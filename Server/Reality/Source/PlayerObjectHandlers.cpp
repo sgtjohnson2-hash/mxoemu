@@ -1,0 +1,1459 @@
+// ***************************************************************************
+//
+// Reality - The Matrix Online Server Emulator
+// Copyright (C) 2006-2010 Rajko Stojadinovic
+// http://mxoemu.info
+//
+// ---------------------------------------------------------------------------
+//
+// This program is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Affero General Public License as
+// published by the Free Software Foundation, either version 3 of the
+// License, or (at your option) any later version.
+//
+// This program is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+// GNU Affero General Public License for more details.
+//
+// You should have received a copy of the GNU Affero General Public License
+// along with this program.  If not, see <http://www.gnu.org/licenses/>.
+//
+// ---------------------------------------------------------------------------
+//
+// ***************************************************************************
+
+#include "Common.h"
+#include "PlayerObject.h"
+#include "Timer.h"
+#include "MissionSystem.h"
+#include "Log.h"
+#include "Database/Database.h"
+#include "GameServer.h"
+#include "MemorySystem.h"
+#include "CrewSystem.h"
+#include "EconomySystem.h"
+#include "CraftingSystem.h"
+#include "GameClient.h"
+#include "Config.h"
+#include "CombatSystem.h"
+#include "BotManager.h"
+
+#include <boost/algorithm/string.hpp>
+using boost::iequals;
+
+void PlayerObject::RPC_NullHandle( ByteBuffer &srcCmd )
+{
+	return;
+}
+
+void PlayerObject::RPC_HandleReadyForSpawn( ByteBuffer &srcCmd )
+{
+	if (!m_spawnedInWorld)
+	{
+		this->SpawnSelf();
+	}
+}
+
+void PlayerObject::ParseAdminCommand( string theCmd )
+{
+	stringstream cmdStream;
+	cmdStream.str(theCmd);
+
+	string command;
+	cmdStream >> command;
+
+	if (cmdStream.fail())
+		return;
+
+	if (iequals(command, "teleportPlayer") || iequals(command, "bringPlayer"))
+	{
+		string playerName;
+		cmdStream >> playerName;
+
+		if (cmdStream.fail() || playerName.length() < 1)
+			return;
+
+		if (iequals(command, "teleportPlayer") && cmdStream.eof())
+			return;
+
+		PlayerObject* theTargetPlayer = NULL;
+		{
+			vector<uint32> allObjects = sObjMgr.getAllGOIds();
+			foreach(uint32 objId, allObjects)
+			{
+				PlayerObject* playerObj = NULL;
+				try
+				{
+					playerObj = sObjMgr.getGOPtr(objId);
+				}
+				catch (ObjectMgr::ObjectNotAvailable)
+				{
+					continue;
+				}
+
+				if (iequals(playerName,playerObj->getHandle()))
+				{
+					theTargetPlayer = playerObj;
+					break;
+				}
+			}
+		}
+
+		if (theTargetPlayer == NULL)
+		{
+			m_parent.QueueCommand(make_shared<SystemChatMsg>((format("Player %1% is not online")%playerName).str()));
+			return;
+		}
+
+		LocationVector derp;
+
+		if (iequals(command, "teleportPlayer"))
+		{
+			double x,y,z;
+			cmdStream >> x;
+			if (cmdStream.eof() || cmdStream.fail())
+				return;
+			cmdStream >> y;
+			if (cmdStream.eof() || cmdStream.fail())
+				return;
+			cmdStream >> z;
+			if (cmdStream.fail())
+				return;
+
+			x*=100;
+			y*=100;
+			z*=100;
+
+			derp.ChangeCoords(x,y,z);
+		}
+		else if (iequals(command, "bringPlayer"))
+		{
+			LocationVector newPos = this->getPosition();
+			derp.ChangeCoords(newPos.x,newPos.y,newPos.z,newPos.getMxoRot());
+		}
+
+		theTargetPlayer->setPosition(derp);
+		sGame.AnnounceStateUpdate(NULL,make_shared<PositionStateMsg>(sObjMgr.getGOId(theTargetPlayer)));
+		return;
+	}
+	else if (iequals(command, "teleportAll") || iequals(command, "bringAll"))
+	{
+		LocationVector derp;
+
+		if (iequals(command, "teleportAll"))
+		{
+			double x,y,z;
+			cmdStream >> x;
+			if (cmdStream.eof() || cmdStream.fail())
+				return;
+			cmdStream >> y;
+			if (cmdStream.eof() || cmdStream.fail())
+				return;
+			cmdStream >> z;
+			if (cmdStream.fail())
+				return;
+
+			x*=100;
+			y*=100;
+			z*=100;
+
+			derp.ChangeCoords(x,y,z);
+		}
+		else if (iequals(command, "bringAll"))
+		{
+			LocationVector newPos = this->getPosition();
+			derp.ChangeCoords(newPos.x,newPos.y,newPos.z,newPos.getMxoRot());
+		}
+
+		vector<uint32> allObjects = sObjMgr.getAllGOIds();
+		foreach(uint32 objId, allObjects)
+		{
+			PlayerObject* playerObj = NULL;
+			try
+			{
+				playerObj = sObjMgr.getGOPtr(objId);
+			}
+			catch (ObjectMgr::ObjectNotAvailable)
+			{
+				continue;
+			}
+
+			if (playerObj == NULL)
+				continue;
+
+			playerObj->setPosition(derp);
+			sGame.AnnounceStateUpdate(NULL,make_shared<PositionStateMsg>(objId));
+			playerObj->PopulateWorld();
+
+		}
+		return;
+	}
+	else if (iequals(command, "set"))
+	{
+		string area;
+		cmdStream >> area;
+
+		if (cmdStream.fail()) 
+			return;
+
+
+		std::string s;
+		std::stringstream out;
+		out << int(m_district);
+		s = out.str();
+
+		double X,Y,Z;
+		X = this->getPosition().x;
+		Y = this->getPosition().y;
+		Z = this->getPosition().z;
+
+		string sql1 = (format("DELETE FROM `locations` Where `District` = '%1%' And `Command` = '%2%'") % s % area ).str();
+		string sql2 = (format("INSERT INTO `locations` SET `District` = '%1%', `Command` = '%2%', X = '%3%', Y = '%4%', Z = '%5%'") % s % area % X % Y % Z ).str();
+		if (sDatabase.Execute(sql1))
+		{
+			if (sDatabase.Execute(sql2))
+			{
+				m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FFFF00}New location set, test it out.{/c}"));
+			}
+			else
+			{
+				m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FF00FF}New location set, FAILED On INSERT.{/c}"));
+			}
+		}
+		else
+		{
+			m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FF00FF}New location set, FAILED On DELETE.{/c}"));
+		}
+
+		return;
+
+
+	}
+	else if (iequals(command, "simTimeSet") || iequals(command, "simTimeInc"))
+	{
+		float newSimTime;
+		cmdStream >> newSimTime;
+
+		if (iequals(command,"simTimeSet"))
+			sGame.SetSimTime(newSimTime);
+		else
+			sGame.IncreaseSimTime(newSimTime);
+
+		sGame.AnnounceCommand(NULL,make_shared<BroadcastMsg>((format("Simtime set to %1%")%sGame.GetSimTime()).str()));
+		return;
+	}
+	else if (iequals(command, "setHL"))
+	{
+		string hardlineId;
+		cmdStream >> hardlineId;
+
+		if (cmdStream.fail()) 
+			return;
+
+		string hardlineName;
+		cmdStream >> hardlineName;
+
+		if (cmdStream.fail()) 
+			return;
+
+		std::string s;
+		std::stringstream out;
+		out << int(m_district);
+		s = out.str();
+
+		double X,Y,Z,O;
+		X = this->getPosition().x;
+		Y = this->getPosition().y;
+		Z = this->getPosition().z;
+		O = this->getPosition().rot;
+
+		string sql1 = (format("DELETE FROM `hardlines` WHERE `DistrictId` = '%1%' AND `HardlineId` = '%2%'") % s % hardlineId ).str();
+		string sql2 = (format("INSERT INTO `hardlines` SET `DistrictId` = '%1%', `HardlineId`='%2%',`X`='%3%',`Y`='%4%',`Z`= '%5%',`HardlineName`='%6%',`ROT`='%7%'") % s % hardlineId % X % Y % Z % hardlineName % O).str();
+		if (sDatabase.Execute(sql1))
+		{
+			if (sDatabase.Execute(sql2))
+			{
+				string msg1 = (format("{c:FFFF00}HardlineId:%1% Set to %2% at X:%3% Y:%4% Z:%5% O:%6%{/c}") % hardlineId % hardlineName % X % Y % Z % O ).str();
+				m_parent.QueueCommand(make_shared<SystemChatMsg>(msg1));
+			}
+			else
+			{
+				m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FF00FF}New hardline set, FAILED On INSERT.{/c}"));
+			}
+		}
+		else
+		{
+			m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FF00FF}New hardline set, FAILED On DELETE.{/c}"));
+		}
+
+		return;
+
+
+	}
+	else if (iequals(command, "spawnBots"))
+	{
+		int count = 1;
+		int faction = 0;
+		cmdStream >> count;
+		if (cmdStream.fail()) count = 1;
+		cmdStream >> faction;
+		if (cmdStream.fail()) faction = 0;
+		if (count < 1) count = 1;
+		if (count > 20) count = 20;
+
+		LocationVector loc = this->getPosition();
+		sBotMgr.SpawnBot(count,(float)loc.x + 200.0f,(float)loc.y,(float)loc.z,faction);
+		m_parent.QueueCommand(make_shared<SystemChatMsg>((format("Spawned %1% bot(s) near you (faction %2%).") % count % faction).str()));
+		return;
+	}
+	else if (iequals(command, "botsAttack"))
+	{
+		string targetName;
+		cmdStream >> targetName;
+		if (cmdStream.fail())
+			targetName = m_handle; //no arg = attack me
+
+		sBotMgr.CommandBotAttack(targetName);
+		m_parent.QueueCommand(make_shared<SystemChatMsg>((format("Bots ordered to attack %1%.") % targetName).str()));
+		return;
+	}
+	else if (iequals(command, "botAggro"))
+	{
+		string mode;
+		cmdStream >> mode;
+		bool enable = iequals(mode,"on") || iequals(mode,"1") || iequals(mode,"true");
+		sBotMgr.EnableBotAggro(enable);
+		m_parent.QueueCommand(make_shared<SystemChatMsg>(enable ? "Bot aggro enabled." : "Bot aggro disabled."));
+		return;
+	}
+	else if (iequals(command, "combatLog"))
+	{
+		string mode;
+		cmdStream >> mode;
+		bool enable = iequals(mode,"on") || iequals(mode,"1") || iequals(mode,"true");
+		sBotMgr.EnableCombatLogging(enable);
+		m_parent.QueueCommand(make_shared<SystemChatMsg>(enable ? "Combat logging enabled (combat_log.csv)." : "Combat logging disabled."));
+		return;
+	}
+	else if (iequals(command, "target"))
+	{
+		string playerName;
+		cmdStream >> playerName;
+		if (cmdStream.fail())
+			return;
+
+		PlayerObject* theTarget = NULL;
+		vector<uint32> allObjects = sObjMgr.getAllGOIds();
+		foreach(uint32 objId, allObjects)
+		{
+			PlayerObject* playerObj = NULL;
+			try { playerObj = sObjMgr.getGOPtr(objId); }
+			catch (ObjectMgr::ObjectNotAvailable) { continue; }
+
+			if (playerObj && iequals(playerName,playerObj->getHandle()) && playerObj != this)
+			{
+				theTarget = playerObj;
+				m_targetGoId = objId;
+				break;
+			}
+		}
+
+		if (theTarget)
+			m_parent.QueueCommand(make_shared<SystemChatMsg>((format("Target: %1%") % theTarget->getHandle()).str()));
+		else
+			m_parent.QueueCommand(make_shared<SystemChatMsg>((format("Player %1% is not online") % playerName).str()));
+		return;
+	}
+	else if (iequals(command, "attack") || iequals(command, "shoot"))
+	{
+		//optional args: [playerName] [moveName]
+		string arg1,arg2;
+		cmdStream >> arg1;
+		cmdStream >> arg2;
+
+		uint32 targetGoId = m_targetGoId;
+		const CombatMove *move = iequals(command,"shoot")
+			? CombatSystem::DefaultRanged()
+			: CombatSystem::DefaultMelee();
+
+		if (arg1.length())
+		{
+			const CombatMove *namedMove = CombatSystem::GetMoveByName(arg1);
+			if (namedMove)
+				move = namedMove;
+			else
+			{
+				//arg1 is a player name
+				vector<uint32> allObjects = sObjMgr.getAllGOIds();
+				foreach(uint32 objId, allObjects)
+				{
+					PlayerObject* playerObj = NULL;
+					try { playerObj = sObjMgr.getGOPtr(objId); }
+					catch (ObjectMgr::ObjectNotAvailable) { continue; }
+
+					if (playerObj && iequals(arg1,playerObj->getHandle()) && playerObj != this)
+					{
+						targetGoId = objId;
+						break;
+					}
+				}
+			}
+		}
+		if (arg2.length())
+		{
+			const CombatMove *namedMove = CombatSystem::GetMoveByName(arg2);
+			if (namedMove)
+				move = namedMove;
+		}
+
+		if (targetGoId == 0)
+		{
+			m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FF0000}No target. Use &target <handle> or click a player.{/c}"));
+			return;
+		}
+
+		m_targetGoId = targetGoId;
+		if (sCombatSys.IsInterlocked(m_goId))
+			sCombatSys.QueueAbility(m_goId,move->id);
+		else
+			sCombatSys.RequestRangedCombat(m_goId,targetGoId,move->id);
+		return;
+	}
+	else if (iequals(command, "il") || iequals(command, "interlock"))
+	{
+		string playerName;
+		cmdStream >> playerName;
+
+		uint32 targetGoId = m_targetGoId;
+		if (!cmdStream.fail() && playerName.length())
+		{
+			vector<uint32> allObjects = sObjMgr.getAllGOIds();
+			foreach(uint32 objId, allObjects)
+			{
+				PlayerObject* playerObj = NULL;
+				try { playerObj = sObjMgr.getGOPtr(objId); }
+				catch (ObjectMgr::ObjectNotAvailable) { continue; }
+
+				if (playerObj && iequals(playerName,playerObj->getHandle()) && playerObj != this)
+				{
+					targetGoId = objId;
+					break;
+				}
+			}
+		}
+
+		if (targetGoId == 0)
+		{
+			m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FF0000}No target for interlock.{/c}"));
+			return;
+		}
+
+		if (sCombatSys.RequestInterlock(m_goId,targetGoId) == false)
+			m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FF0000}Interlock failed (already interlocked or dead).{/c}"));
+		return;
+	}
+	else if (iequals(command, "tactic"))
+	{
+		string tacticName;
+		cmdStream >> tacticName;
+		if (cmdStream.fail())
+		{
+			m_parent.QueueCommand(make_shared<SystemChatMsg>("Usage: &tactic speed|power|grab|block"));
+			return;
+		}
+
+		uint8 newTactic = TACTIC_NORMAL;
+		if (iequals(tacticName,"speed")) newTactic = TACTIC_SPEED;
+		else if (iequals(tacticName,"power")) newTactic = TACTIC_POWER;
+		else if (iequals(tacticName,"grab") || iequals(tacticName,"retaliate")) newTactic = TACTIC_RETALIATE;
+		else if (iequals(tacticName,"block") || iequals(tacticName,"defense")) newTactic = TACTIC_DEFENSE;
+		else
+		{
+			m_parent.QueueCommand(make_shared<SystemChatMsg>("Unknown tactic. Use speed, power, grab or block."));
+			return;
+		}
+
+		m_tactic = newTactic;
+		sCombatSys.SetTactic(m_goId,newTactic);
+		m_parent.QueueCommand(make_shared<SystemChatMsg>((format("Tactic set to %1%.") % tacticName).str()));
+		return;
+	}
+	else if (iequals(command, "withdraw") || iequals(command, "stopcombat"))
+	{
+		sCombatSys.StopFreeFire(m_goId);
+		sCombatSys.LeaveInterlock(m_goId);
+		m_parent.QueueCommand(make_shared<SystemChatMsg>("You disengage from combat."));
+		return;
+	}
+	else if (iequals(command, "use"))
+	{
+		string moveName;
+		cmdStream >> moveName;
+		if (cmdStream.fail())
+		{
+			m_parent.QueueCommand(make_shared<SystemChatMsg>("Usage: &use <ability> - see &abilities"));
+			return;
+		}
+
+		const CombatMove *move = CombatSystem::GetMoveByName(moveName);
+		if (move == NULL)
+		{
+			m_parent.QueueCommand(make_shared<SystemChatMsg>("Unknown ability - see &abilities"));
+			return;
+		}
+
+		if (sCombatSys.IsInterlocked(m_goId))
+		{
+			sCombatSys.QueueAbility(m_goId,move->id);
+			m_parent.QueueCommand(make_shared<SystemChatMsg>((format("%1% queued for next interlock round.") % move->name).str()));
+		}
+		else if (m_targetGoId != 0)
+			sCombatSys.ResolveSingleAttack(m_goId,m_targetGoId,move->id,false);
+		else
+			m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FF0000}No target selected.{/c}"));
+		return;
+	}
+	else if (iequals(command, "abilities"))
+	{
+		m_parent.QueueCommand(make_shared<SystemChatMsg>(
+			"Abilities: punch, kick (melee) | handgun, rifle, throwingknife (ranged) | virus, logicbarrage (hacker) | hyperstrike, hyperkick (interlock specials)"));
+		return;
+	}
+	else if (iequals(command, "hp"))
+	{
+		m_parent.QueueCommand(make_shared<SystemChatMsg>(
+			(format("Health: %1%/%2%  Inner Strength: %3%/%4%  %5%")
+			% getCurrentHealth() % getMaximumHealth() % m_innerStrC % m_innerStrM
+			% (isDead() ? "(DEFEATED)" : (isInCombat() ? "(IN COMBAT)" : ""))).str() ));
+		return;
+	}
+	else if (iequals(command, "hurt"))
+	{
+		//self-damage test hook
+		uint16 amount = 10;
+		cmdStream >> amount;
+		if (cmdStream.fail() || amount == 0) amount = 10;
+		this->takeDamage(0,amount,0x280001C1);
+		return;
+	}
+	else if (iequals(command, "heal"))
+	{
+		setCurrentHealth(getMaximumHealth());
+		m_innerStrC = m_innerStrM;
+		this->sendHealthUpdate();
+		m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:00FF00}Fully restored.{/c}"));
+		return;
+	}
+	else
+	{
+		m_parent.QueueCommand(make_shared<SystemChatMsg>((format("Unrecognized server command %1%")%command).str()));
+		return;
+	}
+}
+
+
+void PlayerObject::ParsePlayerCommand( string theCmd )
+{
+	stringstream cmdStream;
+	cmdStream.str(theCmd);
+
+	string command;
+	cmdStream >> command;
+
+	if (cmdStream.fail())
+		return;
+
+	using boost::erase_all;
+	if (iequals(command, "send") || iequals(command, "sendCmd"))
+	{
+		stringstream restOfStream;
+		restOfStream << cmdStream.rdbuf();
+		string hexStream = restOfStream.str();
+		erase_all(hexStream," ");
+
+		msgBaseClassPtr thePacket = make_shared<HexGenericMsg>(hexStream);
+		const ByteBuffer& dataBuf = thePacket->toBuf();
+		if (!dataBuf.count())
+		{
+			m_parent.QueueCommand(make_shared<SystemChatMsg>("No bytes to send!"));
+			return;
+		}
+
+		m_parent.QueueCommand(make_shared<SystemChatMsg>((format("Sending %1% bytes to you")%dataBuf.count()).str()));
+
+		if (iequals(command,"send"))
+			m_parent.QueueState(thePacket,true);
+		else
+			m_parent.QueueCommand(thePacket);
+	}
+	else if (iequals(command,"netstats"))
+	{
+		string theNetStats = m_parent.GetNetStats();
+		m_parent.QueueCommand(make_shared<SystemChatMsg>(theNetStats));
+		boost::replace_all(theNetStats,"\n"," ");
+		INFO_LOG(format("(%1%) %2%:%3% netstats: %4%")
+			% m_parent.Address()
+			% m_handle
+			% m_goId
+			% theNetStats );
+	}
+	else if (iequals(command, "gotoPos"))
+	{
+		double x,y,z;
+		cmdStream >> x;
+		if (cmdStream.eof() || cmdStream.fail())
+			return;
+		cmdStream >> y;
+		if (cmdStream.eof() || cmdStream.fail())
+			return;
+		cmdStream >> z;
+		if (cmdStream.fail())
+			return;
+
+		x*=100;
+		y*=100;
+		z*=100;
+
+		m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FFFF00}Teleported...{/c}"));
+		LocationVector derp(x,y,z);
+		this->setPosition(derp);
+
+		sGame.AnnounceStateUpdate(NULL,make_shared<PositionStateMsg>(m_goId));
+		return;
+	}
+	else if (iequals(command, "incX") || iequals(command, "incY") || iequals(command, "incZ"))
+	{
+		double incrementAmount=0;
+
+		if (cmdStream.eof())
+			incrementAmount = 1;
+
+		cmdStream >> incrementAmount;
+
+		if (cmdStream.fail())
+			incrementAmount = 1;
+
+		if (incrementAmount==0)
+			return;
+
+		incrementAmount*=100;
+
+		double newX,newY,newZ;
+		newX = this->getPosition().x;
+		newY = this->getPosition().y;
+		newZ = this->getPosition().z;
+
+		if (iequals(command, "incX"))
+			newX+=incrementAmount;
+		else if (iequals(command, "incY"))
+			newY+=incrementAmount;
+		else if (iequals(command,"incZ"))
+			newZ+=incrementAmount;
+
+		LocationVector newPos(newX,newY,newZ);
+		this->setPosition(newPos);
+		sGame.AnnounceStateUpdate(NULL,make_shared<PositionStateMsg>(m_goId),true);
+		return;
+	}
+	else if (iequals(command, "goThru"))
+	{
+		double incrementAmount=0;
+
+		if (cmdStream.eof())
+			incrementAmount = 2;
+
+		cmdStream >> incrementAmount;
+
+		this->GoAhead(incrementAmount);
+		return;
+	}
+	else if (iequals(command, "random"))
+	{
+		//Random Object Id
+		uint32 randObjId = rand() % 0xFFFFFFFF;
+		uint16 randViewId = rand() % 0xFFFF;
+
+		//randObjId = 1310720002;   //mara church middle door
+
+		sObjMgr.RandomObject(randObjId, &m_parent,this->getPosition().x, this->getPosition().y, this->getPosition().z, this->getPosition().rot );
+		m_parent.QueueState(make_shared<DoorAnimationMsg>(randObjId, randViewId, this->getPosition().x, this->getPosition().y, this->getPosition().z, this->getPosition().rot, 1));
+		return;
+	}
+	else if (iequals(command, "update"))
+	{
+		this->UpdateAppearance();
+		m_parent.QueueCommand(make_shared<SystemChatMsg>("Your appearance has been refreshed."));
+		return;
+	}
+	else if (iequals(command, "gotoPlayer"))
+	{
+		string playerName;
+		cmdStream >> playerName;
+
+		if (cmdStream.fail())
+			return;
+
+		PlayerObject* theTargetPlayer = NULL;
+		{
+			vector<uint32> allObjects = sObjMgr.getAllGOIds();
+			foreach(uint32 objId, allObjects)
+			{
+				PlayerObject* playerObj = NULL;
+				try
+				{
+					playerObj = sObjMgr.getGOPtr(objId);
+				}
+				catch (ObjectMgr::ObjectNotAvailable)
+				{
+					continue;
+				}
+
+				if (iequals(playerName,playerObj->getHandle()))
+				{
+					theTargetPlayer = playerObj;
+					break;
+				}
+			}
+		}
+
+		if (theTargetPlayer == NULL)
+		{
+			m_parent.QueueCommand(make_shared<SystemChatMsg>((format("Player %1% is not online")%playerName).str()));
+			return;
+		}
+
+		this->setPosition(theTargetPlayer->getPosition());		
+		sGame.AnnounceStateUpdate(NULL,make_shared<PositionStateMsg>(m_goId));
+		return;
+	}
+	else if (iequals(command, "go"))
+	{
+		string area;
+		cmdStream >> area;
+
+		if (cmdStream.fail()) //Get list and whisper it but for now we just fail
+			return;
+
+		format sql = format("SELECT `X`,`Y`,`Z` FROM `locations` Where `District` = '%1%' And `Command` = '%2%' LIMIT 1") % int(getDistrict()) % area ;
+		scoped_ptr<QueryResult> result(sDatabase.Query(sql));
+		if (!result)
+			return;
+		else
+		{
+			Field *field = result->Fetch();
+			double newX = field[0].GetDouble();
+			double newY = field[1].GetDouble();
+			double newZ = field[2].GetDouble();
+
+			string message1 = (format("{c:00FF00}Welcome to %1%.{/c}") % area ).str();
+			m_parent.QueueCommand(make_shared<SystemChatMsg>(message1));
+			m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FFFF00}You may have to wait a min or two for the client and server to sync if the area is complex...{/c}"));
+			LocationVector derp(newX,newY,newZ);
+			this->setPosition(derp);
+
+			sGame.AnnounceStateUpdate(NULL,make_shared<PositionStateMsg>(m_goId));
+			return;
+		}
+	}	
+	else
+	{
+		m_parent.QueueCommand(make_shared<SystemChatMsg>((format("Unrecognized server command %1%")%command).str()));
+		return;
+	}
+}
+
+void PlayerObject::RPC_HandleChat( ByteBuffer &srcCmd )
+{
+	uint16 stringLenPos = srcCmd.read<uint16>();
+	stringLenPos = swap16(stringLenPos);
+
+	if (stringLenPos != 8)
+		WARNING_LOG(format("(%1%) Chat packet stringLenPos not 8 but %2%, packet %3%") % m_parent.Address() % stringLenPos % Bin2Hex(srcCmd));
+
+	srcCmd.rpos(stringLenPos);
+	string theMessage = srcCmd.readString();
+
+	if (!theMessage.length())
+		return;
+
+	if (m_isAdmin && theMessage[0] == '!')
+	{
+		ParseAdminCommand(theMessage.substr(1));
+		return;
+	}
+	else if (theMessage[0] == '&')
+	{
+		ParsePlayerCommand(theMessage.substr(1));
+		return;
+	}
+
+	INFO_LOG(format("%1% says %2%") % m_handle % theMessage);
+	m_parent.QueueCommand(make_shared<SystemChatMsg>((format("You said %1%") % theMessage).str()));
+	sGame.AnnounceCommand(&m_parent,make_shared<PlayerChatMsg>(m_handle,theMessage));
+	//m_parent.QueueCommand(make_shared<PlayerChatMsg>(m_handle,theMessage));
+}
+
+void PlayerObject::RPC_HandleWhisper( ByteBuffer &srcCmd )
+{
+	uint8 thirdByte = srcCmd.read<uint8>();
+
+	if (thirdByte != 0)
+		WARNING_LOG(format("(%1%) Whisper packet third byte not 0 but %2%, packet %3%") % m_parent.Address() % uint32(thirdByte) % Bin2Hex(srcCmd));
+
+	uint16 messageLenPos = srcCmd.read<uint16>();
+	uint16 whisperCount = srcCmd.read<uint16>();
+	whisperCount = swap16(whisperCount); //big endian in packet
+
+	string theRecipient = srcCmd.readString();
+	string serverPrefix = sGame.GetChatPrefix() + string("+");
+	string::size_type prefixPos = theRecipient.find_first_of(serverPrefix);
+	if (prefixPos != string::npos)
+		theRecipient = theRecipient.substr(prefixPos+serverPrefix.length());
+
+	if (srcCmd.rpos() != messageLenPos)
+		WARNING_LOG(format("(%1%) Whisper packet size byte mismatch, packet %2%") % m_parent.Address() % Bin2Hex(srcCmd));
+
+	string theMessage = srcCmd.readString();
+
+	bool sentProperly=false;
+	vector<uint32> objectLists = sObjMgr.getAllGOIds();
+	foreach (int currObj, objectLists)
+	{
+		PlayerObject* targetPlayer = NULL;
+		try
+		{
+			targetPlayer = sObjMgr.getGOPtr(currObj);
+		}
+		catch (ObjectMgr::ObjectNotAvailable)
+		{
+			continue;
+		}
+
+		if (targetPlayer == NULL)
+			continue;
+
+		if (iequals(targetPlayer->getHandle(),theRecipient))
+		{
+			targetPlayer->getClient().QueueCommand(make_shared<WhisperMsg>(m_handle,theMessage));
+			sentProperly=true;
+		}
+	}
+	if (sentProperly)
+	{
+		INFO_LOG(format("%1% whispered to %2%: %3%") % m_handle % theRecipient % theMessage);
+		m_parent.QueueCommand(make_shared<SystemChatMsg>((format("You whispered %1% to %2%")%theMessage%theRecipient).str()));
+	}
+	else
+	{
+		INFO_LOG(format("%1% sent whisper to disconnected player %2%: %3%") % m_handle % theRecipient % theMessage);
+		m_parent.QueueCommand(make_shared<SystemChatMsg>((format("%1% is not online")%theRecipient).str()));
+	}
+}
+
+void PlayerObject::RPC_HandleStopAnimation( ByteBuffer &srcCmd )
+{
+	m_currAnimation = 0;
+	sGame.AnnounceStateUpdate(NULL,make_shared<AnimationStateMsg>(m_goId));
+}
+
+void PlayerObject::RPC_HandleStartAnimtion( ByteBuffer &srcCmd )
+{
+	uint8 newAnimation = srcCmd.read<uint8>();
+	m_currAnimation = newAnimation;
+	sGame.AnnounceStateUpdate(NULL,make_shared<AnimationStateMsg>(m_goId));
+}
+
+void PlayerObject::RPC_HandleChangeMood( ByteBuffer &srcCmd )
+{
+	uint8 newMood = srcCmd.read<uint8>();
+	m_currMood = newMood;	
+	sGame.AnnounceStateUpdate(NULL,make_shared<AnimationStateMsg>(m_goId));
+	return;
+}
+
+void PlayerObject::RPC_HandlePerformEmote( ByteBuffer &srcCmd )
+{
+	uint32 emoteId = srcCmd.read<uint32>();
+	uint32 emoteTarget = srcCmd.read<uint32>();
+
+	m_emoteCounter++;
+	sGame.AnnounceStateUpdate(NULL,make_shared<EmoteMsg>(m_goId,emoteId,m_emoteCounter));
+
+	DEBUG_LOG(format("(%1%) %2%:%3% doing emote %4% on target %5% at coords %6%,%7%,%8%")
+		% m_parent.Address()
+		% m_handle
+		% m_goId
+		% Bin2Hex((const byte*)&emoteId,sizeof(emoteId),0)
+		% Bin2Hex((const byte*)&emoteTarget,sizeof(emoteTarget),0)
+		% m_pos.x % m_pos.y % m_pos.z );
+}
+
+void PlayerObject::RPC_HandleDynamicObjInteraction( ByteBuffer &srcCmd )
+{
+	uint16 viewId = srcCmd.read<uint16>();
+	uint16 objType = srcCmd.read<uint16>();
+	uint16 interaction = srcCmd.read<uint16>();
+
+	format debugStr = 
+		format("(%s) %s:%d interacting with dynamic view id 0x%04x object type 0x%04x interaction %d")
+		% m_parent.Address()
+		% m_handle
+		% m_goId
+		% viewId
+		% objType
+		% int(interaction);
+
+	INFO_LOG( debugStr );
+	m_parent.QueueCommand(make_shared<SystemChatMsg>(debugStr.str()));
+
+	if (interaction == 0x01) // Typical Talk interaction
+	{
+		sMissionSys.AdvanceObjective(this, ObjectiveCommand::TALK, viewId);
+	}
+}
+
+// ---------------------------------------------------------
+// Inventory & Item System UI Hooks
+// ---------------------------------------------------------
+
+void PlayerObject::RPC_HandleItemMountRSI( ByteBuffer &srcCmd )
+{
+    uint32 itemId = srcCmd.read<uint32>();
+    uint32 slotId = srcCmd.read<uint32>();
+    INFO_LOG(format("Player %1% mounting item %2% to slot %3%") % m_handle % itemId % slotId);
+    sBotMgr.LogCombat((format("You equipped item %1%.") % itemId).str());
+}
+
+void PlayerObject::RPC_HandleItemUnmountRSI( ByteBuffer &srcCmd )
+{
+    uint32 slotId = srcCmd.read<uint32>();
+    INFO_LOG(format("Player %1% unmounting slot %2%") % m_handle % slotId);
+    sBotMgr.LogCombat("You unequipped an item.");
+}
+
+void PlayerObject::RPC_HandleItemMoveSlot( ByteBuffer &srcCmd )
+{
+    uint32 itemId = srcCmd.read<uint32>();
+    uint32 fromSlot = srcCmd.read<uint32>();
+    uint32 toSlot = srcCmd.read<uint32>();
+    INFO_LOG(format("Player %1% moving item %2% from %3% to %4%") % m_handle % itemId % fromSlot % toSlot);
+}
+
+// ---------------------------------------------------------
+// Mission UI Hooks
+// ---------------------------------------------------------
+
+void PlayerObject::RPC_HandleMissionRequest( ByteBuffer &srcCmd )
+{
+    uint32 missionId = srcCmd.read<uint32>();
+    INFO_LOG(format("Player %1% requested mission %2%") % m_handle % missionId);
+}
+
+void PlayerObject::RPC_HandleMissionInfo( ByteBuffer &srcCmd )
+{
+    uint32 missionId = srcCmd.read<uint32>();
+    INFO_LOG(format("Player %1% requested info for mission %2%") % m_handle % missionId);
+}
+
+void PlayerObject::RPC_HandleMissionAccept( ByteBuffer &srcCmd )
+{
+    uint32 missionId = srcCmd.read<uint32>();
+    INFO_LOG(format("Player %1% accepted mission %2%") % m_handle % missionId);
+    
+    // Add mission via backend system
+    sMissionSys.AssignMission(this, missionId);
+}
+
+void PlayerObject::RPC_HandleMissionAbort( ByteBuffer &srcCmd )
+{
+    uint32 missionId = srcCmd.read<uint32>();
+    INFO_LOG(format("Player %1% aborted mission %2%") % m_handle % missionId);
+}
+
+// ---------------------------------------------------------
+// Memory & Abilities UI Hooks
+// ---------------------------------------------------------
+
+void PlayerObject::RPC_HandleUpgradeAbility( ByteBuffer &srcCmd )
+{
+    uint32 abilityId = srcCmd.read<uint32>();
+    sMemorySys.UpgradeAbility(this, abilityId);
+}
+
+void PlayerObject::RPC_HandleMemoryChangeTactic( ByteBuffer &srcCmd )
+{
+    uint32 tacticId = srcCmd.read<uint32>();
+    sMemorySys.ChangeTactic(this, tacticId);
+}
+
+// ---------------------------------------------------------
+// Factions & Crew UI Hooks
+// ---------------------------------------------------------
+
+void PlayerObject::RPC_HandlePartyLeave( ByteBuffer &srcCmd )
+{
+    INFO_LOG(format("Player %1% left the party/crew.") % m_handle);
+    sCrewSys.LeaveCrew(this);
+}
+
+void PlayerObject::RPC_HandleMissionInvite( ByteBuffer &srcCmd )
+{
+    uint32 crewId = srcCmd.read<uint32>();
+    INFO_LOG(format("Player %1% accepted invite to crew %2%") % m_handle % crewId);
+    sCrewSys.JoinCrew(crewId, this);
+}
+
+void PlayerObject::RPC_HandleFactionInfo( ByteBuffer &srcCmd )
+{
+    INFO_LOG(format("Player %1% requested faction info.") % m_handle);
+    // Real server would send back standing data here
+}
+
+// ---------------------------------------------------------
+// Crafting UI Hooks
+// ---------------------------------------------------------
+
+void PlayerObject::RPC_HandleCraftRequest( ByteBuffer &srcCmd )
+{
+    uint32 blueprintId = srcCmd.read<uint32>();
+    sCraftSys.HandleCraftRequest(this, blueprintId);
+}
+
+// ---------------------------------------------------------
+// Economy & Vendors UI Hooks
+// ---------------------------------------------------------
+
+void PlayerObject::RPC_HandleVendorBuy( ByteBuffer &srcCmd )
+{
+    uint32 vendorId = srcCmd.read<uint32>();
+    uint32 itemId = srcCmd.read<uint32>();
+    sEconomySys.HandleBuyRequest(this, vendorId, itemId);
+}
+
+void PlayerObject::RPC_HandleMarketOpen( ByteBuffer &srcCmd )
+{
+    INFO_LOG(format("Player %1% opened the market UI.") % m_handle);
+}
+
+void PlayerObject::RPC_HandleMarketListItems( ByteBuffer &srcCmd )
+{
+    INFO_LOG(format("Player %1% requested market item list.") % m_handle);
+}
+
+void PlayerObject::RPC_HandleStaticObjInteraction( ByteBuffer &srcCmd )
+{
+	uint32 staticObjId = srcCmd.read<uint32>();
+	uint16 interaction = srcCmd.read<uint16>();
+
+	format debugStr = 
+		format("(%s) %s:%d interacting with object id 0x%08x interaction %d")
+		% m_parent.Address()
+		% m_handle
+		% m_goId
+		% staticObjId
+		% int(interaction);
+
+	INFO_LOG( debugStr );
+
+	m_parent.QueueCommand(make_shared<SystemChatMsg>(debugStr.str()));
+
+	if (interaction == 0x03) //open door
+	{
+		LocationVector loc = this->getPosition();
+
+		scoped_ptr<QueryResult> resultDoorExists(sDatabase.Query(format("SELECT * FROM `doors` WHERE `DistrictId`='%1%' And `DoorId`='%2%' Limit 1") % (int)getDistrict() % staticObjId));
+		if (resultDoorExists == NULL)
+		{
+			m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FFFF00}You are using a door not in the database yet, lets add it{/c}"));	
+			format sqlDoorInsert = 
+				format("INSERT INTO `doors` SET  `DistrictId` = '%1%', `DoorId` = '%2%', X = '%3%', Y = '%4%', Z = '%5%', ROT = '%6%', FirstUser = '%7%'")
+				% (int)m_district
+				% staticObjId
+				% loc.x	% loc.y	% loc.z	% loc.rot
+				% this->getHandle();
+
+			if (sDatabase.Execute(sqlDoorInsert))
+			{
+				format msg1 = 
+					format("{c:00FF00}Door:0x%08x in District %d Set to Location X:%f Y:%f Z:%f O:%f{/c}")
+					% staticObjId 
+					% (int)m_district 
+					% loc.x	% loc.y	% loc.z	% loc.rot;
+
+				m_parent.QueueCommand(make_shared<SystemChatMsg>(msg1.str()));
+			}
+		}			
+		sObjMgr.OpenDoor(staticObjId, &m_parent);		
+		//sGame.AnnounceStateUpdate(NULL,make_shared<DeleteDoorMsg>(staticObjId));
+		//sGame.AnnounceStateUpdate(NULL,make_shared<DeleteDoorMsg>(staticObjId));
+		//uint16 viewId = m_goId;// sObjMgr.getViewForGO(&m_parent,staticObjId);
+		//sGame.AnnounceStateUpdate(&m_parent,make_shared<DoorAnimationMsg>(staticObjId, viewId));
+		this->GoAhead(1);
+		return;
+	}
+}
+
+void PlayerObject::RPC_HandleJump( ByteBuffer &srcCmd )
+{
+	LocationVector endPos;
+	if (endPos.fromDoubleBuf(srcCmd) == false)
+	{
+		WARNING_LOG(format("(%1%) %2%:%3% jump packet doesn't have endPos: %4%")
+			% m_parent.Address()
+			% m_handle
+			% m_goId
+			% Bin2Hex(srcCmd) );
+		return;
+	}
+
+	vector<byte> extraData(0x0B);
+	srcCmd.read(extraData);
+
+	uint32 theTimeStamp = srcCmd.read<uint32>();
+
+/*	DEBUG_LOG(format("(%1%) %2%:%3% jumping to %4%,%5%,%6% extra data %7% timestamp %8%")
+		% m_parent.Address()
+		% m_handle
+		% m_goId
+		% endPos.x % endPos.y % endPos.z
+		% Bin2Hex(&extraData[0],extraData.size())
+		% theTimeStamp );*/
+
+	float dist = float(m_pos.Distance(endPos));
+    if (dist > 1000.0f) // Arbitrary hyperjump threshold
+    {
+        INFO_LOG(format("Player %1% executed a HYPERJUMP (Distance: %2%)") % m_handle % dist);
+        // Normally we'd broadcast an FX packet for the "cracked pavement" visual here
+        sBotMgr.LogCombat("You hyperjumped!");
+    }
+
+	this->setPosition(endPos);
+	sGame.AnnounceStateUpdate(NULL,make_shared<PositionStateMsg>(m_goId));
+}
+
+void PlayerObject::RPC_HandleRegionLoadedNotification( ByteBuffer &srcCmd )
+{
+	vector<byte> fourBytes(4);
+	srcCmd.read(fourBytes);
+	LocationVector loc;
+	if (!loc.fromFloatBuf(srcCmd))
+		throw ByteBuffer::out_of_range();
+
+/*	DEBUG_LOG(format("(%1%) %2%:%3% loaded region X:%4% Y:%5% Z:%6% extra: %7%")
+		% m_parent.Address()
+		% m_handle
+		% m_goId
+		% loc.x % loc.y % loc.z
+		% Bin2Hex(fourBytes));
+*/
+}
+
+void PlayerObject::RPC_HandleReadyForWorldChange( ByteBuffer &srcCmd )
+{
+	uint32 shouldBeZero = srcCmd.read<uint32>();
+
+	if (shouldBeZero != 0)
+		DEBUG_LOG(format("ReadyForWorldChange uint32 is %1%")%shouldBeZero);
+
+	m_district = 0x03;
+	InitializeWorld();
+	SpawnSelf();
+}
+
+void PlayerObject::RPC_HandleWho( ByteBuffer &srcCmd )
+{
+	stringstream playerList;
+	vector<uint32> objects = sObjMgr.getAllGOIds();
+	playerList << "Players(" << objects.size() << ")";
+	playerList << " [ ";
+	foreach (uint32 objId, objects)
+	{
+		PlayerObject* pObj = NULL;
+		try
+		{
+			pObj = sObjMgr.getGOPtr(objId);
+		}
+		catch (ObjectMgr::ObjectNotAvailable)
+		{
+			continue;
+		}
+
+		if (pObj->getDistrict() == this->getDistrict())
+		{
+			playerList << pObj->getHandle() << " ";
+		}
+	}
+	playerList << "]";
+
+	m_parent.QueueCommand(make_shared<WhisperMsg>("PlayersInYourDistrict",playerList.str()));
+}
+
+void PlayerObject::RPC_HandleWhereAmI( ByteBuffer &srcCmd )
+{
+	LocationVector clientSidePos;
+	if (clientSidePos.fromFloatBuf(srcCmd) == false)
+		throw ByteBuffer::out_of_range();
+
+	bool byte1Valid = false;
+	bool byte2Valid = false;
+	bool byte3Valid = false;
+	uint8 byte1,byte2,byte3;
+
+	if (srcCmd.remaining() >= sizeof(byte1))
+	{
+		byte1Valid=true;
+		srcCmd >> byte1;
+	}
+	if (srcCmd.remaining() >= sizeof(byte2))
+	{
+		byte2Valid=true;
+		srcCmd >> byte2;
+	}
+	if (srcCmd.remaining() >= sizeof(byte3))
+	{
+		byte3Valid=true;
+		srcCmd >> byte3;
+	}
+
+	INFO_LOG(format("(%1%) %2%:%3% requesting whereami clientPos %4%,%5%,%6% %7%:%8% %9%:%10% %11%:%12%")
+		% m_parent.Address()
+		% m_handle
+		% m_goId
+		% clientSidePos.x % clientSidePos.y % clientSidePos.z
+		% byte1Valid % uint32(byte1)
+		% byte2Valid % uint32(byte2)
+		% byte3Valid % uint32(byte3) );
+
+	m_parent.QueueCommand(make_shared<WhereAmIResponse>(m_pos));
+	//m_parent.QueueCommand(make_shared<HexGenericMsg>("8107"));
+}
+
+void PlayerObject::RPC_HandleGetPlayerDetails( ByteBuffer &srcCmd )
+{
+	uint32 zeroInt = srcCmd.read<uint32>();
+
+	if (zeroInt != 0)
+		WARNING_LOG(format("Get player details zero int is %1%") % zeroInt );
+
+	uint16 playerNameStrLenPos = srcCmd.read<uint16>();
+
+	if (playerNameStrLenPos != srcCmd.rpos())
+	{
+		WARNING_LOG(format("Get player details strlenpos not %1% but %2%") % (int)srcCmd.rpos() % playerNameStrLenPos );
+		return;
+	}
+
+	srcCmd.rpos(playerNameStrLenPos);
+	string thePlayerName = srcCmd.readString();
+
+	vector<uint32> objectList = sObjMgr.getAllGOIds();
+	foreach(uint32 objId, objectList)
+	{
+		PlayerObject* targetPlayer = NULL;
+		try
+		{
+			targetPlayer = sObjMgr.getGOPtr(objId);
+		}
+		catch (ObjectMgr::ObjectNotAvailable)
+		{
+			continue;
+		}
+
+		if (targetPlayer == NULL)
+			continue;
+
+		if (targetPlayer->getHandle() == thePlayerName)
+		{
+			m_parent.QueueCommand(make_shared<PlayerDetailsMsg>(targetPlayer));
+			m_parent.QueueCommand(make_shared<PlayerBackgroundMsg>(targetPlayer->getBackground()));
+			break;
+		}
+	}
+}
+
+void PlayerObject::RPC_HandleGetBackground( ByteBuffer &srcCmd )
+{
+	m_parent.QueueCommand(make_shared<BackgroundResponseMsg>(this->getBackground()));
+}
+
+void PlayerObject::RPC_HandleSetBackground( ByteBuffer &srcCmd )
+{
+	uint16 backgroundStrLenPos = srcCmd.read<uint16>();
+
+	srcCmd.rpos(backgroundStrLenPos);
+	string theNewBackground = srcCmd.readString();
+
+	bool success = this->setBackground(theNewBackground);
+	if (success)
+	{
+		INFO_LOG(format("(%1%) %2%:%3% changed background to |%4%|")
+			% m_parent.Address()
+			% m_handle
+			% m_goId
+			% this->getBackground() );
+	}
+	else
+	{
+		WARNING_LOG(format("(%1%) %2%:%3% background sql query update failed")
+			% m_parent.Address()
+			% m_handle
+			% m_goId );
+	}
+}
+
+void PlayerObject::RPC_HandleHardlineTeleport( ByteBuffer &srcCmd )
+{
+	uint8 hardlineYouAreUsing;
+	uint8 districtYouAreIn;
+	uint8 hardlineLocation;
+	uint8 hardlineDistrict;
+
+	//Get hardlineYouAreUsing
+	srcCmd >> hardlineYouAreUsing;
+
+	srcCmd.rpos(6);
+	//Get District you are currently in
+	srcCmd >> districtYouAreIn;
+
+	srcCmd.rpos(10);
+	//Get Hardline location
+	srcCmd >> hardlineLocation;
+
+	srcCmd.rpos(14);
+	//Get Hardline District
+	srcCmd >> hardlineDistrict;
+
+	format debugMsg = 
+		format("You want to go to Hardline:%1% District:%2% From District:%3% Hardline:%4%")
+		% (int)hardlineLocation 
+		% (int)hardlineDistrict 
+		% (int)districtYouAreIn 
+		% (int)hardlineYouAreUsing;
+
+	m_parent.QueueCommand(make_shared<SystemChatMsg>(debugMsg.str()));
+
+	//See if we need to add this HL to the DB
+	LocationVector loc = this->getPosition();
+
+	format sqlHLExists = 
+		format("SELECT * FROM `hardlines` WHERE `DistrictId`='%1%' AND `HardlineId`='%2%' LIMIT 1")
+		% (int)districtYouAreIn 
+		% (int)hardlineYouAreUsing;
+
+	scoped_ptr<QueryResult> resultHLExists(sDatabase.Query(sqlHLExists));
+	if (resultHLExists == NULL)
+	{
+		m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FFFF00}You are at a hardline not in the database yet, lets add it so all can use it :){/c}"));	
+		format sqlHLInsert = 
+			format("INSERT INTO `hardlines` SET `DistrictId` = '%1%', `HardlineId` = '%2%', X = '%3%', Y = '%4%', Z = '%5%', ROT = '%6%', HardlineName = 'Tagged By %7%'")
+			% (int)districtYouAreIn 
+			% (int)hardlineYouAreUsing 
+			% loc.x % loc.y % loc.z % loc.rot
+			% this->getHandle();
+
+		if (sDatabase.Execute(sqlHLInsert))
+		{
+			format msg1 = 
+				format("{c:00FF00}HardlineId:%1% in District %7% Set to Tagged By %2% at X:%3% Y:%4% Z:%5% O:%6%{/c}")
+				% (int)hardlineYouAreUsing 
+				% this->getHandle() 
+				% loc.x % loc.y % loc.z % loc.rot
+				% (int)districtYouAreIn;
+
+			m_parent.QueueCommand(make_shared<SystemChatMsg>(msg1.str()));
+		}
+		else
+		{
+			m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FF00FF}New hardline set, FAILED On INSERT.{/c}"));
+		}
+
+	}
+
+	format sql = 
+		format("SELECT `X`,`Y`,`Z`, `ROT`, `HardlineName` FROM `hardlines` Where `DistrictId` = '%1%' And `HardlineId` = '%2%' LIMIT 1")
+		% (int)hardlineDistrict 
+		% (int)hardlineLocation;
+
+	scoped_ptr<QueryResult> result(sDatabase.Query(sql));
+	if (result == NULL)
+	{
+		m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FF0000}The hardline you selected is not in the database yet, go tag it...{/c}"));	
+	}
+	else
+	{
+		Field *field = result->Fetch();
+		double newX = field[0].GetDouble();
+		double newY = field[1].GetDouble();
+		double newZ = field[2].GetDouble();
+		double newRot = field[3].GetDouble();
+		string newlocationName = field[4].GetString();
+
+		format message1 = format("{c:00FFFF}Welcome to %1%.{/c}") % newlocationName;
+		m_parent.QueueCommand(make_shared<SystemChatMsg>(message1.str()));
+
+		LocationVector newLoc(newX, newY, newZ);
+		newLoc.rot = newRot;
+		this->setPosition(newLoc);
+		sGame.AnnounceStateUpdate(NULL,make_shared<PositionStateMsg>(m_goId));
+	}
+}
+
+void PlayerObject::RPC_HandleObjectSelected( ByteBuffer &srcCmd )
+{
+	uint16 viewId = srcCmd.read<uint16>();
+	uint16 objType = srcCmd.read<uint16>();
+	if (viewId || objType)
+	{
+		format msg = 
+			format("(%s) %s:%d selected dynamic object view id %04x objType %04x")
+			% m_parent.Address() % m_handle	% m_goId
+			% viewId % objType;
+
+		DEBUG_LOG(msg);
+		m_parent.QueueCommand(make_shared<SystemChatMsg>(msg.str()));
+	}
+}
+
+void PlayerObject::RPC_HandleJackoutRequest( ByteBuffer &srcCmd )
+{
+	ByteBuffer extraData = ByteBuffer(&srcCmd.contents()[srcCmd.rpos()],srcCmd.remaining());
+	format msg = 
+		format("(%s) %s:%d wants to jackout with extra data %s")
+		% m_parent.Address()
+		% m_handle
+		% m_goId
+		% Bin2Hex(extraData,0);
+
+	DEBUG_LOG(msg);
+	//effect
+	m_parent.QueueState(make_shared<JackoutEffectMsg>(m_goId));
+	//chat msg
+	m_parent.QueueCommand(make_shared<HexGenericMsg>("2E0700000000000000000000002300002E00000000000000000000000000000000000000"));
+	this->addEvent(EVENT_JACKOUT,boost::bind(&PlayerObject::jackoutEvent,this),10.0f); //schedule jackout in 10 seconds
+}
+
+
+void PlayerObject::jackoutEvent()
+{
+	m_parent.QueueCommand(make_shared<HexGenericMsg>("80fd000000000000"));
+	m_parent.FlushQueue();
+	//hack, should see why client doesnt send jackout complete msg, instead of invalidating here
+	//m_parent.Invalidate();
+}
+
+void PlayerObject::RPC_HandleJackoutFinished( ByteBuffer &srcCmd )
+{
+	//this doesn't get sent by client, even though it does on real server
+
+	ByteBuffer extraData = ByteBuffer(&srcCmd.contents()[srcCmd.rpos()],srcCmd.remaining());
+	format msg = 
+		format("(%s) %s:%d jackout complete extra data %s")
+		% m_parent.Address()
+		% m_handle
+		% m_goId
+		% Bin2Hex(extraData,0);
+
+	DEBUG_LOG(msg);
+	m_parent.Invalidate();
+}
