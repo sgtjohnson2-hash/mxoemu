@@ -52,9 +52,9 @@ public:
     bool isStealthed() const { return m_isStealthed; }
     void setStealthed(bool val) { m_isStealthed = val; }
 
-    uint32 getInfo() const { return m_info; }
-    void addInfo(uint32 amt) { m_info += amt; }
-    void removeInfo(uint32 amt) { if (m_info >= amt) m_info -= amt; else m_info = 0; }
+    uint64 getInfo() const { return m_info; }
+    void addInfo(uint64 amt) { m_info += amt; }
+    void removeInfo(uint64 amt) { if (m_info >= amt) m_info -= amt; else m_info = 0; }
 
 	void InitializeWorld();
 	void SpawnSelf();

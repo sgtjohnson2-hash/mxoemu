@@ -1,0 +1,6 @@
+@echo off
+echo Starting Zion Server (Reality Engine)...
+start "Reality Server" /MIN "E:\Games\The Matrix Online\mxoemu_fork\Reality\Binaries\Reality.exe"
+echo Jacking into the Matrix...
+start "" "matrix.exe" -clone
+exit

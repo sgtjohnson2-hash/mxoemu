@@ -42,9 +42,17 @@ BotClient::BotClient(uint64 charUID)
         m_encryptionInitialized = true;
         DEBUG_LOG(format("BotClient constructed for charUID %1%") % m_characterUID);
     }
+    catch (ObjectMgr::ObjectNotAvailable)
+    {
+        ERROR_LOG(format("Failed to construct player object for BotClient: ObjectNotAvailable charUID %1%") % m_characterUID);
+    }
+    catch (const std::exception& e)
+    {
+        ERROR_LOG(format("Failed to construct player object for BotClient: %1%") % e.what());
+    }
     catch (...)
     {
-        ERROR_LOG("Failed to construct player object for BotClient");
+        ERROR_LOG(format("Failed to construct player object for BotClient: UNKNOWN EXCEPTION charUID %1%") % m_characterUID);
     }
 }
 
