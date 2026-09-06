@@ -99,8 +99,41 @@ const server = http.createServer((req, res) => {
         return;
     }
 
-    // 2. Patch Manifest API
-    if (pathname === '/patch/patch_manifest.json' || pathname === '/patch_manifest.json') {
+    // 2. Health & Status Telemetry API
+    if (pathname === '/status' || pathname === '/health') {
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({
+            status: "online",
+            server: "Reality",
+            version: "7.6005",
+            uptime_seconds: Math.floor(process.uptime()),
+            endpoints: {
+                auth: "15.204.82.250:11000",
+                game: "15.204.82.250:10000",
+                database: "15.204.82.250:3307",
+                patch: "http://15.204.82.250"
+            },
+            timestamp: new Date().toISOString()
+        }, null, 2));
+        return;
+    }
+
+    // 3. Version endpoint
+    if (pathname === '/version.txt' || pathname === '/version') {
+        res.writeHead(200, { 'Content-Type': 'text/plain' });
+        res.end("7.6005\n");
+        return;
+    }
+
+    // 4. Patch notes endpoint
+    if (pathname === '/patch_notes.txt' || pathname === '/patchnotes') {
+        res.writeHead(200, { 'Content-Type': 'text/plain' });
+        res.end("The Matrix Online - Reality Server v7.6005\n- Full live server synchronization\n- High throughput UDP socket buffers\n- Crash-resilient InnoDB database engine\n- Active Pedestrian Ecology & Faction War\n");
+        return;
+    }
+
+    // 5. Patch Manifest API
+    if (pathname === '/patch/patch_manifest.json' || pathname === '/patch_manifest.json' || pathname === '/manifest.json') {
         res.writeHead(200, { 'Content-Type': 'application/json' });
         fs.createReadStream(manifestJsonPath).pipe(res);
         return;
