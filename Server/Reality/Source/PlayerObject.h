@@ -174,9 +174,11 @@ public:
     void setCurrentHealth(uint16 hp) { m_healthC = hp; }
     void setMaximumHealth(uint16 hp) { m_healthM = hp; }
     void setInnerStrength(uint16 cur, uint16 max) { m_innerStrC = cur; m_innerStrM = max; }
+    void setCurrentIS(uint16 cur) { m_innerStrC = cur; }
     void setLevel(uint8 lvl) { m_lvl = lvl; }
     void setHandle(const std::string& handle) { m_handle = handle; }
     void setRsiHex(const std::string& hexStr);
+    std::string getRsiHex() const;
     
     // Combat
     

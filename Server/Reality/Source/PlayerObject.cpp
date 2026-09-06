@@ -236,6 +236,20 @@ uint8 PlayerObject::getRsiData( byte* outputBuf, size_t maxBufLen ) const
 	return m_rsi->ToBytes(outputBuf,maxBufLen);
 }
 
+std::string PlayerObject::getRsiHex() const
+{
+	if (!m_rsi) return "";
+	byte buf[64];
+	uint8 len = m_rsi->ToBytes(buf, sizeof(buf));
+	std::string hex;
+	char hexChar[3];
+	for (uint8 i = 0; i < len; ++i) {
+		snprintf(hexChar, sizeof(hexChar), "%02x", buf[i]);
+		hex += hexChar;
+	}
+	return hex;
+}
+
 void PlayerObject::setRsiHex(const std::string& hexStr)
 {
 	if (hexStr.empty()) return;

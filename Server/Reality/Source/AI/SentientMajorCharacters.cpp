@@ -185,7 +185,7 @@ void SentientMajorCharacters::ProcessMerovingianCombat(BotClient* meroBot, Playe
 {
     if (!meroBot || !meroPo || meroPo->isDead()) return;
 
-    float healthPct = float(meroPo->getCurrentHealth()) / float(std::max(1u, meroPo->getMaximumHealth()));
+    float healthPct = float(meroPo->getCurrentHealth()) / float(std::max<uint32>(1u, (uint32)meroPo->getMaximumHealth()));
     uint32 now = getMSTime();
 
     // 1. Backdoor Escape routine when health < 25%
