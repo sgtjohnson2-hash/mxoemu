@@ -1,4 +1,6 @@
+#ifdef _WIN32
 #include <winsock2.h>
+#endif
 #include "PreparedStatement.h"
 #include "Database.h"
 #include "../Log.h"
