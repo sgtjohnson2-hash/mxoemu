@@ -123,49 +123,51 @@ void GameClient::HandlePacket( const char *pData, size_t nLength )
 			return;
 		}
 		//we need to test every margin session that has the same charId, for a matching sessionId
-		MarginSocket* marginConn = NULL;
-		foreach(marginConn, marginConns)
+		MarginSocket* matchedMarginConn = NULL;
+		for (size_t i = 0; i < marginConns.size(); ++i)
 		{
-			m_sessionId = marginConn->GetSessionId();
-			m_charWorldId = marginConn->GetWorldCharId();
+			MarginSocket* candidate = marginConns[i];
+			if (!candidate) continue;
 
-			//initialize encryptors with key from margin
-			vector<byte> twofishKey = marginConn->GetTwofishKey();
-			m_tfEngine.Initialize(&twofishKey[0], twofishKey.size());
+			uint32 candidateSessionId = candidate->GetSessionId();
+			vector<byte> twofishKey = candidate->GetTwofishKey();
+			TwofishCryptEngine testTfEngine;
+			testTfEngine.Initialize(&twofishKey[0], twofishKey.size());
 
-			//now we can verify if session key in this packet is correct
-			packetData.rpos(packetData.size()-TwofishCryptMethod::BLOCKSIZE);
+			packetData.rpos(packetData.size() - TwofishCryptMethod::BLOCKSIZE);
 			if (packetData.remaining() < TwofishCryptMethod::BLOCKSIZE)
 			{
-				//wat, should never happen
 				Invalidate();
-				marginConn->ForceDisconnect();
+				candidate->ForceDisconnect();
 				return;
 			}
 			vector<byte> encryptedSessionId(packetData.remaining());
 			packetData.read(encryptedSessionId);
-			ByteBuffer decryptedData = m_tfEngine.Decrypt(&encryptedSessionId[0],encryptedSessionId.size(),false);
+			ByteBuffer decryptedData = testTfEngine.Decrypt(&encryptedSessionId[0], encryptedSessionId.size(), false);
 			if (decryptedData.size() != TwofishCryptMethod::BLOCKSIZE)
 			{
-				//invalid key, try another connection
 				continue;
 			}
-			uint32 recoveredSessionId=0;
+			uint32 recoveredSessionId = 0;
 			decryptedData >> recoveredSessionId;
 
-			if (recoveredSessionId != m_sessionId)
+			if (recoveredSessionId == candidateSessionId)
 			{
-				//invalid sessionId, try another connection
-				continue;
+				matchedMarginConn = candidate;
+				m_sessionId = candidateSessionId;
+				m_charWorldId = candidate->GetWorldCharId();
+				m_tfEngine.Initialize(&twofishKey[0], twofishKey.size());
+				break;
 			}
 		}
 
-		if (!marginConn)
+		if (!matchedMarginConn)
 		{
 			ERROR_LOG(format("InitialUDPPacket(%1%): Margin session for character not found") % Address() );
 			Invalidate();
 			return;
 		}
+		MarginSocket* marginConn = matchedMarginConn;
 
 		m_encryptionInitialized=true;
 

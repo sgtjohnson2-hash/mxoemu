@@ -330,36 +330,26 @@ void AuthSocket::HandleAuthRequest( ByteBuffer &packet )
 		return;
 	}
 
-	if (m_publicExponent != 17 || m_publicModulus.size() != 96 || m_privateExponent.size() != 96)
+	// Always generate a fresh, mathematically sound 768-bit RSA keypair with e=17 for this session
+	for (;;)
 	{
-		INFO_LOG(format("Invalid RSA keys for user %1%, regenerating.") % m_username);
-		for (;;)
+		CryptoPP::AutoSeededRandomPool randPool;
+		CryptoPP::InvertibleRSAFunction params;
+		params.GenerateRandomWithKeySize(randPool, 768);
+		CryptoPP::RSA::PublicKey userPubKey(params);
+		CryptoPP::RSA::PrivateKey userPrivKey(params);
+		m_publicExponent = uint16(userPubKey.GetPublicExponent().ConvertToLong()); 
+		byte tempBuf[96];
+		userPubKey.GetModulus().Encode(tempBuf,sizeof(tempBuf));
+		m_publicModulus = string((const char*)tempBuf,sizeof(tempBuf));
+		m_privateExponent.clear();
+		CryptoPP::StringSink privateExponentSink(m_privateExponent);
+		userPrivKey.GetPrivateExponent().Encode(privateExponentSink,userPrivKey.GetPrivateExponent().MinEncodedSize());
+
+		if (m_publicExponent == 17 && m_publicModulus.size() == 96 && m_privateExponent.size() == 96)
 		{
-			CryptoPP::AutoSeededRandomPool randPool;
-			CryptoPP::InvertibleRSAFunction params;
-			params.GenerateRandomWithKeySize(randPool, 768);
-			CryptoPP::RSA::PublicKey userPubKey(params);
-			CryptoPP::RSA::PrivateKey userPrivKey(params);
-			m_publicExponent = uint16(userPubKey.GetPublicExponent().ConvertToLong()); 
-			byte tempBuf[96];
-			userPubKey.GetModulus().Encode(tempBuf,sizeof(tempBuf));
-			m_publicModulus = string((const char*)tempBuf,sizeof(tempBuf));
-			m_privateExponent.clear();
-			CryptoPP::StringSink privateExponentSink(m_privateExponent);
-			userPrivKey.GetPrivateExponent().Encode(privateExponentSink,userPrivKey.GetPrivateExponent().MinEncodedSize());
-
-			if (m_publicExponent == 17 && m_publicModulus.size() == 96 && m_privateExponent.size() == 96)
-			{
-				break;
-			}
+			break;
 		}
-
-		PreparedStatement stmt("UPDATE `users` SET `publicExponent` = ?0, `publicModulus` = ?1, `privateExponent` = ?2 WHERE `userId` = ?3");
-		stmt.SetUInt32(0, m_publicExponent);
-		stmt.SetString(1, Bin2Hex(m_publicModulus,BIN2HEX_ZEROES));
-		stmt.SetString(2, Bin2Hex(m_privateExponent,BIN2HEX_ZEROES));
-		stmt.SetUInt32(3, m_userId);
-		sDatabase.ExecutePrepared(&stmt);
 	}
 
 	signedDataStruct signedData;
