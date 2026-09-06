@@ -66,6 +66,8 @@
 #include "AI/SensoryPerceptionSystem.h"
 #include "AI/SentientMajorCharacters.h"
 #include "AI/CoverSystem.h"
+#include "RadioDispatchSystem.h"
+#include "SmithVirusCascade.h"
 // removed duplicate include
 #include <boost/bind.hpp>
 
@@ -114,6 +116,8 @@ bool GameServer::Start()
 	sSensoryPerception.Initialize();
 	sSentientCharacters.Initialize();
 	sCoverSystem.Initialize();
+	sRadioDispatchSystem.Initialize();
+	sSmithCascade.Initialize();
 
 	string Interface = sConfig.GetStringDefault("GameServer.IP", "0.0.0.0");
 	int Port = sConfig.GetIntDefault("GameServer.Port", 10000);
@@ -198,6 +202,8 @@ void GameServer::SimulationLoop()
 			try { sWorldDirector.Update(aiDeltaMs); } catch (const std::exception& e) { ERROR_LOG(format("SimulationLoop: sWorldDirector caught %1%") % e.what()); }
 			try { sSensoryPerception.Update(aiDeltaMs / 1000.0f, currentMs); } catch (const std::exception& e) { ERROR_LOG(format("SimulationLoop: sSensoryPerception caught %1%") % e.what()); }
 			try { sSentientCharacters.Update(aiDeltaMs / 1000.0f); } catch (const std::exception& e) { ERROR_LOG(format("SimulationLoop: sSentientCharacters caught %1%") % e.what()); }
+			try { sRadioDispatchSystem.Update(aiDeltaMs); } catch (const std::exception& e) { ERROR_LOG(format("SimulationLoop: sRadioDispatchSystem caught %1%") % e.what()); }
+			try { sSmithCascade.Update(aiDeltaMs); } catch (const std::exception& e) { ERROR_LOG(format("SimulationLoop: sSmithCascade caught %1%") % e.what()); }
 
 			static uint32 lastMetricLogMs = 0;
 			static uint32 tickCount = 0;

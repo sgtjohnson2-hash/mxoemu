@@ -35,7 +35,7 @@ public:
 
     // Procedural cover point extraction & scoring
     bool FindBestCover(float botX, float botZ, float threatX, float threatZ,
-                       float searchRadius, CoverPoint& outCoverPoint);
+                       float searchRadius, CoverPoint& outCoverPoint, float botY = 95.0f);
 
     // Scoring formula: Score = ThreatOcclusion * 2.0 - TravelDistance * 0.5 + LineOfSightToTarget * 1.2
     float ScoreCoverPoint(float candX, float candZ, float botX, float botZ,

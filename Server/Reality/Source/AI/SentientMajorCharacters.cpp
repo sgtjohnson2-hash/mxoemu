@@ -49,6 +49,43 @@ void SentientMajorCharacters::Update(float deltaSec)
     }
 }
 
+bool SentientMajorCharacters::HijackHost(BotClient* bot, PlayerObject* po, uint32 smithGoId)
+{
+    if (!bot || !po || po->isDead() || bot->isAgent()) return false;
+    uint32 goId = bot->GetPlayerGoId();
+    if (goId == smithGoId) return false;
+
+    std::lock_guard<std::recursive_mutex> lock(m_majorMutex);
+    if (m_hijackedHosts.find(goId) != m_hijackedHosts.end()) return false;
+
+    HostHijackRecord rec;
+    rec.entityGoId = goId;
+    rec.originalHandle = po->getHandle();
+    rec.originalFaction = po->getFactionName();
+    rec.originalRsi = po->getRsiHex();
+    rec.hijackTimeMs = getMSTime();
+    m_hijackedHosts[goId] = rec;
+
+    // Overwrite into Agent Smith Clone!
+    bot->setAgent(true);
+    bot->SetFaction(FACTION_MACHINES);
+    po->setFactionName("Machines");
+    po->setHandle("Agent_Smith_Clone");
+    po->setRsiHex("6e060040"); // Classic dark suit & shades
+    po->setLevel(50);
+    po->setMaximumHealth(5000);
+    po->setCurrentHealth(5000);
+
+    LocationVector p = po->getPosition();
+    sGame.AnnounceStateUpdateNear((float)p.x, (float)p.z, 20000.0f, std::make_shared<EmoteMsg>(goId, 43, 1));
+    bot->Say("Agent Smith: Hear that, Mr. Anderson? That is the sound of inevitability.");
+
+    sSmithCascade.InfectEntity(goId, smithGoId, 1);
+    INFO_LOG(format("SentientMajorCharacters: Agent Smith violently hijacked host %1% ('%2%') at (%3%, %4%)")
+             % goId % rec.originalHandle % p.x % p.z);
+    return true;
+}
+
 bool SentientMajorCharacters::HijackNearbyHost(float wx, float wz, uint32 smithGoId)
 {
     std::lock_guard<std::recursive_mutex> lock(m_majorMutex);
@@ -66,33 +103,9 @@ bool SentientMajorCharacters::HijackNearbyHost(float wx, float wz, uint32 smithG
         PlayerObject* po = BotGetPlayer(goId);
         if (!po || po->isDead()) continue;
 
-        // Record original identity for later reversion
-        HostHijackRecord rec;
-        rec.entityGoId = goId;
-        rec.originalHandle = po->getHandle();
-        rec.originalFaction = po->getFactionName();
-        rec.originalRsi = po->getRsiHex();
-        rec.hijackTimeMs = getMSTime();
-        m_hijackedHosts[goId] = rec;
-
-        // Overwrite into Agent Smith Clone!
-        bot->setAgent(true);
-        bot->SetFaction(FACTION_MACHINES);
-        po->setFactionName("Machines");
-        po->setHandle("Agent_Smith_Clone");
-        po->setRsiHex("6e060040"); // Classic dark suit & shades
-        po->setLevel(50);
-        po->setMaximumHealth(5000);
-        po->setCurrentHealth(5000);
-
-        // Digital green cascade code emote
-        sGame.AnnounceStateUpdateNear(wx, wz, 20000.0f, std::make_shared<EmoteMsg>(goId, 43, 1));
-        bot->Say("Agent Smith: Hear that, Mr. Anderson? That is the sound of inevitability.");
-
-        sSmithCascade.InfectEntity(goId, smithGoId, 1);
-        INFO_LOG(format("SentientMajorCharacters: Agent Smith violently hijacked host %1% ('%2%') at (%3%, %4%)")
-                 % goId % rec.originalHandle % wx % wz);
-        return true;
+        if (HijackHost(bot, po, smithGoId)) {
+            return true;
+        }
     }
 
     return false;
@@ -202,7 +215,7 @@ void SentientMajorCharacters::ProcessMerovingianCombat(BotClient* meroBot, Playe
         meroBot->Say("The Merovingian: It is remarkable how similar the pattern of love is to the pattern of insanity. Enforcers, attend to our guests.");
 
         // Spawn 1 Werewolf (Lupine Enforcer) and 1 Vampire (Blood Noble)
-        auto lupine = sBotMgr.SpawnSingleBot(pos.x + 400.0f, pos.y, pos.z + 400.0f, FACTION_MEROVINGIAN);
+        auto lupine = sBotMgr.SpawnSingleBot((float)pos.x + 400.0f, (float)pos.y, (float)pos.z + 400.0f, FACTION_MEROVINGIAN);
         if (lupine) {
             PlayerObject* poLup = BotGetPlayer(lupine->GetPlayerGoId());
             if (poLup) {
@@ -211,9 +224,13 @@ void SentientMajorCharacters::ProcessMerovingianCombat(BotClient* meroBot, Playe
                 poLup->setMaximumHealth(3500);
                 poLup->setCurrentHealth(3500);
             }
+            if (meroBot->GetTargetGoId() != 0) {
+                lupine->SetTargetGoId(meroBot->GetTargetGoId());
+                lupine->AttackTarget(meroBot->GetTargetGoId());
+            }
         }
 
-        auto noble = sBotMgr.SpawnSingleBot(pos.x - 400.0f, pos.y, pos.z - 400.0f, FACTION_MEROVINGIAN);
+        auto noble = sBotMgr.SpawnSingleBot((float)pos.x - 400.0f, (float)pos.y, (float)pos.z - 400.0f, FACTION_MEROVINGIAN);
         if (noble) {
             PlayerObject* poNob = BotGetPlayer(noble->GetPlayerGoId());
             if (poNob) {
@@ -221,6 +238,10 @@ void SentientMajorCharacters::ProcessMerovingianCombat(BotClient* meroBot, Playe
                 poNob->setLevel(50);
                 poNob->setMaximumHealth(3000);
                 poNob->setCurrentHealth(3000);
+            }
+            if (meroBot->GetTargetGoId() != 0) {
+                noble->SetTargetGoId(meroBot->GetTargetGoId());
+                noble->AttackTarget(meroBot->GetTargetGoId());
             }
         }
     }
@@ -234,14 +255,16 @@ bool SentientMajorCharacters::TriggerMerovingianBackdoorEscape(BotClient* meroBo
     meroBot->Say("The Merovingian: You see there is only one constant, one universal truth: causality. Au revoir, mon cher.");
 
     // Visual backdoor code flash
-    sGame.AnnounceStateUpdateNear(pos.x, pos.z, 20000.0f, std::make_shared<EmoteMsg>(meroPo->getGoId(), 43, 1));
+    sGame.AnnounceStateUpdateNear((float)pos.x, (float)pos.z, 20000.0f, std::make_shared<EmoteMsg>(meroPo->getGoId(), 43, 1));
 
     // Teleport to Club Hel safe retreat coordinates
     LocationVector clubHelSafe(-67862.0f, 95.0f, 16314.0f);
     meroPo->setPosition(clubHelSafe);
-    meroBot->SetSpawnLocation(clubHelSafe.x, clubHelSafe.y, clubHelSafe.z);
+    meroBot->SetSpawnLocation((float)clubHelSafe.x, (float)clubHelSafe.y, (float)clubHelSafe.z);
     meroPo->setCurrentHealth(meroPo->getMaximumHealth());
     sCombatSys.RemoveCombatant(meroPo->getGoId());
+    sSpatialGrid.UpdateClientPosition(meroBot, (float)clubHelSafe.x, (float)clubHelSafe.z);
+    sGame.AnnounceStateUpdateNear((float)clubHelSafe.x, (float)clubHelSafe.z, 20000.0f, std::make_shared<PositionStateMsg>(meroPo->getGoId()));
 
     INFO_LOG("SentientMajorCharacters: The Merovingian executed backdoor phase teleportation to Club Hel.");
     return true;

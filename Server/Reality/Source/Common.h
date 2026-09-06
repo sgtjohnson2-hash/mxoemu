@@ -106,6 +106,8 @@ typedef unsigned char byte;
 // removed snprintf macro
 
 #define atoll __atoi64
+#define strcasecmp _stricmp
+#define strncasecmp _strnicmp
 #else
 #define stricmp strcasecmp
 #define strnicmp strncasecmp

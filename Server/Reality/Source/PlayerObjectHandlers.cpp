@@ -69,6 +69,8 @@
 #include "OrbitalSatelliteSystem.h"
 #include "SourceCodeCompilerSystem.h"
 #include "MatrixRebootEngine.h"
+#include "SmithVirusCascade.h"
+#include "AI/PedestrianEcology.h"
 
 #include <boost/algorithm/string.hpp>
 using boost::iequals;
@@ -1388,8 +1390,97 @@ void PlayerObject::RPC_HandleChat( ByteBuffer &srcCmd )
         auto recent = sRadioDispatchSystem.GetRecentTransmissions(1);
         std::string latest = recent.empty() ? "Scanner idle." : recent[0].chatterText;
         m_parent.QueueCommand(make_shared<SystemChatMsg>(
-            (format("{c:FF5555}[Police Radio Dispatch] Total Scanner Calls: %1% | Latest: %2%{/c}")
-             % totalCalls % latest).str()
+            (format("{c:FF5555}[Police Radio Dispatch] Total Scanner Calls: %1% | 911 Calls: %2% | Latest: %3%{/c}")
+             % totalCalls % sRadioDispatchSystem.GetTotal911Calls() % latest).str()
+        ));
+        return;
+    }
+
+    if (boost::iequals(theMessage, "/outbreak")) {
+        float px = getPosition().x;
+        float pz = getPosition().z;
+        uint32 dId = sMatrixThreatHeatmap.GetDistrictAt(px, pz);
+
+        // Record massive disruption spike
+        sMatrixThreatHeatmap.RecordDisruption(px, pz, 160.0f, "Simulated Viral Outbreak");
+
+        // Spawn test Agent Smith clone
+        auto bot = sBotMgr.SpawnSingleBot(px + 300.0f, 95.0f, pz + 300.0f, FACTION_MACHINES);
+        if (bot) {
+            bot->setAgent(true);
+            PlayerObject* po = BotGetPlayer(bot->GetPlayerGoId());
+            if (po) {
+                po->setHandle("Agent_Smith_Clone");
+                po->setRsiHex("6e060040");
+                po->setLevel(50);
+                po->setMaximumHealth(5000);
+                po->setCurrentHealth(5000);
+                bot->Say("Agent Smith: Hear that, Mr. Anderson? That is the sound of inevitability.");
+                sSmithCascade.InfectEntity(po->getGoId(), 0, dId);
+            }
+        }
+
+        // Machine Agent Gray commandeers municipal channels & deploys tactical cordon
+        sRadioDispatchSystem.TriggerAgentOverride("Agent Gray", "Viral outbreak confirmed. Sector quarantine initiated. All municipal transit locked down.", dId);
+        sPedestrianEcology.DeployTacticalCordon(dId);
+        sPedestrianEcology.SpreadRumorFearAura(px, pz, 0.65f, 3000.0f);
+
+        m_parent.QueueCommand(make_shared<SystemChatMsg>(
+            (format("{c:FF0000}[OUTBREAK SIMULATION] Outbreak initiated in District %1%! Agent Gray override triggered, Tactical Cordon deployed, Fear Aura propagated.{/c}")
+             % dId).str()
+        ));
+        return;
+    }
+
+    if (boost::iequals(theMessage, "/fear")) {
+        float px = getPosition().x;
+        float pz = getPosition().z;
+        uint32 dId = sMatrixThreatHeatmap.GetDistrictAt(px, pz);
+        float heat = sMatrixThreatHeatmap.GetHeat(px, pz);
+        bool cordon = sPedestrianEcology.IsCordonActive(dId);
+        bool martial = sRadioDispatchSystem.IsMartialLawActive(dId);
+
+        // Scan nearby civilians
+        auto nearby = sSpatialGrid.GetClientsInRadius(px, pz);
+        int civCount = 0;
+        int t0 = 0, t1 = 0, t2 = 0, t3 = 0;
+        float avgFear = 0.0f;
+
+        for (GameClient* gc : nearby) {
+            if (!gc->isBot()) continue;
+            PlayerObject* po = BotGetPlayer(gc->GetPlayerGoId());
+            if (po && po->getFactionName() == "Civilian") {
+                BotClient* bc = dynamic_cast<BotClient*>(gc);
+                if (bc) {
+                    civCount++;
+                    float f = bc->GetFearLevel();
+                    avgFear += f;
+                    uint8 tier = bc->GetCivilianTier();
+                    if (tier == 0) t0++;
+                    else if (tier == 1) t1++;
+                    else if (tier == 2) t2++;
+                    else if (tier == 3) t3++;
+                }
+            }
+        }
+        if (civCount > 0) avgFear /= (float)civCount;
+
+        m_parent.QueueCommand(make_shared<SystemChatMsg>(
+            (format("{c:00FFCC}[Civilian Fear Ecology] District %1% | Heat: %2$.1f | Cordon: %3% | Martial Law: %4% | Civilians: %5% | Avg Fear: %6$.2f | Tiers: [T0:%7% T1:%8% T2:%9% T3:%10%]{/c}")
+             % dId % heat % (cordon ? "ACTIVE" : "OFF") % (martial ? "ACTIVE" : "OFF")
+             % civCount % avgFear % t0 % t1 % t2 % t3).str()
+        ));
+        return;
+    }
+
+    if (boost::iequals(theMessage, "/cordon")) {
+        float px = getPosition().x;
+        float pz = getPosition().z;
+        uint32 dId = sMatrixThreatHeatmap.GetDistrictAt(px, pz);
+        sPedestrianEcology.DeployTacticalCordon(dId);
+        m_parent.QueueCommand(make_shared<SystemChatMsg>(
+            (format("{c:FFAA00}[Tactical Cordon] Deployed SWAT perimeter cordon in District %1%. Subway concourse sealed.{/c}")
+             % dId).str()
         ));
         return;
     }

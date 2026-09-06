@@ -31,6 +31,7 @@ public:
     void Update(float deltaSec);
 
     // Agent Smith: Autonomous Host Body Hijacking
+    bool HijackHost(BotClient* bot, PlayerObject* po, uint32 smithGoId = 0);
     bool HijackNearbyHost(float wx, float wz, uint32 smithGoId = 0);
     bool RevertHijackedHost(uint32 entityGoId);
     bool IsHijackedHost(uint32 entityGoId) const;

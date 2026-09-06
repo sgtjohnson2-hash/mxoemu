@@ -7,6 +7,11 @@
 #include "Timer.h"
 #include "BehaviorTree.h"
 #include "AI/TheoryOfMind.h"
+#include "AI/MatrixThreatHeatmap.h"
+#include "RadioDispatchSystem.h"
+#include "BotManager.h"
+#include "SmithVirusCascade.h"
+#include "GameServer.h"
 #include <cmath>
 #include <algorithm>
 
@@ -119,8 +124,48 @@ void PedestrianEcology::Initialize()
         "Tastee Wheat never tastes the same twice. Makes you wonder who wrote the food subroutine."
     };
 
-    INFO_LOG(format("PedestrianEcology Initialized with %1% POIs and %2% authentic rumors across 4 districts.") 
-             % m_pois.size() % m_rumorPool.size());
+    // Tier 1 Outbreak Rumors (Emergent Outbreak Awareness)
+    m_outbreakRumors = {
+        "Did you see that man in the black suit? There were three of them with the exact same face...",
+        "Someone near the station had their face glitch and ripple into a dark suit...",
+        "They're multiplying. Don't look them in the eyes or you become one of them...",
+        "I saw an entire crowd turn their heads in perfect synchronization. Something is terribly wrong.",
+        "The transit police fired on one of those identical men and the bullets just flattened on his skin.",
+        "There are men in dark glasses watching every phone booth... don't answer them.",
+        "A guy in Morrell collapsed, and when he stood up, he wasn't him anymore—he was that agent.",
+        "They're sealing off the streets... I heard it over a transit police scanner.",
+        "Unnatural faces in the crowd. Look closely at people's reflections in the glass windows.",
+        "The subway turnstiles are being guarded by identical agents standing shoulder to shoulder."
+    };
+
+    // Tier 3 Panic Vocalizations & Distress Cries
+    m_panicCries = {
+        "THEY'RE MULTIPLYING! RUN FOR YOUR LIVES!",
+        "HIS FACE... IT WAS IN THE MIRROR! GOD HELP US!",
+        "THEY'RE TURNING EVERYONE! DON'T LET THEM TOUCH YOU!",
+        "SUBWAY! GET UNDERGROUND RIGHT NOW!",
+        "THE WHOLE STREET TURNED INTO HIM! RUN!",
+        "PLEASE NO! SOMEONE STOP THEM! AAAAAGH!",
+        "HE JUST REACHED INTO HIM AND REWROTE HIM! RUN!",
+        "THE POLICE CAN'T STOP THEM! THEY'RE INEVITABLE!"
+    };
+
+    // Tier 2 Evasion Whispers & Rejections
+    m_evasionWhispers = {
+        "Leave me alone! Don't look at them... just keep moving!",
+        "Don't come near me! You could be one of them!",
+        "I didn't see anything! I don't know anything! Get away!",
+        "*looks nervously over shoulder, pulling collar tight and hurrying past*",
+        "Stay back! Don't talk to anyone... they're watching every corner."
+    };
+
+    {
+        std::lock_guard<std::recursive_mutex> lock(m_cordonMutex);
+        m_tacticalCordons.clear();
+    }
+
+    INFO_LOG(format("PedestrianEcology Initialized with %1% POIs, %2% ambient rumors, and %3% outbreak rumors across 4 districts.") 
+             % m_pois.size() % m_rumorPool.size() % m_outbreakRumors.size());
 }
 
 PointOfInterest PedestrianEcology::GetCircadianTarget(float currentX, float currentZ, WeatherSystem::CircadianPeriod period, const BotPersonality& personality) const
@@ -185,6 +230,30 @@ PointOfInterest PedestrianEcology::GetNearestPOI(float currentX, float currentZ,
 PointOfInterest PedestrianEcology::GetNearestSubway(float currentX, float currentZ) const
 {
     return GetNearestPOI(currentX, currentZ, POI_SUBWAY_TRANSIT);
+}
+
+PointOfInterest PedestrianEcology::GetNearestShelter(float currentX, float currentZ) const
+{
+    PointOfInterest best;
+    float minDistSq = -1.0f;
+
+    for (const auto& poi : m_pois) {
+        if (poi.type != POI_SUBWAY_TRANSIT && poi.type != POI_OFFICE_COMMERCIAL && poi.type != POI_RESIDENTIAL_APARTMENT) {
+            continue;
+        }
+        float dx = poi.x - currentX;
+        float dz = poi.z - currentZ;
+        float distSq = dx * dx + dz * dz;
+        if (minDistSq < 0.0f || distSq < minDistSq) {
+            minDistSq = distSq;
+            best = poi;
+        }
+    }
+
+    if (minDistSq < 0.0f && !m_pois.empty()) {
+        return m_pois[0];
+    }
+    return best;
 }
 
 void PedestrianEcology::InteractWithPOI(BotClient* bot, PlayerObject* me, const PointOfInterest& poi)
@@ -294,9 +363,7 @@ void PedestrianEcology::ApplyCrowdSteering(BotClient* bot, PlayerObject* me, flo
         // Sidewalk personal space (within 3 meters = 300 units)
         if (distSq > 1.0f && distSq < 90000.0f) {
             float dist = std::sqrt(distSq);
-            // Repulsion force inversely proportional to distance
             float force = (300.0f - dist) / 300.0f;
-            // Add lateral deflection (sidewalk courtesy steering: turn slightly right)
             float perpX = -dz / dist;
             float perpZ = dx / dist;
 
@@ -305,7 +372,6 @@ void PedestrianEcology::ApplyCrowdSteering(BotClient* bot, PlayerObject* me, flo
         }
     }
 
-    // Clamp steering magnitude to prevent velocity explosions
     float steerLenSq = outSteerX * outSteerX + outSteerZ * outSteerZ;
     if (steerLenSq > 4.0f) {
         float steerLen = std::sqrt(steerLenSq);
@@ -314,46 +380,194 @@ void PedestrianEcology::ApplyCrowdSteering(BotClient* bot, PlayerObject* me, flo
     }
 }
 
+bool PedestrianEcology::TryOutbreakGossip(BotClient* botA, BotClient* botB, uint32 currentMs)
+{
+    if (!botA || !botB || m_outbreakRumors.empty()) return false;
+
+    if (currentMs - botA->GetLastGossipTime() < 20000 || currentMs - botB->GetLastGossipTime() < 20000) {
+        return false;
+    }
+
+    botA->SetLastGossipTime(currentMs);
+    botB->SetLastGossipTime(currentMs);
+
+    PlayerObject* poA = BotGetPlayer(botA->GetPlayerGoId());
+    PlayerObject* poB = BotGetPlayer(botB->GetPlayerGoId());
+    if (!poA || !poB) return false;
+
+    int rumorIdx = rand() % m_outbreakRumors.size();
+    std::string rumor = m_outbreakRumors[rumorIdx];
+
+    const char* whispers[] = {
+        "*whispers frantically* ",
+        "*looking over shoulder* ",
+        "Listen to me... ",
+        "Did you see that? "
+    };
+    std::string mutated = whispers[rand() % 4] + rumor;
+    botA->Say((format("\"%1%\"") % mutated).str());
+
+    // Boost fear of speaker and listener
+    botA->AddFear(0.10f);
+    botB->AddFear(0.15f);
+
+    // Propagate fear aura to surrounding pedestrians
+    SpreadRumorFearAura(poA->getPosition().x, poA->getPosition().z, 0.12f, 800.0f, poA->getGoId());
+
+    // Theory of Mind updates
+    botA->GetTheoryOfMindSolver().UpdateState(std::to_string(poB->getGoId()), 0.25f, 0.1f);
+    botB->GetTheoryOfMindSolver().UpdateState(std::to_string(poA->getGoId()), 0.25f, 0.1f);
+
+    return true;
+}
+
+void PedestrianEcology::SpreadRumorFearAura(float x, float z, float fearAmount, float radius, uint32 excludeGoId)
+{
+    auto nearbyClients = sSpatialGrid.GetClientsInRadius(x, z);
+    float radSq = radius * radius;
+
+    for (GameClient* gc : nearbyClients) {
+        if (!gc->isBot()) continue;
+        uint32 otherGoId = gc->GetPlayerGoId();
+        if (otherGoId == 0 || otherGoId == excludeGoId) continue;
+
+        PlayerObject* otherPo = BotGetPlayer(otherGoId);
+        if (!otherPo || otherPo->isDead() || otherPo->getFactionName() != "Civilian") continue;
+
+        BotClient* otherBot = dynamic_cast<BotClient*>(gc);
+        if (!otherBot) continue;
+
+        LocationVector oPos = otherPo->getPosition();
+        float dx = x - oPos.x;
+        float dz = z - oPos.z;
+        float distSq = dx * dx + dz * dz;
+
+        if (distSq <= radSq) {
+            float dist = std::sqrt(distSq);
+            float weight = (radius - dist) / radius;
+            otherBot->AddFear(fearAmount * weight);
+        }
+    }
+}
+
+CivilianFearTier PedestrianEcology::EvaluateCivilianTier(float fear) const
+{
+    if (fear >= 0.80f) return CIV_TIER_PANIC_STAMPEDE;
+    if (fear >= 0.55f) return CIV_TIER_ALARM_EVASION;
+    if (fear >= 0.25f) return CIV_TIER_UNEASY_RUMORS;
+    return CIV_TIER_NORMAL_COMMUTE;
+}
+
+void PedestrianEcology::UpdateCivilianFear(BotClient* bot, PlayerObject* me, float deltaSeconds)
+{
+    const BotPersonality& personality = bot->GetPersonality();
+    LocationVector pos = me->getPosition();
+
+    float currentFear = bot->GetFearLevel();
+    float fearDelta = 0.0f;
+
+    // 1. Threat Heatmap influence
+    float localHeat = sMatrixThreatHeatmap.GetHeat(pos.x, pos.z);
+    EscalationTier tier = sMatrixThreatHeatmap.GetTier(pos.x, pos.z);
+    if (localHeat > 20.0f) {
+        fearDelta += (localHeat * 0.0012f) * deltaSeconds * (0.8f + personality.neuroticism * 0.6f);
+    }
+    float minFearFloor = 0.0f;
+    if (tier == ESCALATION_TIER_1_POLICE) minFearFloor = 0.20f;
+    else if (tier == ESCALATION_TIER_2_SWAT) minFearFloor = 0.35f;
+    else if (tier == ESCALATION_TIER_3_AGENT_TAKEOVER) minFearFloor = 0.55f;
+    else if (tier >= ESCALATION_TIER_4_MULTI_AGENT) minFearFloor = 0.80f;
+
+    // 2. Proximity Threat Scanning
+    auto nearbyClients = sSpatialGrid.GetClientsInRadius(pos.x, pos.z);
+    bool smithNearby = false;
+    bool violenceNearby = false;
+    bool panicNearby = false;
+
+    for (GameClient* gc : nearbyClients) {
+        if (gc == bot || !gc->isBot()) continue;
+        BotClient* otherBot = dynamic_cast<BotClient*>(gc);
+        if (!otherBot) continue;
+
+        PlayerObject* otherPo = BotGetPlayer(otherBot->GetPlayerGoId());
+        if (!otherPo) continue;
+
+        float dx = pos.x - otherPo->getPosition().x;
+        float dz = pos.z - otherPo->getPosition().z;
+        float distSq = dx * dx + dz * dz;
+
+        if (distSq > 9000000.0f) continue; // 30m
+
+        // Agent Smith sightings
+        if (otherBot->isAgent() || otherPo->getHandle().find("Smith") != std::string::npos || otherPo->getHandle().find("Agent") != std::string::npos) {
+            smithNearby = true;
+            float dist = std::sqrt(std::max(1.0f, distSq));
+            float smithFactor = (dist < 1000.0f) ? 0.70f : 0.35f;
+            fearDelta += smithFactor * deltaSeconds * (0.9f + personality.neuroticism * 0.5f);
+
+            if (otherBot->IsInCombat()) {
+                fearDelta += 0.25f * deltaSeconds;
+            }
+        }
+
+        // Casualties / dead bodies
+        if (otherPo->isDead()) {
+            violenceNearby = true;
+            fearDelta += 0.18f * deltaSeconds;
+        }
+
+        // Social fear contagion: Panicked pedestrians transmit terror
+        if (otherBot->GetCivilianTier() >= CIV_TIER_PANIC_STAMPEDE) {
+            panicNearby = true;
+            fearDelta += 0.22f * deltaSeconds * personality.neuroticism;
+        }
+    }
+
+    // 3. Fear Decay or Accretion
+    if (!smithNearby && !violenceNearby && !panicNearby && localHeat < 15.0f) {
+        float decayRate = (0.05f + personality.conscientiousness * 0.03f) * (1.0f - personality.neuroticism * 0.4f);
+        currentFear = std::max(minFearFloor, currentFear - decayRate * deltaSeconds);
+    } else {
+        currentFear = std::clamp(currentFear + fearDelta, minFearFloor, 1.0f);
+    }
+
+    bot->SetFearLevel(currentFear);
+}
+
 void PedestrianEcology::UpdateCivilian(BotClient* bot, float deltaSeconds)
 {
     if (!bot) return;
     PlayerObject* me = BotGetPlayer(bot->GetPlayerGoId());
     if (!me || me->isDead()) return;
 
+    // 1. Calculate & Evolve Emergent Fear Scale (0.0 to 1.0)
+    UpdateCivilianFear(bot, me, deltaSeconds);
+
+    // 2. Multi-tier Behavioral Routing
+    CivilianFearTier tier = EvaluateCivilianTier(bot->GetFearLevel());
+
+    switch (tier) {
+        case CIV_TIER_NORMAL_COMMUTE:
+            ExecuteTier0Normal(bot, me, deltaSeconds);
+            break;
+        case CIV_TIER_UNEASY_RUMORS:
+            ExecuteTier1Uneasy(bot, me, deltaSeconds);
+            break;
+        case CIV_TIER_ALARM_EVASION:
+            ExecuteTier2Alarm(bot, me, deltaSeconds);
+            break;
+        case CIV_TIER_PANIC_STAMPEDE:
+            ExecuteTier3Panic(bot, me, deltaSeconds);
+            break;
+    }
+}
+
+void PedestrianEcology::ExecuteTier0Normal(BotClient* bot, PlayerObject* me, float deltaSeconds)
+{
     const BotPersonality& personality = bot->GetPersonality();
     LocationVector pos = me->getPosition();
     uint32 now = getMSTime();
 
-    // 1. Panic Response (OCEAN Neuroticism influence)
-    if (bot->IsPanicking()) {
-        PointOfInterest subway = GetNearestSubway(pos.x, pos.z);
-        float dx = subway.x - pos.x;
-        float dz = subway.z - pos.z;
-        float dist = std::sqrt(dx * dx + dz * dz);
-
-        if (dist > 200.0f) { // Head to subway entrance
-            dx /= dist;
-            dz /= dist;
-            float fleeSpeed = 8.0f + (personality.neuroticism * 4.0f); // High N flees faster
-            float newX = pos.x + dx * fleeSpeed * deltaSeconds * 100.0f;
-            float newZ = pos.z + dz * fleeSpeed * deltaSeconds * 100.0f;
-            bot->MoveTo(newX, pos.y, newZ);
-        } else {
-            // Reached subway shelter, calm down
-            bot->SetPanicking(false);
-            bot->Say("I made it to the subway... safe for now.");
-        }
-
-        // Neuroticism slows calming; Conscientiousness speeds calming
-        float calmChance = ((1.0f - personality.neuroticism) * 0.08f) + (personality.conscientiousness * 0.04f);
-        if ((rand() % 100) / 100.0f < calmChance) {
-            bot->SetPanicking(false);
-            bot->Say("*takes a deep breath and looks around*");
-        }
-        return;
-    }
-
-    // 2. Circadian Schedule Routine Navigation
     WeatherSystem::CircadianPeriod currentPeriod = sWeatherSys.GetCircadianPeriod();
     PointOfInterest targetPOI = GetCircadianTarget(pos.x, pos.z, currentPeriod, personality);
 
@@ -361,28 +575,24 @@ void PedestrianEcology::UpdateCivilian(BotClient* bot, float deltaSeconds)
     float toPdz = targetPOI.z - pos.z;
     float distToPOI = std::sqrt(toPdx * toPdx + toPdz * toPdz);
 
-    if (distToPOI > 1500.0f) { // Beyond 15m of destination: travel toward POI
+    if (distToPOI > 1500.0f) {
         toPdx /= distToPOI;
         toPdz /= distToPOI;
 
-        float steerX = 0.0f;
-        float steerZ = 0.0f;
+        float steerX = 0.0f, steerZ = 0.0f;
         ApplyCrowdSteering(bot, me, steerX, steerZ);
 
         float walkSpeed = 3.5f;
         float moveX = (toPdx * walkSpeed * 100.0f + steerX * 50.0f) * deltaSeconds;
         float moveZ = (toPdz * walkSpeed * 100.0f + steerZ * 50.0f) * deltaSeconds;
-
         bot->MoveTo(pos.x + moveX, pos.y, pos.z + moveZ);
     } else {
-        // At or near POI: interact with the smart object
         InteractWithPOI(bot, me, targetPOI);
 
         int roll = rand() % 100;
         if (roll < 35) {
             bot->RoamAndSwarm(deltaSeconds);
         } else if (roll < 65) {
-            // Proximity gossip attempt with nearby civilians
             auto nearby = sSpatialGrid.GetClientsInRadius(pos.x, pos.z);
             for (GameClient* gc : nearby) {
                 if (gc == bot || !gc->isBot()) continue;
@@ -397,4 +607,327 @@ void PedestrianEcology::UpdateCivilian(BotClient* bot, float deltaSeconds)
             }
         }
     }
+}
+
+void PedestrianEcology::ExecuteTier1Uneasy(BotClient* bot, PlayerObject* me, float deltaSeconds)
+{
+    const BotPersonality& personality = bot->GetPersonality();
+    LocationVector pos = me->getPosition();
+    uint32 now = getMSTime();
+
+    // Gather around familiar public POIs (noodle bars, diners, benches, payphones, corners)
+    POIType gatherType = (personality.extraversion > 0.4f) ? POI_DINER_RESTAURANT : POI_PARK_BENCH;
+    PointOfInterest targetPOI = GetNearestPOI(pos.x, pos.z, gatherType);
+
+    float toPdx = targetPOI.x - pos.x;
+    float toPdz = targetPOI.z - pos.z;
+    float distToPOI = std::sqrt(toPdx * toPdx + toPdz * toPdz);
+
+    if (distToPOI > 800.0f) {
+        toPdx /= distToPOI;
+        toPdz /= distToPOI;
+        float steerX = 0.0f, steerZ = 0.0f;
+        ApplyCrowdSteering(bot, me, steerX, steerZ);
+
+        float walkSpeed = 4.0f; // Alert, faster walking gait
+        float moveX = (toPdx * walkSpeed * 100.0f + steerX * 40.0f) * deltaSeconds;
+        float moveZ = (toPdz * walkSpeed * 100.0f + steerZ * 40.0f) * deltaSeconds;
+        bot->MoveTo(pos.x + moveX, pos.y, pos.z + moveZ);
+    } else {
+        // At gathering spot: whisper outbreak rumors to nearby pedestrians
+        auto nearby = sSpatialGrid.GetClientsInRadius(pos.x, pos.z);
+        bool gossiped = false;
+        for (GameClient* gc : nearby) {
+            if (gc == bot || !gc->isBot()) continue;
+            BotClient* otherBot = dynamic_cast<BotClient*>(gc);
+            if (otherBot) {
+                PlayerObject* otherPo = BotGetPlayer(otherBot->GetPlayerGoId());
+                if (otherPo && otherPo->getFactionName() == "Civilian") {
+                    gossiped = TryOutbreakGossip(bot, otherBot, now);
+                    if (gossiped) break;
+                }
+            }
+        }
+
+        // Solitary muttering if nobody to gossip with
+        if (!gossiped && (now - bot->GetLastWhisperTime() > 20000) && !m_outbreakRumors.empty()) {
+            bot->SetLastWhisperTime(now);
+            int rIdx = rand() % m_outbreakRumors.size();
+            bot->Say(m_outbreakRumors[rIdx]);
+            SpreadRumorFearAura(pos.x, pos.z, 0.08f, 700.0f, me->getGoId());
+            bot->Emote(41);
+        }
+    }
+
+    // 911 Call Escalation
+    if (bot->GetFearLevel() >= 0.40f && (now - bot->GetLastDistressCallTime() > 45000)) {
+        bot->SetLastDistressCallTime(now);
+        uint32 districtId = sMatrixThreatHeatmap.GetDistrictAt(pos.x, pos.z);
+        sRadioDispatchSystem.Report911Call(districtId, pos.x, pos.z,
+            (format("Bizarre disturbance! Men in black suits multiplying near %1%") % targetPOI.name).str());
+    }
+}
+
+void PedestrianEcology::ExecuteTier2Alarm(BotClient* bot, PlayerObject* me, float deltaSeconds)
+{
+    LocationVector pos = me->getPosition();
+    uint32 now = getMSTime();
+
+    // 1. Avoid Suspicious Entities (Agents, Smith clones, combatants)
+    auto nearby = sSpatialGrid.GetClientsInRadius(pos.x, pos.z);
+    float avoidX = 0.0f, avoidZ = 0.0f;
+    int threatCount = 0;
+
+    for (GameClient* gc : nearby) {
+        if (gc == bot) continue;
+        uint32 otherGoId = gc->GetPlayerGoId();
+        PlayerObject* otherPo = BotGetPlayer(otherGoId);
+        if (!otherPo || otherPo->isDead()) continue;
+
+        BotClient* otherBot = dynamic_cast<BotClient*>(gc);
+        bool isThreat = false;
+        if (otherBot && otherBot->isAgent()) isThreat = true;
+        if (otherPo->getHandle().find("Smith") != std::string::npos || otherPo->getHandle().find("Agent") != std::string::npos) isThreat = true;
+        if (otherBot && otherBot->IsInCombat()) isThreat = true;
+
+        if (isThreat) {
+            float dx = pos.x - otherPo->getPosition().x;
+            float dz = pos.z - otherPo->getPosition().z;
+            float distSq = dx * dx + dz * dz;
+            if (distSq < 2250000.0f && distSq > 1.0f) { // Within 15m
+                float dist = std::sqrt(distSq);
+                avoidX += (dx / dist) * (1500.0f - dist);
+                avoidZ += (dz / dist) * (1500.0f - dist);
+                threatCount++;
+            }
+        }
+    }
+
+    // 2. Refuse to talk & evade interactions
+    if (threatCount > 0) {
+        float avoidLenSq = avoidX * avoidX + avoidZ * avoidZ;
+        if (avoidLenSq > 1.0f) {
+            float avoidLen = std::sqrt(avoidLenSq);
+            avoidX /= avoidLen;
+            avoidZ /= avoidLen;
+        }
+        float evadeSpeed = 5.5f; // Fast, hurried walking pace
+        bot->MoveTo(pos.x + avoidX * evadeSpeed * 100.0f * deltaSeconds, pos.y,
+                    pos.z + avoidZ * evadeSpeed * 100.0f * deltaSeconds);
+    } else {
+        // Steer away from narrow alleyways towards main thoroughfares
+        PointOfInterest mainPlaza = GetNearestPOI(pos.x, pos.z, POI_OFFICE_COMMERCIAL);
+        float toMdx = mainPlaza.x - pos.x;
+        float toMdz = mainPlaza.z - pos.z;
+        float mDist = std::sqrt(toMdx * toMdx + toMdz * toMdz);
+        if (mDist > 500.0f) {
+            toMdx /= mDist;
+            toMdz /= mDist;
+            bot->MoveTo(pos.x + toMdx * 4.5f * 100.0f * deltaSeconds, pos.y,
+                        pos.z + toMdz * 4.5f * 100.0f * deltaSeconds);
+        }
+    }
+
+    // 3. Nervous glances over shoulder
+    if (now - bot->GetLastLookAroundTime() > 4000) {
+        bot->SetLastLookAroundTime(now);
+        bot->Emote(40); // Sitting/alert glance
+        if (!m_evasionWhispers.empty() && (rand() % 100 < 30)) {
+            bot->Say(m_evasionWhispers[rand() % m_evasionWhispers.size()]);
+        }
+    }
+}
+
+void PedestrianEcology::ExecuteTier3Panic(BotClient* bot, PlayerObject* me, float deltaSeconds)
+{
+    const BotPersonality& personality = bot->GetPersonality();
+    LocationVector pos = me->getPosition();
+    uint32 now = getMSTime();
+
+    uint32 districtId = sMatrixThreatHeatmap.GetDistrictAt(pos.x, pos.z);
+    bool cordonActive = IsCordonActive(districtId);
+
+    // Target Shelter: Subway unless cordoned, else Commercial/Residential building
+    PointOfInterest dest;
+    PointOfInterest nearestSubway = GetNearestSubway(pos.x, pos.z);
+
+    if (cordonActive) {
+        // Subway is cordoned! Check if near subway and intercept
+        if (CheckCordonInterception(bot, me, nearestSubway.x, nearestSubway.z, 500.0f)) {
+            bot->Say("The subway is sealed! The police locked the gates! We're trapped!");
+            bot->Emote(50); // Cower
+            return;
+        }
+        dest = GetNearestPOI(pos.x, pos.z, POI_OFFICE_COMMERCIAL);
+    } else {
+        dest = nearestSubway;
+    }
+
+    // Sprint fleeing speed scaled by neuroticism
+    float fleeSpeed = 9.0f + (personality.neuroticism * 4.5f);
+    float dx = dest.x - pos.x;
+    float dz = dest.z - pos.z;
+    float dist = std::sqrt(dx * dx + dz * dz);
+
+    if (dist > 250.0f) {
+        dx /= dist;
+        dz /= dist;
+        float moveX = dx * fleeSpeed * deltaSeconds * 100.0f;
+        float moveZ = dz * fleeSpeed * deltaSeconds * 100.0f;
+        bot->MoveTo(pos.x + moveX, pos.y, pos.z + moveZ);
+    } else {
+        // Reached shelter
+        bot->Say("Made it inside! Lock the doors! They're turning everyone out there!");
+        bot->SetFearLevel(0.50f); // Calmed down to Tier 1 inside shelter
+    }
+
+    // Panic Vocalizations & Distress Cries
+    if (now - bot->GetLastWhisperTime() > 8000) {
+        bot->SetLastWhisperTime(now);
+        if (!m_panicCries.empty()) {
+            bot->Say(m_panicCries[rand() % m_panicCries.size()]);
+        }
+        // Distress cry triggers chain stampede in nearby crowd
+        SpreadRumorFearAura(pos.x, pos.z, 0.20f, 1200.0f, me->getGoId());
+    }
+}
+
+void PedestrianEcology::DeployTacticalCordon(uint32 districtId)
+{
+    std::lock_guard<std::recursive_mutex> lock(m_cordonMutex);
+    auto it = m_tacticalCordons.find(districtId);
+    if (it != m_tacticalCordons.end() && it->second.active) {
+        return; // Already deployed
+    }
+
+    // Find subway station in this district
+    PointOfInterest subwayTarget;
+    bool found = false;
+    for (const auto& poi : m_pois) {
+        if (poi.districtId == districtId && poi.type == POI_SUBWAY_TRANSIT) {
+            subwayTarget = poi;
+            found = true;
+            break;
+        }
+    }
+    if (!found) {
+        subwayTarget = GetNearestSubway(0.0f, 0.0f);
+    }
+
+    TacticalCordonPoint cordon;
+    cordon.districtId = districtId;
+    cordon.x = subwayTarget.x;
+    cordon.y = subwayTarget.y;
+    cordon.z = subwayTarget.z;
+    cordon.name = subwayTarget.name;
+    cordon.active = true;
+    cordon.deployedMs = getMSTime();
+
+    // Spawn SWAT Breachers & Barricade units around the subway entrance
+    auto botLead = sBotMgr.SpawnSingleBot(cordon.x, cordon.y, cordon.z + 200.0f, FACTION_MACHINES);
+    if (botLead) {
+        PlayerObject* po = BotGetPlayer(botLead->GetPlayerGoId());
+        if (po) {
+            po->setHandle("SWAT_Tactical_Lead");
+            po->setLevel(45);
+            po->setMaximumHealth(3500);
+            po->setCurrentHealth(3500);
+            cordon.cordonBotGoIds.push_back(po->getGoId());
+            botLead->Say((format("SWAT Tactical Lead: Perimeter cordon deployed at %1%. Subway concourse is quarantined by Machine Order.") % cordon.name).str());
+        }
+    }
+
+    auto botBreacher = sBotMgr.SpawnSingleBot(cordon.x - 250.0f, cordon.y, cordon.z + 150.0f, FACTION_MACHINES);
+    if (botBreacher) {
+        PlayerObject* po = BotGetPlayer(botBreacher->GetPlayerGoId());
+        if (po) {
+            po->setHandle("SWAT_Cordon_Breacher");
+            po->setLevel(40);
+            po->setMaximumHealth(3000);
+            po->setCurrentHealth(3000);
+            cordon.cordonBotGoIds.push_back(po->getGoId());
+            botBreacher->Say("SWAT Breacher: Barricade in position. Turn back all civilian traffic!");
+        }
+    }
+
+    auto botGuard = sBotMgr.SpawnSingleBot(cordon.x + 250.0f, cordon.y, cordon.z + 150.0f, FACTION_MACHINES);
+    if (botGuard) {
+        PlayerObject* po = BotGetPlayer(botGuard->GetPlayerGoId());
+        if (po) {
+            po->setHandle("SWAT_Perimeter_Guard");
+            po->setLevel(40);
+            po->setMaximumHealth(3000);
+            po->setCurrentHealth(3000);
+            cordon.cordonBotGoIds.push_back(po->getGoId());
+        }
+    }
+
+    auto botBarricade = sBotMgr.SpawnSingleBot(cordon.x, cordon.y, cordon.z + 350.0f, FACTION_MACHINES);
+    if (botBarricade) {
+        PlayerObject* po = BotGetPlayer(botBarricade->GetPlayerGoId());
+        if (po) {
+            po->setHandle("Police_Cruiser_Barricade");
+            po->setLevel(35);
+            po->setMaximumHealth(2500);
+            po->setCurrentHealth(2500);
+            cordon.cordonBotGoIds.push_back(po->getGoId());
+        }
+    }
+
+    m_tacticalCordons[districtId] = cordon;
+
+    // Broadcast scanner announcement
+    sRadioDispatchSystem.BroadcastCordonOrder(districtId, cordon.name);
+    INFO_LOG(format("PedestrianEcology: Tactical Perimeter Cordon active at %1% (District %2%)") 
+             % cordon.name % districtId);
+}
+
+bool PedestrianEcology::IsCordonActive(uint32 districtId) const
+{
+    std::lock_guard<std::recursive_mutex> lock(m_cordonMutex);
+    auto it = m_tacticalCordons.find(districtId);
+    return (it != m_tacticalCordons.end()) ? it->second.active : false;
+}
+
+void PedestrianEcology::SetCordonActive(uint32 districtId, bool active)
+{
+    std::lock_guard<std::recursive_mutex> lock(m_cordonMutex);
+    m_tacticalCordons[districtId].active = active;
+}
+
+bool PedestrianEcology::CheckCordonInterception(BotClient* bot, PlayerObject* me, float subwayX, float subwayZ, float radius)
+{
+    if (!bot || !me) return false;
+    LocationVector pos = me->getPosition();
+    float dx = pos.x - subwayX;
+    float dz = pos.z - subwayZ;
+    float dist = std::sqrt(dx * dx + dz * dz);
+
+    if (dist < radius) {
+        if (dist > 1.0f) {
+            dx /= dist;
+            dz /= dist;
+        } else {
+            dx = 1.0f;
+            dz = 0.0f;
+        }
+
+        // Push civilian back 600 units away from subway
+        float bounceX = pos.x + dx * 600.0f;
+        float bounceZ = pos.z + dz * 600.0f;
+        bot->MoveTo(bounceX, pos.y, bounceZ);
+
+        uint32 now = getMSTime();
+        if (now - bot->GetLastWhisperTime() > 5000) {
+            bot->SetLastWhisperTime(now);
+            const char* swatWarnings[] = {
+                "SWAT Breacher: HALT! Subway is locked down under Machine Quarantine! Turn around!",
+                "SWAT Tactical Lead: Nobody enters the transit concourse! Fall back inside the sector!",
+                "SWAT Guard: Quarantine line active! Return to your homes immediately!"
+            };
+            bot->Say(swatWarnings[rand() % 3]);
+        }
+        return true;
+    }
+    return false;
 }

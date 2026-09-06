@@ -635,6 +635,31 @@ BotVector2D BotClient::CalculateBoidsVelocity(PlayerObject* me)
     return totalVel;
 }
 
+bool BotClient::IsPanicking() const { return m_isPanicking || m_fearLevel >= 0.80f; }
+void BotClient::SetPanicking(bool panic) {
+    m_isPanicking = panic;
+    if (panic && m_fearLevel < 0.80f) m_fearLevel = 0.85f;
+    else if (!panic && m_fearLevel >= 0.80f) m_fearLevel = 0.50f;
+}
+float BotClient::GetFearLevel() const { return m_fearLevel; }
+void BotClient::SetFearLevel(float f) {
+    m_fearLevel = std::clamp(f, 0.0f, 1.0f);
+    m_isPanicking = (m_fearLevel >= 0.80f);
+}
+void BotClient::AddFear(float amount) { SetFearLevel(m_fearLevel + amount); }
+uint8 BotClient::GetCivilianTier() const {
+    if (m_fearLevel >= 0.80f) return 3;
+    if (m_fearLevel >= 0.55f) return 2;
+    if (m_fearLevel >= 0.25f) return 1;
+    return 0;
+}
+uint32 BotClient::GetLastDistressCallTime() const { return m_lastDistressCallTime; }
+void BotClient::SetLastDistressCallTime(uint32 t) { m_lastDistressCallTime = t; }
+uint32 BotClient::GetLastLookAroundTime() const { return m_lastLookAroundTime; }
+void BotClient::SetLastLookAroundTime(uint32 t) { m_lastLookAroundTime = t; }
+uint32 BotClient::GetLastWhisperTime() const { return m_lastWhisperTime; }
+void BotClient::SetLastWhisperTime(uint32 t) { m_lastWhisperTime = t; }
+
 void BotClient::triggerPanic(uint32 sourceGoId)
 {
     if (m_isPanicking) return;
@@ -649,6 +674,7 @@ void BotClient::triggerPanic(uint32 sourceGoId)
         return;
     }
 
+    m_fearLevel = 1.0f;
     m_isPanicking = true;
     m_targetGoId = 0; // Drop targets
     

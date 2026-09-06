@@ -184,8 +184,10 @@ namespace SOCKETS_NAMESPACE {
 #endif
 #define strcasecmp _stricmp
 #ifndef __CYGWIN__
+#if defined(_MSC_VER) && _MSC_VER < 1900
 #define snprintf sprintf_s
 #define vsnprintf vsprintf_s
+#endif
 #endif
 
 typedef unsigned long ipaddr_t;

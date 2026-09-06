@@ -73,10 +73,8 @@ bool SensoryPerceptionSystem::CheckVision(PlayerObject* observer, PlayerObject* 
         return false;
     }
 
-    // Observer forward direction
-    // In MxO, facing angle can be derived from velocity or default forward (Z+ or orientation)
-    // If observer has a target or facing, we use observer's facing
-    float obsHeadingRad = 0.0f; // Default facing
+    // Observer forward direction from LocationVector rotation
+    float obsHeadingRad = (float)obsPos.rot;
     float targetAngleRad = std::atan2(dz, dx);
     float angleDiffRad = std::abs(targetAngleRad - obsHeadingRad);
     while (angleDiffRad > 3.14159265f) angleDiffRad = std::abs(angleDiffRad - 2.0f * 3.14159265f);

@@ -4,6 +4,7 @@
 #include "GameClient.h"
 #include <vector>
 #include <utility>
+#include <algorithm>
 #include "BehaviorTree.h"
 #include "AI/ActiveInferenceSolver.h"
 #include "AI/QTable.h"
@@ -58,9 +59,21 @@ public:
     bool isAgent() const { return m_isAgent; }
     void setAgent(bool val) { m_isAgent = val; }
 
-    bool IsPanicking() const { return m_isPanicking; }
-    void SetPanicking(bool p) { m_isPanicking = p; }
+    bool IsPanicking() const;
+    void SetPanicking(bool panic);
     void triggerPanic(uint32 sourceGoId);
+
+    float GetFearLevel() const;
+    void SetFearLevel(float f);
+    void AddFear(float amount);
+    uint8 GetCivilianTier() const;
+
+    uint32 GetLastDistressCallTime() const;
+    void SetLastDistressCallTime(uint32 t);
+    uint32 GetLastLookAroundTime() const;
+    void SetLastLookAroundTime(uint32 t);
+    uint32 GetLastWhisperTime() const;
+    void SetLastWhisperTime(uint32 t);
 
     uint32 GetTargetGoId() const { return m_targetGoId; }
     void SetTargetGoId(uint32 id) { m_targetGoId = id; }
@@ -104,7 +117,11 @@ private:
     uint32 m_stateTimer;
     uint32 m_nextActionTime;
     bool m_isPanicking = false;
+    float m_fearLevel = 0.0f;
     uint32 m_lastGossipTime = 0;
+    uint32 m_lastDistressCallTime = 0;
+    uint32 m_lastLookAroundTime = 0;
+    uint32 m_lastWhisperTime = 0;
     
     std::shared_ptr<BehaviorNode> m_btRoot;
     GOAPPlanner m_goapPlanner;

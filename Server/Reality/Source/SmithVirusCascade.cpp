@@ -5,6 +5,8 @@
 #include "Log.h"
 #include "EconomySystem.h"
 #include "Util.h"
+#include "RadioDispatchSystem.h"
+#include "AI/PedestrianEcology.h"
 
 createFileSingleton(SmithVirusCascade);
 
@@ -111,7 +113,8 @@ size_t SmithVirusCascade::GetPurgedCount() const
 
 bool SmithVirusCascade::IsDistrictQuarantined(uint32 districtId) const
 {
-    return m_currentStage >= CONTAGION_STAGE_CASCADE;
+    if (m_currentStage >= CONTAGION_STAGE_CASCADE) return true;
+    return sRadioDispatchSystem.IsMartialLawActive(districtId) || sPedestrianEcology.IsCordonActive(districtId);
 }
 
 void SmithVirusCascade::CheckStageTransitions()
@@ -128,6 +131,20 @@ void SmithVirusCascade::CheckStageTransitions()
     {
         m_currentStage = newStage;
         TriggerGlobalContagionAlert();
+
+        if (newStage == CONTAGION_STAGE_OUTBREAK) {
+            sRadioDispatchSystem.TriggerAgentOverride("Agent Gray", "Elevated viral vector confirmed. Machine Directive 101 enacted. Deploying tactical cordons at transit hubs.", 1);
+            sPedestrianEcology.DeployTacticalCordon(1);
+            sPedestrianEcology.DeployTacticalCordon(2);
+        } else if (newStage == CONTAGION_STAGE_CASCADE) {
+            sRadioDispatchSystem.TriggerAgentOverride("Agent Pace", "Viral cascade critical. Full Megacity quarantine protocol engaged. All civilian egress points sealed.", 2);
+            sPedestrianEcology.DeployTacticalCordon(1);
+            sPedestrianEcology.DeployTacticalCordon(2);
+            sPedestrianEcology.DeployTacticalCordon(3);
+            sPedestrianEcology.DeployTacticalCordon(4);
+        } else if (newStage == CONTAGION_STAGE_QUARANTINE) {
+            sRadioDispatchSystem.TriggerAgentOverride("Agent Skinner", "Megacity quarantine in effect. All transit terminals locked down under terminal force authorization.", 3);
+        }
     }
 }
 

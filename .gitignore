@@ -1,4 +1,4 @@
-﻿# Build and intermediate files
+# Build and intermediate files
 **/build/
 **/bin/
 **/obj/
@@ -18,6 +18,9 @@
 *.res
 *.pch
 *.exp
+*.map
+build_*/
+Server/Reality/build_msvc/
 
 # IDE and Editor files
 .vs/

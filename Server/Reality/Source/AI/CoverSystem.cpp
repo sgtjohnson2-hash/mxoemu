@@ -37,12 +37,12 @@ float CoverSystem::ScoreCoverPoint(float candX, float candZ, float botX, float b
     float lineOfSightToTarget = outHasSight ? 1.0f : 0.0f;
 
     // Roadmap formula: Score = ThreatOcclusion * 2.0 - TravelDistance * 0.5 + LineOfSightToTarget * 1.2
-    float score = (threatOcclusion * 2.0f) - (travelDistMeters * 0.05f) + (lineOfSightToTarget * 1.2f);
+    float score = (threatOcclusion * 2.0f) - (travelDistMeters * 0.5f) + (lineOfSightToTarget * 1.2f);
     return score;
 }
 
 bool CoverSystem::FindBestCover(float botX, float botZ, float threatX, float threatZ,
-                               float searchRadius, CoverPoint& outCoverPoint)
+                               float searchRadius, CoverPoint& outCoverPoint, float botY)
 {
     std::lock_guard<std::mutex> lock(m_coverMutex);
 
@@ -77,7 +77,7 @@ bool CoverSystem::FindBestCover(float botX, float botZ, float threatX, float thr
             if (occluded && score > bestScore) {
                 bestScore = score;
                 outCoverPoint.x = cx;
-                outCoverPoint.y = 95.0f;
+                outCoverPoint.y = (box.minY != box.maxY) ? box.minY : botY;
                 outCoverPoint.z = cz;
                 outCoverPoint.type = (i % 2 == 0) ? COVER_HIGH : COVER_LOW;
                 outCoverPoint.score = score;

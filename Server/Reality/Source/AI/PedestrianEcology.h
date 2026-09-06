@@ -33,6 +33,24 @@ struct PointOfInterest {
     float z;
 };
 
+enum CivilianFearTier : uint8 {
+    CIV_TIER_NORMAL_COMMUTE = 0,    // Fear < 0.25: Ambient schedules, visiting POIs
+    CIV_TIER_UNEASY_RUMORS = 1,     // Fear 0.25 - 0.55: Gather at POIs, whisper rumors, spread fear
+    CIV_TIER_ALARM_EVASION = 2,     // Fear 0.55 - 0.80: Avoid suspicious entities, refuse to talk, look over shoulder, avoid alleys
+    CIV_TIER_PANIC_STAMPEDE = 3     // Fear >= 0.80: Flee to subways/buildings, distress cries, stampede
+};
+
+struct TacticalCordonPoint {
+    uint32 districtId{1};
+    float x{0.0f};
+    float y{95.0f};
+    float z{0.0f};
+    std::string name;
+    bool active{false};
+    uint32 deployedMs{0};
+    std::vector<uint32> cordonBotGoIds;
+};
+
 class PedestrianEcology : public Singleton<PedestrianEcology> {
 public:
     PedestrianEcology();
@@ -44,18 +62,34 @@ public:
     PointOfInterest GetCircadianTarget(float currentX, float currentZ, WeatherSystem::CircadianPeriod period, const BotPersonality& personality) const;
     PointOfInterest GetNearestPOI(float currentX, float currentZ, POIType type) const;
     PointOfInterest GetNearestSubway(float currentX, float currentZ) const;
+    PointOfInterest GetNearestShelter(float currentX, float currentZ) const;
 
     // Smart object behavioral affordance interaction
     void InteractWithPOI(BotClient* bot, PlayerObject* me, const PointOfInterest& poi);
 
     // Proximity social gossip & Theory of Mind belief update with rumor mutation
     bool TryProximityGossip(BotClient* botA, BotClient* botB, uint32 currentMs);
+    bool TryOutbreakGossip(BotClient* botA, BotClient* botB, uint32 currentMs);
+    void SpreadRumorFearAura(float x, float z, float fearAmount, float radius = 800.0f, uint32 excludeGoId = 0);
 
     // Dynamic crowd lane / sidewalk steering force
     void ApplyCrowdSteering(BotClient* bot, PlayerObject* me, float& outSteerX, float& outSteerZ);
 
-    // Full civilian behavioral update tick
+    // Full civilian behavioral update tick & multi-tier response
     void UpdateCivilian(BotClient* bot, float deltaSeconds);
+    CivilianFearTier EvaluateCivilianTier(float fear) const;
+    void UpdateCivilianFear(BotClient* bot, PlayerObject* me, float deltaSeconds);
+    void ExecuteTier0Normal(BotClient* bot, PlayerObject* me, float deltaSeconds);
+    void ExecuteTier1Uneasy(BotClient* bot, PlayerObject* me, float deltaSeconds);
+    void ExecuteTier2Alarm(BotClient* bot, PlayerObject* me, float deltaSeconds);
+    void ExecuteTier3Panic(BotClient* bot, PlayerObject* me, float deltaSeconds);
+
+    // Tactical Perimeter Cordon & SWAT containment
+    void DeployTacticalCordon(uint32 districtId);
+    bool IsCordonActive(uint32 districtId) const;
+    void SetCordonActive(uint32 districtId, bool active);
+    bool CheckCordonInterception(BotClient* bot, PlayerObject* me, float subwayX, float subwayZ, float radius = 500.0f);
+    const std::map<uint32, TacticalCordonPoint>& GetCordons() const { return m_tacticalCordons; }
 
     const std::vector<PointOfInterest>& GetAllPOIs() const { return m_pois; }
 
@@ -64,6 +98,11 @@ private:
 
     std::vector<PointOfInterest> m_pois;
     std::vector<std::string> m_rumorPool;
+    std::vector<std::string> m_outbreakRumors;
+    std::vector<std::string> m_panicCries;
+    std::vector<std::string> m_evasionWhispers;
+    std::map<uint32, TacticalCordonPoint> m_tacticalCordons;
+    mutable std::recursive_mutex m_cordonMutex;
 };
 
 #define sPedestrianEcology PedestrianEcology::getSingleton()

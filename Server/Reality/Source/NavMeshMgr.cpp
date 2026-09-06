@@ -258,41 +258,64 @@ std::vector<LocationVector> NavMeshMgr::FindPath3D(float startX, float startY, f
 
     // Look for best vertical link connecting start elevation to target elevation
     const VerticalOffMeshLink* bestLink = nullptr;
+    bool bestLinkReverse = false;
     float bestLinkDistSq = -1.0f;
 
     for (const auto& link : m_verticalLinks) {
-        float linkHeightDiff = std::abs(link.end.y - link.start.y);
+        float linkHeightDiff = std::abs((float)(link.end.y - link.start.y));
         if (linkHeightDiff < 100.0f) continue;
 
-        // Check direction
-        bool canTraverse = false;
+        bool canTraverseForward = false;
+        bool canTraverseReverse = false;
+
         if (startY < targetY) { // Ascending
-            if (std::abs(link.start.y - startY) < 200.0f && std::abs(link.end.y - targetY) < 200.0f) canTraverse = true;
-            else if (link.isBiDirectional && std::abs(link.end.y - startY) < 200.0f && std::abs(link.start.y - targetY) < 200.0f) canTraverse = true;
+            if (std::abs((float)(link.start.y - startY)) < 200.0f && std::abs((float)(link.end.y - targetY)) < 200.0f) {
+                canTraverseForward = true;
+            }
+            if (link.isBiDirectional && std::abs((float)(link.end.y - startY)) < 200.0f && std::abs((float)(link.start.y - targetY)) < 200.0f) {
+                canTraverseReverse = true;
+            }
         } else { // Descending
-            if (std::abs(link.end.y - startY) < 200.0f && std::abs(link.start.y - targetY) < 200.0f) canTraverse = true;
-            else if (link.isBiDirectional && std::abs(link.start.y - startY) < 200.0f && std::abs(link.end.y - targetY) < 200.0f) canTraverse = true;
+            if (std::abs((float)(link.end.y - startY)) < 200.0f && std::abs((float)(link.start.y - targetY)) < 200.0f && link.isBiDirectional) {
+                canTraverseReverse = true;
+            }
+            if (std::abs((float)(link.start.y - startY)) < 200.0f && std::abs((float)(link.end.y - targetY)) < 200.0f) {
+                canTraverseForward = true;
+            }
         }
 
-        if (canTraverse) {
-            float dSq = std::pow(link.start.x - startX, 2) + std::pow(link.start.z - startZ, 2);
+        if (canTraverseForward) {
+            float dSq = (float)(std::pow(link.start.x - startX, 2) + std::pow(link.start.z - startZ, 2));
             if (bestLinkDistSq < 0.0f || dSq < bestLinkDistSq) {
                 bestLinkDistSq = dSq;
                 bestLink = &link;
+                bestLinkReverse = false;
+            }
+        }
+        if (canTraverseReverse) {
+            float dSq = (float)(std::pow(link.end.x - startX, 2) + std::pow(link.end.z - startZ, 2));
+            if (bestLinkDistSq < 0.0f || dSq < bestLinkDistSq) {
+                bestLinkDistSq = dSq;
+                bestLink = &link;
+                bestLinkReverse = true;
             }
         }
     }
 
     if (bestLink) {
+        LocationVector entrance = bestLinkReverse ? bestLink->end : bestLink->start;
+        LocationVector exit = bestLinkReverse ? bestLink->start : bestLink->end;
+
         // Path to link entrance
-        auto toLink2D = FindPath(startX, startZ, bestLink->start.x, bestLink->start.z, ignoreCollision);
+        auto toLink2D = FindPath(startX, startZ, (float)entrance.x, (float)entrance.z, ignoreCollision);
         for (const auto& pt : toLink2D) {
             path3D.push_back(LocationVector(pt.first, startY, pt.second));
         }
-        // Vertical traversal point
-        path3D.push_back(bestLink->end);
+        // Vertical traversal points
+        path3D.push_back(entrance);
+        path3D.push_back(exit);
         // Path from link exit to destination
-        auto fromLink2D = FindPath(bestLink->end.x, bestLink->end.z, targetX, targetZ, ignoreCollision);
+        auto fromLink2D = FindPath((float)exit.x, (float)exit.z, targetX, targetZ, ignoreCollision);
         for (const auto& pt : fromLink2D) {
             path3D.push_back(LocationVector(pt.first, targetY, pt.second));
         }

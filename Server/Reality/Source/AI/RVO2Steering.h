@@ -69,6 +69,7 @@ public:
 
             // Relative velocity
             RVOVector2D relVel = bestVelocity - other.velocity;
+            float relSpeedSq = relVel.LengthSq();
 
             // Check if relative velocity is inside the Velocity Obstacle cone
             float dist = std::sqrt(std::max(0.01f, distSq));
@@ -80,18 +81,17 @@ public:
                 break;
             }
 
-            // Ray test towards relative position
-            float relVelProj = relVel.Dot(relPos) / dist;
-            if (relVelProj > 0.0f) {
-                float timeToClosest = relVelProj / std::max(0.01f, relVel.Length());
-                if (timeToClosest < TIME_HORIZON) {
-                    RVOVector2D closestPt = relVel * timeToClosest;
-                    float perpDistSq = (relPos - closestPt).LengthSq();
+            // Closest approach along relative velocity ray
+            if (relSpeedSq > 0.0001f) {
+                float timeToClosest = relPos.Dot(relVel) / relSpeedSq;
+                if (timeToClosest > 0.0f && timeToClosest < TIME_HORIZON) {
+                    RVOVector2D relPosClosest = relPos - relVel * timeToClosest;
+                    float perpDistSq = relPosClosest.LengthSq();
 
                     if (perpDistSq < combRadiusSq) {
                         hasConflict = true;
-                        // Minimum avoidance vector u
-                        RVOVector2D normal = (closestPt - relPos).Normalized();
+                        // Avoidance normal pointing away from collision center
+                        RVOVector2D normal = (perpDistSq > 0.001f) ? (relPosClosest * -1.0f).Normalized() : RVOVector2D(-relVel.z, relVel.x).Normalized();
                         float overlap = combinedRadius - std::sqrt(std::max(0.0f, perpDistSq));
                         RVOVector2D u = normal * (overlap / std::max(0.1f, timeToClosest));
 

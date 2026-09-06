@@ -133,12 +133,14 @@ public:
     
     // Organizations and Factions
     int getFaction() const {
+        if (m_factionName == "Civilian") return FACTION_NONE;
         if (m_factionName == "Zion") return FACTION_ZION;
         if (m_factionName == "Machines") return FACTION_MACHINES;
         if (m_factionName == "Merovingian") return FACTION_MEROVINGIAN;
-        if (m_alignment == 0) return FACTION_ZION;
+        if (m_factionName == "Exile") return FACTION_EXILE;
         if (m_alignment == 1) return FACTION_MACHINES;
         if (m_alignment == 2) return FACTION_MEROVINGIAN;
+        if (m_alignment == 0 && m_factionName.empty()) return FACTION_ZION;
         return FACTION_NONE;
     }
     void setFactionName(const std::string& name) { m_factionName = name; }

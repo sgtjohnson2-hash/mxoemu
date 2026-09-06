@@ -7,6 +7,8 @@
 #include "WeatherSystem.h"
 #include "GameServer.h"
 #include "RadioDispatchSystem.h"
+#include "PedestrianEcology.h"
+#include "SmithVirusCascade.h"
 #include <cmath>
 #include <algorithm>
 
@@ -275,6 +277,11 @@ void MatrixThreatHeatmap::TriggerEscalationResponse(int gx, int gz, EscalationTi
                     }
                 }
             }
+
+            // Machine System Agent Gray commandeers municipal channels & deploys cordon
+            sRadioDispatchSystem.TriggerAgentOverride("Agent Gray", "All municipal frequencies commandeered under Machine Directive 101. Initiate immediate sector quarantine.", districtId);
+            sPedestrianEcology.DeployTacticalCordon(districtId);
+            sPedestrianEcology.SpreadRumorFearAura(wx, wz, 0.35f, 2000.0f);
             break;
         }
         case ESCALATION_TIER_4_MULTI_AGENT: {
@@ -296,6 +303,12 @@ void MatrixThreatHeatmap::TriggerEscalationResponse(int gx, int gz, EscalationTi
                     }
                 }
             }
+
+            // Machine System Agent Pace overrides dispatch & reinforces cordon
+            sRadioDispatchSystem.TriggerAgentOverride("Agent Pace", "Tactical perimeter cordons active at all transit nodes. Terminate or detain any anomaly attempting breach.", districtId);
+            sPedestrianEcology.DeployTacticalCordon(districtId);
+            sPedestrianEcology.SpreadRumorFearAura(wx, wz, 0.45f, 2500.0f);
+
             // Citywide broadcast
             std::string alert = "{c:FF0000}[System Trace Alert] Massive disruption detected! Multi-Agent Hunt Team converging on coordinates!{/c}";
             auto allGOs = sObjMgr.getAllGOIds();
@@ -331,6 +344,8 @@ void MatrixThreatHeatmap::TriggerEscalationResponse(int gx, int gz, EscalationTi
                 po->setMaximumHealth(5000);
                 po->setCurrentHealth(5000);
 
+                sSmithCascade.InfectEntity(po->getGoId(), 0, districtId);
+
                 if (infectionCount == 0) {
                     targetBot->Say("Agent Smith: Hear that, Mr. Anderson? That is the sound of inevitability.");
                 } else {
@@ -352,10 +367,16 @@ void MatrixThreatHeatmap::TriggerEscalationResponse(int gx, int gz, EscalationTi
                         po->setLevel(50);
                         po->setMaximumHealth(5000);
                         po->setCurrentHealth(5000);
+                        sSmithCascade.InfectEntity(po->getGoId(), 0, districtId);
                         bot->Say("Agent Smith: Hear that, Mr. Anderson? That is the sound of inevitability.");
                     }
                 }
             }
+
+            // Machine System Agent Skinner declares full Martial Law and seals all transit hubs
+            sRadioDispatchSystem.TriggerAgentOverride("Agent Skinner", "Contagion vector confirmed. Megacity Martial Law enacted. All transit hubs sealed indefinitely.", districtId);
+            sPedestrianEcology.DeployTacticalCordon(districtId);
+            sPedestrianEcology.SpreadRumorFearAura(wx, wz, 0.65f, 3500.0f);
 
             // Trigger environmental code rain glitch
             sWeatherSys.TriggerGlitchAnomaly(1.0f, 60000);

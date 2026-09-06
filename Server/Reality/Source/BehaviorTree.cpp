@@ -13,6 +13,9 @@
 #include "MessageTypes.h"
 #include "AI/SensoryPerceptionSystem.h"
 #include "AI/SentientMajorCharacters.h"
+#include "AI/CoverSystem.h"
+#include "AI/PedestrianEcology.h"
+#include "RadioDispatchSystem.h"
 #include <cmath>
 
 NodeStatus SequenceNode::Tick(BotClient* bot)
@@ -143,10 +146,14 @@ NodeStatus ActionFindTarget::Tick(BotClient* bot)
             bool canSee = sSensoryPerception.CheckVision(me, potentialTarget, false, visionConfidence);
             BotAwarenessState awareness = sSensoryPerception.GetAwareness(bot->GetPlayerGoId());
 
-            if (canSee || (dist < 1500.0f) || (awareness.stage >= AWARENESS_ALERTED && awareness.alertSourceGoId == client->GetPlayerGoId()))
+            if (canSee || (awareness.stage >= AWARENESS_ALERTED && awareness.alertSourceGoId == client->GetPlayerGoId()))
             {
                 sSensoryPerception.SetAwareness(bot->GetPlayerGoId(), AWARENESS_IN_COMBAT, client->GetPlayerGoId());
                 bot->SetTargetGoId(client->GetPlayerGoId());
+                
+                // Turn observer to face the acquired target
+                myPos.rot = myPos.CalcAngTo(targetPos);
+                me->setPosition(myPos);
                 
                 // Map BotPersonality to Local Chat Output
                 if ((rand() % 100) / 100.0f < bot->GetPersonality().talkativeness) {
@@ -303,33 +310,46 @@ NodeStatus ActionAgentInfect::Tick(BotClient* bot)
             if (distSq <= 2250000.0f) // 1500 units (15 meters)
             {
                 // Cascade into SentientMajorCharacters host hijacking
-                sSentientCharacters.HijackNearbyHost(myPos.x, myPos.z, me->getGoId());
+                std::string targetHandle = target->getHandle();
+                bool isLawEnforcement = (targetHandle.find("Police") != std::string::npos ||
+                                         targetHandle.find("SWAT") != std::string::npos ||
+                                         targetHandle.find("Barricade") != std::string::npos);
 
-                // Viral Assimilation!
-                target->setFactionName("Machines");
-                targetBot->SetFaction(FACTION_MACHINES);
-                targetBot->setAgent(true);
-                target->setHandle("Agent_Smith_Clone");
-                target->setRsiHex("6e060040"); // Authentic Agent suit & sunglasses
-                
-                // Agents assimilate host to restore their integrity
-                me->setCurrentHealth(me->getMaximumHealth());
+                if (sSentientCharacters.HijackHost(targetBot.get(), target, me->getGoId()))
+                {
+                    // Agents assimilate host to restore their integrity
+                    me->setCurrentHealth(me->getMaximumHealth());
 
-                // Record in Memory Stream
-                MemoryNode mem;
-                mem.text = (format("Assimilated host %1% into Agent clone") % target->getHandle()).str();
-                mem.importance = 0.9f;
-                mem.timestamp = double(getMSTime());
-                bot->GetMemoryStreamCuller().AddMemory(mem);
+                    // Record in Memory Stream
+                    MemoryNode mem;
+                    mem.text = (format("Assimilated host %1% into Agent clone") % targetHandle).str();
+                    mem.importance = 0.9f;
+                    mem.timestamp = double(getMSTime());
+                    bot->GetMemoryStreamCuller().AddMemory(mem);
 
-                BotManager::getSingletonPtr()->LogCombat((format("[VIRAL INFECTION] %1% possessed %2%!") % me->getHandle() % target->getHandle()).str());
-                
-                sGame.AnnounceStateUpdateNear(tPos.x, tPos.z, 20000.0f, std::make_shared<EmoteMsg>(target->getGoId(), 43, 1));
+                    if (isLawEnforcement) {
+                        if (targetHandle.find("SWAT") != std::string::npos) {
+                            targetBot->Say("SWAT Breacher: NO! GET OFF ME— MY BODY IS OVERWRITING— *static*");
+                        } else {
+                            targetBot->Say("Police Officer: Dispatch, 10-99! It's touching me— I can't move— *gurgles into cold static*");
+                        }
+                        bot->Say("Agent Smith: Your tactical gear is irrelevant. Welcome to the collective.");
 
-                if (bot->GetTargetGoId() == target->getGoId()) {
-                    bot->SetTargetGoId(0);
+                        std::string streetAddr = sRadioDispatchSystem.GenerateStreetAddress(tPos.x, tPos.z);
+                        sRadioDispatchSystem.BroadcastOfficerAssimilation(targetHandle, streetAddr);
+                        sPedestrianEcology.SpreadRumorFearAura(tPos.x, tPos.z, 0.50f, 2500.0f, target->getGoId());
+                    } else {
+                        targetBot->Say("Civilian: No, please! Don't touch me— AAAAAAGH!");
+                        sPedestrianEcology.SpreadRumorFearAura(tPos.x, tPos.z, 0.35f, 2000.0f, target->getGoId());
+                    }
+
+                    BotManager::getSingletonPtr()->LogCombat((format("[VIRAL INFECTION] %1% possessed %2%!") % me->getHandle() % targetHandle).str());
+
+                    if (bot->GetTargetGoId() == target->getGoId()) {
+                        bot->SetTargetGoId(0);
+                    }
+                    return NodeStatus::SUCCESS;
                 }
-                return NodeStatus::SUCCESS;
             }
         }
     }
@@ -482,12 +502,30 @@ NodeStatus ActionFlee::Tick(BotClient* bot)
             return NodeStatus::FAILURE; 
         }
 
-        DEBUG_LOG("BotClient: Fleeing!");
-        
+        // Tactical Cover Seeking before hardline jackout
+        uint32 currentThreatId = bot->GetTargetGoId();
+        LocationVector myPos = me->getPosition();
+        if (currentThreatId != 0) {
+            PlayerObject* threatPo = BotGetPlayer(currentThreatId);
+            if (threatPo && !threatPo->isDead()) {
+                CoverPoint cp;
+                if (sCoverSystem.FindBestCover((float)myPos.x, (float)myPos.z,
+                                              (float)threatPo->getPosition().x, (float)threatPo->getPosition().z,
+                                              3500.0f, cp, (float)myPos.y)) {
+                    bot->MoveTo(cp.x, cp.y, cp.z);
+                    if (cp.type == COVER_LOW) {
+                        me->setTactic(TACTIC_DEFENSE);
+                        sCombatSys.SetTactic(me->getGoId(), TACTIC_DEFENSE);
+                    }
+                    DEBUG_LOG("BotClient: Took tactical cover while fleeing!");
+                    return NodeStatus::SUCCESS;
+                }
+            }
+        }
+
         bot->SetTargetGoId(0); // Break combat targeting
         
         // Item 11: Pathfind to nearest Hardline to Jack-Out
-        LocationVector myPos = me->getPosition();
         LocationVector nearestHardline = BotManager::getSingletonPtr()->GetNearestHardline(myPos.x, myPos.z);
         
         float distToHardline = sqrt(pow(myPos.x - nearestHardline.x, 2) + pow(myPos.z - nearestHardline.z, 2));

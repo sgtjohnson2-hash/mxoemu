@@ -17,6 +17,7 @@
 #include "AI/SentientMajorCharacters.h"
 #include "WorldDirector.h"
 #include "LogisticsManager.h"
+#include "AbilitySystem.h"
 #include <boost/property_tree/ptree.hpp>
 #include <boost/property_tree/json_parser.hpp>
 
@@ -534,6 +535,15 @@ CombatSystem::AttackResult CombatSystem::ResolveAttack(PlayerObject* attacker, P
         SetTactic(target->getGoId(), newTactic);
     }
 
+    // Calculate attacker angle relative to defender facing (rear arc > 100 degrees)
+    LocationVector aPos = attacker->getPosition();
+    LocationVector tPos = target->getPosition();
+    float angleToAttacker = (float)std::atan2(aPos.z - tPos.z, aPos.x - tPos.x);
+    float angleDiff = std::abs(angleToAttacker - (float)tPos.rot);
+    while (angleDiff > 3.14159265f) angleDiff = std::abs(angleDiff - 2.0f * 3.14159265f);
+    bool isBehind = (angleDiff > 1.74533f); // Rear arc > 100 degrees
+    bool isBackstab = (move.specialFlags & ABILITY_FLAG_BACKSTAB) && isBehind;
+
 	//authentic hit resolution: attack roll vs defense roll (d100 + level accuracy)
 	{
 		int attackRoll = (rand() % 100) + int(attacker->getLevel()) * 2;
@@ -545,9 +555,9 @@ CombatSystem::AttackResult CombatSystem::ResolveAttack(PlayerObject* attacker, P
 		int defenseRoll = (rand() % 100) + int(target->getLevel()) * 2;
 		if (targetTactic == TACTIC_DEFENSE)
 			defenseRoll += 25; //a blocking defender is much harder to hit cleanly
-        
+
         // Spy Backstab Execution: bypasses 75% evasion if landed from behind
-        if (move.specialFlags & ABILITY_FLAG_BACKSTAB) {
+        if (isBackstab) {
             defenseRoll = (int)(defenseRoll * 0.25f);
         }
 
@@ -562,9 +572,10 @@ CombatSystem::AttackResult CombatSystem::ResolveAttack(PlayerObject* attacker, P
 	dmg += move.minDmgPerLvl * attacker->getLevel();
 	dmg *= TacticModifier(attackerTactic, targetTactic);
 
-    // Apply Spy Backstab critical multiplier
-    if (move.specialFlags & ABILITY_FLAG_BACKSTAB) {
+    // Apply Spy Backstab critical multiplier only when landed from behind
+    if (isBackstab) {
         dmg *= 2.0f; // Critical backstab damage
+        res.isCrit = true;
     }
 
     // Apply adaptive learning mitigation: 0.5 * (1.0 - 0.15 * (SpamCount - 3))
@@ -578,9 +589,28 @@ CombatSystem::AttackResult CombatSystem::ResolveAttack(PlayerObject* attacker, P
     // Item 20 & Phase 41: Deflection / Bullet Blocking
     uint16 evasion = target->getEvasion();
     int deflectChance = 15 + (evasion / 5);
-    if (move.specialFlags & ABILITY_FLAG_DEFLECT_BUFF) deflectChance += 30; // Crane Stance bonus
 
-    if (targetTactic == TACTIC_DEFENSE && move.dmgType == DAMAGE_RANGED && (rand() % 100 < deflectChance)) {
+    bool targetHasDeflectBuff = false;
+    if (auto abSys = target->getAbilitySystem()) {
+        for (const auto& pair : abSys->getLoadedAbilities()) {
+            const CombatMove* abMove = GetMove(pair.first);
+            if (abMove && (abMove->specialFlags & ABILITY_FLAG_DEFLECT_BUFF)) {
+                targetHasDeflectBuff = true;
+                break;
+            }
+        }
+    }
+    if (targetHasDeflectBuff) deflectChance += 30; // Crane Stance bonus
+
+    if (target->getClient().isBot()) {
+        BotClient* botTarget = dynamic_cast<BotClient*>(&target->getClient());
+        if (botTarget) {
+            auto& tomState = botTarget->GetTheoryOfMindSolver().GetState(std::to_string(attacker->getGoId()));
+            deflectChance += int(tomState.counterPredictionChance * 30.0f);
+        }
+    }
+
+    if ((targetTactic == TACTIC_DEFENSE || targetHasDeflectBuff) && move.dmgType == DAMAGE_RANGED && (rand() % 100 < deflectChance)) {
         res.isBlocked = true; // Deflection
         dmg = 0;
         sMatrixThreatHeatmap.RecordDisruption(target->getPosition().x, target->getPosition().z, 15.0f, "Bullet Deflection");
@@ -660,6 +690,24 @@ CombatSystem::AttackResult CombatSystem::ResolveAttack(PlayerObject* attacker, P
 		bool wasAlive = !target->isDead();
 		target->takeDamage(attacker->getGoId(), res.damageTaken, move.hitFxId);
         target->recordIncomingAttack(move.id);
+
+        // Series II: Hook Theory of Mind and Neurochemistry on combat interactions
+        if (target->getClient().isBot()) {
+            BotClient* botTarget = dynamic_cast<BotClient*>(&target->getClient());
+            if (botTarget) {
+                std::string attackerIdStr = std::to_string(attacker->getGoId());
+                botTarget->GetTheoryOfMindSolver().RecordTargetMove(attackerIdStr, move.id);
+                botTarget->GetTheoryOfMindSolver().UpdateNeurochemistry(attackerIdStr, 0.0f, 1.0f, 0.1f);
+            }
+        }
+        if (attacker->getClient().isBot()) {
+            BotClient* botAttacker = dynamic_cast<BotClient*>(&attacker->getClient());
+            if (botAttacker) {
+                std::string targetIdStr = std::to_string(target->getGoId());
+                botAttacker->GetTheoryOfMindSolver().UpdateNeurochemistry(targetIdStr, 1.0f, 0.0f, 0.1f);
+            }
+        }
+
 		if (wasAlive && target->isDead())
 			AwardKill(attacker, target);
 	}
