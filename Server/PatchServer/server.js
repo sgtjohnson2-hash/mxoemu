@@ -88,6 +88,13 @@ const defaultManifest = {
     authServer: "15.204.82.250:11000",
     gameServer: "15.204.82.250:10000",
     patchServer: "http://15.204.82.250",
+    launcher: {
+        version: "1.2.0",
+        minVersion: "1.0.0",
+        url: "/launcher/ZionLauncher.exe",
+        filename: "ZionLauncher.exe",
+        notes: "Matrix Digital Rain loader & auto-updater"
+    },
     clientPackage: {
         filename: "MxO_Client.7z",
         url: "/client/MxO_Client.7z",
@@ -335,6 +342,25 @@ const server = http.createServer(async (req, res) => {
         return;
     }
 
+    // 5b. Launcher Auto-Update API
+    if (pathname === '/launcher/version' || pathname === '/launcher/version.json' || pathname === '/version.json') {
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({
+            version: "1.2.0",
+            minVersion: "1.0.0",
+            downloadUrl: "/launcher/ZionLauncher.exe",
+            filename: "ZionLauncher.exe",
+            notes: "Matrix Digital Rain loader & auto-updater"
+        }, null, 2));
+        return;
+    }
+
+    if (pathname === '/launcher/version.txt') {
+        res.writeHead(200, { 'Content-Type': 'text/plain' });
+        res.end("1.2.0\n");
+        return;
+    }
+
     // 6. Patch notes endpoint
     if (pathname === '/patch_notes.txt' || pathname === '/patchnotes') {
         res.writeHead(200, { 'Content-Type': 'text/plain' });
@@ -353,6 +379,7 @@ const server = http.createServer(async (req, res) => {
     let relativePath = pathname;
     if (relativePath.startsWith('/client/')) relativePath = relativePath.replace('/client/', 'client/');
     else if (relativePath.startsWith('/download/')) relativePath = relativePath.replace('/download/', 'client/');
+    else if (relativePath.startsWith('/launcher/')) relativePath = relativePath.replace('/launcher/', 'launcher/');
     else if (relativePath.startsWith('/')) relativePath = relativePath.substring(1);
 
     const safePath = path.normalize(relativePath).replace(/^(\.\.[\/\\])+/, '');
@@ -362,6 +389,11 @@ const server = http.createServer(async (req, res) => {
         const clientCandidate = path.join(PATCH_DIR, 'client', path.basename(safePath));
         if (fs.existsSync(clientCandidate)) {
             targetFile = clientCandidate;
+        } else {
+            const launcherCandidate = path.join(PATCH_DIR, 'launcher', path.basename(safePath));
+            if (fs.existsSync(launcherCandidate)) {
+                targetFile = launcherCandidate;
+            }
         }
     }
 
