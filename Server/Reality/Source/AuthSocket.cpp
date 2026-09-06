@@ -566,25 +566,42 @@ void AuthSocket::HandleCreateCharacterRequest( ByteBuffer &packet )
 {
 	try
 	{
-		// AS_CreateCharacterRequest payload from matrix.exe:
-		// [0x0A (already consumed by ProcessData)] [uint16 0x0000] [null-terminated handle string]
 		if (packet.remaining() < 2)
 		{
 			WARNING_LOG(format("Auth received malformed CreateCharacter packet (size %1% bytes)") % packet.remaining());
 			return;
 		}
 
-		uint16 unk = 0;
-		packet >> unk;
+		const byte* raw = &packet.contents()[packet.rpos()];
+		size_t remaining = packet.remaining();
 
-		// Safely extract null-terminated string handle
 		string handle;
-		while (packet.remaining() > 0)
+		// If 4+ bytes and has length prefix: [uint16 offset] [uint16 handleLen] [chars...]
+		if (remaining >= 4)
 		{
-			char c = packet.read<char>();
-			if (c == 0)
-				break;
-			handle += c;
+			uint16 len16 = *(uint16*)&raw[2];
+			if (len16 > 0 && len16 <= remaining - 4 && (raw[4] >= 32 && raw[4] <= 126))
+			{
+				size_t sLen = len16;
+				while (sLen > 0 && raw[4 + sLen - 1] == '\0') sLen--;
+				handle = string((const char*)&raw[4], sLen);
+			}
+		}
+
+		// If still empty, try scanning printable characters
+		if (handle.empty())
+		{
+			for (size_t i = 0; i < remaining; ++i)
+			{
+				if (isalnum((unsigned char)raw[i]) || raw[i] == '_' || raw[i] == '-')
+				{
+					size_t start = i;
+					while (i < remaining && raw[i] != '\0' && isprint((unsigned char)raw[i]))
+						i++;
+					handle = string((const char*)&raw[start], i - start);
+					break;
+				}
+			}
 		}
 
 		if (handle.empty())
@@ -643,20 +660,28 @@ void AuthSocket::HandleCreateCharacterRequest( ByteBuffer &packet )
 		}
 
 		// AS_CreateCharacterReply (0x0B) format expected by matrix.exe at 0x43f4c0:
-		// [uint8 opcode 0x0B] [uint16 0x0000] [uint32 status (0=success)] [uint64 charId]
+		// [uint8 opcode 0x0B] [uint16 0x000F] [uint32 status (0=success)] [uint64 charId] [uint16 handleLen] [handle chars...]
+		vector<char> hBuf(handle.begin(), handle.end());
+		hBuf.push_back('\0');
+		uint16 hLen = (uint16)hBuf.size();
+
 		TCPVariableLengthPacket replyPacket;
 		replyPacket << uint8(AS_CreateCharacterReply); // 0x0B
-		replyPacket << uint16(0);                      // 2 bytes 0x0000 padding
+		replyPacket << uint16(0x000F);                 // String offset table (0x0F)
 		if (success && newCharId != 0)
 		{
 			replyPacket << uint32(0);                  // status 0 = Success
-			replyPacket << uint64(newCharId);           // 64-bit charId
+			replyPacket << uint64(newCharId);          // 64-bit charId
+			replyPacket << uint16(hLen);
+			replyPacket.append((const byte*)hBuf.data(), hLen);
 			INFO_LOG(format("Auth: Character '%1%' (charId %2%) successfully created for user %3%!") % handle % newCharId % m_username);
 		}
 		else
 		{
 			replyPacket << uint32(1);                  // status 1 = Failed (Name in use / Error)
 			replyPacket << uint64(0);
+			replyPacket << uint16(hLen);
+			replyPacket.append((const byte*)hBuf.data(), hLen);
 			WARNING_LOG(format("Auth: Failed to create character '%1%' for user %2%!") % handle % m_username);
 		}
 
@@ -667,13 +692,12 @@ void AuthSocket::HandleCreateCharacterRequest( ByteBuffer &packet )
 		ERROR_LOG(format("Auth: Exception in HandleCreateCharacterRequest: %1%") % ex.what());
 		TCPVariableLengthPacket replyPacket;
 		replyPacket << uint8(AS_CreateCharacterReply);
-		replyPacket << uint16(0);
+		replyPacket << uint16(0x000F);
 		replyPacket << uint32(1);
 		replyPacket << uint64(0);
 		SendPacket(replyPacket);
 	}
 }
-
 
 void AuthSocket::HandleDeleteCharacterRequest( ByteBuffer &packet )
 {

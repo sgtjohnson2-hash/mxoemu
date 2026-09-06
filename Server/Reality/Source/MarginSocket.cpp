@@ -978,29 +978,72 @@ void MarginSocket::SendLoadCharacterReplies()
 void MarginSocket::HandleClaimCharacterNameRequest(ByteBuffer &packetData)
 {
 	DEBUG_LOG("Margin Received MS_ClaimCharacterNameRequest");
-	if (packetData.remaining() < 6)
+	if (packetData.remaining() < 4)
+	{
+		WARNING_LOG(format("MS_ClaimCharacterNameRequest: Packet too short (%1% bytes)") % packetData.remaining());
 		return;
+	}
 
-	uint32 unknownFlags;
-	packetData >> unknownFlags;
+	const byte* raw = &packetData.contents()[packetData.rpos()];
+	size_t remaining = packetData.remaining();
 
-	uint16 handleSize;
-	packetData >> handleSize;
+	string handleStr;
+	uint16 handleSize = 0;
 
-	if (packetData.remaining() < handleSize || handleSize == 0)
-		return;
+	// Check format A (Standard client.dll): uint16 stringOffset (0x0000 / 0x0001), uint16 handleLen, handle string...
+	uint16 off16 = *(uint16*)&raw[0];
+	uint16 len16 = *(uint16*)&raw[2];
+	if (len16 > 0 && len16 <= remaining - 4 && (raw[4] >= 32 && raw[4] <= 126))
+	{
+		handleSize = len16;
+		size_t strLen = handleSize;
+		while (strLen > 0 && raw[4 + strLen - 1] == '\0')
+			strLen--;
+		handleStr = string((const char*)&raw[4], strLen);
+	}
+	// Check format B (4-byte flags prefix): uint32 flags, uint16 handleLen, handle string...
+	else if (remaining >= 6 && *(uint16*)&raw[4] > 0 && *(uint16*)&raw[4] <= remaining - 6 && (raw[6] >= 32 && raw[6] <= 126))
+	{
+		handleSize = *(uint16*)&raw[4];
+		size_t strLen = handleSize;
+		while (strLen > 0 && raw[6 + strLen - 1] == '\0')
+			strLen--;
+		handleStr = string((const char*)&raw[6], strLen);
+	}
+	// Check format C (2-byte length only): uint16 handleLen, handle string...
+	else if (len16 > 0 && len16 <= remaining - 2 && (raw[2] >= 32 && raw[2] <= 126))
+	{
+		handleSize = len16;
+		size_t strLen = handleSize;
+		while (strLen > 0 && raw[2 + strLen - 1] == '\0')
+			strLen--;
+		handleStr = string((const char*)&raw[2], strLen);
+	}
+	else
+	{
+		// Fallback scanner: scan for first sequence of printable ASCII chars
+		for (size_t i = 0; i < remaining; ++i)
+		{
+			if (isalnum((unsigned char)raw[i]) || raw[i] == '_' || raw[i] == '-')
+			{
+				size_t start = i;
+				while (i < remaining && raw[i] != '\0' && isprint((unsigned char)raw[i]))
+					i++;
+				handleStr = string((const char*)&raw[start], i - start);
+				handleSize = (uint16)(handleStr.size() + 1);
+				break;
+			}
+		}
+	}
 
-	vector<char> handleBuf(handleSize);
-	packetData.read((byte*)&handleBuf[0], handleSize);
-
-	size_t cleanLen = handleSize;
-	while (cleanLen > 0 && handleBuf[cleanLen - 1] == '\0')
-		cleanLen--;
-	string handleStr(handleBuf.data(), cleanLen);
 	if (handleStr.empty())
 		handleStr = m_username;
 
-	DEBUG_LOG(format("MS_ClaimCharacterNameRequest: User %1% claiming handle '%2%' (len %3%)") % m_username % handleStr % handleSize);
+	vector<char> handleBuf(handleStr.begin(), handleStr.end());
+	handleBuf.push_back('\0');
+	uint16 replyHandleLen = (uint16)handleBuf.size();
+
+	DEBUG_LOG(format("MS_ClaimCharacterNameRequest: User %1% claiming handle '%2%' (len %3%)") % m_username % handleStr % replyHandleLen);
 
 	uint64 existingCharId = 0;
 	bool nameTakenByOther = false;
@@ -1026,15 +1069,15 @@ void MarginSocket::HandleClaimCharacterNameRequest(ByteBuffer &packetData)
 
 	TwofishEncryptedPacket response;
 	response << uint8(MS_ClaimCharacterNameReply); // 0x0B
-	response << uint16(0x000F); // 0x0F, 0x00
+	response << uint16(0x000F); // String offset table
 
 	if (nameTakenByOther)
 	{
 		DEBUG_LOG(format("MS_ClaimCharacterNameRequest: Handle '%1%' is TAKEN by another user.") % handleStr);
 		response << uint32(1); // 4-byte status: 1 = Taken / Failed
 		response << uint64(0); // 8-byte charId: 0
-		response << uint16(handleSize);
-		response.append((const byte*)handleBuf.data(), handleSize);
+		response << uint16(replyHandleLen);
+		response.append((const byte*)handleBuf.data(), replyHandleLen);
 	}
 	else if (existingCharId != 0)
 	{
@@ -1045,8 +1088,8 @@ void MarginSocket::HandleClaimCharacterNameRequest(ByteBuffer &packetData)
 
 		response << uint32(0); // 4-byte status: 0 = Success
 		response << uint64(charId); // 8-byte charId
-		response << uint16(handleSize);
-		response.append((const byte*)handleBuf.data(), handleSize);
+		response << uint16(replyHandleLen);
+		response.append((const byte*)handleBuf.data(), replyHandleLen);
 	}
 	else
 	{
@@ -1072,12 +1115,18 @@ void MarginSocket::HandleClaimCharacterNameRequest(ByteBuffer &packetData)
 		charId = newCharId;
 		m_charName = handleStr;
 
+		// Ensure default RSI values exist immediately
+		PreparedStatement rsiDef("INSERT IGNORE INTO `rsivalues` (`charId`, `sex`, `body`, `hat`, `face`, `shirt`, `coat`, `pants`, `shoes`, `gloves`, `glasses`, `hair`, `facialdetail`, `shirtcolor`, `pantscolor`, `coatcolor`, `shoecolor`, `glassescolor`, `haircolor`, `skintone`, `tattoo`, `facialdetailcolor`, `leggings`) "
+			"VALUES (?0, 0, 0, 0, 0, 2, 10, 1, 6, 6, 4, 1, 0, 41, 16, 0, 0, 15, 1, 1, 0, 0, 0)");
+		rsiDef.SetUInt64(0, charId);
+		sDatabase.ExecutePrepared(&rsiDef);
+
 		DEBUG_LOG(format("MS_ClaimCharacterNameRequest: Handle '%1%' reserved! CharID=%2%") % handleStr % charId);
 
 		response << uint32(0); // 4-byte status: 0 = Success
 		response << uint64(charId); // 8-byte charId
-		response << uint16(handleSize);
-		response.append((const byte*)handleBuf.data(), handleSize);
+		response << uint16(replyHandleLen);
+		response.append((const byte*)handleBuf.data(), replyHandleLen);
 	}
 
 	SendCrypted(response);
@@ -1086,7 +1135,7 @@ void MarginSocket::HandleClaimCharacterNameRequest(ByteBuffer &packetData)
 void MarginSocket::HandleCreateCharacterRequest(ByteBuffer &packetData)
 {
 	DEBUG_LOG("Margin Received MS_CreateCharacterRequest");
-	if (packetData.remaining() < 78)
+	if (packetData.remaining() < 70)
 	{
 		WARNING_LOG(format("MS_CreateCharacterRequest: Packet too short (%1% bytes)") % packetData.remaining());
 		return;
@@ -1111,42 +1160,83 @@ void MarginSocket::HandleCreateCharacterRequest(ByteBuffer &packetData)
 	uint16 footwearId = *(uint16*)&raw[62];
 	uint16 profession = *(uint16*)&raw[66];
 
-	size_t curOffset = 78;
 	string firstName = m_charName;
 	string lastName = "Operative";
 	string description = "";
 
-	if (curOffset + 2 <= remaining)
+	// Parse string offsets if available (offsets relative to byte 0 of packet)
+	bool parsedOffsets = false;
+	if (remaining >= 74)
 	{
-		uint16 fnLen = *(uint16*)&raw[curOffset];
-		curOffset += 2;
-		if (curOffset + fnLen <= remaining && fnLen > 1)
+		uint16 fnOff = *(uint16*)&raw[68];
+		uint16 lnOff = *(uint16*)&raw[70];
+		uint16 descOff = *(uint16*)&raw[72];
+
+		if (fnOff >= 75 && (size_t)(fnOff - 1 + 2) <= remaining)
 		{
-			firstName = string((const char*)&raw[curOffset], fnLen - 1);
+			size_t fnIdx = fnOff - 1;
+			uint16 fnLen = *(uint16*)&raw[fnIdx];
+			if (fnLen > 1 && fnIdx + 2 + fnLen <= remaining)
+			{
+				firstName = string((const char*)&raw[fnIdx + 2], fnLen - 1);
+				parsedOffsets = true;
+			}
 		}
-		curOffset += fnLen;
+
+		if (lnOff >= 75 && (size_t)(lnOff - 1 + 2) <= remaining)
+		{
+			size_t lnIdx = lnOff - 1;
+			uint16 lnLen = *(uint16*)&raw[lnIdx];
+			if (lnLen > 1 && lnIdx + 2 + lnLen <= remaining)
+			{
+				lastName = string((const char*)&raw[lnIdx + 2], lnLen - 1);
+			}
+		}
+
+		if (descOff >= 75 && (size_t)(descOff - 1 + 2) <= remaining)
+		{
+			size_t descIdx = descOff - 1;
+			uint16 descLen = *(uint16*)&raw[descIdx];
+			if (descLen > 1 && descIdx + 2 + descLen <= remaining)
+			{
+				description = string((const char*)&raw[descIdx + 2], descLen - 1);
+			}
+		}
 	}
 
-	if (curOffset + 2 <= remaining)
+	if (!parsedOffsets)
 	{
-		uint16 lnLen = *(uint16*)&raw[curOffset];
-		curOffset += 2;
-		if (curOffset + lnLen <= remaining && lnLen > 1)
+		// Fallback to sequential scanning starting at offset 74 or 78
+		size_t curOffset = (remaining >= 78 && *(uint16*)&raw[74] == 0) ? 78 : 74;
+		if (curOffset + 2 <= remaining)
 		{
-			lastName = string((const char*)&raw[curOffset], lnLen - 1);
+			uint16 fnLen = *(uint16*)&raw[curOffset];
+			curOffset += 2;
+			if (curOffset + fnLen <= remaining && fnLen > 1)
+			{
+				firstName = string((const char*)&raw[curOffset], fnLen - 1);
+			}
+			curOffset += fnLen;
 		}
-		curOffset += lnLen;
-	}
-
-	if (curOffset + 2 <= remaining)
-	{
-		uint16 descLen = *(uint16*)&raw[curOffset];
-		curOffset += 2;
-		if (curOffset + descLen <= remaining && descLen > 1)
+		if (curOffset + 2 <= remaining)
 		{
-			description = string((const char*)&raw[curOffset], descLen - 1);
+			uint16 lnLen = *(uint16*)&raw[curOffset];
+			curOffset += 2;
+			if (curOffset + lnLen <= remaining && lnLen > 1)
+			{
+				lastName = string((const char*)&raw[curOffset], lnLen - 1);
+			}
+			curOffset += lnLen;
 		}
-		curOffset += descLen;
+		if (curOffset + 2 <= remaining)
+		{
+			uint16 descLen = *(uint16*)&raw[curOffset];
+			curOffset += 2;
+			if (curOffset + descLen <= remaining && descLen > 1)
+			{
+				description = string((const char*)&raw[curOffset], descLen - 1);
+			}
+		}
 	}
 
 	DEBUG_LOG(format("MS_CreateCharacterRequest: RSI parsed - CharID %1%: Name='%2% %3%', Hair=%4%, Coat=%5%, Shirt=%6%, Pants=%7%, Shoes=%8%, Glasses=%9%")
