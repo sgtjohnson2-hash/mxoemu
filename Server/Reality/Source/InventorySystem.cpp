@@ -176,6 +176,8 @@ bool InventorySystem::moveItem(uint8 fromSlot, uint8 toSlot)
 
 void InventorySystem::sendFullInventory()
 {
+    if (!m_owner || m_owner->getClient().isBot()) return;
+
     // TODO: Send binary 0x63 packet to client with all items and their slots once reverse engineered.
     // For now, we will dump the inventory state to the player's chat log for validation.
     std::string msg = "{c:00FF00}[Inventory Loader] Loaded " + std::to_string(m_items.size()) + " items.{/c}";

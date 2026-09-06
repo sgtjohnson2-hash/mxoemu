@@ -557,6 +557,7 @@ bool MarginSocket::UdpReady(GameClient *theClient)
 
 void MarginSocket::SendLoadCharacterReplies()
 {
+	readyForUdp = true;
 	worldCharId = charId & 0xFFFFFFFF;
 			NewCharacterReply();
 			//10 00 00 00 00 11 a0 07 00 00 00 01 00 01 00 00 
@@ -991,7 +992,13 @@ void MarginSocket::HandleClaimCharacterNameRequest(ByteBuffer &packetData)
 
 	vector<char> handleBuf(handleSize);
 	packetData.read((byte*)&handleBuf[0], handleSize);
-	string handleStr(&handleBuf[0]);
+
+	size_t cleanLen = handleSize;
+	while (cleanLen > 0 && handleBuf[cleanLen - 1] == '\0')
+		cleanLen--;
+	string handleStr(handleBuf.data(), cleanLen);
+	if (handleStr.empty())
+		handleStr = m_username;
 
 	DEBUG_LOG(format("MS_ClaimCharacterNameRequest: User %1% claiming handle '%2%' (len %3%)") % m_username % handleStr % handleSize);
 
@@ -1024,29 +1031,20 @@ void MarginSocket::HandleClaimCharacterNameRequest(ByteBuffer &packetData)
 	if (nameTakenByOther)
 	{
 		DEBUG_LOG(format("MS_ClaimCharacterNameRequest: Handle '%1%' is TAKEN by another user.") % handleStr);
-		response << uint8(0x01); // 1 = Taken / Failed
-		response << uint8(0x00);
-		response << uint8(0x00);
-		response << uint8(0x11);
-		byte zeroPad[7] = {0};
-		response.append(zeroPad, sizeof(zeroPad));
+		response << uint32(1); // 4-byte status: 1 = Taken / Failed
+		response << uint64(0); // 8-byte charId: 0
 		response << uint16(handleSize);
 		response.append((const byte*)handleBuf.data(), handleSize);
 	}
 	else if (existingCharId != 0)
 	{
 		charId = existingCharId;
-		uint32 charId32 = (uint32)(existingCharId & 0xFFFFFFFF);
 		m_charName = handleStr;
 
-		DEBUG_LOG(format("MS_ClaimCharacterNameRequest: Handle '%1%' already belongs to user %2%! CharID=%3%") % handleStr % m_username % charId32);
+		DEBUG_LOG(format("MS_ClaimCharacterNameRequest: Handle '%1%' already belongs to user %2%! CharID=%3%") % handleStr % m_username % charId);
 
-		response << uint8(0x00); // 0 = Success
-		response << uint8(0x00);
-		response << uint8(0x00);
-		response << uint32(charId32);
-		byte zeroPad[5] = {0};
-		response.append(zeroPad, sizeof(zeroPad));
+		response << uint32(0); // 4-byte status: 0 = Success
+		response << uint64(charId); // 8-byte charId
 		response << uint16(handleSize);
 		response.append((const byte*)handleBuf.data(), handleSize);
 	}
@@ -1072,17 +1070,12 @@ void MarginSocket::HandleClaimCharacterNameRequest(ByteBuffer &packetData)
 		}
 
 		charId = newCharId;
-		uint32 charId32 = (uint32)(newCharId & 0xFFFFFFFF);
 		m_charName = handleStr;
 
-		DEBUG_LOG(format("MS_ClaimCharacterNameRequest: Handle '%1%' reserved! CharID=%2%") % handleStr % charId32);
+		DEBUG_LOG(format("MS_ClaimCharacterNameRequest: Handle '%1%' reserved! CharID=%2%") % handleStr % charId);
 
-		response << uint8(0x00); // 0 = Success
-		response << uint8(0x00);
-		response << uint8(0x00);
-		response << uint32(charId32);
-		byte zeroPad[5] = {0};
-		response.append(zeroPad, sizeof(zeroPad));
+		response << uint32(0); // 4-byte status: 0 = Success
+		response << uint64(charId); // 8-byte charId
 		response << uint16(handleSize);
 		response.append((const byte*)handleBuf.data(), handleSize);
 	}

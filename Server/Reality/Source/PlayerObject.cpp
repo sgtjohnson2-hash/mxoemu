@@ -41,9 +41,9 @@
 
 PlayerObject::PlayerObject( GameClient &parent,uint64 charUID, bool isBot ) :m_parent(parent),m_characterUID(charUID),m_spawnedInWorld(false),m_worldPopulated(false)
 {
+	m_inventorySystem = std::make_shared<InventorySystem>(this);
 	if (!isBot) {
 		loadFromDB(true);
-		m_inventorySystem = std::make_shared<InventorySystem>(this);
 		m_inventorySystem->loadFromDB();
 	} else {
 		m_handle = "Bot_" + std::to_string(charUID);
@@ -863,10 +863,17 @@ bool PlayerObject::giveItem(unsigned int templateId)
     uint32 newGoId = sObjMgr.getNewObjectId();
     shared_ptr<Item> newItem(new Item(newGoId, templateId));
     if (m_inventorySystem->addItemAuto(newItem)) {
-        m_inventorySystem->saveToDB();
+        if (!getClient().isBot()) {
+            m_inventorySystem->saveToDB();
+        }
         return true;
     }
     return false;
+}
+
+bool PlayerObject::addItemByTemplateId(unsigned int templateId)
+{
+    return giveItem(templateId);
 }
 
 void PlayerObject::SendWaypoint(float x, float y, float z, const std::string& name) { }

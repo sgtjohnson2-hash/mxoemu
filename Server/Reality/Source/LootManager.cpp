@@ -95,9 +95,11 @@ void LootManager::GenerateLoot(PlayerObject* killer, PlayerObject* victim)
                         std::string itemName = itemIt->second.name;
                         if (isCorrupted) itemName = "[CORRUPTED] " + itemName;
                         
-                        killer->getClient().QueueCommand(std::make_shared<SystemChatMsg>(
-                            (format("%1%You looted item: %2%.{/c}") % colorCode % itemName).str()
-                        ));
+                        if (!killer->getClient().isBot()) {
+                            killer->getClient().QueueCommand(std::make_shared<SystemChatMsg>(
+                                (format("%1%You looted item: %2%.{/c}") % colorCode % itemName).str()
+                            ));
+                        }
                         INFO_LOG(format("LootManager: %1% looted %2% (Rarity: %3%, Corrupted: %4%)") 
                             % killer->getHandle() % itemName % (int)rarity % isCorrupted);
                     }

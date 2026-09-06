@@ -85,6 +85,7 @@ public:
 
 	void PerformRebirth(void);
 	bool giveItem(unsigned int templateId);
+	bool addItemByTemplateId(unsigned int templateId);
 	bool isDualWielding(void) const;
 	unsigned short getEvasion(void) const;
 	void ApplyTimeDilation(float amount, unsigned int durationMs);
