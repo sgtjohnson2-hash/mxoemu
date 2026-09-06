@@ -41,7 +41,7 @@ CREATE TABLE `characters` (
   PRIMARY KEY (`charId`),
   UNIQUE KEY `handle` (`handle`),
   UNIQUE KEY `charId` (`charId`)
-) ENGINE=MyISAM AUTO_INCREMENT=357 DEFAULT CHARSET=utf8;
+) ENGINE=InnoDB AUTO_INCREMENT=357 DEFAULT CHARSET=utf8;
 
 -- ----------------------------
 -- Table structure for doors
@@ -60,7 +60,7 @@ CREATE TABLE `doors` (
   `FirstUser` varchar(45) DEFAULT NULL,
   PRIMARY KEY (`id`),
   UNIQUE KEY `id` (`id`)
-) ENGINE=MyISAM AUTO_INCREMENT=13168 DEFAULT CHARSET=utf8;
+) ENGINE=InnoDB AUTO_INCREMENT=13168 DEFAULT CHARSET=utf8;
 
 -- ----------------------------
 -- Table structure for hardlines
@@ -77,7 +77,7 @@ CREATE TABLE `hardlines` (
   `FactionTag` int(11) unsigned NOT NULL DEFAULT '0',
   PRIMARY KEY (`Id`),
   UNIQUE KEY `Id` (`Id`)
-) ENGINE=MyISAM AUTO_INCREMENT=139 DEFAULT CHARSET=utf8;
+) ENGINE=InnoDB AUTO_INCREMENT=139 DEFAULT CHARSET=utf8;
 
 -- ----------------------------
 -- Table structure for inventory
@@ -90,7 +90,7 @@ CREATE TABLE `inventory` (
   `item_metadata` text DEFAULT NULL,
   PRIMARY KEY (`invId`),
   UNIQUE KEY `invId` (`invId`)
-) ENGINE=MyISAM DEFAULT CHARSET=utf8;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8;
 
 -- ----------------------------
 -- Table structure for locations
@@ -104,7 +104,7 @@ CREATE TABLE `locations` (
   `District` tinyint(3) unsigned NOT NULL,
   PRIMARY KEY (`Id`),
   UNIQUE KEY `Id` (`Id`)
-) ENGINE=MyISAM AUTO_INCREMENT=62 DEFAULT CHARSET=utf8;
+) ENGINE=InnoDB AUTO_INCREMENT=62 DEFAULT CHARSET=utf8;
 
 -- ----------------------------
 -- Table structure for rsivalues
@@ -135,7 +135,7 @@ CREATE TABLE `rsivalues` (
   `leggings` smallint(6) unsigned NOT NULL DEFAULT '0',
   PRIMARY KEY (`charId`),
   UNIQUE KEY `charId` (`charId`)
-) ENGINE=MyISAM DEFAULT CHARSET=utf8;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8;
 
 -- ----------------------------
 -- Table structure for users
@@ -154,7 +154,7 @@ CREATE TABLE `users` (
   PRIMARY KEY (`userId`),
   UNIQUE KEY `id` (`userId`),
   UNIQUE KEY `username` (`username`)
-) ENGINE=MyISAM AUTO_INCREMENT=327 DEFAULT CHARSET=utf8;
+) ENGINE=InnoDB AUTO_INCREMENT=327 DEFAULT CHARSET=utf8;
 
 -- ----------------------------
 -- Table structure for worlds
@@ -168,7 +168,7 @@ CREATE TABLE `worlds` (
   PRIMARY KEY (`worldId`),
   UNIQUE KEY `worldId` (`worldId`),
   UNIQUE KEY `name` (`name`)
-) ENGINE=MyISAM AUTO_INCREMENT=6 DEFAULT CHARSET=utf8;
+) ENGINE=InnoDB AUTO_INCREMENT=6 DEFAULT CHARSET=utf8;
 
 -- ----------------------------
 -- Table structure for abilities
@@ -179,7 +179,7 @@ CREATE TABLE IF NOT EXISTS `abilities` (
   `level` smallint(6) unsigned NOT NULL DEFAULT '1',
   `slot` smallint(6) unsigned NOT NULL DEFAULT '0',
   PRIMARY KEY (`charId`, `abilityId`)
-) ENGINE=MyISAM DEFAULT CHARSET=utf8;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8;
 
 -- ----------------------------
 -- Table structure for crews
@@ -190,7 +190,7 @@ CREATE TABLE IF NOT EXISTS `crews` (
   `faction` int(11) unsigned NOT NULL DEFAULT '0',
   `leader_goid` int(11) unsigned NOT NULL DEFAULT '0',
   PRIMARY KEY (`id`)
-) ENGINE=MyISAM DEFAULT CHARSET=utf8;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8;
 
 -- ----------------------------
 -- Table structure for crew_members
@@ -200,7 +200,7 @@ CREATE TABLE IF NOT EXISTS `crew_members` (
   `member_goid` int(11) unsigned NOT NULL,
   `rank` tinyint(3) unsigned NOT NULL DEFAULT '1',
   PRIMARY KEY (`crew_id`, `member_goid`)
-) ENGINE=MyISAM DEFAULT CHARSET=utf8;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8;
 
 -- ----------------------------
 -- Table structure for territory_map
@@ -210,7 +210,7 @@ CREATE TABLE IF NOT EXISTS `territory_map` (
   `faction` int(11) unsigned NOT NULL DEFAULT '0',
   `control_points` int(11) unsigned NOT NULL DEFAULT '0',
   PRIMARY KEY (`territory_id`, `faction`)
-) ENGINE=MyISAM DEFAULT CHARSET=utf8;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8;
 
 INSERT IGNORE INTO `territory_map` (`territory_id`, `faction`, `control_points`) VALUES
 ('1', '1', '0'),

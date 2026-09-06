@@ -55,6 +55,12 @@ const server = http.createServer((req, res) => {
         return;
     }
 
+    if (pathname === '/favicon.ico') {
+        res.writeHead(204);
+        res.end();
+        return;
+    }
+
     // 1. Landing Page (Root /)
     if (pathname === '/' || pathname === '/index.html') {
         res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
@@ -171,6 +177,12 @@ const server = http.createServer((req, res) => {
             'Content-Disposition': `attachment; filename="${path.basename(targetFile)}"`
         });
 
+        fileStream.on('error', (err) => {
+            console.error(`[PatchServer] Stream error: ${err.message}`);
+            if (!res.headersSent) res.writeHead(500);
+            res.end();
+        });
+        res.on('close', () => fileStream.destroy());
         fileStream.pipe(res);
     } else {
         res.writeHead(200, {
@@ -180,7 +192,14 @@ const server = http.createServer((req, res) => {
             'Content-Disposition': `attachment; filename="${path.basename(targetFile)}"`
         });
 
-        fs.createReadStream(targetFile).pipe(res);
+        const fullStream = fs.createReadStream(targetFile);
+        fullStream.on('error', (err) => {
+            console.error(`[PatchServer] Stream error: ${err.message}`);
+            if (!res.headersSent) res.writeHead(500);
+            res.end();
+        });
+        res.on('close', () => fullStream.destroy());
+        fullStream.pipe(res);
     }
 });
 
