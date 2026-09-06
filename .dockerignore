@@ -1,0 +1,6 @@
+.git
+Server/PatchServer/patch_data
+*.log
+*.7z
+*.zip
+*.dmp
