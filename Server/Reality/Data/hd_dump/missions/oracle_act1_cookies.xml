@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<mission id="10801" faction="None">
+  <data title="Visions of the Unwritten - Act I: The Scent of Fresh Baked Cookies" exp="6000" info="3500">
+    <objective1 command="TALK" idNpc="9101" description="Duel with Seraph at the Kitchen Threshold" dial="I protect that which matters most. Before you can see her, you must prove your intent." spawnAmbush="true" />
+    <objective2 command="DEFEAT" idNpc="9101" description="Spar with Seraph to demonstrate conviction" dial="You never truly know someone until you fight them. Enter." />
+    <objective3 command="TALK" idNpc="9300" description="Kitchen Audience with The Oracle" dial="Well look what the cat dragged in. Have a cookie, darling. You've already made the choice; you're here to understand why." />
+    <objective4 command="USE_ITEM" idNpc="9300" description="Eat the Oracle Anniversary Cookie" dial="Cinnamon and brown sugar. By the time you're done eating it, you'll feel right as rain." item="46995" />
+    <objective5 command="TALK" idNpc="9300" description="Receive the First Premonition" dial="The Truce hasn't made this world safe, just quieter. The threads are starting to fray." />
+  </data>
+</mission>

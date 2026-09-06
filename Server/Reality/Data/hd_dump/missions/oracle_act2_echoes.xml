@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<mission id="10802" faction="None">
+  <data title="Visions of the Unwritten - Act II: Echoes of the Fall" exp="8000" info="4500">
+    <objective1 command="TALK" idNpc="9300" description="Consult the Oracle regarding the Morrell Station assassination" dial="Morpheus sought the truth in the shadows of the code. Go to where the flies gathered, in Morrell Station." />
+    <objective2 command="USE_ITEM" idNpc="9300" description="Activate Seraphic Vision to perceive temporal residue" dial="Shift your sight to the golden spectrum. Look past the green rain to where the code calcified." item="47077" />
+    <objective3 command="HACK" idNpc="9310" description="Trace the Assassin's viral code footprint in Morrell Station" dial="Residual flies buzzing... Death was programmed here before the trigger was ever pulled." />
+    <objective4 command="DEFEAT" idNpc="9311" description="Neutralize the Assassin's Simulacra Ambush" dial="The contract is perpetual. Morpheus was only the beginning." spawnAmbush="true" />
+    <objective5 command="TALK" idNpc="9300" description="Report the viral residue back to the Oracle" dial="The Assassin was not an isolated operative. He was hired with code from outside the system." />
+  </data>
+</mission>

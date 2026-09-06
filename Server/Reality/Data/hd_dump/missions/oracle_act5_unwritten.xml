@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<mission id="10805" faction="None">
+  <data title="Visions of the Unwritten - Act V: The Unwritten Future" exp="20000" info="15000" rewardItem="47078" rewardAbility="-2146183168" rewardAbilityName="PSeraphicVisionAbility">
+    <objective1 command="TALK" idNpc="9300" description="Emergency rally at the Tenement Kitchen" dial="The virus has mutated. Smith's code is coalescing across Sector 1. They are coming for the kitchen. We must hold them while Sati escapes." />
+    <objective2 command="DEFEAT" idNpc="9340" description="Repel Wave 1: Corrupted Smith Simulacra Swarm" dial="Hear that, redpill? That is the sound of inevitability... the sound of your purpose meeting mine." spawnAmbush="true" />
+    <objective3 command="DEFEAT" idNpc="9341" description="Repel Wave 2: Evolved Viral Vector Clones" dial="We are all Smith now. Join us. It is pointless to resist." spawnAmbush="true" />
+    <objective4 command="ESCORT" idNpc="9252" description="Escort Sati to the Hardline Evacuation Conduit" dial="Seraph says the door is open! Don't let them touch the code!" escortTarget="9252" />
+    <objective5 command="HACK" idNpc="9342" description="Seal the Hardline Conduit and Transmit Sati into Archive" dial="Archive sequence committed: sati.metr compiled and partitioned beyond the reach of the contagion." />
+    <objective6 command="TALK" idNpc="9300" description="Receive the Oracle's Blessing: Permanent Seraphic Vision" dial="You did it, darling. Everything that has a beginning has an end. But the unwritten future belongs to those who see beyond the code. Take this gift—walk forever in the golden light." />
+  </data>
+</mission>

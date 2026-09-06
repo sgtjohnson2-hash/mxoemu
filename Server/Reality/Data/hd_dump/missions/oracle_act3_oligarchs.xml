@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<mission id="10803" faction="None">
+  <data title="Visions of the Unwritten - Act III: The Threat from Beyond" exp="10000" info="6000">
+    <objective1 command="TALK" idNpc="9300" description="Receive prophetic warning regarding the Oligarchs" dial="They came from the time before the pods were built. Biological minds preserved in crystalline architectures. Halborn seeks the Prime Source." />
+    <objective2 command="TALK" idNpc="9101" description="Obtain Seraph's cipher key for the deep transit conduits" dial="The old subway lines bypass the Machine firewall. Take this frequency. Do not falter." />
+    <objective3 command="HACK" idNpc="9320" description="Purge the Pre-Source anomalous anchor in Abandoned Subway" dial="Anomalous protocol decompiled: Halborn authorization detected. The Machine Truce is irrelevant to them." />
+    <objective4 command="DEFEAT" idNpc="9321" description="Defeat Halborn's Crystalline Vanguard" dial="You are ephemeral constructs. We ruled the Earth before your sun went dark." spawnAmbush="true" />
+    <objective5 command="TALK" idNpc="9300" description="Deliver the decrypted crystalline shard to the Oracle" dial="They want the system rewritten without human equations. We cannot let them reach the core." />
+  </data>
+</mission>

@@ -40,6 +40,7 @@
 
 bool g_sniffPackets = false;
 bool g_testProtocol = false;
+bool g_testFrank = false;
 
 #ifdef CLIENT_EXE
 #include "CustomClient.h"
@@ -65,6 +66,28 @@ int main(int argc, char* argv[])
 #else
 
 void RunProtocolTests();
+void RunFrankCastleTestSuite();
+void RunUnderworldTestSuite();
+void RunSimulationTestSuite();
+void RunEmergentAITestSuite();
+void RunEmergentPoliceTestSuite();
+void RunBiographicalTestSuite();
+void RunNPCSocialLifeTestSuite();
+void RunNPCFamilyDreamsTestSuite();
+void RunNPCEmergentLifeTestSuite();
+void RunSLMDialogueTestSuite();
+void RunMafiaEcosystemTestSuite();
+
+static bool g_testUnderworld = false;
+static bool g_testSimulation = false;
+static bool g_testEmergentAI = false;
+static bool g_testPolice = false;
+static bool g_testBiography = false;
+static bool g_testSocial = false;
+static bool g_testFamily = false;
+static bool g_testEmergentLife = false;
+static bool g_testSLM = false;
+static bool g_testMafia = false;
 
 int main(int argc, char* argv[])
 {
@@ -80,11 +103,85 @@ int main(int argc, char* argv[])
             g_sniffPackets = true;
         } else if (arg == "--test-protocol") {
             g_testProtocol = true;
+        } else if (arg == "--test-frank") {
+            g_testFrank = true;
+        } else if (arg == "--test-underworld") {
+            g_testUnderworld = true;
+        } else if (arg == "--test-simulation") {
+            g_testSimulation = true;
+        } else if (arg == "--test-emergent-ai") {
+            g_testEmergentAI = true;
+        } else if (arg == "--test-police" || arg == "--test-swat") {
+            g_testPolice = true;
+        } else if (arg == "--test-bio" || arg == "--test-biography") {
+            g_testBiography = true;
+        } else if (arg == "--test-social" || arg == "--test-social-life") {
+            g_testSocial = true;
+        } else if (arg == "--test-family" || arg == "--test-dreams" || arg == "--test-life") {
+            g_testFamily = true;
+        } else if (arg == "--test-emergent-life" || arg == "--test-awakening" || arg == "--test-hobbies") {
+            g_testEmergentLife = true;
+        } else if (arg == "--test-slm" || arg == "--test-dialogue") {
+            g_testSLM = true;
+        } else if (arg == "--test-mafia" || arg == "--test-commission" || arg == "--test-pizzo") {
+            g_testMafia = true;
+        } else if (arg == "--test-all") {
+            g_testFrank = true;
+            g_testUnderworld = true;
+            g_testSimulation = true;
+            g_testEmergentAI = true;
+            g_testPolice = true;
+            g_testBiography = true;
+            g_testSocial = true;
+            g_testFamily = true;
+            g_testEmergentLife = true;
+            g_testSLM = true;
+            g_testMafia = true;
         }
     }
 
 #ifndef UNITTEST
-    if (g_testProtocol) {
+    if (g_testFrank && g_testUnderworld && g_testSimulation && g_testEmergentAI && g_testPolice && g_testBiography && g_testSocial && g_testFamily && g_testEmergentLife && g_testSLM && g_testMafia) {
+        std::cout << "\n============================================================" << std::endl;
+        std::cout << "  RUNNING COMPLETE MEGACITY & TACTICAL TEST SUITE (11 SUITES)" << std::endl;
+        std::cout << "============================================================\n" << std::endl;
+        RunFrankCastleTestSuite();
+        RunUnderworldTestSuite();
+        RunSimulationTestSuite();
+        RunEmergentAITestSuite();
+        RunEmergentPoliceTestSuite();
+        RunBiographicalTestSuite();
+        RunNPCSocialLifeTestSuite();
+        RunNPCFamilyDreamsTestSuite();
+        RunNPCEmergentLifeTestSuite();
+        RunSLMDialogueTestSuite();
+        RunMafiaEcosystemTestSuite();
+        std::cout << "\n============================================================" << std::endl;
+        std::cout << "  ALL 11 MEGACITY EMERGENCE & TACTICAL SUITES PASSED 100%!  " << std::endl;
+        std::cout << "============================================================\n" << std::endl;
+    } else if (g_testMafia) {
+        RunMafiaEcosystemTestSuite();
+    } else if (g_testSLM) {
+        RunSLMDialogueTestSuite();
+    } else if (g_testEmergentLife) {
+        RunNPCEmergentLifeTestSuite();
+    } else if (g_testFamily) {
+        RunNPCFamilyDreamsTestSuite();
+    } else if (g_testSocial) {
+        RunNPCSocialLifeTestSuite();
+    } else if (g_testBiography) {
+        RunBiographicalTestSuite();
+    } else if (g_testFrank) {
+        RunFrankCastleTestSuite();
+    } else if (g_testUnderworld) {
+        RunUnderworldTestSuite();
+    } else if (g_testSimulation) {
+        RunSimulationTestSuite();
+    } else if (g_testEmergentAI) {
+        RunEmergentAITestSuite();
+    } else if (g_testPolice) {
+        RunEmergentPoliceTestSuite();
+    } else if (g_testProtocol) {
         RunProtocolTests();
     } else {
         Master::getSingleton().Run();

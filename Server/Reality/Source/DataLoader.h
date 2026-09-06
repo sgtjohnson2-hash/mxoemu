@@ -26,6 +26,18 @@ struct NPCTemplate
     bool isHostile;
 };
 
+struct PropheticGlitchNode
+{
+    uint32 nodeId{0};
+    std::string district;
+    float posX{0.0f};
+    float posY{0.0f};
+    float posZ{0.0f};
+    std::string anomalyType;
+    std::string loreReward;
+    bool isUnmasked{false};
+};
+
 #include <string>
 #include <map>
 #include <vector>
@@ -44,6 +56,7 @@ public:
     bool LoadClothing(const std::string& filePath);
     bool LoadNPCs(const std::string& filePath);
     bool LoadBlueprints(const std::string& filePath);
+    bool LoadPropheticGlitchNodes(const std::string& filePath);
 
     const AbilityTemplate* GetAbilityTemplate(uint16 id) const;
     const std::map<uint16, AbilityTemplate>& GetAllAbilities() const { return m_abilities; }
@@ -52,6 +65,7 @@ public:
     const NPCTemplate* GetNPCTemplate(uint32 id) const;
     const std::map<uint32, NPCTemplate>& GetAllNPCs() const { return m_npcs; }
     const std::map<uint32, CraftingBlueprint>& GetAllBlueprints() const { return m_blueprints; }
+    const std::map<uint32, PropheticGlitchNode>& GetAllGlitchNodes() const { return m_glitchNodes; }
 
     const BotPersonality* GetPersonalityProfile(uint32 index) const;
 
@@ -63,6 +77,7 @@ private:
     std::map<uint32, NPCTemplate> m_npcs;
     std::vector<BotPersonality> m_personalities;
     std::map<uint32, CraftingBlueprint> m_blueprints;
+    std::map<uint32, PropheticGlitchNode> m_glitchNodes;
 };
 
 #define sDataLoader DataLoader::getSingleton()

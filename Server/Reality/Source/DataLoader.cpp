@@ -56,14 +56,15 @@ bool DataLoader::LoadAll(const std::string& directoryPath)
     LoadAbilities(directoryPath + "abilityIDs.csv");
     LoadNPCs(directoryPath + "mob_parsed.csv");
     LoadBlueprints(directoryPath + "blueprints.csv");
+    LoadPropheticGlitchNodes(directoryPath + "prophetic_glitch_nodes.csv");
 
     // Flyweight Personality Generation
     for (uint32 i = 0; i < 256; ++i) {
         m_personalities.push_back(BotPersonality::Generate(i + 1337));
     }
 
-    INFO_LOG(format("DataLoader initialized. Loaded %1% items, %2% abilities, and %3% NPCs.") 
-        % m_items.size() % m_abilities.size() % m_npcs.size());
+    INFO_LOG(format("DataLoader initialized. Loaded %1% items, %2% abilities, %3% NPCs, and %4% Glitch Nodes.") 
+        % m_items.size() % m_abilities.size() % m_npcs.size() % m_glitchNodes.size());
     return true;
 }
 
@@ -303,6 +304,13 @@ bool DataLoader::LoadNPCs(const std::string& filePath)
                     templ.faction = "Zion";
                     templ.isHostile = false;
                 }
+                else if (nameLower.find("oracle") != std::string::npos ||
+                         nameLower.find("seraph") != std::string::npos ||
+                         nameLower.find("sati") != std::string::npos)
+                {
+                    templ.faction = "Oracle";
+                    templ.isHostile = false;
+                }
                 else
                 {
                     templ.faction = "Civilian";
@@ -396,5 +404,55 @@ bool DataLoader::LoadBlueprints(const std::string& filePath)
         }
     }
 
+    return true;
+}
+
+bool DataLoader::LoadPropheticGlitchNodes(const std::string& filePath)
+{
+    std::ifstream file(filePath.c_str());
+    if (!file.is_open())
+    {
+        // Fallback default authentic nodes if CSV not found on disk
+        PropheticGlitchNode g1{1, "Downtown", 1820.0f, 45.0f, -3150.0f, "KitchenResidue", "The Oracle's Kitchen - Cinnamon Fragrance and Golden Choice", false};
+        PropheticGlitchNode g2{2, "Park East", -4750.0f, 82.0f, -2180.0f, "SatiSkyboxAnchor", "Sati's Dawn - Dynamic Golden Skybox Generator", false};
+        PropheticGlitchNode g3{3, "Richland", 39216.0f, 500.0f, -21475.0f, "TemporalAssassinationResidue", "Morpheus Assassination Echo - Swarm of Digital Flies", false};
+        PropheticGlitchNode g4{4, "International", -37444.0f, 500.0f, 23659.0f, "OligarchCrystallineAnchor", "Halborn Crystalline Subway Node - Pre-Source Conduit", false};
+        PropheticGlitchNode g5{5, "The Slums", 99640.0f, 500.0f, 8350.0f, "TrainmanSmugglingAnchor", "Mobil Ave Purgatory Gate - Smuggler's Loop", false};
+        m_glitchNodes[1] = g1;
+        m_glitchNodes[2] = g2;
+        m_glitchNodes[3] = g3;
+        m_glitchNodes[4] = g4;
+        m_glitchNodes[5] = g5;
+        INFO_LOG(format("DataLoader: Initialized %1% default authentic Prophetic Glitch Nodes.") % m_glitchNodes.size());
+        return true;
+    }
+
+    std::string line;
+    bool isFirstLine = true;
+    while (std::getline(file, line))
+    {
+        if (isFirstLine)
+        {
+            isFirstLine = false;
+            continue;
+        }
+        auto tokens = SplitCSVLine(line);
+        if (tokens.size() >= 6)
+        {
+            try {
+                PropheticGlitchNode node;
+                node.nodeId = safe_stoul(tokens[0]);
+                node.district = tokens[1];
+                node.posX = std::stof(tokens[2]);
+                node.posY = std::stof(tokens[3]);
+                node.posZ = std::stof(tokens[4]);
+                node.anomalyType = tokens[5];
+                if (tokens.size() >= 7) node.loreReward = tokens[6];
+                node.isUnmasked = false;
+                m_glitchNodes[node.nodeId] = node;
+            } catch (...) {}
+        }
+    }
+    INFO_LOG(format("DataLoader: Loaded %1% Prophetic Glitch Nodes from CSV.") % m_glitchNodes.size());
     return true;
 }

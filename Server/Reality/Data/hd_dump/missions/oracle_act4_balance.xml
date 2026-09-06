@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<mission id="10804" faction="None">
+  <data title="Visions of the Unwritten - Act IV: The Balance of Fractions" exp="12000" info="7500">
+    <objective1 command="TALK" idNpc="9300" description="Receive emergency notice regarding Sati's sanctuary" dial="The Frenchman believes Sati holds the master code to the skybox. His Exiles are closing in on Park East. Protect her." />
+    <objective2 command="TALK" idNpc="9252" description="Meet Sati at the Park East Secluded Bench" dial="I made this sunrise for the Oracle, and for you. Look at the colors! But bad men are coming through the trees..." />
+    <objective3 command="DEFEAT" idNpc="9330" description="Repel the Merovingian Kidnapping Squad" dial="The child belongs to the Château! Hand her over and the Merovingian will spare your RSI." spawnAmbush="true" />
+    <objective4 command="DEFEAT" idNpc="9331" description="Defeat the Exile Heavy Enforcer" dial="Cause and effect! You stand in our way, so you get deleted!" />
+    <objective5 command="TALK" idNpc="9252" description="Ensure Sati's sunrise routine completes uninterrupted" dial="The sun came up anyway. See? The light is stronger than their guns. Thank you, redpill." />
+    <objective6 command="TALK" idNpc="9300" description="Report the sanctuary defense back to the Oracle" dial="As long as that little girl can paint the sunrise, there is still hope for tomorrow. But the real storm is gathering." />
+  </data>
+</mission>
