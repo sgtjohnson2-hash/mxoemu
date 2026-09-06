@@ -306,39 +306,47 @@ void BotManager::Update()
         try {
             double minDistSq = 999999999999.0;
             
-            if (!activePlayers.empty()) {
-                float botX = bot->GetSpawnX();
-                float botY = bot->GetSpawnY();
-                float botZ = bot->GetSpawnZ();
-                PlayerObject* botPo = BotGetPlayer(bot->GetPlayerGoId());
-                if (botPo) {
-                    botX = botPo->getPosition().x;
-                    botY = botPo->getPosition().y;
-                    botZ = botPo->getPosition().z;
-                }
+            if (activePlayers.empty())
+            {
+                // In unpopulated sectors, keep bots alive in persistent macro-simulation
+                if (bot->IsInCombat() || bot->IsPanicking())
+                    bot->SetLOD(ExecutionLOD::APPROACH_AREA);
+                else
+                    bot->SetLOD(ExecutionLOD::BACKGROUND_AREA);
+                return;
+            }
 
-                // Use SpatialGrid for O(1) nearby client lookup
-                auto nearbyClients = sSpatialGrid.GetClientsInRadius(botX, botZ);
-                for (GameClient* gc : nearbyClients)
+            float botX = bot->GetSpawnX();
+            float botY = bot->GetSpawnY();
+            float botZ = bot->GetSpawnZ();
+            PlayerObject* botPo = BotGetPlayer(bot->GetPlayerGoId());
+            if (botPo) {
+                botX = botPo->getPosition().x;
+                botY = botPo->getPosition().y;
+                botZ = botPo->getPosition().z;
+            }
+
+            // Use SpatialGrid for O(1) nearby client lookup
+            auto nearbyClients = sSpatialGrid.GetClientsInRadius(botX, botZ);
+            for (GameClient* gc : nearbyClients)
+            {
+                if (!gc) continue;
+                uint32 goId = gc->GetPlayerGoId();
+                if (goId == 0 || goId >= 9000000) continue; // Skip bots
+                
+                PlayerObject* p = sObjMgr.getGOPtrSafe(goId);
+                if (p)
                 {
-                    if (!gc) continue;
-                    uint32 goId = gc->GetPlayerGoId();
-                    if (goId == 0 || goId >= 9000000) continue; // Skip bots
-                    
-                    PlayerObject* p = sObjMgr.getGOPtrSafe(goId);
-                    if (p)
-                    {
-                        double distSq = p->getPosition().DistanceSq(botX, botY, botZ);
-                        if (distSq < minDistSq)
-                            minDistSq = distSq;
-                    }
+                    double distSq = p->getPosition().DistanceSq(botX, botY, botZ);
+                    if (distSq < minDistSq)
+                        minDistSq = distSq;
                 }
             }
 
             // Apply Spatial LOD in world units (1m = 100 units)
             // ACTIVE_VIEWPORT: < 50m (5,000 units) -> 4Hz Tick (250ms)
             // APPROACH_AREA:  50m - 200m (20,000 units) -> 1Hz Tick (1000ms)
-            // BACKGROUND_AREA: > 200m -> 0Hz Tick (skip logic)
+            // BACKGROUND_AREA: > 200m -> 0.28Hz Macro-Tick (3500ms) - continuous world persistence
             ExecutionLOD targetLOD = ExecutionLOD::BACKGROUND_AREA;
             
             const double activeRadiusSq = 5000.0 * 5000.0;     // 50m
@@ -361,12 +369,9 @@ void BotManager::Update()
         } catch (...) {}
     });
 
-    //std::cout << "DEBUG_TRACER: Starting sequential bot loop" << std::endl;
+    // Sequential bot update execution
     for (size_t i = 0; i < botsCopy.size(); i++)
     {
-        //if (i % 500 == 0) {
-        //    std::cout << "DEBUG_TRACER: Processing bot " << i << " of " << botsCopy.size() << std::endl;
-        //}
         auto bot = botsCopy[i];
         ExecutionLOD targetLOD = bot->GetLOD();
         uint32 tickRate = 0;
@@ -374,13 +379,15 @@ void BotManager::Update()
             tickRate = 250;
         else if (targetLOD == ExecutionLOD::APPROACH_AREA)
             tickRate = 1000;
+        else if (targetLOD == ExecutionLOD::BACKGROUND_AREA)
+            tickRate = 3500; // Continuous macro-simulation keeps world active when unobserved
 
         if (tickRate > 0 && (now - bot->GetLastLodTick() >= tickRate))
         {
             float botDeltaSeconds = 0.033f;
             if (bot->GetLastLodTick() != 0) {
                 botDeltaSeconds = (now - bot->GetLastLodTick()) / 1000.0f;
-                if (botDeltaSeconds > 1.0f) botDeltaSeconds = 1.0f; // Cap at 1.0s to prevent explosion
+                if (botDeltaSeconds > 3.5f) botDeltaSeconds = 3.5f;
             }
 
             if (bot && bot->GetPlayerGoId() != 0)
