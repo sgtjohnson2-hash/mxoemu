@@ -120,7 +120,7 @@ void MarginSocket::ProcessData( const byte *buf,size_t len )
 
 	byte firstByte;
 	packetContents >> firstByte;
-	if (firstByte >= CERT_ConnectRequest && firstByte <= CERT_NewSessionKey)
+	if (firstByte == CERT_ConnectRequest && packetContents.remaining() >= 2)
 	{
 		uint16 firstShort;
 		packetContents >> firstShort;
@@ -130,17 +130,34 @@ void MarginSocket::ProcessData( const byte *buf,size_t len )
 			encrypted = false;
 		}
 	}
-	//reset position (since we just read 3 bytes)
+	else if (firstByte == CERT_ChallengeResponse && len == 17)
+	{
+		encrypted = false;
+	}
+	else if (!m_tfEngine.IsValid())
+	{
+		encrypted = false;
+	}
+	//reset position
 	packetContents.rpos(0);
 
 	ByteBuffer packetData;
 
 	if (encrypted == true && m_tfEngine.IsValid())
 	{
-		TwofishEncryptedPacket packetTodecrypt(packetContents,m_tfEngine);
-		packetData = packetTodecrypt;
+		try
+		{
+			TwofishEncryptedPacket packetTodecrypt(packetContents,m_tfEngine);
+			packetData = packetTodecrypt;
 
-		DEBUG_LOG(format("Margin Decrypted |%1%|") % Bin2Hex(packetData) );
+			DEBUG_LOG(format("Margin Decrypted |%1%|") % Bin2Hex(packetData) );
+		}
+		catch (std::exception &e)
+		{
+			ERROR_LOG(format("Margin Decrypt failed: %1%") % e.what());
+			SetCloseAndDelete(true);
+			return;
+		}
 	}
 	else
 	{
@@ -308,6 +325,10 @@ void MarginSocket::ProcessData( const byte *buf,size_t len )
 			else
 			{
 				ERROR_LOG("CERT_ChallengeResponse from client INcorrect!");
+				DEBUG_LOG(format("Expected challenge: |%1%|, Got: |%2%|")
+					% Bin2Hex(challenge, sizeof(challenge))
+					% Bin2Hex(clientsChallenge, sizeof(clientsChallenge)));
+				SetCloseAndDelete(true);
 				return;
 			}
 
