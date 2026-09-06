@@ -20,6 +20,8 @@ services:
     restart: unless-stopped
     ports:
       - "80:80"
+    volumes:
+      - ./Server/PatchServer/patch_data:/app/patch_data:ro
 
   reality-server:
     build:
