@@ -51,12 +51,12 @@ MarginSocket::MarginSocket(ISocketHandler& h) : TCPVarLenSocket(h)
 	readyForUdp = false;
 //	this->SetWillBeHalfClosed(true);
 
-	INFO_LOG("Margin socket constructed");
+	DEBUG_LOG("Margin socket constructed");
 }
 
 MarginSocket::~MarginSocket()
 {
-	INFO_LOG("Margin socket deconstructed");
+	DEBUG_LOG("Margin socket deconstructed");
 }
 
 void MarginSocket::OnDisconnect( short info, int code )
@@ -65,7 +65,7 @@ void MarginSocket::OnDisconnect( short info, int code )
 		udpClient->Invalidate();
 */
 
-	INFO_LOG(format("Margin socket with %1% disconnected") % GetRemoteSocketAddress()->Convert(true));
+	DEBUG_LOG(format("Margin socket with %1% disconnected") % GetRemoteSocketAddress()->Convert(true));
 }
 
 void MarginSocket::SendCrypted( TwofishEncryptedPacket &cryptedPacket )

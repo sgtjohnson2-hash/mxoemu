@@ -1256,8 +1256,14 @@ int SocketHandler::ISocketHandler_Select(struct timeval *tsel)
 			LogError(NULL, "SocketHandler::Select", err, StrError(err), LOG_LEVEL_ERROR);
 			break;
 		}
+#ifdef _WIN32
+		if (err != WSAEINTR)
+#else
+		if (err != EBADF && err != EINTR)
 #endif
-		printf("error on select(): %d %s\n", Errno, StrError(err));
+		{
+			printf("error on select(): %d %s\n", Errno, StrError(err));
+		}
 	}
 	else
 	if (!n) // timeout
