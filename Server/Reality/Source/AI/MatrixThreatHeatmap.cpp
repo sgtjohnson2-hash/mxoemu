@@ -254,7 +254,7 @@ void MatrixThreatHeatmap::TriggerEscalationResponse(int gx, int gz, EscalationTi
                 po->setCurrentHealth(4000);
 
                 targetBot->Say("Agent Johnson: Anomaly detected at coordinates. Stand down. Your code has been revoked.");
-                sGame.AnnounceStateUpdateNear(wx, wz, 20000.0f, std::make_shared<EmoteMsg>(po->getGoId(), 43, 1));
+                sGame.AnnounceStateUpdateNear(wx, wz, 20000.0f, msgBaseClassPtr(new EmoteMsg(po->getGoId(), 43, 1)));
                 overwritten = true;
                 break;
             }
@@ -302,7 +302,7 @@ void MatrixThreatHeatmap::TriggerEscalationResponse(int gx, int gz, EscalationTi
             for (auto goId : allGOs) {
                 PlayerObject* p = sObjMgr.getGOPtr(goId);
                 if (p && !p->getClient().isBot()) {
-                    p->getClient().QueueCommand(std::make_shared<SystemChatMsg>(alert));
+                    p->getClient().QueueCommand(msgBaseClassPtr(new SystemChatMsg(alert)));
                 }
             }
             break;
@@ -366,7 +366,7 @@ void MatrixThreatHeatmap::TriggerEscalationResponse(int gx, int gz, EscalationTi
             for (auto goId : allGOs) {
                 PlayerObject* p = sObjMgr.getGOPtr(goId);
                 if (p && !p->getClient().isBot()) {
-                    p->getClient().QueueCommand(std::make_shared<SystemChatMsg>(alert));
+                    p->getClient().QueueCommand(msgBaseClassPtr(new SystemChatMsg(alert)));
                 }
             }
             break;
