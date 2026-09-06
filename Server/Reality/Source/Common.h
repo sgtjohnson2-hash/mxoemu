@@ -226,11 +226,12 @@ using std::list;
 using std::map;
 using std::string;
 
-#if COMPILER == COMPILER_MICROSOFT && _MSC_VER >= 1900
+#if (COMPILER == COMPILER_MICROSOFT && _MSC_VER >= 1900) || (__cplusplus >= 201103L) || defined(__GNUC__) || defined(__clang__)
 #include <memory>
 using std::shared_ptr;
 using std::make_shared;
 using std::dynamic_pointer_cast;
+using std::static_pointer_cast;
 #include <unordered_map>
 using std::unordered_map;
 #elif COMPILER == COMPILER_MICROSOFT && _MSC_VER >= 1600 && _HAS_TR1

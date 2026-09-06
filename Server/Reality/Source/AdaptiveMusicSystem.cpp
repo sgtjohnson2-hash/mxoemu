@@ -100,6 +100,6 @@ void AdaptiveMusicSystem::sendMusicCommand(uint32 playerGoId, const std::string&
         float dilation = po->GetTimeDilation();
         std::string payload = (format("[CEF_PAYLOAD] {\"system\":\"audio\", \"action\":\"play\", \"stem\":\"%1%_%2%_%3%\", \"dilation\": %4%}") 
             % family % stemType % index % dilation).str();
-        po->getClient().QueueCommand(make_shared<SystemChatMsg>(payload));
+        po->getClient().QueueCommand(std::make_shared<SystemChatMsg>(payload));
     }
 }

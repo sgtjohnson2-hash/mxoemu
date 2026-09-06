@@ -354,7 +354,7 @@ NodeStatus ActionEngageTarget::Tick(BotClient* bot)
         myPos.z += dz * 150.0f;
         
         me->setPosition(myPos);
-        sGame.AnnounceStateUpdate(&me->getClient(), make_shared<PositionStateMsg>(bot->GetPlayerGoId()));
+        sGame.AnnounceStateUpdate(&me->getClient(), std::make_shared<PositionStateMsg>(bot->GetPlayerGoId()));
         return NodeStatus::RUNNING; // Still moving
     }
     
@@ -482,7 +482,7 @@ NodeStatus ActionFlee::Tick(BotClient* bot)
         if (distToHardline < 50.0f) // Close enough to the hardline to jack-out
         {
             DEBUG_LOG(format("Hacker %1% jacked out successfully.") % me->getHandle());
-            sGame.BroadcastNear(me->getPosition().x, me->getPosition().z, 200.0f, make_shared<JackoutEffectMsg>(me->getGoId(), true)->toBuf(), false);
+            sGame.BroadcastNear(me->getPosition().x, me->getPosition().z, 200.0f, std::make_shared<JackoutEffectMsg>(me->getGoId(), true)->toBuf(), false);
             bot->Invalidate(); // Despawn
             me->saveDataToDB();
             me->die(0); // Trigger death state to despawn safely
@@ -568,7 +568,7 @@ NodeStatus ActionHyperjump::Tick(BotClient* bot)
         {
             bot->Say("Operator, get me out of here!");
             DEBUG_LOG(format("Agent %1% jacked out successfully.") % me->getHandle());
-            sGame.BroadcastNear(me->getPosition().x, me->getPosition().z, 200.0f, make_shared<JackoutEffectMsg>(me->getGoId(), true)->toBuf(), false);
+            sGame.BroadcastNear(me->getPosition().x, me->getPosition().z, 200.0f, std::make_shared<JackoutEffectMsg>(me->getGoId(), true)->toBuf(), false);
             bot->Invalidate(); // Despawn and Serialize
             me->saveDataToDB();
             me->die(0); // Trigger death state to despawn
