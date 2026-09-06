@@ -109,6 +109,8 @@ typedef unsigned char byte;
 #else
 #define stricmp strcasecmp
 #define strnicmp strncasecmp
+#define _stricmp strcasecmp
+#define _strnicmp strncasecmp
 #endif
 
 // Short for unsigned long

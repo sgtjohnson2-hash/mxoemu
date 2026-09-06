@@ -6,9 +6,9 @@ services:
       MYSQL_ROOT_PASSWORD: reality_root_password
       MYSQL_DATABASE: reality
       MYSQL_USER: reality
-      MYSQL_PASSWORD: reality_password
+      MYSQL_PASSWORD: reality
     ports:
-      - "127.0.0.1:3307:3306"
+      - "3307:3306"
     volumes:
       - db_data:/var/lib/mysql
       - ./Server/Reality/SQL:/docker-entrypoint-initdb.d:ro
@@ -38,7 +38,7 @@ services:
       - DB_HOST=database
       - DB_PORT=3306
       - DB_USER=reality
-      - DB_PASSWORD=reality_password
+      - DB_PASSWORD=reality
       - DB_NAME=reality
       - WORLD_NAME=Reality
     volumes:

@@ -162,8 +162,21 @@ bool Master::_StartDB()
  	if(result == false)
 	{
 		CRITICAL_LOG("sql: One or more parameters were missing from Database directive.");
+	}
+
+	if (const char* envHost = getenv("DB_HOST")) hostname = envHost;
+	if (const char* envPort = getenv("DB_PORT")) port = atoi(envPort);
+	if (const char* envUser = getenv("DB_USER")) username = envUser;
+	if (const char* envPass = getenv("DB_PASSWORD")) password = envPass;
+	if (const char* envName = getenv("DB_NAME")) database = envName;
+
+	if (hostname.empty() || username.empty() || database.empty() || port == 0)
+	{
+		CRITICAL_LOG("sql: Database configuration is incomplete. Exiting.");
 		return false;
 	}
+
+	INFO_LOG((format("Connecting to MySQL Database at %1%:%2% (DB: %3%, User: %4%)...") % hostname % port % database % username).str().c_str());
 
 	// Initialize it
 	if(!sDatabase.Initialize(hostname.c_str(), (unsigned int)port, username.c_str(),
