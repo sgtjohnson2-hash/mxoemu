@@ -1,4 +1,4 @@
-﻿cmake_minimum_required(VERSION 3.20)
+cmake_minimum_required(VERSION 3.20)
 project(Reality LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 20)
@@ -75,7 +75,6 @@ add_executable(Reality ${REALITY_SRC} ${REALITY_INC})
 target_include_directories(Reality PRIVATE
     "$ENV{BOOST_ROOT}"
     "E:/Games/The Matrix Online/boost/boost_1_84_0"
-    "../Dependencies10/CryptoPP"
     "../Dependencies10/Sockets/Project.net/Include"
     "../Dependencies10/Sockets"
     "../Dependencies10/MySQL/include"
@@ -86,8 +85,10 @@ target_include_directories(Reality PRIVATE
     "Source"
 )
 
-if(NOT WIN32)
-    target_include_directories(Reality PRIVATE "/usr/include/crypto++")
+if(WIN32)
+    target_include_directories(Reality PRIVATE "../Dependencies10/CryptoPP")
+else()
+    target_include_directories(Reality PRIVATE "/usr/include/crypto++" "/usr/include/cryptopp")
 endif()
 
 if(WIN32)
