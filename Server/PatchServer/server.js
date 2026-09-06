@@ -1,12 +1,83 @@
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
+const crypto = require('crypto');
+
+let mysql;
+try {
+    mysql = require('mysql2/promise');
+} catch (e) {
+    console.log('[PatchServer] mysql2 not yet installed in local environment, will be available in container.');
+}
 
 const PORT = 80;
 const PATCH_DIR = path.join(__dirname, 'patch_data');
 
 if (!fs.existsSync(PATCH_DIR)) {
     fs.mkdirSync(PATCH_DIR, { recursive: true });
+}
+
+// Database Connection Pool (communicates across Docker internal network)
+const DB_HOST = process.env.DB_HOST || 'database';
+const DB_PORT = parseInt(process.env.DB_PORT || '3306', 10);
+const DB_USER = process.env.DB_USER || 'reality';
+const DB_PASSWORD = process.env.DB_PASSWORD || 'reality';
+const DB_NAME = process.env.DB_NAME || 'reality';
+
+let pool = null;
+if (mysql) {
+    pool = mysql.createPool({
+        host: DB_HOST,
+        port: DB_PORT,
+        user: DB_USER,
+        password: DB_PASSWORD,
+        database: DB_NAME,
+        waitForConnections: true,
+        connectionLimit: 10,
+        queueLimit: 0
+    });
+}
+
+// Password Hashing Functions matching AuthServer C++
+function sha1(str) {
+    return crypto.createHash('sha1').update(str).digest('hex').toLowerCase();
+}
+
+function hashPassword(salt, password) {
+    const thingToHash = sha1(salt) + sha1(password);
+    return sha1(thingToHash);
+}
+
+function generateSalt(length = 8) {
+    const chars = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!@#$%^&*()_+-=';
+    let salt = '';
+    for (let i = 0; i < length; i++) {
+        salt += chars.charAt(Math.floor(Math.random() * chars.length));
+    }
+    return salt;
+}
+
+// Helper to parse JSON body
+function parseJsonBody(req) {
+    return new Promise((resolve, reject) => {
+        let body = '';
+        req.on('data', chunk => {
+            body += chunk.toString();
+            if (body.length > 1e6) { // 1MB limit
+                req.destroy();
+                reject(new Error('Body too large'));
+            }
+        });
+        req.on('end', () => {
+            if (!body) return resolve({});
+            try {
+                resolve(JSON.parse(body));
+            } catch (err) {
+                reject(err);
+            }
+        });
+        req.on('error', reject);
+    });
 }
 
 // Generate default patch manifest if not present
@@ -35,10 +106,10 @@ try {
         fs.writeFileSync(manifestJsonPath, JSON.stringify(defaultManifest, null, 2));
     }
 } catch (err) {
-    console.log('[PatchServer] Notice: manifest writing skipped (read-only filesystem or permissions):', err.message);
+    console.log('[PatchServer] Notice: manifest writing skipped:', err.message);
 }
 
-const server = http.createServer((req, res) => {
+const server = http.createServer(async (req, res) => {
     const urlObj = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
     const pathname = decodeURIComponent(urlObj.pathname);
 
@@ -46,8 +117,8 @@ const server = http.createServer((req, res) => {
 
     // Enable CORS for web/launcher clients
     res.setHeader('Access-Control-Allow-Origin', '*');
-    res.setHeader('Access-Control-Allow-Methods', 'GET, HEAD, OPTIONS');
-    res.setHeader('Access-Control-Allow-Headers', 'Range, Content-Type');
+    res.setHeader('Access-Control-Allow-Methods', 'GET, HEAD, POST, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Range, Content-Type, Authorization');
 
     if (req.method === 'OPTIONS') {
         res.writeHead(204);
@@ -85,7 +156,8 @@ const server = http.createServer((req, res) => {
         <p>Host: <span class="stat">15.204.82.250</span></p>
         <p>Auth Daemon: <span class="stat">Port 11000 TCP [ONLINE]</span></p>
         <p>Game World: <span class="stat">Port 10000 TCP/UDP [ONLINE]</span></p>
-        <p>Database: <span class="stat">Port 3307 TCP [ONLINE]</span></p>
+        <p>REST API: <span class="stat">Port 80 HTTP [SECURED]</span></p>
+        <p>Database: <span class="stat">Isolated Internal Network [ENFORCED]</span></p>
     </div>
     <div class="card">
         <h3>GAME CLIENT DOWNLOAD</h3>
@@ -99,48 +171,185 @@ const server = http.createServer((req, res) => {
         return;
     }
 
-    // 2. Health & Status Telemetry API
-    if (pathname === '/status' || pathname === '/health') {
-        res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({
-            status: "online",
-            server: "Reality",
-            version: "7.6005",
-            uptime_seconds: Math.floor(process.uptime()),
-            endpoints: {
-                auth: "15.204.82.250:11000",
-                game: "15.204.82.250:10000",
-                database: "15.204.82.250:3307",
-                patch: "http://15.204.82.250"
-            },
-            timestamp: new Date().toISOString()
-        }, null, 2));
+    // 2. REST API: Register Account
+    if (pathname === '/api/register' && req.method === 'POST') {
+        res.setHeader('Content-Type', 'application/json');
+        try {
+            const data = await parseJsonBody(req);
+            const username = (data.username || '').trim();
+            const password = data.password || '';
+
+            if (!username || username.length < 3 || username.length > 24) {
+                res.writeHead(400);
+                res.end(JSON.stringify({ success: false, message: 'Username must be between 3 and 24 characters.' }));
+                return;
+            }
+            if (!/^[a-zA-Z0-9_-]+$/.test(username)) {
+                res.writeHead(400);
+                res.end(JSON.stringify({ success: false, message: 'Username can only contain letters, numbers, underscores, and hyphens.' }));
+                return;
+            }
+            if (!password || password.length < 3) {
+                res.writeHead(400);
+                res.end(JSON.stringify({ success: false, message: 'Password must be at least 3 characters.' }));
+                return;
+            }
+
+            if (!pool) {
+                res.writeHead(503);
+                res.end(JSON.stringify({ success: false, message: 'Database service unavailable.' }));
+                return;
+            }
+
+            const [existing] = await pool.execute('SELECT userId FROM users WHERE LOWER(username) = LOWER(?) LIMIT 1', [username]);
+            if (existing.length > 0) {
+                res.writeHead(409);
+                res.end(JSON.stringify({ success: false, message: 'Operative handle already registered.' }));
+                return;
+            }
+
+            const salt = generateSalt(8);
+            const pHash = hashPassword(salt, password);
+            const now = Math.floor(Date.now() / 1000);
+
+            await pool.execute(
+                'INSERT INTO users (username, passwordSalt, passwordHash, timeCreated) VALUES (?, ?, ?, ?)',
+                [username, salt, pHash, now]
+            );
+
+            console.log(`[PatchServer] Successfully registered operative: ${username}`);
+            res.writeHead(201);
+            res.end(JSON.stringify({ success: true, message: `Account for ${username} created successfully.` }));
+        } catch (err) {
+            console.error('[PatchServer] Registration error:', err.message);
+            res.writeHead(500);
+            res.end(JSON.stringify({ success: false, message: 'Internal server error during registration.' }));
+        }
         return;
     }
 
-    // 3. Version endpoint
+    // 3. REST API: Verify Login
+    if (pathname === '/api/login' && req.method === 'POST') {
+        res.setHeader('Content-Type', 'application/json');
+        try {
+            const data = await parseJsonBody(req);
+            const username = (data.username || '').trim();
+            const password = data.password || '';
+
+            if (!username || !password) {
+                res.writeHead(400);
+                res.end(JSON.stringify({ success: false, message: 'Missing credentials.' }));
+                return;
+            }
+
+            if (!pool) {
+                res.writeHead(503);
+                res.end(JSON.stringify({ success: false, message: 'Database service unavailable.' }));
+                return;
+            }
+
+            const [rows] = await pool.execute(
+                'SELECT userId, username, passwordSalt, passwordHash FROM users WHERE LOWER(username) = LOWER(?) LIMIT 1',
+                [username]
+            );
+
+            if (rows.length === 0) {
+                res.writeHead(401);
+                res.end(JSON.stringify({ success: false, message: 'Operative not found.' }));
+                return;
+            }
+
+            const user = rows[0];
+            const computedHash = hashPassword(user.passwordSalt, password);
+
+            if (computedHash.toLowerCase() !== user.passwordHash.toLowerCase()) {
+                res.writeHead(401);
+                res.end(JSON.stringify({ success: false, message: 'Invalid passcode.' }));
+                return;
+            }
+
+            res.writeHead(200);
+            res.end(JSON.stringify({
+                success: true,
+                userId: user.userId,
+                username: user.username,
+                message: 'Authentication verified.'
+            }));
+        } catch (err) {
+            console.error('[PatchServer] Login error:', err.message);
+            res.writeHead(500);
+            res.end(JSON.stringify({ success: false, message: 'Internal server error during authentication.' }));
+        }
+        return;
+    }
+
+    // 4. REST API: Server Stats & Telemetry
+    if (pathname === '/api/stats' || pathname === '/status' || pathname === '/health') {
+        res.setHeader('Content-Type', 'application/json');
+        try {
+            let usersCount = 0;
+            let charactersCount = 0;
+            let dbConnected = false;
+
+            if (pool) {
+                try {
+                    const [uRows] = await pool.query('SELECT COUNT(*) AS cnt FROM users');
+                    usersCount = uRows[0].cnt;
+                    const [cRows] = await pool.query('SELECT COUNT(*) AS cnt FROM characters');
+                    charactersCount = cRows[0].cnt;
+                    dbConnected = true;
+                } catch (dbErr) {
+                    console.error('[PatchServer] DB poll error:', dbErr.message);
+                }
+            }
+
+            res.writeHead(200);
+            res.end(JSON.stringify({
+                status: "online",
+                server: "Reality",
+                version: "7.6005",
+                uptime_seconds: Math.floor(process.uptime()),
+                database: {
+                    connected: dbConnected,
+                    registered_operatives: usersCount,
+                    total_characters: charactersCount
+                },
+                endpoints: {
+                    auth: "15.204.82.250:11000",
+                    game: "15.204.82.250:10000",
+                    patch: "http://15.204.82.250"
+                },
+                timestamp: new Date().toISOString()
+            }, null, 2));
+        } catch (err) {
+            res.writeHead(500);
+            res.end(JSON.stringify({ status: "error", message: err.message }));
+        }
+        return;
+    }
+
+    // 5. Version endpoint
     if (pathname === '/version.txt' || pathname === '/version') {
         res.writeHead(200, { 'Content-Type': 'text/plain' });
         res.end("7.6005\n");
         return;
     }
 
-    // 4. Patch notes endpoint
+    // 6. Patch notes endpoint
     if (pathname === '/patch_notes.txt' || pathname === '/patchnotes') {
         res.writeHead(200, { 'Content-Type': 'text/plain' });
-        res.end("The Matrix Online - Reality Server v7.6005\n- Full live server synchronization\n- High throughput UDP socket buffers\n- Crash-resilient InnoDB database engine\n- Active Pedestrian Ecology & Faction War\n");
+        res.end("The Matrix Online - Reality Server v7.6005\n- Full live server synchronization\n- High throughput UDP socket buffers\n- Secured internal MariaDB engine\n- Active Pedestrian Ecology & Faction War\n");
         return;
     }
 
-    // 5. Patch Manifest API
+    // 7. Patch Manifest API
     if (pathname === '/patch/patch_manifest.json' || pathname === '/patch_manifest.json' || pathname === '/manifest.json') {
         res.writeHead(200, { 'Content-Type': 'application/json' });
         fs.createReadStream(manifestJsonPath).pipe(res);
         return;
     }
 
-    // 3. Resolve target file in patch_data
-    // Map /client/... or /download/... or direct paths
+    // 8. Resolve target file in patch_data
     let relativePath = pathname;
     if (relativePath.startsWith('/client/')) relativePath = relativePath.replace('/client/', 'client/');
     else if (relativePath.startsWith('/download/')) relativePath = relativePath.replace('/download/', 'client/');
@@ -149,7 +358,6 @@ const server = http.createServer((req, res) => {
     const safePath = path.normalize(relativePath).replace(/^(\.\.[\/\\])+/, '');
     let targetFile = path.join(PATCH_DIR, safePath);
 
-    // If not found in safePath, check directly inside client/
     if (!fs.existsSync(targetFile)) {
         const clientCandidate = path.join(PATCH_DIR, 'client', path.basename(safePath));
         if (fs.existsSync(clientCandidate)) {
@@ -157,7 +365,6 @@ const server = http.createServer((req, res) => {
         }
     }
 
-    // Legacy fallback for .zcf / .mfst
     if (pathname.toLowerCase().includes('.zcf') || pathname.toLowerCase().endsWith('.mfst')) {
         const signedManifestPath = path.join(__dirname, '..', '_patchcf.prev.zcf');
         if (fs.existsSync(signedManifestPath)) {
@@ -168,7 +375,6 @@ const server = http.createServer((req, res) => {
     }
 
     if (!fs.existsSync(targetFile) || !fs.statSync(targetFile).isFile()) {
-        console.log(`[PatchServer] 404 Not Found: ${targetFile}`);
         res.writeHead(404, { 'Content-Type': 'text/plain' });
         res.end('404 File Not Found');
         return;
@@ -186,16 +392,14 @@ const server = http.createServer((req, res) => {
     else if (ext === '.7z') contentType = 'application/x-7z-compressed';
     else if (ext === '.zip') contentType = 'application/zip';
 
-    // Support HTTP Range Requests (206 Partial Content) for resilient, resumable downloads
+    // Support HTTP Range Requests (206 Partial Content)
     if (range) {
         const parts = range.replace(/bytes=/, "").split("-");
         const start = parseInt(parts[0], 10);
         const end = parts[1] ? parseInt(parts[1], 10) : fileSize - 1;
 
         if (start >= fileSize || end >= fileSize) {
-            res.writeHead(416, {
-                'Content-Range': `bytes */${fileSize}`
-            });
+            res.writeHead(416, { 'Content-Range': `bytes */${fileSize}` });
             return res.end();
         }
 
@@ -211,7 +415,6 @@ const server = http.createServer((req, res) => {
         });
 
         fileStream.on('error', (err) => {
-            console.error(`[PatchServer] Stream error: ${err.message}`);
             if (!res.headersSent) res.writeHead(500);
             res.end();
         });
@@ -227,7 +430,6 @@ const server = http.createServer((req, res) => {
 
         const fullStream = fs.createReadStream(targetFile);
         fullStream.on('error', (err) => {
-            console.error(`[PatchServer] Stream error: ${err.message}`);
             if (!res.headersSent) res.writeHead(500);
             res.end();
         });
@@ -242,5 +444,5 @@ server.on('error', (e) => {
 });
 
 server.listen(PORT, '0.0.0.0', () => {
-    console.log(`[PatchServer] The Matrix Online Patch & Client Distribution Server running on port ${PORT}`);
+    console.log(`[PatchServer] The Matrix Online Patch & API Server running on port ${PORT}`);
 });
