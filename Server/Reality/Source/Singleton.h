@@ -21,15 +21,15 @@
 //
 // ---------------------------------------------------------------------------
 //
-// ***************************************************************************
-
 #ifndef MXOSIM_SINGLETON_H
 #define MXOSIM_SINGLETON_H
 
 #include "Errors.h"
 #include <typeinfo>
 #include <iostream>
+#if defined(_WIN32) || defined(WIN32)
 #include "StackWalker.h"
+#endif
 
 /// Should be placed in the appropriate .cpp file somewhere
 #define initialiseSingleton( type ) \

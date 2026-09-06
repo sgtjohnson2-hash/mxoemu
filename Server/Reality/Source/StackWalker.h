@@ -27,7 +27,7 @@
 // so we need not to check the version (because we only support _MSC_VER >= 1100)!
 #pragma once
 
-//#include <windows.h>
+#if defined(_WIN32) || defined(WIN32)
 
 // special defines for VC5/6 (if no actual PSDK is installed):
 #if _MSC_VER < 1300
@@ -203,3 +203,4 @@ protected:
 	RtlCaptureContext(&c); \
 } while(0);
 #endif
+#endif // _WIN32
