@@ -116,9 +116,10 @@ void GameClient::HandlePacket( const char *pData, size_t nLength )
 		}
 
 		vector<MarginSocket*> marginConns = sMargin.GetSocketsForCharacterUID(m_characterUID);
+		INFO_LOG(format("InitialUDPPacket(%1%): Received for charUID %2%, found %3% candidate margin sockets") % Address() % m_characterUID % marginConns.size());
 		if (marginConns.size() < 1)
 		{
-			ERROR_LOG(format("InitialUDPPacket(%1%): Margin session for character not found") % Address() );
+			ERROR_LOG(format("InitialUDPPacket(%1%): Margin session for character not found (GetSocketsForCharacterUID returned 0 for charUID %2%)") % Address() % m_characterUID );
 			Invalidate();
 			return;
 		}
@@ -144,14 +145,15 @@ void GameClient::HandlePacket( const char *pData, size_t nLength )
 			vector<byte> encryptedSessionId(packetData.remaining());
 			packetData.read(encryptedSessionId);
 			ByteBuffer decryptedData = testTfEngine.Decrypt(&encryptedSessionId[0], encryptedSessionId.size(), false);
-			if (decryptedData.size() != TwofishCryptMethod::BLOCKSIZE)
-			{
-				continue;
-			}
 			uint32 recoveredSessionId = 0;
-			decryptedData >> recoveredSessionId;
+			if (decryptedData.size() >= sizeof(uint32))
+			{
+				decryptedData >> recoveredSessionId;
+			}
+			INFO_LOG(format("InitialUDPPacket(%1%): Candidate [%2%] - CandidateSessionId=%3% (0x%4$08X), DecryptedSize=%5%, RecoveredSessionId=%6% (0x%7$08X)")
+				% Address() % i % candidateSessionId % candidateSessionId % decryptedData.size() % recoveredSessionId % recoveredSessionId);
 
-			if (recoveredSessionId == candidateSessionId)
+			if (decryptedData.size() == TwofishCryptMethod::BLOCKSIZE && recoveredSessionId == candidateSessionId)
 			{
 				matchedMarginConn = candidate;
 				m_sessionId = candidateSessionId;
@@ -163,7 +165,7 @@ void GameClient::HandlePacket( const char *pData, size_t nLength )
 
 		if (!matchedMarginConn)
 		{
-			ERROR_LOG(format("InitialUDPPacket(%1%): Margin session for character not found") % Address() );
+			ERROR_LOG(format("InitialUDPPacket(%1%): Margin session for character not found (no matched session across %2% candidates)") % Address() % marginConns.size() );
 			Invalidate();
 			return;
 		}

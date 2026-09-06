@@ -52,7 +52,7 @@ vector<MarginSocket*> MarginHandler::FindByCharacterUID( uint64 charUID )
 		if (margSock == NULL)
 			continue;
 
-		if (margSock->GetCharUID() == charUID)
+		if (margSock->GetCharUID() == charUID || (margSock->GetWorldCharId() > 0 && margSock->GetWorldCharId() == (uint32)charUID))
 		{
 			tempVect.push_back(margSock);
 		}
