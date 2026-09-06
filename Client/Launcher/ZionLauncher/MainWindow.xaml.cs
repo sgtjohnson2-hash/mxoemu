@@ -123,6 +123,11 @@ namespace ZionLauncher
 
         private void Window_Loaded(object sender, RoutedEventArgs e)
         {
+            // Dynamic version labels
+            txtLoaderSubTitle.Text = $"THE MATRIX ONLINE // NEURAL BRIDGE LOADER v{CurrentLauncherVersion}";
+            txtConsoleSubTitle.Text = $"THE MATRIX ONLINE // REALITY REMASTER (v{CurrentLauncherVersion})";
+            txtLauncherVersionInfo.Text = $"CURRENT BUILD: v{CurrentLauncherVersion} (Active)";
+
             // 1. Setup Matrix Code Rain Animation
             VisualHost host = new VisualHost { Visual = _visual };
             MatrixCanvas.Children.Add(host);
@@ -149,6 +154,21 @@ namespace ZionLauncher
 
             // 4. Begin Startup Loader & Auto-Update sequence
             _ = InitializeStartupFlowAsync();
+        }
+
+        private void Window_Closing(object? sender, System.ComponentModel.CancelEventArgs e)
+        {
+            _isRainRunning = false;
+            CompositionTarget.Rendering -= OnMatrixCompositionRendering;
+            _diagTimer?.Stop();
+        }
+
+        private void Window_SizeChanged(object sender, SizeChangedEventArgs e)
+        {
+            if (e.NewSize.Width > 100 && e.NewSize.Height > 100)
+            {
+                InitializeMatrixColumns();
+            }
         }
 
         private void InitializeGlyphCache()
@@ -255,6 +275,7 @@ namespace ZionLauncher
         private void OnMatrixCompositionRendering(object? sender, EventArgs e)
         {
             if (!_isRainRunning || _cachedGlyphs == null || _rainColumns.Length == 0) return;
+            if (this.WindowState == WindowState.Minimized) return;
 
             RenderingEventArgs renderingArgs = (RenderingEventArgs)e;
             if (_lastRenderTime == TimeSpan.Zero)
@@ -386,6 +407,46 @@ namespace ZionLauncher
             catch { }
         }
 
+        public static bool TryParseNormalizedVersion(string? verStr, out Version version)
+        {
+            version = new Version(0, 0, 0, 0);
+            if (string.IsNullOrWhiteSpace(verStr)) return false;
+            verStr = verStr.Trim();
+            if (verStr.StartsWith('v') || verStr.StartsWith('V')) verStr = verStr[1..].Trim();
+            verStr = verStr.Split('-')[0].Split('+')[0].Trim();
+
+            var parts = verStr.Split('.');
+            if (parts.Length < 1) return false;
+
+            int major = 0, minor = 0, build = 0, revision = 0;
+            if (!int.TryParse(parts[0], out major)) return false;
+            if (parts.Length > 1 && !int.TryParse(parts[1], out minor)) return false;
+            if (parts.Length > 2 && !int.TryParse(parts[2], out build)) return false;
+            if (parts.Length > 3 && !int.TryParse(parts[3], out revision)) return false;
+
+            version = new Version(major, minor, build, revision);
+            return true;
+        }
+
+        public static Version NormalizeVersion(Version v)
+        {
+            return new Version(
+                v.Major >= 0 ? v.Major : 0,
+                v.Minor >= 0 ? v.Minor : 0,
+                v.Build >= 0 ? v.Build : 0,
+                v.Revision >= 0 ? v.Revision : 0);
+        }
+
+        public static bool IsRemoteVersionNewer(string? remoteVerStr, Version currentVer, out Version? parsedRemote)
+        {
+            parsedRemote = null;
+            if (!TryParseNormalizedVersion(remoteVerStr, out var remoteVer))
+                return false;
+
+            parsedRemote = remoteVer;
+            return NormalizeVersion(remoteVer) > NormalizeVersion(currentVer);
+        }
+
         private async Task CheckForLauncherUpdateAsync(bool isStartup)
         {
             string host = _currentServerIp;
@@ -393,45 +454,55 @@ namespace ZionLauncher
             string? remoteVerStr = null;
             string filename = "ZionLauncher.exe";
 
-            try
+            async Task<string?> TryFetchUrlAsync(string url, int timeoutSeconds)
             {
-                using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(4));
-
-                // Try 1: /launcher/version or /version.json
-                HttpResponseMessage? resp = null;
                 try
                 {
-                    resp = await _httpClient.GetAsync($"http://{host}/launcher/version", cts.Token);
+                    using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(timeoutSeconds));
+                    using var resp = await _httpClient.GetAsync(url, cts.Token);
+                    if (resp.IsSuccessStatusCode)
+                    {
+                        return await resp.Content.ReadAsStringAsync(cts.Token);
+                    }
                 }
-                catch
+                catch { }
+                return null;
+            }
+
+            try
+            {
+                // Endpoint 1: /launcher/version
+                string? json = await TryFetchUrlAsync($"http://{host}/launcher/version", 4);
+
+                // Endpoint 2: /version.json
+                if (string.IsNullOrEmpty(json))
+                {
+                    json = await TryFetchUrlAsync($"http://{host}/version.json", 4);
+                }
+
+                if (!string.IsNullOrEmpty(json))
                 {
                     try
                     {
-                        resp = await _httpClient.GetAsync($"http://{host}/version.json", cts.Token);
+                        using var doc = JsonDocument.Parse(json);
+                        if (doc.RootElement.TryGetProperty("version", out var vProp))
+                            remoteVerStr = vProp.GetString();
+                        if (doc.RootElement.TryGetProperty("downloadUrl", out var dProp))
+                            downloadUrl = dProp.GetString();
+                        if (doc.RootElement.TryGetProperty("filename", out var fProp))
+                            filename = fProp.GetString() ?? filename;
                     }
                     catch { }
                 }
 
-                if (resp != null && resp.IsSuccessStatusCode)
+                // Endpoint 3: patch_manifest.json fallback
+                if (string.IsNullOrEmpty(remoteVerStr))
                 {
-                    string json = await resp.Content.ReadAsStringAsync(cts.Token);
-                    using var doc = JsonDocument.Parse(json);
-                    if (doc.RootElement.TryGetProperty("version", out var vProp))
-                        remoteVerStr = vProp.GetString();
-                    if (doc.RootElement.TryGetProperty("downloadUrl", out var dProp))
-                        downloadUrl = dProp.GetString();
-                    if (doc.RootElement.TryGetProperty("filename", out var fProp))
-                        filename = fProp.GetString() ?? filename;
-                }
-                else
-                {
-                    // Try 2: manifest.json
-                    try
+                    string? mJson = await TryFetchUrlAsync($"http://{host}/patch/patch_manifest.json", 4);
+                    if (!string.IsNullOrEmpty(mJson))
                     {
-                        var mResp = await _httpClient.GetAsync($"http://{host}/patch/patch_manifest.json", cts.Token);
-                        if (mResp.IsSuccessStatusCode)
+                        try
                         {
-                            string mJson = await mResp.Content.ReadAsStringAsync(cts.Token);
                             using var mDoc = JsonDocument.Parse(mJson);
                             if (mDoc.RootElement.TryGetProperty("launcher", out var lProp))
                             {
@@ -443,17 +514,17 @@ namespace ZionLauncher
                                     filename = lf.GetString() ?? filename;
                             }
                         }
+                        catch { }
                     }
-                    catch { }
                 }
             }
             catch (Exception ex)
             {
-                Debug.WriteLine("[UpdateCheck] Network exception: " + ex.Message);
+                Debug.WriteLine("[UpdateCheck] Unexpected error: " + ex.Message);
             }
 
             // Evaluation
-            if (string.IsNullOrEmpty(remoteVerStr) || !Version.TryParse(remoteVerStr, out var remoteVer))
+            if (string.IsNullOrEmpty(remoteVerStr) || !TryParseNormalizedVersion(remoteVerStr, out var remoteVer))
             {
                 // Unreachable or offline fallback
                 if (isStartup)
@@ -475,7 +546,7 @@ namespace ZionLauncher
                 return;
             }
 
-            if (remoteVer > CurrentLauncherVersion)
+            if (NormalizeVersion(remoteVer) > NormalizeVersion(CurrentLauncherVersion))
             {
                 // Newer version available!
                 downloadUrl ??= $"/launcher/{filename}";
@@ -539,11 +610,16 @@ namespace ZionLauncher
             txtLoaderPercent.Text = "0%";
             txtLoaderSpeed.Text = "CONNECTING...";
 
-            string currentExe = Environment.ProcessPath 
+            string processPath = Environment.ProcessPath 
                 ?? Process.GetCurrentProcess().MainModule?.FileName 
                 ?? Path.Combine(AppContext.BaseDirectory, "ZionLauncher.exe");
 
-            string tempFile = currentExe + ".update.tmp";
+            string currentExe = Path.GetFileName(processPath).StartsWith("dotnet", StringComparison.OrdinalIgnoreCase)
+                ? Path.Combine(AppContext.BaseDirectory, "ZionLauncher.exe")
+                : processPath;
+
+            string targetDir = Path.GetDirectoryName(currentExe) ?? AppContext.BaseDirectory;
+            string tempFile = Path.Combine(targetDir, Path.GetFileName(currentExe) + ".update.tmp");
 
             string fullUrl = downloadUrl.StartsWith("http", StringComparison.OrdinalIgnoreCase)
                 ? downloadUrl
@@ -551,7 +627,8 @@ namespace ZionLauncher
 
             try
             {
-                using var response = await _httpClient.GetAsync(fullUrl, HttpCompletionOption.ResponseHeadersRead);
+                using var downloadClient = new HttpClient { Timeout = TimeSpan.FromMinutes(15) };
+                using var response = await downloadClient.GetAsync(fullUrl, HttpCompletionOption.ResponseHeadersRead);
                 response.EnsureSuccessStatusCode();
 
                 long? totalBytes = response.Content.Headers.ContentLength;
@@ -570,7 +647,7 @@ namespace ZionLauncher
                     await fileStream.WriteAsync(buffer.AsMemory(0, bytesRead));
                     totalDownloaded += bytesRead;
 
-                    if (sw.Elapsed - lastReport > TimeSpan.FromMilliseconds(150))
+                    if (sw.Elapsed - lastReport > TimeSpan.FromMilliseconds(100))
                     {
                         double dt = (sw.Elapsed - lastReport).TotalSeconds;
                         long bytesSince = totalDownloaded - lastBytes;
@@ -578,12 +655,12 @@ namespace ZionLauncher
 
                         double pct = totalBytes > 0 ? ((double)totalDownloaded / totalBytes.Value) * 100.0 : 0.0;
                         string eta = "--";
-                        if (totalBytes > 0 && speedMBps > 0.05)
+                        if (totalBytes > 0 && speedMBps > 0.02)
                         {
                             double remaining = totalBytes.Value - totalDownloaded;
                             double sec = remaining / (speedMBps * 1024.0 * 1024.0);
                             TimeSpan t = TimeSpan.FromSeconds(sec);
-                            eta = $"{t.Minutes}m {t.Seconds}s";
+                            eta = t.Hours > 0 ? $"{t.Hours}h {t.Minutes}m" : $"{t.Minutes}m {t.Seconds}s";
                         }
 
                         pbLoader.Value = Math.Min(100, Math.Max(0, pct));
@@ -607,22 +684,38 @@ namespace ZionLauncher
                 txtLoaderDetail.Text = "Replacing executable binary and rebooting...";
                 txtLoaderSpeed.Text = "REBOOTING...";
 
-                await Task.Delay(500);
+                await Task.Delay(400);
 
-                // Create helper updater batch script
-                string scriptPath = Path.Combine(Path.GetDirectoryName(currentExe)!, "update_launcher.bat");
+                // Helper updater batch script with retry loop and UAC elevation fallback
+                string scriptPath = Path.Combine(targetDir, "update_launcher.bat");
                 string scriptContent = 
                     "@echo off\r\n" +
                     "set \"TARGET=%~1\"\r\n" +
                     "set \"UPDATE=%~2\"\r\n" +
                     "set \"PID=%~3\"\r\n\r\n" +
                     ":WAIT_PID\r\n" +
-                    "timeout /t 1 /nobreak >nul\r\n" +
                     "tasklist /fi \"PID eq %PID%\" 2>nul | find \"%PID%\" >nul\r\n" +
-                    "if not errorlevel 1 goto WAIT_PID\r\n\r\n" +
-                    "copy /Y \"%UPDATE%\" \"%TARGET%\" >nul\r\n" +
-                    "del \"%UPDATE%\" >nul\r\n" +
-                    "start \"\" \"%TARGET%\"\r\n" +
+                    "if not errorlevel 1 (\r\n" +
+                    "    ping -n 2 127.0.0.1 >nul\r\n" +
+                    "    goto WAIT_PID\r\n" +
+                    ")\r\n\r\n" +
+                    "set ATTEMPTS=0\r\n" +
+                    ":COPY_LOOP\r\n" +
+                    "set /a ATTEMPTS+=1\r\n" +
+                    "copy /Y \"%UPDATE%\" \"%TARGET%\" >nul 2>nul\r\n" +
+                    "if not errorlevel 1 goto COPY_SUCCESS\r\n\r\n" +
+                    "if %ATTEMPTS% leq 15 (\r\n" +
+                    "    ping -n 2 127.0.0.1 >nul\r\n" +
+                    "    goto COPY_LOOP\r\n" +
+                    ")\r\n\r\n" +
+                    ":: If copy still failed after retries (e.g. UAC protected directory), elevate via PowerShell\r\n" +
+                    "powershell -Command \"Start-Process cmd -ArgumentList '/c copy /Y \\\"%UPDATE%\\\" \\\"%TARGET%\\\" & del \\\"%UPDATE%\\\" & start \\\"\\\" \\\"%TARGET%\\\"' -Verb RunAs -WindowStyle Hidden\" >nul 2>nul\r\n" +
+                    "goto CLEANUP\r\n\r\n" +
+                    ":COPY_SUCCESS\r\n" +
+                    "del \"%UPDATE%\" >nul 2>nul\r\n" +
+                    "start \"\" \"%TARGET%\"\r\n\r\n" +
+                    ":CLEANUP\r\n" +
+                    "ping -n 2 127.0.0.1 >nul\r\n" +
                     "(goto) 2>nul & del \"%~f0\"\r\n";
 
                 File.WriteAllText(scriptPath, scriptContent);
@@ -637,8 +730,12 @@ namespace ZionLauncher
                     WindowStyle = ProcessWindowStyle.Hidden
                 });
 
-                // Shutdown old process
+                // Shutdown old process cleanly and terminate immediately
+                _isRainRunning = false;
+                CompositionTarget.Rendering -= OnMatrixCompositionRendering;
+                _diagTimer?.Stop();
                 Application.Current.Shutdown();
+                Environment.Exit(0);
             }
             catch (Exception ex)
             {
@@ -1754,13 +1851,34 @@ namespace ZionLauncher
 
     public class VisualHost : FrameworkElement
     {
-        public Visual? Visual { get; set; }
+        private Visual? _visual;
 
-        protected override int VisualChildrenCount => Visual != null ? 1 : 0;
+        public Visual? Visual
+        {
+            get => _visual;
+            set
+            {
+                if (_visual != null)
+                {
+                    RemoveVisualChild(_visual);
+                    RemoveLogicalChild(_visual);
+                }
+                _visual = value;
+                if (_visual != null)
+                {
+                    AddVisualChild(_visual);
+                    AddLogicalChild(_visual);
+                }
+            }
+        }
+
+        protected override int VisualChildrenCount => _visual != null ? 1 : 0;
 
         protected override Visual GetVisualChild(int index)
         {
-            return Visual ?? throw new ArgumentOutOfRangeException(nameof(index));
+            if (index != 0 || _visual == null)
+                throw new ArgumentOutOfRangeException(nameof(index));
+            return _visual;
         }
     }
 }

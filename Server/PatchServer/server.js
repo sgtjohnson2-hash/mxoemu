@@ -345,19 +345,43 @@ const server = http.createServer(async (req, res) => {
     // 5b. Launcher Auto-Update API
     if (pathname === '/launcher/version' || pathname === '/launcher/version.json' || pathname === '/version.json') {
         res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({
+        let launcherInfo = {
             version: "1.2.0",
             minVersion: "1.0.0",
             downloadUrl: "/launcher/ZionLauncher.exe",
             filename: "ZionLauncher.exe",
             notes: "Matrix Digital Rain loader & auto-updater"
-        }, null, 2));
+        };
+        try {
+            if (fs.existsSync(manifestJsonPath)) {
+                const mData = JSON.parse(fs.readFileSync(manifestJsonPath, 'utf8'));
+                if (mData.launcher) {
+                    launcherInfo = {
+                        version: mData.launcher.version || launcherInfo.version,
+                        minVersion: mData.launcher.minVersion || launcherInfo.minVersion,
+                        downloadUrl: mData.launcher.url || mData.launcher.downloadUrl || launcherInfo.downloadUrl,
+                        filename: mData.launcher.filename || launcherInfo.filename,
+                        notes: mData.launcher.notes || launcherInfo.notes
+                    };
+                }
+            }
+        } catch (e) {
+            console.error('[PatchServer] Error reading manifest for launcher version:', e.message);
+        }
+        res.end(JSON.stringify(launcherInfo, null, 2));
         return;
     }
 
     if (pathname === '/launcher/version.txt') {
         res.writeHead(200, { 'Content-Type': 'text/plain' });
-        res.end("1.2.0\n");
+        let v = "1.2.0";
+        try {
+            if (fs.existsSync(manifestJsonPath)) {
+                const mData = JSON.parse(fs.readFileSync(manifestJsonPath, 'utf8'));
+                if (mData.launcher && mData.launcher.version) v = mData.launcher.version;
+            }
+        } catch (e) {}
+        res.end(v + "\n");
         return;
     }
 

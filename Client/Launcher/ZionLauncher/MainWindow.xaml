@@ -2,7 +2,8 @@
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="Zion Mainframe - The Matrix Online" Height="680" Width="880"
-        Background="Black" WindowStartupLocation="CenterScreen" ResizeMode="NoResize" Loaded="Window_Loaded">
+        Background="Black" WindowStartupLocation="CenterScreen" ResizeMode="NoResize"
+        Loaded="Window_Loaded" Closing="Window_Closing" SizeChanged="Window_SizeChanged">
     <Window.Resources>
         <Style TargetType="TextBlock">
             <Setter Property="FontFamily" Value="Consolas"/>
@@ -88,7 +89,7 @@
                         <DropShadowEffect Color="#00FF66" BlurRadius="8" ShadowDepth="0" Opacity="0.8"/>
                     </TextBlock.Effect>
                 </TextBlock>
-                <TextBlock Text="THE MATRIX ONLINE // REALITY REMASTER (v1.2.0)" TextAlignment="Center" FontSize="11" Foreground="#00FF66" Opacity="0.8" Margin="0,0,0,3"/>
+                <TextBlock x:Name="txtConsoleSubTitle" Text="THE MATRIX ONLINE // REALITY REMASTER (v1.2.0)" TextAlignment="Center" FontSize="11" Foreground="#00FF66" Opacity="0.8" Margin="0,0,0,3"/>
                 <TextBlock Text="==========================================================" TextAlignment="Center" Margin="0,0,0,15" Foreground="#00AA33"/>
 
                 <!-- Navigation Tabs -->
@@ -277,7 +278,7 @@
                             <DropShadowEffect Color="#00FF66" BlurRadius="12" ShadowDepth="0" Opacity="0.9"/>
                         </TextBlock.Effect>
                     </TextBlock>
-                    <TextBlock Text="THE MATRIX ONLINE // NEURAL BRIDGE LOADER v1.2.0" 
+                    <TextBlock x:Name="txtLoaderSubTitle" Text="THE MATRIX ONLINE // NEURAL BRIDGE LOADER v1.2.0" 
                                TextAlignment="Center" FontSize="11" Foreground="#00FF66" Opacity="0.85" Margin="0,3,0,2"/>
                     <TextBlock Text="╚══════════════════════════════════════════════════════════════╝" 
                                TextAlignment="Center" Foreground="#00AA33" FontSize="11" Margin="0,0,0,20"/>
