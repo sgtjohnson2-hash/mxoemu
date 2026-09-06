@@ -18,6 +18,7 @@
 #include "WorldDirector.h"
 #include "LogisticsManager.h"
 #include "AbilitySystem.h"
+#include "SmithVirusCascade.h"
 #include <boost/property_tree/ptree.hpp>
 #include <boost/property_tree/json_parser.hpp>
 
@@ -94,6 +95,24 @@ void CombatSystem::LoadAbilities()
         defaultMelee.specialFlags = 0;
         m_moveTable[defaultMelee.id] = defaultMelee;
     }
+
+    // Ability 401: Antiviral Code Scrubber / Logic Purge
+    CombatMove antiviralPurge;
+    antiviralPurge.id = 401;
+    antiviralPurge.name = "Antiviral Code Scrubber";
+    antiviralPurge.dmgType = DAMAGE_HACKING;
+    antiviralPurge.minDmg = 0.0f;
+    antiviralPurge.maxDmg = 0.0f;
+    antiviralPurge.minDmgPerLvl = 0.0f;
+    antiviralPurge.maxDmgPerLvl = 0.0f;
+    antiviralPurge.isCost = 50;
+    antiviralPurge.range = 800.0f; // 8 meters
+    antiviralPurge.hitFxId = 45;
+    antiviralPurge.interlockOnly = false;
+    antiviralPurge.freefireOnly = false;
+    antiviralPurge.castTime = 3.0f;
+    antiviralPurge.specialFlags = ABILITY_FLAG_CLEANSE;
+    m_moveTable[antiviralPurge.id] = antiviralPurge;
 }
 
 const CombatMove* CombatSystem::GetMove(uint16 moveId)
@@ -778,6 +797,71 @@ bool CombatSystem::UseAbility(PlayerObject* caster, uint16 abilityId, uint32 tar
     std::lock_guard<std::recursive_mutex> lock(m_combatMutex);
     const CombatMove* move = GetMove(abilityId);
     if (!move) return false;
+
+    // Special Handling: Ability 401 - Antiviral Code Scrubber / Logic Purge
+    if (abilityId == 401) {
+        PlayerObject* target = getPlayerSafe(targetGoId);
+        if (!target || target->isDead()) {
+            if (!caster->getClient().isBot()) {
+                caster->getClient().QueueCommand(std::make_shared<SystemChatMsg>("{c:FF3333}Invalid target for Antiviral Code Scrub.{/c}"));
+            }
+            return false;
+        }
+
+        // Must be an infected entity or Smith clone
+        bool isSmithTarget = (sSentientCharacters.IsHijackedHost(targetGoId) || target->getHandle().find("Smith") != std::string::npos);
+        if (!isSmithTarget) {
+            if (!caster->getClient().isBot()) {
+                caster->getClient().QueueCommand(std::make_shared<SystemChatMsg>("{c:FF3333}Target is not corrupted by viral Agent Smith code.{/c}"));
+            }
+            return false;
+        }
+
+        // Sub-40% HP Viral Instability Window check
+        float hpPct = float(target->getCurrentHealth()) / float(std::max<uint16>(1, target->getMaximumHealth()));
+        if (hpPct > 0.40f) {
+            if (!caster->getClient().isBot()) {
+                caster->getClient().QueueCommand(std::make_shared<SystemChatMsg>("{c:FF3333}Target viral code is too stable! Must weaken below 40% HP to scrub.{/c}"));
+            }
+            // Trigger visual instability tell animation
+            sGame.AnnounceStateUpdateNear((float)target->getPosition().x, (float)target->getPosition().z, 20000.0f, std::make_shared<EmoteMsg>(targetGoId, 48, 1));
+            return false;
+        }
+
+        // Standoff distance check (8 meters / 800 units)
+        float dist = float(caster->getPosition().Distance(target->getPosition()));
+        if (dist > 800.0f) {
+            if (!caster->getClient().isBot()) {
+                caster->getClient().QueueCommand(std::make_shared<SystemChatMsg>("{c:FF3333}Target out of range for Antiviral Code Scrub (Max 8m).{/c}"));
+            }
+            return false;
+        }
+
+        // IS cost: 50 IS
+        if (caster->getCurrentIS() < 50) {
+            if (!caster->getClient().isBot()) {
+                caster->getClient().QueueCommand(std::make_shared<SystemChatMsg>("{c:FF3333}Insufficient Inner Strength (50 IS required).{/c}"));
+            }
+            return false;
+        }
+        caster->setCurrentIS(caster->getCurrentIS() - 50);
+
+        if (!caster->getClient().isBot()) {
+            caster->getClient().QueueCommand(std::make_shared<CastBarMsg>(401, 3.0f));
+        }
+
+        // Channel antiviral decontamination pulse
+        sSmithCascade.PurgeEntity(targetGoId, caster, PURGE_METHOD_ANTIVIRAL_PULSE);
+        sSentientCharacters.RevertHijackedHost(targetGoId);
+        caster->addFactionReputation(50);
+
+        if (!caster->getClient().isBot()) {
+            caster->getClient().QueueCommand(std::make_shared<SystemChatMsg>("{c:00FF00}Viral code successfully scrubbed! Host restored to civilian state. (+750 Info, +50 Zion Standing){/c}"));
+        }
+        sBotMgr.LogCombat((format("[ANTIVIRAL PURGE] %1% executed Ability 401 on %2%! Viral code purged.")
+                           % caster->getHandle() % target->getHandle()).str());
+        return true;
+    }
 
     //cast bar for anything with a cast time
     if (move->castTime > 0.05f && !caster->getClient().isBot())

@@ -89,6 +89,7 @@ public:
     bool IsCordonActive(uint32 districtId) const;
     void SetCordonActive(uint32 districtId, bool active);
     bool CheckCordonInterception(BotClient* bot, PlayerObject* me, float subwayX, float subwayZ, float radius = 500.0f);
+    bool BreachTacticalCordon(uint32 districtId, uint32 rescuerSquadId = 0);
     const std::map<uint32, TacticalCordonPoint>& GetCordons() const { return m_tacticalCordons; }
 
     const std::vector<PointOfInterest>& GetAllPOIs() const { return m_pois; }

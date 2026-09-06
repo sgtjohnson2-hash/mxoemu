@@ -39,6 +39,12 @@ public:
     // Morpheus: Inspirational Tactician Aura & Dual-Stance Switching
     void ProcessMorpheusAura(PlayerObject* morpheusPo);
     void ProcessMorpheusStance(BotClient* morpheusBot, PlayerObject* morpheusPo);
+    bool IsInMorpheusAura(float wx, float wz, float radius = 2500.0f) const;
+    bool CheckMorpheusAuraDeflection(uint32 targetGoId, uint32 smithGoId);
+
+    // Viral Immunity Window (e.g. 30s post-reversion)
+    bool HasViralImmunity(uint32 entityGoId) const;
+    void SetViralImmunity(uint32 entityGoId, uint32 durationMs = 30000);
 
     // The Merovingian: Causality AI & Henchmen Wave Orchestration
     void ProcessMerovingianCombat(BotClient* meroBot, PlayerObject* meroPo);
@@ -50,6 +56,7 @@ public:
 private:
     mutable std::recursive_mutex m_majorMutex;
     std::map<uint32, HostHijackRecord> m_hijackedHosts;
+    std::map<uint32, uint32> m_viralImmunity;
     uint32 m_lastHenchmenWaveMs{0};
     uint32 m_lastAuraPulseMs{0};
 };

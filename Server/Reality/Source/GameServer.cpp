@@ -68,6 +68,7 @@
 #include "AI/CoverSystem.h"
 #include "RadioDispatchSystem.h"
 #include "SmithVirusCascade.h"
+#include "BackdoorNetwork.h"
 // removed duplicate include
 #include <boost/bind.hpp>
 
@@ -204,6 +205,7 @@ void GameServer::SimulationLoop()
 			try { sSentientCharacters.Update(aiDeltaMs / 1000.0f); } catch (const std::exception& e) { ERROR_LOG(format("SimulationLoop: sSentientCharacters caught %1%") % e.what()); }
 			try { sRadioDispatchSystem.Update(aiDeltaMs); } catch (const std::exception& e) { ERROR_LOG(format("SimulationLoop: sRadioDispatchSystem caught %1%") % e.what()); }
 			try { sSmithCascade.Update(aiDeltaMs); } catch (const std::exception& e) { ERROR_LOG(format("SimulationLoop: sSmithCascade caught %1%") % e.what()); }
+			try { sBackdoorNetwork.Update(aiDeltaMs); } catch (const std::exception& e) { ERROR_LOG(format("SimulationLoop: sBackdoorNetwork caught %1%") % e.what()); }
 
 			static uint32 lastMetricLogMs = 0;
 			static uint32 tickCount = 0;

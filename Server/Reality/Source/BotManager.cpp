@@ -561,5 +561,44 @@ std::shared_ptr<BotClient> BotManager::GetBotByGOID(uint32 goid)
     return nullptr;
 }
 
+void BotManager::HandleCleanseAwakening(uint32 entityGoId)
+{
+    PlayerObject* po = BotGetPlayer(entityGoId);
+    if (!po) return;
+
+    auto bot = GetBotByGOID(entityGoId);
+    if (!bot) return;
+
+    LocationVector pos = po->getPosition();
+    bool awakened = ((rand() % 100) < 15);
+
+    if (awakened) {
+        po->setHandle("Awakened_Redpill_Novice");
+        po->setFactionName("Zion");
+        bot->SetFaction(FACTION_ZION);
+        po->setLevel(20);
+        po->setMaximumHealth(2000);
+        po->setCurrentHealth(1000);
+
+        bot->Say("Awakened Redpill: I saw it... the green code behind the walls. Get me out of here.");
+        LocationVector hl = GetNearestHardline((float)pos.x, (float)pos.z);
+        if (hl.x != 0.0f || hl.z != 0.0f) {
+            bot->MoveTo((float)hl.x, (float)hl.y, (float)hl.z);
+        }
+        bot->SetPanicking(false);
+        bot->SetFearLevel(0.05f);
+
+        LogCombat((format("[AWAKENING] Rescued civilian entity %1% awakened into Redpill Novice aligned with Zion!") % entityGoId).str());
+    } else {
+        bot->Say("Civilian: What happened to me? Who was that man in the suit?");
+        bot->SetPanicking(false);
+        bot->SetFearLevel(0.20f);
+        LocationVector hl = GetNearestHardline((float)pos.x, (float)pos.z);
+        if (hl.x != 0.0f || hl.z != 0.0f) {
+            bot->MoveTo((float)hl.x, (float)hl.y, (float)hl.z);
+        }
+    }
+}
+
 
 

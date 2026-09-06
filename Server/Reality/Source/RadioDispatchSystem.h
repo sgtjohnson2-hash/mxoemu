@@ -63,6 +63,9 @@ public:
     bool IsMartialLawActive(uint32 districtId) const;
     void SetMartialLaw(uint32 districtId, bool active);
 
+    // Zion Operator Pirate Frequency Infiltration & Override
+    void BroadcastPirateOverride(uint32 districtId, const std::string& operatorName = "Zion Operator Uplink", const std::string& directive = "");
+
     void BroadcastDispatch(const RadioTransmission& transmission, float rangeUnits = 30000.0f);
     std::vector<RadioTransmission> GetRecentTransmissions(size_t limit = 10) const;
     uint32 GetTotalDispatchCalls() const;
@@ -82,6 +85,7 @@ private:
     uint32 m_totalDispatches{0};
     uint32 m_total911Calls{0};
     uint32 m_lastAgentOverrideMs{0};
+    uint32 m_lastPirateOverrideMs{0};
 };
 
 #define sRadioDispatchSystem RadioDispatchSystem::getSingleton()

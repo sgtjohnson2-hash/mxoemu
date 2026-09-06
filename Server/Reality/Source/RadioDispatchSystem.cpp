@@ -5,8 +5,11 @@
 #include "BotClient.h"
 #include "PlayerObject.h"
 #include "SpatialGrid.h"
+#include "ObjectMgr.h"
+#include "GameServer.h"
 #include <sstream>
 #include <iomanip>
+#include <cmath>
 
 createFileSingleton(RadioDispatchSystem);
 
@@ -30,6 +33,7 @@ void RadioDispatchSystem::Initialize()
     m_nextTransmissionId = 1;
     m_next911CallId = 1;
     m_lastAgentOverrideMs = 0;
+    m_lastPirateOverrideMs = 0;
 
     if (Log::getSingletonPtr())
     {
@@ -295,6 +299,71 @@ void RadioDispatchSystem::SetMartialLaw(uint32 districtId, bool active)
 {
     std::lock_guard<std::recursive_mutex> lock(m_dispatchMutex);
     m_martialLawDistricts[districtId] = active;
+}
+
+void RadioDispatchSystem::BroadcastPirateOverride(uint32 districtId, const std::string& operatorName, const std::string& directive)
+{
+    std::lock_guard<std::recursive_mutex> lock(m_dispatchMutex);
+    uint32 now = getMSTime();
+    if (now - m_lastPirateOverrideMs < 5000) {
+        return; // Throttle broadcasts
+    }
+    m_lastPirateOverrideMs = now;
+
+    // Counter Machine martial-law orders in this district
+    m_martialLawDistricts[districtId] = false;
+
+    RadioTransmission tx;
+    tx.transmissionId = m_nextTransmissionId++;
+    tx.tenCode = "PIRATE-OVERRIDE";
+    tx.unitCallsign = operatorName.empty() ? "Zion Operator Uplink" : operatorName;
+    tx.districtName = ResolveDistrictName(districtId);
+    tx.locationAddress = "District-Wide Pirate Frequency";
+    tx.threatHeatLevel = 180.0f;
+    tx.escalationTier = 5;
+    tx.timestampMs = now;
+    tx.squelchToneActive = false;
+
+    std::string text = directive;
+    if (text.empty()) {
+        std::stringstream dss;
+        dss << "Attention all citizens and free operatives in " << tx.districtName
+            << ": Do not trust municipal police directives. SWAT teams have sealed the subway exits. "
+            << "The men in black suits are replicating. Avoid corporate plazas. "
+            << "Move immediately towards active Hardlines. Zion Strike Teams are inbound to clear a corridor. "
+            << "Hold on to your minds.";
+        text = dss.str();
+    }
+
+    std::stringstream ss;
+    ss << "[*PIRATE BROADCAST - ZION OPERATOR UPLINK*] " << tx.unitCallsign << ": " << text;
+    tx.chatterText = ss.str();
+    BroadcastDispatch(tx);
+
+    sBotMgr.LogCombat(tx.chatterText);
+
+    // Dynamic In-Game Effect: Steer panicking civilians away from police roadblocks and toward active Hardlines
+    auto allIds = sObjMgr.getAllGOIds();
+    for (auto goId : allIds) {
+        PlayerObject* po = sObjMgr.getGOPtrSafe(goId);
+        if (!po || po->isDead() || !po->getClient().isBot()) continue;
+        if (po->getFactionName() == "Civilian" || po->getHandle().find("Civilian") != std::string::npos ||
+            po->getHandle().find("Suit") != std::string::npos || po->getHandle().find("Office") != std::string::npos) {
+            auto bot = sBotMgr.GetBotByGOID(goId);
+            if (bot && (bot->IsPanicking() || bot->GetFearLevel() > 0.35f)) {
+                LocationVector pos = po->getPosition();
+                LocationVector hl = sBotMgr.GetNearestHardline((float)pos.x, (float)pos.z);
+                if (hl.x != 0.0f || hl.z != 0.0f) {
+                    bot->MoveTo((float)hl.x, (float)hl.y, (float)hl.z);
+                    bot->SetPanicking(false);
+                    bot->SetFearLevel(0.20f);
+                    if (rand() % 15 == 0) {
+                        bot->Say("Civilian: The pirate frequency... they said get to the Hardlines! The phone booths are safe!");
+                    }
+                }
+            }
+        }
+    }
 }
 
 uint32 RadioDispatchSystem::GetTotal911Calls() const

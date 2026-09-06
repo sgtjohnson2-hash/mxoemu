@@ -931,3 +931,49 @@ bool PedestrianEcology::CheckCordonInterception(BotClient* bot, PlayerObject* me
     }
     return false;
 }
+
+bool PedestrianEcology::BreachTacticalCordon(uint32 districtId, uint32 rescuerSquadId)
+{
+    std::lock_guard<std::recursive_mutex> lock(m_cordonMutex);
+    auto it = m_tacticalCordons.find(districtId);
+    if (it == m_tacticalCordons.end() || !it->second.active) {
+        return false;
+    }
+
+    TacticalCordonPoint& cordon = it->second;
+    cordon.active = false;
+
+    // Disorient SWAT cordon guards with EMP disruption canisters
+    for (uint32 botId : cordon.cordonBotGoIds) {
+        PlayerObject* po = BotGetPlayer(botId);
+        if (po && !po->isDead()) {
+            po->takeDamage(0, 500, 43); // EMP shock damage
+            po->getClient().QueueState(std::make_shared<EmoteMsg>(botId, 43, 1));
+            auto bot = sBotMgr.GetBotByGOID(botId);
+            if (bot) {
+                bot->SetTargetGoId(0);
+                bot->Say("SWAT Officer: EMP canister! Optics jammed— our barricade line is collapsing!");
+            }
+        }
+    }
+
+    std::string announcement = (format("[TACTICAL BREACH] Zion Strike Squad %1% breached SWAT cordon at %2%! Subway evacuation corridor OPEN!")
+                                % rescuerSquadId % cordon.name).str();
+    sBotMgr.LogCombat(announcement);
+    INFO_LOG(format("PedestrianEcology: %1%") % announcement);
+
+    RadioTransmission tx;
+    tx.transmissionId = 88888;
+    tx.tenCode = "10-99-BREACH";
+    tx.unitCallsign = "SWAT Tactical Net";
+    tx.districtName = sRadioDispatchSystem.ResolveDistrictName(districtId);
+    tx.locationAddress = cordon.name;
+    tx.threatHeatLevel = 190.0f;
+    tx.escalationTier = 4;
+    tx.timestampMs = getMSTime();
+    tx.squelchToneActive = true;
+    tx.chatterText = "[*STATIC*] MAYDAY! SWAT cordon overrun by Zion strike team at " + cordon.name + "! Subway concourse turnstiles breached!";
+    sRadioDispatchSystem.BroadcastDispatch(tx);
+
+    return true;
+}

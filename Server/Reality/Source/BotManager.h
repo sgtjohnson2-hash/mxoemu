@@ -41,6 +41,9 @@ public:
     bool IsCombatLoggingEnabled() const { return m_combatLogging; }
     void LogCombat(const std::string& msg);
 
+    // Host Decontamination & Awakening
+    void HandleCleanseAwakening(uint32 entityGoId);
+
     void Update();
 
     void PopulateWorld();

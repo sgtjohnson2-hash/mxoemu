@@ -68,6 +68,13 @@ struct CryptographicCipherPuzzle
     uint32 expectedSolution{0};
 };
 
+struct FirewallAnchor
+{
+    uint32 hardlineId{0};
+    uint32 expireTimeMs{0};
+    uint32 deployedBySquadId{0};
+};
+
 class BackdoorNetwork : public Singleton<BackdoorNetwork>
 {
 public:
@@ -76,6 +83,7 @@ public:
 
     void Initialize();
     void Reset();
+    void Update(uint32 deltaMs);
 
     // Portal Registry & Non-Euclidean Spatial Links
     void RegisterBackdoor(uint32 doorId, uint32 doorNumber, const std::string& name,
@@ -96,6 +104,14 @@ public:
     bool VerifyKeyForDoor(const KeymakerMasterKey& key, uint32 doorId) const;
     bool UnlockDoorWithKey(uint32 doorId, KeymakerMasterKey& key);
 
+    // Hardline Firewall Anchor & Defense
+    bool DeployFirewallAnchor(uint32 hardlineId, uint32 durationMs = 180000, uint32 squadId = 0);
+    bool HasFirewallAnchor(uint32 hardlineId) const;
+    bool SealDoorByAgents(uint32 doorId);
+
+    // Civilian Emergency Jack-Out
+    bool ExecuteCivilianJackout(uint32 entityGoId, uint32 hardlineId);
+
     // Telemetry & Statistics
     uint32 GetTotalTransits() const;
 
@@ -103,6 +119,7 @@ private:
     mutable std::recursive_mutex m_networkMutex;
     std::vector<BackdoorPortal> m_portals;
     std::map<uint32, KeymakerMasterKey> m_craftedKeys;
+    std::map<uint32, FirewallAnchor> m_firewallAnchors;
     uint32 m_nextKeyId{1001};
     uint32 m_nextPuzzleId{1};
     uint32 m_totalTransits{0};

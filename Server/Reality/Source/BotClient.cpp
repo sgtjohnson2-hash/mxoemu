@@ -189,6 +189,14 @@ void BotClient::UpdateBotAI(float deltaSeconds)
         }
     }
 
+    // 2b. Zion Viral Disruption Countermeasure
+    if (m_faction == FACTION_ZION) {
+        ActionDisruptInfection disrupt;
+        if (disrupt.Tick(this) == NodeStatus::SUCCESS) {
+            return;
+        }
+    }
+
     // 3. Active Inference Intention Selection (Unified Pipeline)
     std::vector<ActionPolicy> policies;
 

@@ -1,5 +1,12 @@
 #include "BackdoorNetwork.h"
 #include "Log.h"
+#include "PlayerObject.h"
+#include "ObjectMgr.h"
+#include "GameServer.h"
+#include "BotManager.h"
+#include "BotClient.h"
+#include "FactionWarManager.h"
+#include "Timer.h"
 #include <algorithm>
 
 createFileSingleton(BackdoorNetwork);
@@ -18,6 +25,7 @@ void BackdoorNetwork::Initialize()
     std::lock_guard<std::recursive_mutex> lock(m_networkMutex);
     m_portals.clear();
     m_craftedKeys.clear();
+    m_firewallAnchors.clear();
     m_totalTransits = 0;
 
     // Register Default Backdoor Corridor Doors
@@ -289,4 +297,76 @@ uint32 BackdoorNetwork::GetTotalTransits() const
 {
     std::lock_guard<std::recursive_mutex> lock(m_networkMutex);
     return m_totalTransits;
+}
+
+void BackdoorNetwork::Update(uint32 deltaMs)
+{
+    std::lock_guard<std::recursive_mutex> lock(m_networkMutex);
+    uint32 now = getMSTime();
+    for (auto it = m_firewallAnchors.begin(); it != m_firewallAnchors.end(); ) {
+        if (now >= it->second.expireTimeMs) {
+            INFO_LOG(format("BackdoorNetwork: Hardline Firewall Anchor expired on Node %1%") % it->first);
+            it = m_firewallAnchors.erase(it);
+        } else {
+            ++it;
+        }
+    }
+}
+
+bool BackdoorNetwork::DeployFirewallAnchor(uint32 hardlineId, uint32 durationMs, uint32 squadId)
+{
+    std::lock_guard<std::recursive_mutex> lock(m_networkMutex);
+    FirewallAnchor anchor;
+    anchor.hardlineId = hardlineId;
+    anchor.expireTimeMs = getMSTime() + durationMs;
+    anchor.deployedBySquadId = squadId;
+    m_firewallAnchors[hardlineId] = anchor;
+
+    INFO_LOG(format("BackdoorNetwork: Deployed Hardline Firewall Anchor on Node %1% for %2% seconds (Squad #%3%)")
+             % hardlineId % (durationMs / 1000) % squadId);
+    return true;
+}
+
+bool BackdoorNetwork::HasFirewallAnchor(uint32 hardlineId) const
+{
+    std::lock_guard<std::recursive_mutex> lock(m_networkMutex);
+    auto it = m_firewallAnchors.find(hardlineId);
+    if (it == m_firewallAnchors.end()) return false;
+    return getMSTime() < it->second.expireTimeMs;
+}
+
+bool BackdoorNetwork::SealDoorByAgents(uint32 doorId)
+{
+    std::lock_guard<std::recursive_mutex> lock(m_networkMutex);
+    if (HasFirewallAnchor(doorId)) {
+        INFO_LOG(format("BackdoorNetwork: Agent attempt to seal Door %1% REPELLED by Zion Firewall Anchor!") % doorId);
+        return false;
+    }
+    for (auto& p : m_portals) {
+        if (p.doorId == doorId) {
+            p.lockStatus = DOOR_SEALED_BY_AGENTS;
+            INFO_LOG(format("BackdoorNetwork: Door %1% successfully sealed by Machine System Agents.") % doorId);
+            return true;
+        }
+    }
+    return false;
+}
+
+bool BackdoorNetwork::ExecuteCivilianJackout(uint32 entityGoId, uint32 hardlineId)
+{
+    PlayerObject* po = sObjMgr.getGOPtrSafe(entityGoId);
+    if (!po || po->isDead()) return false;
+
+    LocationVector pos = po->getPosition();
+    sGame.AnnounceStateUpdateNear((float)pos.x, (float)pos.z, 20000.0f, std::make_shared<EmoteMsg>(entityGoId, 45, 1)); // Digital dissolution FX
+
+    auto bot = sBotMgr.GetBotByGOID(entityGoId);
+    if (bot) {
+        bot->Say("Civilian: The telephone... I hear the operator! Pulling me out!");
+    }
+
+    po->setCurrentHealth(0); // Safely despawn from Matrix
+    sFactionWarMgr.registerPvPKill(FACTION_ZION, FACTION_MACHINES); // Zion score reward
+    INFO_LOG(format("BackdoorNetwork: Civilian %1% successfully jacked out to Zion via Hardline %2%!") % entityGoId % hardlineId);
+    return true;
 }

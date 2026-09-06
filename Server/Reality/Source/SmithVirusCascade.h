@@ -57,6 +57,7 @@ public:
     size_t GetInfectedCount() const;
     size_t GetPurgedCount() const;
     bool IsDistrictQuarantined(uint32 districtId) const;
+    bool IsVirallyInstable(uint32 entityGoId) const;
 
     void TriggerGlobalContagionAlert();
 

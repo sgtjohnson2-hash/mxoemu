@@ -12,6 +12,10 @@
 #include "CombatSystem.h"
 #include "HackerSystem.h"
 #include "BehaviorTree.h"
+#include "SmithVirusCascade.h"
+#include "AI/SentientMajorCharacters.h"
+#include "AI/PedestrianEcology.h"
+#include "BackdoorNetwork.h"
 #include <cmath>
 #include <algorithm>
 
@@ -462,6 +466,11 @@ void FactionWarManager::updateStrikeSquads(uint32 deltaMs)
                         squad.state = SQUAD_STATE_HOLDING;
                         BroadcastSquadCallout(squad, "Operative", "Hardline perimeter secured! Holding defensive line!");
                     }
+
+                    // Series 5: Deploy Hardline Firewall Anchor holding the line open against Machine lockouts
+                    if (squad.faction == FACTION_ZION) {
+                        sBackdoorNetwork.DeployFirewallAnchor(squad.targetNodeId, 180000, squad.squadId);
+                    }
                 } else {
                     // Engaging / capturing node
                     if (squad.state != SQUAD_STATE_ENGAGING) {
@@ -469,17 +478,26 @@ void FactionWarManager::updateStrikeSquads(uint32 deltaMs)
                         BroadcastSquadCallout(squad, "Operative", "Breaching hardline! Hacker, drop their firewall! Striker, clear the flanks!");
                     }
 
+                    // Series 5: Check and breach Machine SWAT cordons at subway transit points
+                    if (squad.faction == FACTION_ZION && nodeIt != m_controlNodes.end()) {
+                        uint32 distId = nodeIt->second.districtId;
+                        if (sPedestrianEcology.IsCordonActive(distId)) {
+                            sPedestrianEcology.BreachTacticalCordon(distId, squad.squadId);
+                            BroadcastSquadCallout(squad, "Tactical", "SWAT cordon breached at subway transit node! Evacuation corridor OPEN!");
+                        }
+                    }
+
                     // Synchronized triad action:
-                    // 1. Operative engages closest enemy defender
+                    // 1. Operative engages closest enemy defender & acts as heavy aggro magnet
                     auto opBot = sBotMgr.GetBotByGOID(squad.operative.goId);
                     if (opBot) {
                         if (opBot->GetTargetGoId() == 0) {
-                            auto localClients = sSpatialGrid.GetClientsInRadius(tx, tz);
+                            auto localClients = sSpatialGrid.GetClientsInRadius(tx, tz, 2500.0f);
                             for (GameClient* gc : localClients) {
                                 uint32 gid = gc->GetPlayerGoId();
                                 if (gid == 0 || gid == squad.operative.goId || gid == squad.hacker.goId || gid == squad.martialArtist.goId) continue;
                                 PlayerObject* p = BotGetPlayer(gid);
-                                if (p && !p->isDead() && p->getFaction() != squad.faction && p->getFactionName() != "Civilian") {
+                                if (p && !p->isDead() && (p->getFaction() != squad.faction || sSentientCharacters.IsHijackedHost(gid) || p->getHandle().find("Smith") != std::string::npos) && p->getFactionName() != "Civilian") {
                                     opBot->SetTargetGoId(gid);
                                     break;
                                 }
@@ -488,9 +506,28 @@ void FactionWarManager::updateStrikeSquads(uint32 deltaMs)
 
                         if (opBot->GetTargetGoId() != 0) {
                             uint32 enemyGoId = opBot->GetTargetGoId();
+                            PlayerObject* enemyPo = BotGetPlayer(enemyGoId);
+
+                            // Zion Operative Vanguard Tank Synergies: High-threat aggro redirect / body-blocking
+                            if (squad.faction == FACTION_ZION && enemyPo && !enemyPo->isDead()) {
+                                auto enemyBot = sBotMgr.GetBotByGOID(enemyGoId);
+                                if (enemyBot && (enemyBot->GetTargetGoId() == squad.hacker.goId || enemyBot->GetTargetGoId() == 0)) {
+                                    enemyBot->SetTargetGoId(squad.operative.goId); // Force aggro onto Vanguard tank
+                                    if (rand() % 15 == 0) {
+                                        BroadcastSquadCallout(squad, "Operative", "Eyes on me, suit! Leave the civilians and support alone!");
+                                    }
+                                }
+                            }
                             
-                            // 2. Hacker supports by debuffing and compiling programs on operative's target
+                            // 2. Hacker supports by debuffing, healing, replenishing IS, and antiviral code purging
                             if (squad.hacker.isAlive) {
+                                auto hackBot = sBotMgr.GetBotByGOID(squad.hacker.goId);
+                                if (hackBot) {
+                                    // Maintain 8-10m standoff behind the tank
+                                    LocationVector opCurrentPos = op->getPosition();
+                                    hackBot->MoveTo((float)opCurrentPos.x - 900.0f, (float)opCurrentPos.y, (float)opCurrentPos.z - 900.0f);
+                                }
+
                                 sHackerSystem.CompileProgram(hack, 1, enemyGoId);
                                 sHackerSystem.ExecuteProgram(hack, 1, enemyGoId);
                                 
@@ -499,15 +536,48 @@ void FactionWarManager::updateStrikeSquads(uint32 deltaMs)
                                     op->setCurrentHealth(std::min<uint32>(op->getMaximumHealth(), op->getCurrentHealth() + 600));
                                     BroadcastSquadCallout(squad, "Hacker", "Patching operative health matrix!");
                                 }
+
+                                // Replenish Inner Strength to strike team (+35 IS)
+                                if (op->getCurrentIS() < op->getMaximumIS()) {
+                                    op->setCurrentIS(std::min<uint16>(op->getMaximumIS(), op->getCurrentIS() + 35));
+                                }
+                                if (ma && ma->getCurrentIS() < ma->getMaximumIS()) {
+                                    ma->setCurrentIS(std::min<uint16>(ma->getMaximumIS(), ma->getCurrentIS() + 35));
+                                }
+
+                                // Series 4: Antiviral Code Scrubbing on virally unstable Smith clones (<40% HP)
+                                if (squad.faction == FACTION_ZION && enemyPo && !enemyPo->isDead()) {
+                                    bool isSmith = (sSentientCharacters.IsHijackedHost(enemyGoId) || enemyPo->getHandle().find("Smith") != std::string::npos);
+                                    float enemyHpPct = float(enemyPo->getCurrentHealth()) / float(std::max<uint16>(1, enemyPo->getMaximumHealth()));
+                                    if (isSmith && enemyHpPct <= 0.40f) {
+                                        sSmithCascade.PurgeEntity(enemyGoId, hack, PURGE_METHOD_ANTIVIRAL_PULSE);
+                                        sSentientCharacters.RevertHijackedHost(enemyGoId);
+                                        BroadcastSquadCallout(squad, "Hacker", "Viral core unstable! Antiviral pulse successful— host decontaminated!");
+                                        opBot->SetTargetGoId(0);
+                                    }
+                                }
                             }
 
-                            // 3. Martial Artist flanks and executes power combat cycle
+                            // 3. Martial Artist flanks, executes power combat, and 85% interlock infection interrupt
                             if (squad.martialArtist.isAlive) {
                                 auto maBot = sBotMgr.GetBotByGOID(squad.martialArtist.goId);
                                 if (maBot) {
                                     maBot->SetTargetGoId(enemyGoId);
                                     ma->setTactic(TACTIC_POWER);
                                     sCombatSys.SetTactic(squad.martialArtist.goId, TACTIC_POWER);
+
+                                    // 85% interrupt on clones attempting infection or in melee
+                                    if (squad.faction == FACTION_ZION && enemyPo && !enemyPo->isDead()) {
+                                        bool isSmith = (sSentientCharacters.IsHijackedHost(enemyGoId) || enemyPo->getHandle().find("Smith") != std::string::npos);
+                                        if (isSmith && (rand() % 100) < 85) {
+                                            LocationVector ePos = enemyPo->getPosition();
+                                            sGame.AnnounceStateUpdateNear((float)ePos.x, (float)ePos.z, 20000.0f, std::make_shared<EmoteMsg>(enemyGoId, 51, 1));
+                                            enemyPo->takeDamage(ma->getGoId(), 250, 43);
+                                            if (rand() % 12 == 0) {
+                                                BroadcastSquadCallout(squad, "Striker", "Wire-fu sweep! Knocked the clone down, breaking the channel!");
+                                            }
+                                        }
+                                    }
                                 }
                             }
                         }

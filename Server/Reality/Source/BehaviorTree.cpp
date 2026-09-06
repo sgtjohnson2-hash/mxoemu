@@ -286,6 +286,17 @@ NodeStatus ActionAgentInfect::Tick(BotClient* bot)
     PlayerObject* me = BotGetPlayer(bot->GetPlayerGoId());
     if (!me || me->isDead()) return NodeStatus::FAILURE;
 
+    // System Agents are Machine immune system and do NOT propagate the Smith virus
+    std::string handle = me->getHandle();
+    if (handle.find("Agent Gray") != std::string::npos ||
+        handle.find("Agent Skinner") != std::string::npos ||
+        handle.find("Agent Pace") != std::string::npos ||
+        handle.find("Agent Jackson") != std::string::npos ||
+        handle.find("Agent Johnson") != std::string::npos ||
+        handle.find("Agent Thompson") != std::string::npos) {
+        return NodeStatus::FAILURE;
+    }
+
     // High chance if wounded (< 50% HP), moderate chance ambiently
     float hpPct = float(me->getCurrentHealth()) / float(me->getMaximumHealth());
     int infectChance = (hpPct < 0.5f) ? 50 : 15;
@@ -353,6 +364,82 @@ NodeStatus ActionAgentInfect::Tick(BotClient* bot)
             }
         }
     }
+    return NodeStatus::FAILURE;
+}
+
+NodeStatus ActionDisruptInfection::Tick(BotClient* bot)
+{
+    if (!bot) return NodeStatus::FAILURE;
+
+    PlayerObject* me = BotGetPlayer(bot->GetPlayerGoId());
+    if (!me || me->isDead()) return NodeStatus::FAILURE;
+
+    // Only Zion martial artists, operatives, or sentient champions execute this
+    std::string handle = me->getHandle();
+    bool isZionCombatant = (bot->GetFaction() == FACTION_ZION ||
+                            handle.find("Zion") != std::string::npos ||
+                            handle.find("Strikemaster") != std::string::npos ||
+                            handle.find("Martial") != std::string::npos ||
+                            handle.find("Vanguard") != std::string::npos ||
+                            handle.find("Duelist") != std::string::npos ||
+                            handle.find("Trinity") != std::string::npos ||
+                            handle.find("Morpheus") != std::string::npos);
+
+    if (!isZionCombatant) return NodeStatus::FAILURE;
+
+    LocationVector myPos = me->getPosition();
+    auto nearbyClients = sSpatialGrid.GetClientsInRadius((float)myPos.x, (float)myPos.z, 1500.0f);
+
+    for (GameClient* client : nearbyClients)
+    {
+        if (client->GetPlayerGoId() == bot->GetPlayerGoId()) continue;
+        if (!client->isBot()) continue;
+
+        PlayerObject* target = BotGetPlayer(client->GetPlayerGoId());
+        if (!target || target->isDead()) continue;
+
+        std::string tHandle = target->getHandle();
+        bool isSmithClone = (tHandle.find("Smith") != std::string::npos || sSentientCharacters.IsHijackedHost(target->getGoId()));
+        if (!isSmithClone) continue;
+
+        // Target found! Check distance
+        LocationVector tPos = target->getPosition();
+        float dx = float(myPos.x - tPos.x);
+        float dz = float(myPos.z - tPos.z);
+        float distSq = dx * dx + dz * dz;
+        if (distSq <= 2250000.0f) // 1500 units (15m)
+        {
+            // Sprint to the infector clone
+            bot->MoveTo((float)tPos.x, (float)tPos.y, (float)tPos.z);
+
+            // Execute high-priority interrupt move with 85% success rate
+            if ((rand() % 100) < 85)
+            {
+                // Knockdown emote on Smith clone
+                sGame.AnnounceStateUpdateNear((float)tPos.x, (float)tPos.z, 20000.0f, std::make_shared<EmoteMsg>(target->getGoId(), 51, 1));
+                
+                // Sever clone's active target lock
+                auto targetBot = sBotMgr.GetBotByGOID(target->getGoId());
+                if (targetBot) {
+                    targetBot->SetTargetGoId(0);
+                }
+
+                // Disruption damage & visual kick FX
+                target->takeDamage(me->getGoId(), 250, 43);
+                sGame.AnnounceStateUpdateNear((float)myPos.x, (float)myPos.z, 20000.0f, std::make_shared<EmoteMsg>(me->getGoId(), 43, 1));
+
+                if (rand() % 4 == 0) {
+                    bot->Say("Zion Strikemaster: Back off! Break the viral link!");
+                }
+
+                sBotMgr.LogCombat((format("[INFECTION DISRUPTED] %1% knocked down %2%! Viral assimilation severed.")
+                                   % me->getHandle() % target->getHandle()).str());
+
+                return NodeStatus::SUCCESS;
+            }
+        }
+    }
+
     return NodeStatus::FAILURE;
 }
 

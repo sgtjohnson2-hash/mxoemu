@@ -1,6 +1,7 @@
 #include "SmithVirusCascade.h"
 #include "PlayerObject.h"
 #include "ObjectMgr.h"
+#include "GameServer.h"
 #include "BotManager.h"
 #include "Log.h"
 #include "EconomySystem.h"
@@ -117,6 +118,15 @@ bool SmithVirusCascade::IsDistrictQuarantined(uint32 districtId) const
     return sRadioDispatchSystem.IsMartialLawActive(districtId) || sPedestrianEcology.IsCordonActive(districtId);
 }
 
+bool SmithVirusCascade::IsVirallyInstable(uint32 entityGoId) const
+{
+    std::lock_guard<std::recursive_mutex> lock(m_cascadeMutex);
+    if (m_infectedEntities.find(entityGoId) == m_infectedEntities.end()) return false;
+    PlayerObject* po = sObjMgr.getGOPtrSafe(entityGoId);
+    if (!po || po->isDead()) return false;
+    return po->getCurrentHealth() <= (uint16)(po->getMaximumHealth() * 0.40f);
+}
+
 void SmithVirusCascade::CheckStageTransitions()
 {
     float pct = GetInfectionPercentage();
@@ -129,21 +139,56 @@ void SmithVirusCascade::CheckStageTransitions()
 
     if (newStage != m_currentStage)
     {
+        ContagionStage oldStage = m_currentStage;
         m_currentStage = newStage;
         TriggerGlobalContagionAlert();
 
-        if (newStage == CONTAGION_STAGE_OUTBREAK) {
-            sRadioDispatchSystem.TriggerAgentOverride("Agent Gray", "Elevated viral vector confirmed. Machine Directive 101 enacted. Deploying tactical cordons at transit hubs.", 1);
-            sPedestrianEcology.DeployTacticalCordon(1);
-            sPedestrianEcology.DeployTacticalCordon(2);
-        } else if (newStage == CONTAGION_STAGE_CASCADE) {
-            sRadioDispatchSystem.TriggerAgentOverride("Agent Pace", "Viral cascade critical. Full Megacity quarantine protocol engaged. All civilian egress points sealed.", 2);
-            sPedestrianEcology.DeployTacticalCordon(1);
-            sPedestrianEcology.DeployTacticalCordon(2);
-            sPedestrianEcology.DeployTacticalCordon(3);
-            sPedestrianEcology.DeployTacticalCordon(4);
-        } else if (newStage == CONTAGION_STAGE_QUARANTINE) {
-            sRadioDispatchSystem.TriggerAgentOverride("Agent Skinner", "Megacity quarantine in effect. All transit terminals locked down under terminal force authorization.", 3);
+        if (newStage > oldStage) {
+            // Escalation
+            if (newStage == CONTAGION_STAGE_OUTBREAK) {
+                sRadioDispatchSystem.TriggerAgentOverride("Agent Gray", "Elevated viral vector confirmed. Machine Directive 101 enacted. Deploying tactical cordons at transit hubs.", 1);
+                sPedestrianEcology.DeployTacticalCordon(1);
+                sPedestrianEcology.DeployTacticalCordon(2);
+            } else if (newStage == CONTAGION_STAGE_CASCADE) {
+                sRadioDispatchSystem.TriggerAgentOverride("Agent Pace", "Viral cascade critical. Full Megacity quarantine protocol engaged. All civilian egress points sealed.", 2);
+                sPedestrianEcology.DeployTacticalCordon(1);
+                sPedestrianEcology.DeployTacticalCordon(2);
+                sPedestrianEcology.DeployTacticalCordon(3);
+                sPedestrianEcology.DeployTacticalCordon(4);
+            } else if (newStage == CONTAGION_STAGE_QUARANTINE) {
+                sRadioDispatchSystem.TriggerAgentOverride("Agent Skinner", "Megacity quarantine in effect. All transit terminals locked down under terminal force authorization.", 3);
+            }
+        } else {
+            // Dynamic De-escalation as viral clones are purged
+            INFO_LOG(format("SmithVirusCascade: De-escalating contagion from Stage %1% to Stage %2% (Infection %3%%%)")
+                     % (int)oldStage % (int)newStage % pct);
+
+            if (newStage == CONTAGION_STAGE_CASCADE) {
+                sRadioDispatchSystem.BroadcastPirateOverride(2, "Zion Operator Uplink", "Quarantine perimeter breached! Smith replication slowing. Maintain extraction corridors!");
+            } else if (newStage == CONTAGION_STAGE_OUTBREAK) {
+                sRadioDispatchSystem.BroadcastPirateOverride(1, "Zion Operator Uplink", "Contagion suppressed below 50%! Free operatives continue code scrubs!");
+            } else if (newStage == CONTAGION_STAGE_ELEVATED) {
+                sRadioDispatchSystem.BroadcastPirateOverride(1, "Zion Operator Uplink", "Viral anomalies contained below 25%. Civilians proceeding safely to Hardlines.");
+            } else if (newStage == CONTAGION_STAGE_LATENT) {
+                // Shard recovery! Reset martial law & SWAT cordons across all districts
+                for (uint32 d = 1; d <= 4; ++d) {
+                    sRadioDispatchSystem.SetMartialLaw(d, false);
+                    sPedestrianEcology.SetCordonActive(d, false);
+                }
+                RadioTransmission tx;
+                tx.transmissionId = 99999;
+                tx.tenCode = "10-99-RECOVERY";
+                tx.unitCallsign = "Central Emergency Broadcast";
+                tx.districtName = "Megacity All Sectors";
+                tx.locationAddress = "Megacity Wide";
+                tx.threatHeatLevel = 10.0f;
+                tx.escalationTier = 1;
+                tx.timestampMs = getMSTime();
+                tx.squelchToneActive = true;
+                tx.chatterText = "[*ALL-CLEAR BROADCAST*] Viral anomaly successfully suppressed! Machine martial law revoked. SWAT cordons dismissed. Megacity civil protocols restored.";
+                sRadioDispatchSystem.BroadcastDispatch(tx);
+                sBotMgr.LogCombat(tx.chatterText);
+            }
         }
     }
 }

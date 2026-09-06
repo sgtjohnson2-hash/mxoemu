@@ -27,9 +27,80 @@ void SentientMajorCharacters::Initialize()
 {
     std::lock_guard<std::recursive_mutex> lock(m_majorMutex);
     m_hijackedHosts.clear();
+    m_viralImmunity.clear();
     m_lastHenchmenWaveMs = 0;
     m_lastAuraPulseMs = 0;
     INFO_LOG("SentientMajorCharacters: Initialized persona directors (Merovingian, Smith, Morpheus, Trinity).");
+}
+
+bool SentientMajorCharacters::HasViralImmunity(uint32 entityGoId) const
+{
+    std::lock_guard<std::recursive_mutex> lock(m_majorMutex);
+    auto it = m_viralImmunity.find(entityGoId);
+    if (it == m_viralImmunity.end()) return false;
+    return getMSTime() < it->second;
+}
+
+void SentientMajorCharacters::SetViralImmunity(uint32 entityGoId, uint32 durationMs)
+{
+    std::lock_guard<std::recursive_mutex> lock(m_majorMutex);
+    m_viralImmunity[entityGoId] = getMSTime() + durationMs;
+}
+
+bool SentientMajorCharacters::IsInMorpheusAura(float wx, float wz, float radius) const
+{
+    float radiusSq = radius * radius;
+    auto allIds = sObjMgr.getAllGOIds();
+    for (auto id : allIds) {
+        PlayerObject* po = sObjMgr.getGOPtrSafe(id);
+        if (po && !po->isDead() && po->getHandle().find("Morpheus") != std::string::npos) {
+            LocationVector mPos = po->getPosition();
+            float dx = float(mPos.x) - wx;
+            float dz = float(mPos.z) - wz;
+            if ((dx * dx + dz * dz) <= radiusSq) {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
+bool SentientMajorCharacters::CheckMorpheusAuraDeflection(uint32 targetGoId, uint32 smithGoId)
+{
+    PlayerObject* targetPo = sObjMgr.getGOPtrSafe(targetGoId);
+    if (!targetPo) return false;
+    LocationVector tPos = targetPo->getPosition();
+    if (!IsInMorpheusAura((float)tPos.x, (float)tPos.z, 2500.0f)) return false;
+
+    // 95% deflection check under Morpheus's Aura of Free Will
+    if ((rand() % 100) < 95) {
+        PlayerObject* smithPo = sObjMgr.getGOPtrSafe(smithGoId);
+        if (smithPo) {
+            LocationVector sPos = smithPo->getPosition();
+            float dx = float(sPos.x - tPos.x);
+            float dz = float(sPos.z - tPos.z);
+            float dist = std::sqrt(dx * dx + dz * dz);
+            if (dist > 0.01f) {
+                dx /= dist;
+                dz /= dist;
+            } else {
+                dx = 1.0f;
+                dz = 0.0f;
+            }
+            float kbX = float(sPos.x) + dx * 500.0f;
+            float kbZ = float(sPos.z) + dz * 500.0f;
+            smithPo->setPosition(LocationVector(kbX, sPos.y, kbZ));
+            auto smithBot = sBotMgr.GetBotByGOID(smithGoId);
+            if (smithBot) {
+                smithBot->MoveTo(kbX, (float)sPos.y, kbZ);
+                smithBot->Emote(51); // Knockdown stagger
+            }
+            sGame.AnnounceStateUpdateNear((float)kbX, (float)kbZ, 20000.0f, std::make_shared<EmoteMsg>(smithGoId, 43, 1));
+        }
+        sBotMgr.LogCombat("[AURA OF FREE WILL] Morpheus's Aura deflected Agent Smith viral infection! Kinetic shockwave staggered clone.");
+        return true; // Deflected!
+    }
+    return false;
 }
 
 void SentientMajorCharacters::Update(float deltaSec)
@@ -54,6 +125,16 @@ bool SentientMajorCharacters::HijackHost(BotClient* bot, PlayerObject* po, uint3
     if (!bot || !po || po->isDead() || bot->isAgent()) return false;
     uint32 goId = bot->GetPlayerGoId();
     if (goId == smithGoId) return false;
+
+    // Check 30s viral immunity window post-cleansing
+    if (HasViralImmunity(goId)) {
+        return false;
+    }
+
+    // Check Morpheus Aura of Free Will (25m radius, 95% deflection check)
+    if (CheckMorpheusAuraDeflection(goId, smithGoId)) {
+        return false;
+    }
 
     std::lock_guard<std::recursive_mutex> lock(m_majorMutex);
     if (m_hijackedHosts.find(goId) != m_hijackedHosts.end()) return false;
@@ -129,11 +210,29 @@ bool SentientMajorCharacters::RevertHijackedHost(uint32 entityGoId)
         po->setFactionName(rec.originalFaction);
         po->setRsiHex(rec.originalRsi);
         po->setMaximumHealth(1000);
-        po->setCurrentHealth(0); // Unconscious civilian shell
-        po->getClient().QueueState(std::make_shared<EmoteMsg>(entityGoId, 50, 1)); // Cower / collapse emote
+        po->setCurrentHealth(150); // Baseline conscious civilian state (1000 max, 150 current)
+        
+        // Apply 30s Viral Immunity status buff
+        SetViralImmunity(entityGoId, 30000);
+
+        LocationVector pos = po->getPosition();
+        // Green Matrix waterfall cleansing FX
+        sGame.AnnounceStateUpdateNear((float)pos.x, (float)pos.z, 20000.0f, std::make_shared<EmoteMsg>(entityGoId, 45, 1));
+
+        auto bot = sBotMgr.GetBotByGOID(entityGoId);
+        if (bot) {
+            bot->setAgent(false);
+            if (rec.originalFaction == "Machines") bot->SetFaction(FACTION_MACHINES);
+            else if (rec.originalFaction == "Zion") bot->SetFaction(FACTION_ZION);
+            else if (rec.originalFaction == "Merovingian") bot->SetFaction(FACTION_MEROVINGIAN);
+            else bot->SetFaction(FACTION_NONE);
+        }
+
+        // Trigger memory awakening / Redpill recruit check on BotManager
+        sBotMgr.HandleCleanseAwakening(entityGoId);
     }
 
-    INFO_LOG(format("SentientMajorCharacters: Host %1% reverted back to civilian shell ('%2%').")
+    INFO_LOG(format("SentientMajorCharacters: Host %1% reverted back to civilian shell ('%2%') with 30s viral immunity.")
              % entityGoId % rec.originalHandle);
     return true;
 }
@@ -149,18 +248,33 @@ void SentientMajorCharacters::ProcessMorpheusAura(PlayerObject* morpheusPo)
     if (!morpheusPo) return;
     LocationVector mPos = morpheusPo->getPosition();
 
-    // Pulse buff to all allied Zion redpills within 20m (2000 units): +20% focus/IS regen and +15% melee damage
-    auto nearby = sSpatialGrid.GetClientsInRadius(mPos.x, mPos.z, 2000.0f);
+    // Pulse buff to all allied Zion redpills and civilians within 25m (2500 units)
+    auto nearby = sSpatialGrid.GetClientsInRadius((float)mPos.x, (float)mPos.z, 2500.0f);
     for (GameClient* gc : nearby) {
         if (!gc) continue;
         uint32 goId = gc->GetPlayerGoId();
-        PlayerObject* ally = sObjMgr.getGOPtrSafe(goId);
-        if (ally && !ally->isDead() && ally != morpheusPo && ally->getFaction() == FACTION_ZION) {
-            // Restore 20 Focus / IS points per pulse
-            uint16 curIS = ally->getCurrentIS();
-            uint16 maxIS = ally->getMaximumIS();
+        PlayerObject* target = sObjMgr.getGOPtrSafe(goId);
+        if (!target || target->isDead() || target == morpheusPo) continue;
+
+        if (target->getFaction() == FACTION_ZION) {
+            // Restore +35 Focus / IS points per pulse to allied Zion redpills
+            uint16 curIS = target->getCurrentIS();
+            uint16 maxIS = target->getMaximumIS();
             if (curIS < maxIS) {
-                ally->setCurrentIS(std::min<uint16>(maxIS, curIS + 20));
+                target->setCurrentIS(std::min<uint16>(maxIS, curIS + 35));
+            }
+            // Defense tactic for melee parry and ranged deflection boost (+25%)
+            target->setTactic(TACTIC_DEFENSE);
+        } else if (gc->isBot() || target->getFactionName() == "Civilian" || target->getHandle().find("Civilian") != std::string::npos) {
+            // Psychological Trauma & Panic Cleansing
+            auto bot = sBotMgr.GetBotByGOID(goId);
+            if (bot) {
+                bot->SetPanicking(false);
+                bot->SetFearLevel(0.15f); // Calm alertness
+                target->getClient().QueueState(std::make_shared<EmoteMsg>(goId, 0, 1)); // Clear cower emote
+                if (rand() % 12 == 0) {
+                    bot->Say("Civilian: Morpheus is with us! Don't look back, stay close!");
+                }
             }
         }
     }
@@ -273,23 +387,42 @@ bool SentientMajorCharacters::TriggerMerovingianBackdoorEscape(BotClient* meroBo
 void SentientMajorCharacters::ProcessTrinityCombat(BotClient* trinityBot, PlayerObject* trinityPo)
 {
     if (!trinityBot || !trinityPo || trinityPo->isDead()) return;
-    uint32 targetGoId = trinityBot->GetTargetGoId();
-    if (targetGoId == 0) return;
 
+    LocationVector pos = trinityPo->getPosition();
+    uint32 targetGoId = trinityBot->GetTargetGoId();
+
+    // Target Prioritization: Prioritize active Smith infectors / clones in radius
+    if (targetGoId == 0) {
+        auto nearby = sSpatialGrid.GetClientsInRadius((float)pos.x, (float)pos.z, 2500.0f);
+        for (GameClient* gc : nearby) {
+            if (!gc || !gc->isBot()) continue;
+            PlayerObject* enemyPo = BotGetPlayer(gc->GetPlayerGoId());
+            if (enemyPo && !enemyPo->isDead() && (enemyPo->getHandle().find("Smith") != std::string::npos || IsHijackedHost(enemyPo->getGoId()))) {
+                targetGoId = enemyPo->getGoId();
+                trinityBot->SetTargetGoId(targetGoId);
+                break;
+            }
+        }
+    }
+
+    if (targetGoId == 0) return;
     PlayerObject* target = BotGetPlayer(targetGoId);
-    if (!target || target->isDead()) return;
+    if (!target || target->isDead()) {
+        trinityBot->SetTargetGoId(0);
+        return;
+    }
 
     // Acrobatic aerial dive-kicks and dual Beretta bullet-time barrages
     float dist = float(trinityPo->getPosition().Distance(target->getPosition()));
 
     if (dist <= 250.0f) {
-        // Eagle Strike combo / acrobatic kick
+        // High-angle dive kick (Ability 5005 - Eagle Strike) interrupting active infectors
         sCombatSys.UseAbility(trinityPo, 5005, targetGoId);
-        if (rand() % 100 < 8) {
+        if (rand() % 100 < 15) {
             trinityBot->Say("Trinity: Dodge this.");
         }
     } else {
-        // Dual Beretta rapid bullet-time barrage
-        sCombatSys.RequestRangedCombat(trinityPo->getGoId(), targetGoId, 5011); // Trick Shot
+        // Dual Beretta rapid bullet-time suppression fire (Ability 5011 - Trick Shot)
+        sCombatSys.RequestRangedCombat(trinityPo->getGoId(), targetGoId, 5011);
     }
 }

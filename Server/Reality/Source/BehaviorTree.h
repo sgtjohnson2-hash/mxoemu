@@ -91,6 +91,12 @@ public:
     virtual NodeStatus Tick(BotClient* bot) override;
 };
 
+class ActionDisruptInfection : public BehaviorNode
+{
+public:
+    virtual NodeStatus Tick(BotClient* bot) override;
+};
+
 class ActionEngageTarget : public BehaviorNode
 {
 public:
