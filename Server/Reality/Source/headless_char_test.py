@@ -479,11 +479,21 @@ def run_test(host: str, auth_port: int, margin_port: int, username: str, passwor
         session_block = struct.pack("<I12x", session_id)
         udp_pkt[27:43] = tf_encrypt_ecb(session_block, margin_twofish_key)
 
-        # Send UDP initial packet
-        margin_sock.settimeout(10.0)
-        udp_sock.sendto(bytes(udp_pkt), (host, udp_world_port))
+        # Send UDP initial packet with retransmission loop (real client re-transmits periodically until margin reply)
+        margin_sock.settimeout(0.5)
+        start_t = time.time()
+        raw_reply = None
+        while time.time() - start_t < 15.0:
+            udp_sock.sendto(bytes(udp_pkt), (host, udp_world_port))
+            try:
+                raw_reply = recv_var_packet(margin_sock)
+                if raw_reply:
+                    break
+            except (socket.timeout, TimeoutError):
+                continue
+            time.sleep(0.2)
 
-        raw_reply = recv_var_packet(margin_sock)
+        assert raw_reply is not None, "Timed out waiting for MS_EstablishUDPSessionReply (0x11)"
         margin_udp_reply = unwrap_twofish_envelope(raw_reply, margin_twofish_key)
         assert margin_udp_reply[0] == 0x11, f"Expected MS_EstablishUDPSessionReply (0x11), got 0x{margin_udp_reply[0]:02X}"
 
