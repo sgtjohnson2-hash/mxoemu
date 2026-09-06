@@ -3,18 +3,25 @@
 #include <thread>
 #include <chrono>
 #include <vector>
+
+#ifdef _WIN32
 #include <windows.h>
 #include <conio.h>
+#endif
 
 void DrawMatrixCodeRain() {
+#ifdef _WIN32
     HANDLE hConsole = GetStdHandle(STD_OUTPUT_HANDLE);
     SetConsoleTextAttribute(hConsole, FOREGROUND_GREEN | FOREGROUND_INTENSITY);
+#else
+    std::cout << "\033[1;32m";
+#endif
     
     int width = 80;
     int height = 24;
     std::vector<int> drops(width, 0);
 
-    for (int i = 0; i < 50; ++i) {
+    for (int i = 0; i < 30; ++i) {
         for (int x = 0; x < width; ++x) {
             if (drops[x] == 0) {
                 if (rand() % 100 < 5) drops[x] = 1;
@@ -31,18 +38,25 @@ void DrawMatrixCodeRain() {
             }
         }
         std::cout << "\n";
-        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+        std::this_thread::sleep_for(std::chrono::milliseconds(30));
     }
     
-    // Clear screen
+#ifdef _WIN32
     system("cls");
+#else
+    std::cout << "\033[2J\033[H";
+#endif
 }
 
 void CustomClient::Run(const std::string& username, const std::string& token) {
     DrawMatrixCodeRain();
     
+#ifdef _WIN32
     HANDLE hConsole = GetStdHandle(STD_OUTPUT_HANDLE);
     SetConsoleTextAttribute(hConsole, FOREGROUND_GREEN | FOREGROUND_INTENSITY);
+#else
+    std::cout << "\033[1;32m";
+#endif
 
     std::cout << "========================================================\n";
     std::cout << "          ZION MAINFRAME SECURE CONNECTION              \n";
@@ -81,15 +95,24 @@ void CustomClient::Run(const std::string& username, const std::string& token) {
     }
     std::cout << "\n";
     
+#ifdef _WIN32
     SetConsoleTextAttribute(hConsole, FOREGROUND_GREEN | FOREGROUND_RED | FOREGROUND_INTENSITY);
+#else
+    std::cout << "\033[1;33m";
+#endif
     std::cout << "\n*** WARNING: YOU ARE NOW IN THE MATRIX ***\n\n";
+#ifdef _WIN32
     SetConsoleTextAttribute(hConsole, FOREGROUND_GREEN | FOREGROUND_INTENSITY);
+#else
+    std::cout << "\033[1;32m";
+#endif
     
     std::cout << "Welcome back, " << username << ".\n";
     std::cout << "[HEADLESS BOT MODE ACTIVE]\n";
     std::cout << "Your consciousness is now streaming into the construct.\n";
-    std::cout << "Press 'Q' to jack out...\n";
     
+#ifdef _WIN32
+    std::cout << "Press 'Q' to jack out...\n";
     while (true) {
         if (_kbhit()) {
             char key = _getch();
@@ -99,7 +122,9 @@ void CustomClient::Run(const std::string& username, const std::string& token) {
         }
         std::this_thread::sleep_for(std::chrono::milliseconds(100));
     }
-    
-    std::cout << "\n> Jacking out... Transferring to Zion Mainframe...\n";
     SetConsoleTextAttribute(hConsole, FOREGROUND_RED | FOREGROUND_GREEN | FOREGROUND_BLUE);
+#else
+    std::cout << "\033[0m\n";
+#endif
+    std::cout << "\n> Jacking out... Transferring to Zion Mainframe...\n";
 }
