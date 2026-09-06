@@ -1256,6 +1256,7 @@ int SocketHandler::ISocketHandler_Select(struct timeval *tsel)
 			LogError(NULL, "SocketHandler::Select", err, StrError(err), LOG_LEVEL_ERROR);
 			break;
 		}
+#endif
 #ifdef _WIN32
 		if (err != WSAEINTR)
 #else
