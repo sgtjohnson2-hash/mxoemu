@@ -51,16 +51,23 @@ std::string PreparedStatement::GetQueryString(Database* db) const
 	for (auto it = m_params.rbegin(); it != m_params.rend(); ++it)
 	{
 		std::string marker = "?" + std::to_string(it->first);
-		size_t pos = finalQuery.find(marker);
-		if (pos != std::string::npos)
+		std::string val = it->second;
+		if (val.length() >= 2 && val.front() == '\'' && val.back() == '\'')
 		{
-			std::string val = it->second;
-			if (val.length() >= 2 && val.front() == '\'' && val.back() == '\'')
+			std::string inner = val.substr(1, val.length() - 2);
+			val = "'" + db->EscapeString(inner) + "'";
+		}
+		size_t pos = 0;
+		while ((pos = finalQuery.find(marker, pos)) != std::string::npos)
+		{
+			// Ensure marker is not a prefix of a larger number (e.g. ?1 matching ?10)
+			if (pos + marker.length() < finalQuery.length() && isdigit((unsigned char)finalQuery[pos + marker.length()]))
 			{
-				std::string inner = val.substr(1, val.length() - 2);
-				val = "'" + db->EscapeString(inner) + "'";
+				pos += marker.length();
+				continue;
 			}
 			finalQuery.replace(pos, marker.length(), val);
+			pos += val.length();
 		}
 	}
 	return finalQuery;
