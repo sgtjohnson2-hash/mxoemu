@@ -995,14 +995,25 @@ void MarginSocket::HandleClaimCharacterNameRequest(ByteBuffer &packetData)
 
 	DEBUG_LOG(format("MS_ClaimCharacterNameRequest: User %1% claiming handle '%2%' (len %3%)") % m_username % handleStr % handleSize);
 
-	bool nameTaken = false;
+	uint64 existingCharId = 0;
+	bool nameTakenByOther = false;
 	{
-		PreparedStatement stmt("SELECT `charId` FROM `characters` WHERE LOWER(`handle`) = LOWER(?0) LIMIT 1");
+		PreparedStatement stmt("SELECT `charId`, `userId` FROM `characters` WHERE LOWER(`handle`) = LOWER(?0) LIMIT 1");
 		stmt.SetString(0, handleStr);
 		scoped_ptr<QueryResult> res(sDatabase.QueryPrepared(&stmt));
 		if (res != NULL && res->GetRowCount() > 0)
 		{
-			nameTaken = true;
+			Field* f = res->Fetch();
+			uint64 cId = f[0].GetUInt64();
+			uint32 uId = f[1].GetUInt32();
+			if (uId == m_userId)
+			{
+				existingCharId = cId;
+			}
+			else
+			{
+				nameTakenByOther = true;
+			}
 		}
 	}
 
@@ -1010,9 +1021,9 @@ void MarginSocket::HandleClaimCharacterNameRequest(ByteBuffer &packetData)
 	response << uint8(MS_ClaimCharacterNameReply); // 0x0B
 	response << uint16(0x000F); // 0x0F, 0x00
 
-	if (nameTaken)
+	if (nameTakenByOther)
 	{
-		DEBUG_LOG(format("MS_ClaimCharacterNameRequest: Handle '%1%' is TAKEN.") % handleStr);
+		DEBUG_LOG(format("MS_ClaimCharacterNameRequest: Handle '%1%' is TAKEN by another user.") % handleStr);
 		response << uint8(0x01); // 1 = Taken / Failed
 		response << uint8(0x00);
 		response << uint8(0x00);
@@ -1022,10 +1033,27 @@ void MarginSocket::HandleClaimCharacterNameRequest(ByteBuffer &packetData)
 		response << uint16(handleSize);
 		response.append((const byte*)handleBuf.data(), handleSize);
 	}
+	else if (existingCharId != 0)
+	{
+		charId = existingCharId;
+		uint32 charId32 = (uint32)(existingCharId & 0xFFFFFFFF);
+		m_charName = handleStr;
+
+		DEBUG_LOG(format("MS_ClaimCharacterNameRequest: Handle '%1%' already belongs to user %2%! CharID=%3%") % handleStr % m_username % charId32);
+
+		response << uint8(0x00); // 0 = Success
+		response << uint8(0x00);
+		response << uint8(0x00);
+		response << uint32(charId32);
+		byte zeroPad[5] = {0};
+		response.append(zeroPad, sizeof(zeroPad));
+		response << uint16(handleSize);
+		response.append((const byte*)handleBuf.data(), handleSize);
+	}
 	else
 	{
 		PreparedStatement insStmt("INSERT INTO `characters` (`userId`, `worldId`, `status`, `handle`, `firstName`, `lastName`, `x`, `y`, `z`, `rot`, `healthC`, `healthM`, `innerStrC`, `innerStrM`, `level`, `profession`, `alignment`, `pvpflag`, `exp`, `cash`, `district`, `adminFlags`) "
-			"VALUES (?0, 1, 0, ?1, ?1, 'Operative', 16802.3, 495.0, 3237.01, 0.0245437, 500, 500, 200, 200, 1, 2, 0, 0, 0, 1000, 1, 0)");
+			"VALUES (?0, 1, 0, ?1, ?1, 'Operative', 16802.3, 495.0, 3237.01, 0.0245437, 500, 500, 200, 200, 50, 2, 0, 0, 1000000000, 10000, 1, 0)");
 		insStmt.SetUInt32(0, m_userId);
 		insStmt.SetString(1, handleStr);
 		sDatabase.ExecutePrepared(&insStmt);
@@ -1238,6 +1266,7 @@ void MarginSocket::HandleCreateCharacterRequest(ByteBuffer &packetData)
 
 	INFO_LOG(format("MS_CreateCharacterRequest: Character %1% successfully created and configured!") % m_charName);
 
+	readyForUdp = true;
 	worldCharId = (uint32)(charId & 0xFFFFFFFF);
 	SendLoadCharacterReplies();
 }

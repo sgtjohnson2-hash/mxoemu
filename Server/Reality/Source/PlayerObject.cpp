@@ -43,6 +43,8 @@ PlayerObject::PlayerObject( GameClient &parent,uint64 charUID, bool isBot ) :m_p
 {
 	if (!isBot) {
 		loadFromDB(true);
+		m_inventorySystem = std::make_shared<InventorySystem>(this);
+		m_inventorySystem->loadFromDB();
 	} else {
 		m_handle = "Bot_" + std::to_string(charUID);
 		m_firstName = "Bot";
@@ -904,6 +906,7 @@ void PlayerObject::ApplyTimeDilation(float amount, unsigned int durationMs) {
 
 unsigned short PlayerObject::getEvasion() const {
     unsigned short evasion = 10 + (m_lvl * 2); // Base evasion
+    if (!m_inventorySystem) return evasion;
     auto items = m_inventorySystem->getAllItems();
     for (auto item : items) {
         const ItemTemplate* tpl = sDataLoader.GetItemTemplate(item->getTemplateId());

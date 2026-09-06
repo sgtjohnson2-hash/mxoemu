@@ -240,12 +240,14 @@ void PlayerObject::die( uint32 killerGoId )
                 
                 // Random item drop
                 const auto& allItems = sDataLoader.GetAllItems();
-                if (!allItems.empty()) {
+                if (!allItems.empty() && killer->getInventory()) {
                     auto it = allItems.begin();
                     std::advance(it, rand() % allItems.size());
                     killer->getInventory()->addItem(make_shared<Item>(sObjMgr.getNewObjectId(), it->second.templateId), 1);
-                    killer->getClient().QueueCommand(make_shared<SystemChatMsg>(
-                        (format("{c:00FF00}Loot Received: %1%{/c}") % it->second.name).str()));
+                    if (!killer->getClient().isBot()) {
+                        killer->getClient().QueueCommand(make_shared<SystemChatMsg>(
+                            (format("{c:00FF00}Loot Received: %1%{/c}") % it->second.name).str()));
+                    }
                 }
             }
         } catch (...) {}
