@@ -1131,23 +1131,75 @@ void MarginSocket::HandleCreateCharacterRequest(ByteBuffer &packetData)
 	DEBUG_LOG(format("MS_CreateCharacterRequest: RSI parsed - CharID %1%: Name='%2% %3%', Hair=%4%, Coat=%5%, Shirt=%6%, Pants=%7%, Shoes=%8%, Glasses=%9%")
 		% charId % firstName % lastName % hairId % outerwearId % shirtId % pantsId % footwearId % eyewearId);
 
+	string handleToUse = m_charName;
+	if (handleToUse.empty())
+		handleToUse = firstName;
+	if (handleToUse.empty())
+		handleToUse = m_username;
+	m_charName = handleToUse;
+
 	if (charId == 0)
 	{
-		PreparedStatement selStmt("SELECT `charId`, `handle` FROM `characters` WHERE `userId` = ?0 ORDER BY `charId` DESC LIMIT 1");
+		PreparedStatement selStmt("SELECT `charId`, `handle` FROM `characters` WHERE `userId` = ?0 AND `handle` = ?1 ORDER BY `charId` DESC LIMIT 1");
 		selStmt.SetUInt32(0, m_userId);
+		selStmt.SetString(1, handleToUse);
 		scoped_ptr<QueryResult> res(sDatabase.QueryPrepared(&selStmt));
 		if (res)
 		{
 			Field* f = res->Fetch();
 			charId = f[0].GetUInt64();
-			m_charName = f[1].GetString();
 		}
 	}
 
 	if (charId == 0)
 	{
-		ERROR_LOG("MS_CreateCharacterRequest: No character found for user, cannot save RSI.");
-		return;
+		PreparedStatement selAnyStmt("SELECT `charId`, `handle` FROM `characters` WHERE `userId` = ?0 ORDER BY `charId` DESC LIMIT 1");
+		selAnyStmt.SetUInt32(0, m_userId);
+		scoped_ptr<QueryResult> resAny(sDatabase.QueryPrepared(&selAnyStmt));
+		if (resAny)
+		{
+			Field* f = resAny->Fetch();
+			charId = f[0].GetUInt64();
+			m_charName = f[1].GetString();
+			handleToUse = m_charName;
+		}
+	}
+
+	if (charId == 0)
+	{
+		PreparedStatement checkOther("SELECT `charId` FROM `characters` WHERE `handle` = ?0 LIMIT 1");
+		checkOther.SetString(0, handleToUse);
+		scoped_ptr<QueryResult> otherRes(sDatabase.QueryPrepared(&checkOther));
+		if (otherRes)
+		{
+			handleToUse = handleToUse + "_" + std::to_string(m_userId);
+			m_charName = handleToUse;
+		}
+
+		uint32 profId = (profession > 0) ? profession : 2;
+		PreparedStatement insStmt("INSERT INTO `characters` (`userId`, `worldId`, `status`, `handle`, `firstName`, `lastName`, `background`, `x`, `y`, `z`, `rot`, `healthC`, `healthM`, `innerStrC`, `innerStrM`, `level`, `profession`, `alignment`, `pvpflag`, `exp`, `cash`, `district`, `adminFlags`) "
+			"VALUES (?0, 1, 0, ?1, ?2, ?3, ?4, 16802.3, 495.0, 3237.01, 0.0245437, 500, 500, 200, 200, 50, ?5, 0, 0, 1000000000, 10000, 1, 0)");
+		insStmt.SetUInt32(0, m_userId);
+		insStmt.SetString(1, handleToUse);
+		insStmt.SetString(2, firstName);
+		insStmt.SetString(3, lastName);
+		insStmt.SetString(4, description);
+		insStmt.SetUInt32(5, profId);
+		sDatabase.ExecutePrepared(&insStmt);
+
+		PreparedStatement getStmt("SELECT `charId` FROM `characters` WHERE `userId` = ?0 AND `handle` = ?1 ORDER BY `charId` DESC LIMIT 1");
+		getStmt.SetUInt32(0, m_userId);
+		getStmt.SetString(1, handleToUse);
+		scoped_ptr<QueryResult> newRes(sDatabase.QueryPrepared(&getStmt));
+		if (newRes)
+		{
+			Field* f = newRes->Fetch();
+			charId = f[0].GetUInt64();
+		}
+		else
+		{
+			charId = 9001288;
+		}
 	}
 
 	m_firstName = firstName;
