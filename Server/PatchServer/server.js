@@ -10,7 +10,7 @@ try {
     console.log('[PatchServer] mysql2 not yet installed in local environment, will be available in container.');
 }
 
-const PORT = 80;
+const PORT = parseInt(process.env.PORT || '80', 10);
 const PATCH_DIR = path.join(__dirname, 'patch_data');
 
 if (!fs.existsSync(PATCH_DIR)) {

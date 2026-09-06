@@ -1,0 +1,25 @@
+{
+  "version": "7.6005",
+  "serverName": "Reality",
+  "authServer": "15.204.82.250:11000",
+  "gameServer": "15.204.82.250:10000",
+  "patchServer": "http://15.204.82.250",
+  "launcher": {
+    "version": "1.2.0",
+    "minVersion": "1.0.0",
+    "url": "/launcher/ZionLauncher.exe",
+    "filename": "ZionLauncher.exe",
+    "notes": "Matrix Digital Rain loader & auto-updater"
+  },
+  "clientPackage": {
+    "filename": "MxO_Client.7z",
+    "url": "/client/MxO_Client.7z",
+    "sizeBytes": 1327331186,
+    "compressed": true,
+    "compressionType": "7z"
+  },
+  "patchZip": {
+    "filename": "MxO_7.6004p.zip",
+    "url": "/client/MxO_7.6004p.zip"
+  }
+}

@@ -1,0 +1,320 @@
+<Window x:Class="ZionLauncher.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Zion Mainframe - The Matrix Online" Height="680" Width="880"
+        Background="Black" WindowStartupLocation="CenterScreen" ResizeMode="NoResize" Loaded="Window_Loaded">
+    <Window.Resources>
+        <Style TargetType="TextBlock">
+            <Setter Property="FontFamily" Value="Consolas"/>
+            <Setter Property="Foreground" Value="#00FF00"/>
+        </Style>
+        <Style TargetType="TextBox">
+            <Setter Property="FontFamily" Value="Consolas"/>
+            <Setter Property="Background" Value="#111111"/>
+            <Setter Property="Foreground" Value="#00FF00"/>
+            <Setter Property="BorderBrush" Value="#00FF00"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="CaretBrush" Value="#00FF00"/>
+            <Setter Property="Padding" Value="5"/>
+        </Style>
+        <Style TargetType="PasswordBox">
+            <Setter Property="FontFamily" Value="Consolas"/>
+            <Setter Property="Background" Value="#111111"/>
+            <Setter Property="Foreground" Value="#00FF00"/>
+            <Setter Property="BorderBrush" Value="#00FF00"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="CaretBrush" Value="#00FF00"/>
+            <Setter Property="Padding" Value="5"/>
+        </Style>
+        <Style TargetType="ComboBox">
+            <Setter Property="FontFamily" Value="Consolas"/>
+            <Setter Property="Background" Value="#111111"/>
+            <Setter Property="Foreground" Value="#00FF00"/>
+            <Setter Property="BorderBrush" Value="#00FF00"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="Padding" Value="4"/>
+        </Style>
+        <Style TargetType="ComboBoxItem">
+            <Setter Property="FontFamily" Value="Consolas"/>
+            <Setter Property="Background" Value="#111111"/>
+            <Setter Property="Foreground" Value="#00FF00"/>
+        </Style>
+        <Style TargetType="RadioButton">
+            <Setter Property="FontFamily" Value="Consolas"/>
+            <Setter Property="Foreground" Value="#00FF00"/>
+        </Style>
+        <Style TargetType="CheckBox">
+            <Setter Property="FontFamily" Value="Consolas"/>
+            <Setter Property="Foreground" Value="#00FF00"/>
+        </Style>
+        <Style TargetType="Button">
+            <Setter Property="FontFamily" Value="Consolas"/>
+            <Setter Property="Background" Value="#111111"/>
+            <Setter Property="Foreground" Value="#00FF00"/>
+            <Setter Property="BorderBrush" Value="#00FF00"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="{TemplateBinding BorderThickness}">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter Property="Background" Value="#00FF00"/>
+                                <Setter Property="Foreground" Value="#000000"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+    </Window.Resources>
+
+    <Grid>
+        <!-- Matrix Falling Code Canvas -->
+        <Canvas x:Name="MatrixCanvas" HorizontalAlignment="Stretch" VerticalAlignment="Stretch" Background="Black"/>
+
+        <!-- Semi-transparent Main Console Overlay -->
+        <Border x:Name="MainConsoleBorder" Background="#F0030A04" HorizontalAlignment="Center" VerticalAlignment="Center" CornerRadius="10" Padding="25" BorderBrush="#00FF44" BorderThickness="1.5" Visibility="Collapsed">
+            <Border.Effect>
+                <DropShadowEffect Color="#00FF44" BlurRadius="20" ShadowDepth="0" Opacity="0.4"/>
+            </Border.Effect>
+            <StackPanel Width="520">
+                <TextBlock Text="==========================================================" TextAlignment="Center" Margin="0,0,0,3" Foreground="#00AA33"/>
+                <TextBlock Text="Z I O N   M A I N F R A M E" TextAlignment="Center" FontWeight="Bold" FontSize="22" Margin="0,0,0,3" Foreground="#39FF14">
+                    <TextBlock.Effect>
+                        <DropShadowEffect Color="#00FF66" BlurRadius="8" ShadowDepth="0" Opacity="0.8"/>
+                    </TextBlock.Effect>
+                </TextBlock>
+                <TextBlock Text="THE MATRIX ONLINE // REALITY REMASTER (v1.2.0)" TextAlignment="Center" FontSize="11" Foreground="#00FF66" Opacity="0.8" Margin="0,0,0,3"/>
+                <TextBlock Text="==========================================================" TextAlignment="Center" Margin="0,0,0,15" Foreground="#00AA33"/>
+
+                <!-- Navigation Tabs -->
+                <Grid Margin="0,0,0,15">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="*"/>
+                    </Grid.ColumnDefinitions>
+                    <Button x:Name="btnShowLogin" Content="JACK IN" Height="28" Margin="0,0,2,0" Click="btnShowLogin_Click"/>
+                    <Button x:Name="btnShowRegister" Content="REGISTER" Height="28" Grid.Column="1" Margin="2,0,2,0" Click="btnShowRegister_Click"/>
+                    <Button x:Name="btnShowServer" Content="SERVERS" Height="28" Grid.Column="2" Margin="2,0,2,0" Click="btnShowServer_Click"/>
+                    <Button x:Name="btnShowPatch" Content="UPDATE" Height="28" Grid.Column="3" Margin="2,0,0,0" Click="btnShowPatch_Click"/>
+                </Grid>
+
+                <!-- Current Server Banner -->
+                <Border Background="#112211" BorderBrush="#006600" BorderThickness="1" Padding="6" Margin="0,0,0,15">
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="Auto"/>
+                        </Grid.ColumnDefinitions>
+                        <TextBlock x:Name="lblServerTarget" Text="ACTIVE MAINFRAME: LIVE VPS (15.204.82.250)" VerticalAlignment="Center" FontSize="11" FontWeight="SemiBold"/>
+                        <TextBlock x:Name="lblPingStatus" Grid.Column="1" Text="AUTH: ONLINE" Foreground="#00FF00" FontSize="11" FontWeight="Bold"/>
+                    </Grid>
+                </Border>
+
+                <!-- Login View -->
+                <StackPanel x:Name="LoginPanel" Visibility="Visible">
+                    <TextBlock Text="OPERATOR HANDLE / LOGIN:" Margin="0,0,0,4"/>
+                    <TextBox x:Name="txtLoginUser" Margin="0,0,0,12" FontSize="15" KeyDown="txtLogin_KeyDown"/>
+
+                    <TextBlock Text="PASSCODE:" Margin="0,0,0,4"/>
+                    <PasswordBox x:Name="txtLoginPass" Margin="0,0,0,15" FontSize="15" KeyDown="txtLogin_KeyDown"/>
+
+                    <CheckBox x:Name="chkAutoSyncHosts" Content="Automatically sync Windows DNS/hosts redirection to active server" IsChecked="True" Margin="0,0,0,12"/>
+
+                    <Border x:Name="clientStatusBanner" Background="#2A1600" BorderBrush="#FF8800" BorderThickness="1" CornerRadius="4" Padding="8" Margin="0,0,0,12" Visibility="Collapsed">
+                        <StackPanel>
+                            <TextBlock x:Name="txtClientStatusBanner" Text="⚠️ GAME CLIENT NOT DETECTED" Foreground="#FFCC00" FontWeight="Bold" FontSize="11"/>
+                            <TextBlock Text="No Matrix Online client binaries found in this directory. Click the button below to download the complete game client directly from the live server." Foreground="#FFAA00" FontSize="10" TextWrapping="Wrap" Margin="0,2,0,0"/>
+                        </StackPanel>
+                    </Border>
+
+                    <Button x:Name="btnJackIn" Content="JACK IN TO THE MATRIX" FontSize="16" FontWeight="Bold" Height="42" Click="btnJackIn_Click"/>
+                </StackPanel>
+
+                <!-- Register View -->
+                <StackPanel x:Name="RegisterPanel" Visibility="Collapsed">
+                    <TextBlock Text="NEW OPERATOR HANDLE:" Margin="0,0,0,4"/>
+                    <TextBox x:Name="txtRegUser" Margin="0,0,0,12" FontSize="15" KeyDown="txtReg_KeyDown"/>
+
+                    <TextBlock Text="PASSCODE:" Margin="0,0,0,4"/>
+                    <PasswordBox x:Name="txtRegPass" Margin="0,0,0,12" FontSize="15" KeyDown="txtReg_KeyDown"/>
+
+                    <TextBlock Text="CONFIRM PASSCODE:" Margin="0,0,0,4"/>
+                    <PasswordBox x:Name="txtRegPassConfirm" Margin="0,0,0,18" FontSize="15" KeyDown="txtReg_KeyDown"/>
+
+                    <Button x:Name="btnRegister" Content="CREATE MAINFRAME ACCOUNT" FontSize="15" FontWeight="Bold" Height="38" Click="btnRegister_Click"/>
+                </StackPanel>
+
+                <!-- Server Selection & Network Diagnostics View -->
+                <StackPanel x:Name="ServerPanel" Visibility="Collapsed">
+                    <TextBlock Text="SELECT TARGET SERVER:" Margin="0,0,0,6" FontWeight="Bold"/>
+                    <RadioButton x:Name="rbRemoteServer" Content="Live VPS Remote Mainframe (15.204.82.250)" IsChecked="True" Margin="0,0,0,6" Checked="rbServer_Checked"/>
+                    <RadioButton x:Name="rbLocalServer" Content="Local Test Server (127.0.0.1)" Margin="0,0,0,12" Checked="rbServer_Checked"/>
+
+                    <Border Background="#111111" BorderBrush="#004400" BorderThickness="1" Padding="8" Margin="0,0,0,12">
+                        <StackPanel>
+                            <TextBlock Text="PORT &amp; SERVICE STATUS:" FontWeight="Bold" Margin="0,0,0,6"/>
+                            <Grid Margin="0,2">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="200"/>
+                                    <ColumnDefinition Width="*"/>
+                                </Grid.ColumnDefinitions>
+                                <TextBlock Text="Auth Daemon (TCP 11000):"/>
+                                <TextBlock x:Name="diagAuth" Grid.Column="1" Text="Checking..." Foreground="#FFFF00"/>
+                            </Grid>
+                            <Grid Margin="0,2">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="200"/>
+                                    <ColumnDefinition Width="*"/>
+                                </Grid.ColumnDefinitions>
+                                <TextBlock Text="Margin Daemon (TCP 10000):"/>
+                                <TextBlock x:Name="diagMargin" Grid.Column="1" Text="Checking..." Foreground="#FFFF00"/>
+                            </Grid>
+                            <Grid Margin="0,2">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="200"/>
+                                    <ColumnDefinition Width="*"/>
+                                </Grid.ColumnDefinitions>
+                                <TextBlock Text="Patch HTTP (TCP 80):"/>
+                                <TextBlock x:Name="diagPatch" Grid.Column="1" Text="Checking..." Foreground="#FFFF00"/>
+                            </Grid>
+                            <Grid Margin="0,2">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="200"/>
+                                    <ColumnDefinition Width="*"/>
+                                </Grid.ColumnDefinitions>
+                                <TextBlock Text="Mainframe DB (API):"/>
+                                <TextBlock x:Name="diagDb" Grid.Column="1" Text="Checking..." Foreground="#FFFF00"/>
+                            </Grid>
+                            <Grid Margin="0,2">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="200"/>
+                                    <ColumnDefinition Width="*"/>
+                                </Grid.ColumnDefinitions>
+                                <TextBlock Text="Windows Hosts Redirection:"/>
+                                <TextBlock x:Name="diagHosts" Grid.Column="1" Text="Checking..." Foreground="#FFFF00"/>
+                            </Grid>
+                        </StackPanel>
+                    </Border>
+
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>
+                        <Button x:Name="btnRunDiagnostics" Content="REFRESH DIAGNOSTICS" Height="32" Margin="0,0,4,0" Click="btnRunDiagnostics_Click"/>
+                        <Button x:Name="btnApplyHosts" Content="APPLY HOSTS REDIRECTION" Height="32" Grid.Column="1" Margin="4,0,0,0" Click="btnApplyHosts_Click"/>
+                    </Grid>
+                </StackPanel>
+
+                <!-- Patch View -->
+                <StackPanel x:Name="PatchPanel" Visibility="Collapsed">
+                    <TextBlock Text="ZION MAINFRAME DIRECT CLIENT DOWNLOADER" FontWeight="Bold" FontSize="13" Margin="0,0,0,3"/>
+                    <TextBlock Text="Downloads authentic Matrix Online binaries, world maps, and assets from the live host." Foreground="#88FF88" FontSize="11" TextWrapping="Wrap" Margin="0,0,0,10"/>
+                    
+                    <Border Background="#111111" BorderBrush="#004400" BorderThickness="1" Padding="8" Margin="0,0,0,10">
+                        <StackPanel>
+                            <TextBlock Text="CLIENT ASSET EXTRACTION STATUS:" FontWeight="Bold" Margin="0,0,0,6"/>
+                            <TextBlock x:Name="txtPatchInfo" Text="READY TO ACQUIRE CLIENT ARCHIVE FROM SERVER." TextWrapping="Wrap" Margin="0,0,0,4"/>
+                            <TextBlock x:Name="txtPatchDetails" Text="Idle — Ready to download" Foreground="#00FF99" FontSize="11" Margin="0,0,0,8"/>
+                            <ProgressBar x:Name="pbPatch" Height="18" Minimum="0" Maximum="100" Value="0" Margin="0,0,0,0" Background="#111111" Foreground="#00FF00" BorderBrush="#00FF00" BorderThickness="1"/>
+                        </StackPanel>
+                    </Border>
+
+                    <Grid Margin="0,0,0,10">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>
+                        <Button x:Name="btnStartPatch" Content="📥 DOWNLOAD CLIENT (1.26 GB)" Height="36" Margin="0,0,4,0" FontSize="12" FontWeight="Bold" Background="#004400" Click="btnStartPatch_Click"/>
+                        <Button x:Name="btnVerifyFiles" Content="🔍 VERIFY / REPAIR" Height="36" Grid.Column="1" Margin="4,0,0,0" FontSize="12" Click="btnVerifyFiles_Click"/>
+                    </Grid>
+
+                    <!-- Launcher Auto-Update Card -->
+                    <Border Background="#111111" BorderBrush="#004400" BorderThickness="1" Padding="8" Margin="0,0,0,0">
+                        <StackPanel>
+                            <TextBlock Text="LAUNCHER AUTO-UPDATE &amp; INTEGRITY:" FontWeight="Bold" Margin="0,0,0,6"/>
+                            <Grid Margin="0,0,0,8">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                </Grid.ColumnDefinitions>
+                                <TextBlock x:Name="txtLauncherVersionInfo" Text="CURRENT BUILD: v1.2.0 (Active)" FontSize="11" Foreground="#00FF99"/>
+                                <TextBlock x:Name="txtLauncherUpdateStatus" Grid.Column="1" Text="STATUS: UP TO DATE" FontSize="11" FontWeight="Bold" Foreground="#39FF14"/>
+                            </Grid>
+                            <Button x:Name="btnCheckLauncherUpdate" Content="⚡ CHECK LAUNCHER UPDATE" Height="30" Click="btnCheckLauncherUpdate_Click"/>
+                        </StackPanel>
+                    </Border>
+                </StackPanel>
+
+                <!-- Status Output -->
+                <Border Background="#051505" BorderBrush="#004400" BorderThickness="1" CornerRadius="4" Padding="8" Margin="0,15,0,0">
+                    <TextBlock x:Name="txtStatus" Text="Zion Mainframe online. Ready to Jack In." TextAlignment="Center" FontSize="12" Opacity="0.9" TextWrapping="Wrap"/>
+                </Border>
+            </StackPanel>
+        </Border>
+
+        <!-- Matrix Digital Rain Loader / Pre-Loader View Overlay -->
+        <Grid x:Name="LoaderOverlay" Visibility="Visible" HorizontalAlignment="Stretch" VerticalAlignment="Stretch" Background="#80000000">
+            <Border HorizontalAlignment="Center" VerticalAlignment="Center" Width="620" 
+                    Background="#F0020A03" BorderBrush="#00FF66" BorderThickness="1.5" CornerRadius="10" Padding="32">
+                <Border.Effect>
+                    <DropShadowEffect Color="#00FF66" BlurRadius="28" ShadowDepth="0" Opacity="0.75"/>
+                </Border.Effect>
+                <StackPanel>
+                    <!-- Header -->
+                    <TextBlock Text="╔══════════════════════════════════════════════════════════════╗" 
+                               TextAlignment="Center" Foreground="#00AA33" FontSize="11" Margin="0,0,0,2"/>
+                    <TextBlock Text="Z I O N   M A I N F R A M E" 
+                               TextAlignment="Center" FontWeight="Bold" FontSize="26" Foreground="#39FF14">
+                        <TextBlock.Effect>
+                            <DropShadowEffect Color="#00FF66" BlurRadius="12" ShadowDepth="0" Opacity="0.9"/>
+                        </TextBlock.Effect>
+                    </TextBlock>
+                    <TextBlock Text="THE MATRIX ONLINE // NEURAL BRIDGE LOADER v1.2.0" 
+                               TextAlignment="Center" FontSize="11" Foreground="#00FF66" Opacity="0.85" Margin="0,3,0,2"/>
+                    <TextBlock Text="╚══════════════════════════════════════════════════════════════╝" 
+                               TextAlignment="Center" Foreground="#00AA33" FontSize="11" Margin="0,0,0,20"/>
+
+                    <!-- Loader State Readouts -->
+                    <TextBlock x:Name="txtLoaderPhase" Text="INITIALIZING NEURAL LINK..." 
+                               FontSize="14" FontWeight="Bold" Foreground="#39FF14" Margin="0,0,0,6"/>
+                    <TextBlock x:Name="txtLoaderDetail" Text="Calibrating Matrix construct stream..." 
+                               FontSize="11" Foreground="#00CC44" TextWrapping="Wrap" Margin="0,0,0,16"/>
+
+                    <!-- Progress Bar -->
+                    <Border BorderBrush="#00FF66" BorderThickness="1" Background="#0A150A" CornerRadius="3" Height="22" Margin="0,0,0,10">
+                        <ProgressBar x:Name="pbLoader" Minimum="0" Maximum="100" Value="0" 
+                                     Background="Transparent" Foreground="#00FF66" BorderThickness="0"/>
+                    </Border>
+
+                    <!-- Telemetry Stats -->
+                    <Grid Margin="0,0,0,15">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="Auto"/>
+                        </Grid.ColumnDefinitions>
+                        <TextBlock x:Name="txtLoaderSpeed" Text="CIPHER LINK: CONNECTED" FontSize="11" Foreground="#00AA44"/>
+                        <TextBlock x:Name="txtLoaderPercent" Grid.Column="1" Text="0%" FontSize="11" FontWeight="Bold" Foreground="#39FF14"/>
+                    </Grid>
+
+                    <!-- Fallback / Interactive Actions (if offline or error) -->
+                    <Grid x:Name="loaderActionGrid" Visibility="Collapsed" Margin="0,5,0,0">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>
+                        <Button x:Name="btnLoaderProceed" Content="JACK IN ANYWAY (OFFLINE)" Height="32" Margin="0,0,4,0" Click="btnLoaderProceed_Click"/>
+                        <Button x:Name="btnLoaderRetry" Content="RETRY LINK" Height="32" Grid.Column="1" Margin="4,0,0,0" Click="btnLoaderRetry_Click"/>
+                    </Grid>
+                </StackPanel>
+            </Border>
+        </Grid>
+    </Grid>
+</Window>
