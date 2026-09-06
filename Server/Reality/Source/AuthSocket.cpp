@@ -564,50 +564,114 @@ void AuthSocket::HandleAuthChallengeResponse( ByteBuffer &packet )
 
 void AuthSocket::HandleCreateCharacterRequest( ByteBuffer &packet )
 {
-#pragma pack(push,1)
-	struct CreateCharacterRequest {
-		uint32 worldId;
-	};
-#pragma pack(pop)
-
-	if (packet.remaining() < sizeof(CreateCharacterRequest))
-		return;
-
-	CreateCharacterRequest request;
-	packet.read((uint8*)&request, sizeof(request));
-
-	string handle = packet.readString();
-	string firstName = packet.readString();
-	string lastName = packet.readString();
-
-	DEBUG_LOG(format("HandleCreateCharacterRequest: Handle='%1%', FirstName='%2%', LastName='%3%'") 
-		% handle % firstName % lastName);
-
-	// The client expects a 0x0D reply with status
-	TCPVariableLengthPacket replyPacket;
-	replyPacket << uint8(AS_CreateCharacterReply);
-
-	// Get world name from worldId
-	string worldName = sAuth.getWorldNameForId(request.worldId);
-	if (worldName.empty()) worldName = "Slums"; // fallback
-
-	bool success = sAuth.CreateCharacter(worldName, m_username, handle, firstName, lastName);
-	
-	if (success)
+	try
 	{
-		replyPacket << uint8(0x00); // Status 0 = Success
-		uint64 newCharId = sAuth.getCharIdForHandle(handle);
-		replyPacket << uint64(newCharId);
-		DEBUG_LOG("HandleCreateCharacterRequest: Success!");
+		// AS_CreateCharacterRequest payload from matrix.exe:
+		// [0x0A (already consumed by ProcessData)] [uint16 0x0000] [null-terminated handle string]
+		if (packet.remaining() < 2)
+		{
+			WARNING_LOG(format("Auth received malformed CreateCharacter packet (size %1% bytes)") % packet.remaining());
+			return;
+		}
+
+		uint16 unk = 0;
+		packet >> unk;
+
+		// Safely extract null-terminated string handle
+		string handle;
+		while (packet.remaining() > 0)
+		{
+			char c = packet.read<char>();
+			if (c == 0)
+				break;
+			handle += c;
+		}
+
+		if (handle.empty())
+			handle = m_username;
+
+		DEBUG_LOG(format("HandleCreateCharacterRequest: Account='%1%', Handle='%2%'") % m_username % handle);
+
+		string worldName = "Reality";
+		string firstName = handle;
+		string lastName = "Operative";
+
+		uint64 newCharId = 0;
+		uint64 existingCharId = sAuth.getCharIdForHandle(handle);
+
+		bool success = false;
+		if (existingCharId != 0)
+		{
+			// Check if this character already belongs to the current user
+			PreparedStatement checkStmt("SELECT `charId` FROM `characters` WHERE `handle` = ?0 AND `userId` = ?1");
+			checkStmt.SetString(0, handle);
+			checkStmt.SetUInt32(1, m_userId);
+			scoped_ptr<QueryResult> checkRes(sDatabase.QueryPrepared(&checkStmt));
+			if (checkRes)
+			{
+				newCharId = existingCharId;
+				success = true;
+			}
+			else
+			{
+				// Character name taken by another account
+				success = false;
+			}
+		}
+		else
+		{
+			// Create character record
+			PreparedStatement stmt("INSERT INTO `characters` (`userId`, `worldId`, `status`, `handle`, `firstName`, `lastName`, `background`, `x`, `y`, `z`, `rot`, `healthC`, `healthM`, `innerStrC`, `innerStrM`, `level`, `profession`, `alignment`, `pvpflag`, `exp`, `cash`, `district`, `adminFlags`) "
+				"VALUES (?0, 1, 0, ?1, ?2, ?3, '', 16802.3, 495.0, 3237.01, 0.0245437, 500, 500, 200, 200, 50, 2, 0, 0, 1000000000, 10000, 1, 0)");
+			stmt.SetUInt32(0, m_userId);
+			stmt.SetString(1, handle);
+			stmt.SetString(2, firstName);
+			stmt.SetString(3, lastName);
+			success = sDatabase.ExecutePrepared(&stmt);
+
+			if (success)
+			{
+				newCharId = sAuth.getCharIdForHandle(handle);
+				if (newCharId != 0)
+				{
+					PreparedStatement rsiStmt("INSERT IGNORE INTO `rsivalues` (`charId`, `sex`, `body`, `hat`, `face`, `shirt`, `coat`, `pants`, `shoes`, `gloves`, `glasses`, `hair`, `facialdetail`, `shirtcolor`, `pantscolor`, `coatcolor`, `shoecolor`, `glassescolor`, `haircolor`, `skintone`, `tattoo`, `facialdetailcolor`, `leggings`) "
+						"VALUES (?0, 0, 2, 0, 0, 2, 10, 1, 6, 6, 4, 0, 0, 41, 16, 0, 0, 15, 0, 0, 0, 0, 0)");
+					rsiStmt.SetUInt64(0, newCharId);
+					sDatabase.ExecutePrepared(&rsiStmt);
+				}
+			}
+		}
+
+		// AS_CreateCharacterReply (0x0B) format expected by matrix.exe at 0x43f4c0:
+		// [uint8 opcode 0x0B] [uint16 0x0000] [uint32 status (0=success)] [uint64 charId]
+		TCPVariableLengthPacket replyPacket;
+		replyPacket << uint8(AS_CreateCharacterReply); // 0x0B
+		replyPacket << uint16(0);                      // 2 bytes 0x0000 padding
+		if (success && newCharId != 0)
+		{
+			replyPacket << uint32(0);                  // status 0 = Success
+			replyPacket << uint64(newCharId);           // 64-bit charId
+			INFO_LOG(format("Auth: Character '%1%' (charId %2%) successfully created for user %3%!") % handle % newCharId % m_username);
+		}
+		else
+		{
+			replyPacket << uint32(1);                  // status 1 = Failed (Name in use / Error)
+			replyPacket << uint64(0);
+			WARNING_LOG(format("Auth: Failed to create character '%1%' for user %2%!") % handle % m_username);
+		}
+
+		SendPacket(replyPacket);
 	}
-	else
+	catch (const std::exception &ex)
 	{
-		replyPacket << uint8(0x01); // Status 1 = Failed (Name taken / Error)
+		ERROR_LOG(format("Auth: Exception in HandleCreateCharacterRequest: %1%") % ex.what());
+		TCPVariableLengthPacket replyPacket;
+		replyPacket << uint8(AS_CreateCharacterReply);
+		replyPacket << uint16(0);
+		replyPacket << uint32(1);
 		replyPacket << uint64(0);
-		DEBUG_LOG("HandleCreateCharacterRequest: Failed!");
+		SendPacket(replyPacket);
 	}
-
-	SendPacket(replyPacket);
 }
 
 
