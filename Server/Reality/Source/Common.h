@@ -111,6 +111,8 @@ typedef unsigned char byte;
 #define strnicmp strncasecmp
 #define _stricmp strcasecmp
 #define _strnicmp strncasecmp
+#define sprintf_s(buf, sz, fmt, ...) snprintf(buf, sz, fmt, ##__VA_ARGS__)
+#define vsprintf_s(buf, sz, fmt, args) vsnprintf(buf, sz, fmt, args)
 #endif
 
 // Short for unsigned long
