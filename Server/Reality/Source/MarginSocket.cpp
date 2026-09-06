@@ -320,6 +320,21 @@ void MarginSocket::ProcessData( const byte *buf,size_t len )
 			DEBUG_LOG(format("Sending CERT_ConnectReply: |%1%|") % Bin2Hex(response) );
 			break;
 		}
+	case MS_ClaimCharacterNameRequest:
+		{
+			HandleClaimCharacterNameRequest(packetData);
+			break;
+		}
+	case MS_CreateCharacterRequest:
+		{
+			HandleCreateCharacterRequest(packetData);
+			break;
+		}
+	case MS_DeleteCharacterRequest:
+		{
+			HandleDeleteCharacterRequest(packetData);
+			break;
+		}
 	case MS_ConnectRequest:
 		{
 			if (packetData.remaining() < 2*sizeof(uint32))
@@ -503,7 +518,46 @@ void MarginSocket::ProcessData( const byte *buf,size_t len )
 				soeChatString = string();
 			}
 
-			worldCharId = charId & 0xFFFFFFFF;
+			SendLoadCharacterReplies();
+			break;
+		}
+
+	}
+}
+
+void MarginSocket::SendCharacterReply( uint16 shortAfterId,bool lastPacket,uint8 opcode,ByteBuffer theData )
+{
+	numCharacterReplies++;
+
+	TwofishEncryptedPacket derp;
+	derp << uint8(MS_LoadCharacterReply)
+		 << uint32(0)
+		 << uint32(worldCharId)
+		 << uint16(shortAfterId)
+		 << uint8(numCharacterReplies)
+		 << uint8(lastPacket)
+		 << uint8(opcode);
+	derp.append(&theData.contents()[theData.rpos()],theData.remaining());
+
+	SendCrypted(derp);
+}
+
+bool MarginSocket::UdpReady(GameClient *theClient)
+{
+	if (!readyForUdp)
+		return false;
+
+	TwofishEncryptedPacket response;
+	response << uint8(MS_EstablishUDPSessionReply)
+		     << uint32(0);
+
+	SendCrypted(response);
+	return true;
+}
+
+void MarginSocket::SendLoadCharacterReplies()
+{
+	worldCharId = charId & 0xFFFFFFFF;
 			NewCharacterReply();
 			//10 00 00 00 00 11 a0 07 00 00 00 01 00 01 00 00 
 			//               ?? ?? ?? ?? <- world character id (unique per world, the uint64 charId is globally unique across worlds)
@@ -918,38 +972,261 @@ void MarginSocket::ProcessData( const byte *buf,size_t len )
 			} ;
 
 			SendCharacterReply(swap16(0x1027),true,0x0f,ByteBuffer(packet11,sizeof(packet11)));
-			break;
+}
+
+void MarginSocket::HandleClaimCharacterNameRequest(ByteBuffer &packetData)
+{
+	DEBUG_LOG("Margin Received MS_ClaimCharacterNameRequest");
+	if (packetData.remaining() < 6)
+		return;
+
+	uint32 unknownFlags;
+	packetData >> unknownFlags;
+
+	uint16 handleSize;
+	packetData >> handleSize;
+
+	if (packetData.remaining() < handleSize || handleSize == 0)
+		return;
+
+	vector<char> handleBuf(handleSize);
+	packetData.read((byte*)&handleBuf[0], handleSize);
+	string handleStr(&handleBuf[0]);
+
+	DEBUG_LOG(format("MS_ClaimCharacterNameRequest: User %1% claiming handle '%2%' (len %3%)") % m_username % handleStr % handleSize);
+
+	bool nameTaken = false;
+	{
+		PreparedStatement stmt("SELECT `charId` FROM `characters` WHERE LOWER(`handle`) = LOWER(?0) LIMIT 1");
+		stmt.SetString(0, handleStr);
+		scoped_ptr<QueryResult> res(sDatabase.QueryPrepared(&stmt));
+		if (res != NULL && res->GetRowCount() > 0)
+		{
+			nameTaken = true;
 		}
-
 	}
-}
-
-void MarginSocket::SendCharacterReply( uint16 shortAfterId,bool lastPacket,uint8 opcode,ByteBuffer theData )
-{
-	numCharacterReplies++;
-
-	TwofishEncryptedPacket derp;
-	derp << uint8(MS_LoadCharacterReply)
-		 << uint32(0)
-		 << uint32(worldCharId)
-		 << uint16(shortAfterId)
-		 << uint8(numCharacterReplies)
-		 << uint8(lastPacket)
-		 << uint8(opcode);
-	derp.append(&theData.contents()[theData.rpos()],theData.remaining());
-
-	SendCrypted(derp);
-}
-
-bool MarginSocket::UdpReady(GameClient *theClient)
-{
-	if (!readyForUdp)
-		return false;
 
 	TwofishEncryptedPacket response;
-	response << uint8(MS_EstablishUDPSessionReply)
-		     << uint32(0);
+	response << uint8(MS_ClaimCharacterNameReply); // 0x0B
+	response << uint16(0x000F); // 0x0F, 0x00
+
+	if (nameTaken)
+	{
+		DEBUG_LOG(format("MS_ClaimCharacterNameRequest: Handle '%1%' is TAKEN.") % handleStr);
+		response << uint8(0x01); // 1 = Taken / Failed
+		response << uint8(0x00);
+		response << uint8(0x00);
+		response << uint8(0x11);
+		byte zeroPad[7] = {0};
+		response.append(zeroPad, sizeof(zeroPad));
+		response << uint16(handleSize);
+		response.append((const byte*)handleBuf.data(), handleSize);
+	}
+	else
+	{
+		PreparedStatement insStmt("INSERT INTO `characters` (`userId`, `worldId`, `status`, `handle`, `firstName`, `lastName`, `x`, `y`, `z`, `rot`, `healthC`, `healthM`, `innerStrC`, `innerStrM`, `level`, `profession`, `alignment`, `pvpflag`, `exp`, `cash`, `district`, `adminFlags`) "
+			"VALUES (?0, 1, 0, ?1, ?1, 'Operative', 16802.3, 495.0, 3237.01, 0.0245437, 500, 500, 200, 200, 1, 2, 0, 0, 0, 1000, 1, 0)");
+		insStmt.SetUInt32(0, m_userId);
+		insStmt.SetString(1, handleStr);
+		sDatabase.ExecutePrepared(&insStmt);
+
+		uint64 newCharId = 0;
+		{
+			PreparedStatement selStmt("SELECT `charId` FROM `characters` WHERE `userId` = ?0 AND `handle` = ?1 ORDER BY `charId` DESC LIMIT 1");
+			selStmt.SetUInt32(0, m_userId);
+			selStmt.SetString(1, handleStr);
+			scoped_ptr<QueryResult> charRes(sDatabase.QueryPrepared(&selStmt));
+			if (charRes)
+			{
+				Field* f = charRes->Fetch();
+				newCharId = f[0].GetUInt64();
+			}
+		}
+
+		charId = newCharId;
+		uint32 charId32 = (uint32)(newCharId & 0xFFFFFFFF);
+		m_charName = handleStr;
+
+		DEBUG_LOG(format("MS_ClaimCharacterNameRequest: Handle '%1%' reserved! CharID=%2%") % handleStr % charId32);
+
+		response << uint8(0x00); // 0 = Success
+		response << uint8(0x00);
+		response << uint8(0x00);
+		response << uint32(charId32);
+		byte zeroPad[5] = {0};
+		response.append(zeroPad, sizeof(zeroPad));
+		response << uint16(handleSize);
+		response.append((const byte*)handleBuf.data(), handleSize);
+	}
 
 	SendCrypted(response);
-	return true;
+}
+
+void MarginSocket::HandleCreateCharacterRequest(ByteBuffer &packetData)
+{
+	DEBUG_LOG("Margin Received MS_CreateCharacterRequest");
+	if (packetData.remaining() < 78)
+	{
+		WARNING_LOG(format("MS_CreateCharacterRequest: Packet too short (%1% bytes)") % packetData.remaining());
+		return;
+	}
+
+	const byte* raw = &packetData.contents()[packetData.rpos()];
+	size_t remaining = packetData.remaining();
+
+	uint16 skintone = *(uint16*)&raw[2];
+	uint16 bodyTypeId = *(uint16*)&raw[6];
+	uint16 hairId = *(uint16*)&raw[14];
+	uint16 haircolor = *(uint16*)&raw[18];
+	uint16 tattoo = *(uint16*)&raw[22];
+	uint16 headId = *(uint16*)&raw[26];
+	uint16 facialDetail = *(uint16*)&raw[30];
+	uint16 hatId = *(uint16*)&raw[34];
+	uint16 eyewearId = *(uint16*)&raw[38];
+	uint16 shirtId = *(uint16*)&raw[42];
+	uint16 glovesId = *(uint16*)&raw[46];
+	uint16 outerwearId = *(uint16*)&raw[50];
+	uint16 pantsId = *(uint16*)&raw[54];
+	uint16 footwearId = *(uint16*)&raw[62];
+	uint16 profession = *(uint16*)&raw[66];
+
+	size_t curOffset = 78;
+	string firstName = m_charName;
+	string lastName = "Operative";
+	string description = "";
+
+	if (curOffset + 2 <= remaining)
+	{
+		uint16 fnLen = *(uint16*)&raw[curOffset];
+		curOffset += 2;
+		if (curOffset + fnLen <= remaining && fnLen > 1)
+		{
+			firstName = string((const char*)&raw[curOffset], fnLen - 1);
+		}
+		curOffset += fnLen;
+	}
+
+	if (curOffset + 2 <= remaining)
+	{
+		uint16 lnLen = *(uint16*)&raw[curOffset];
+		curOffset += 2;
+		if (curOffset + lnLen <= remaining && lnLen > 1)
+		{
+			lastName = string((const char*)&raw[curOffset], lnLen - 1);
+		}
+		curOffset += lnLen;
+	}
+
+	if (curOffset + 2 <= remaining)
+	{
+		uint16 descLen = *(uint16*)&raw[curOffset];
+		curOffset += 2;
+		if (curOffset + descLen <= remaining && descLen > 1)
+		{
+			description = string((const char*)&raw[curOffset], descLen - 1);
+		}
+		curOffset += descLen;
+	}
+
+	DEBUG_LOG(format("MS_CreateCharacterRequest: RSI parsed - CharID %1%: Name='%2% %3%', Hair=%4%, Coat=%5%, Shirt=%6%, Pants=%7%, Shoes=%8%, Glasses=%9%")
+		% charId % firstName % lastName % hairId % outerwearId % shirtId % pantsId % footwearId % eyewearId);
+
+	if (charId == 0)
+	{
+		PreparedStatement selStmt("SELECT `charId`, `handle` FROM `characters` WHERE `userId` = ?0 ORDER BY `charId` DESC LIMIT 1");
+		selStmt.SetUInt32(0, m_userId);
+		scoped_ptr<QueryResult> res(sDatabase.QueryPrepared(&selStmt));
+		if (res)
+		{
+			Field* f = res->Fetch();
+			charId = f[0].GetUInt64();
+			m_charName = f[1].GetString();
+		}
+	}
+
+	if (charId == 0)
+	{
+		ERROR_LOG("MS_CreateCharacterRequest: No character found for user, cannot save RSI.");
+		return;
+	}
+
+	m_firstName = firstName;
+	m_lastName = lastName;
+	m_background = description;
+
+	uint32 profId = (profession > 0) ? profession : 2;
+	PreparedStatement updStmt("UPDATE `characters` SET `firstName` = ?0, `lastName` = ?1, `background` = ?2, `profession` = ?3 WHERE `charId` = ?4 AND `userId` = ?5");
+	updStmt.SetString(0, firstName);
+	updStmt.SetString(1, lastName);
+	updStmt.SetString(2, description);
+	updStmt.SetUInt32(3, profId);
+	updStmt.SetUInt64(4, charId);
+	updStmt.SetUInt32(5, m_userId);
+	sDatabase.ExecutePrepared(&updStmt);
+
+	PreparedStatement rsiStmt("REPLACE INTO `rsivalues` (`charId`, `sex`, `body`, `hat`, `face`, `shirt`, `coat`, `pants`, `shoes`, `gloves`, `glasses`, `hair`, `facialdetail`, `shirtcolor`, `pantscolor`, `coatcolor`, `shoecolor`, `glassescolor`, `haircolor`, `skintone`, `tattoo`, `facialdetailcolor`, `leggings`) "
+		"VALUES (?0, ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, 41, 16, 0, 0, 15, ?13, ?14, ?15, 0, 0)");
+	rsiStmt.SetUInt64(0, charId);
+	rsiStmt.SetUInt16(1, (bodyTypeId % 2));
+	rsiStmt.SetUInt16(2, bodyTypeId);
+	rsiStmt.SetUInt16(3, hatId);
+	rsiStmt.SetUInt16(4, headId);
+	rsiStmt.SetUInt16(5, shirtId > 0 ? shirtId : 2);
+	rsiStmt.SetUInt16(6, outerwearId > 0 ? outerwearId : 10);
+	rsiStmt.SetUInt16(7, pantsId > 0 ? pantsId : 1);
+	rsiStmt.SetUInt16(8, footwearId > 0 ? footwearId : 6);
+	rsiStmt.SetUInt16(9, glovesId > 0 ? glovesId : 6);
+	rsiStmt.SetUInt16(10, eyewearId > 0 ? eyewearId : 4);
+	rsiStmt.SetUInt16(11, hairId);
+	rsiStmt.SetUInt16(12, facialDetail);
+	rsiStmt.SetUInt16(13, haircolor);
+	rsiStmt.SetUInt16(14, skintone);
+	rsiStmt.SetUInt16(15, tattoo);
+	sDatabase.ExecutePrepared(&rsiStmt);
+
+	INFO_LOG(format("MS_CreateCharacterRequest: Character %1% successfully created and configured!") % m_charName);
+
+	worldCharId = (uint32)(charId & 0xFFFFFFFF);
+	SendLoadCharacterReplies();
+}
+
+void MarginSocket::HandleDeleteCharacterRequest(ByteBuffer &packetData)
+{
+	DEBUG_LOG("Margin Received MS_DeleteCharacterRequest");
+	uint64 delCharId = 0;
+	if (packetData.remaining() >= sizeof(uint64) + 4)
+	{
+		uint32 prefix;
+		packetData >> prefix;
+		packetData >> delCharId;
+	}
+	else if (packetData.remaining() >= sizeof(uint64))
+	{
+		packetData >> delCharId;
+	}
+	else
+	{
+		WARNING_LOG("MS_DeleteCharacterRequest: Packet too short");
+		return;
+	}
+
+	DEBUG_LOG(format("MS_DeleteCharacterRequest: User %1% deleting CharID %2%") % m_username % delCharId);
+
+	PreparedStatement stmt("DELETE FROM `characters` WHERE `charId` = ?0 AND `userId` = ?1");
+	stmt.SetUInt64(0, delCharId);
+	stmt.SetUInt32(1, m_userId);
+	sDatabase.ExecutePrepared(&stmt);
+
+	PreparedStatement stmtRsi("DELETE FROM `rsivalues` WHERE `charId` = ?0");
+	stmtRsi.SetUInt64(0, delCharId);
+	sDatabase.ExecutePrepared(&stmtRsi);
+
+	TwofishEncryptedPacket response;
+	response << uint8(MS_DeleteCharacterReply); // 0x0E
+	response << uint64(delCharId);
+	byte zeroPad[8] = {0};
+	response.append(zeroPad, sizeof(zeroPad));
+	SendCrypted(response);
+
+	DEBUG_LOG(format("MS_DeleteCharacterRequest: Sent MS_DeleteCharacterReply for CharID %1%") % delCharId);
 }

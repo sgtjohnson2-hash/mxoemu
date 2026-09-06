@@ -130,6 +130,11 @@ void AuthSocket::ProcessData( const byte *buf,size_t len )
 			HandleCreateCharacterRequest(packetContents);
 			break;
 		}
+	case AS_DeleteCharacterRequest:
+		{
+			HandleDeleteCharacterRequest(packetContents);
+			break;
+		}
 	}
 }
 
@@ -423,31 +428,8 @@ void AuthSocket::HandleAuthRequest( ByteBuffer &packet )
 	scoped_ptr<QueryResult> result(sDatabase.QueryPrepared(&stmt));
 	uint16 numCharacters = (result == NULL) ? 0 : result->GetRowCount();
 
-	if (numCharacters == 0)
-	{
-		INFO_LOG((format("No character found for user %1% (ID %2%), auto-creating default operative...") % m_username % m_userId).str().c_str());
-		string insSql = (format("INSERT INTO `characters` (`userId`, `worldId`, `status`, `handle`, `firstName`, `lastName`, `x`, `y`, `z`, `rot`, `healthC`, `healthM`, `innerStrC`, `innerStrM`, `level`, `profession`, `alignment`, `pvpflag`, `exp`, `cash`, `district`, `adminFlags`) "
-			"VALUES (%1%, 1, 0, '%2%', '%2%', 'Operative', 16802.3, 495.0, 3237.01, 0.0245437, 500, 500, 200, 200, 50, 2, 0, 0, 1000000000, 10000, 1, 0)")
-			% m_userId % m_username).str();
-		sDatabase.Execute(insSql.c_str());
-
-		string selSql = (format("SELECT `charId` FROM `characters` WHERE `userId` = %1% ORDER BY `charId` DESC LIMIT 1") % m_userId).str();
-		scoped_ptr<QueryResult> charRes(sDatabase.Query(selSql.c_str()));
-		if (charRes)
-		{
-			Field* f = charRes->Fetch();
-			uint64 newCharId = f[0].GetUInt64();
-			if (newCharId > 0)
-			{
-				string insRsi = (format("INSERT INTO `rsivalues` (`charId`, `sex`, `body`, `hat`, `face`, `shirt`, `coat`, `pants`, `shoes`, `gloves`, `glasses`, `hair`, `facialdetail`, `shirtcolor`, `pantscolor`, `coatcolor`, `shoecolor`, `glassescolor`, `haircolor`, `skintone`, `tattoo`, `facialdetailcolor`, `leggings`) "
-					"VALUES (%1%, 0, 2, 9, 7, 2, 10, 1, 6, 6, 4, 1, 6, 41, 16, 0, 0, 15, 1, 10, 0, 3, 0)") % newCharId).str();
-				sDatabase.Execute(insRsi.c_str());
-			}
-		}
-
-		result.reset(sDatabase.QueryPrepared(&stmt));
-		numCharacters = (result == NULL) ? 0 : result->GetRowCount();
-	}
+	// In-game character creation: do not auto-create on login
+	
 
 	worldPacket << uint16(numCharacters);
 
@@ -628,3 +610,32 @@ void AuthSocket::HandleCreateCharacterRequest( ByteBuffer &packet )
 	SendPacket(replyPacket);
 }
 
+
+void AuthSocket::HandleDeleteCharacterRequest( ByteBuffer &packet )
+{
+	if (packet.remaining() < sizeof(uint64))
+		return;
+
+	uint64 delCharId;
+	packet >> delCharId;
+
+	DEBUG_LOG(format("AuthSocket::HandleDeleteCharacterRequest: User %1% deleting charId %2%") % m_username % delCharId);
+
+	PreparedStatement stmt("DELETE FROM `characters` WHERE `charId` = ?0 AND `userId` = ?1");
+	stmt.SetUInt64(0, delCharId);
+	stmt.SetUInt32(1, m_userId);
+	bool success = sDatabase.ExecutePrepared(&stmt);
+
+	if (success)
+	{
+		PreparedStatement stmtRsi("DELETE FROM `rsivalues` WHERE `charId` = ?0");
+		stmtRsi.SetUInt64(0, delCharId);
+		sDatabase.ExecutePrepared(&stmtRsi);
+	}
+
+	TCPVariableLengthPacket replyPacket;
+	replyPacket << uint8(AS_DeleteCharacterReply);
+	replyPacket << uint8(success ? 0x00 : 0x01);
+	replyPacket << uint64(delCharId);
+	SendPacket(replyPacket);
+}

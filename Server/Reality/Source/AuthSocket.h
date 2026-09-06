@@ -41,6 +41,7 @@ private:
 	void HandleAuthRequest(ByteBuffer &packet);
 	void HandleAuthChallengeResponse(ByteBuffer &packet);
 	void HandleCreateCharacterRequest(ByteBuffer &packet);
+	void HandleDeleteCharacterRequest(ByteBuffer &packet);
 
 
 	void ProcessData(const byte *buf,size_t len);
