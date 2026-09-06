@@ -184,6 +184,29 @@ void ConsoleThread::ProcessLine(const string& fullLine)
 	}
 }
 
+#if PLATFORM == PLATFORM_UNIX
+#include <sys/select.h>
+#include <unistd.h>
+#else
+#include <conio.h>
+#endif
+
+static bool HasConsoleInput()
+{
+#if PLATFORM == PLATFORM_UNIX
+	fd_set fds;
+	FD_ZERO(&fds);
+	FD_SET(STDIN_FILENO, &fds);
+	struct timeval tv;
+	tv.tv_sec = 0;
+	tv.tv_usec = 0;
+	int res = select(STDIN_FILENO + 1, &fds, NULL, NULL, &tv);
+	return res > 0;
+#else
+	return _kbhit() != 0;
+#endif
+}
+
 bool ConsoleThread::run()
 {
 	SetThreadName("Console Thread");
@@ -214,8 +237,8 @@ bool ConsoleThread::run()
 			}
 		}
 
-		// 2. Read interactive cin if available
-		if (!cin.eof() && !cin.fail())
+		// 2. Read interactive cin only if input is ready
+		if (HasConsoleInput())
 		{
 			string line;
 			if (getline(cin, line))
@@ -227,14 +250,11 @@ bool ConsoleThread::run()
 				}
 			}
 		}
-		else
-		{
-			cin.clear();
-		}
 
-		Sleep(500);
+		Sleep(200);
 	}
 
 	return true;
 }
+
 
