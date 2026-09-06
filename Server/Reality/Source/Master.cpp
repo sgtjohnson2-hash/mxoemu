@@ -84,8 +84,11 @@ bool Master::Run()
 {
 	if (!sConfig.SetSource(REALITY_CONFIG))
 	{
-		CRITICAL_LOG(format("Could not find configuration file %1%.") % REALITY_CONFIG);
-		exit(0);
+		if (!sConfig.SetSource("Binaries/" REALITY_CONFIG))
+		{
+			CRITICAL_LOG(format("Could not find configuration file %1%.") % REALITY_CONFIG);
+			exit(0);
+		}
 	}
 
 	INFO_LOG(format("Reality v0.01 Alpha %1% bit version started") % (sizeof(int*) * 8));

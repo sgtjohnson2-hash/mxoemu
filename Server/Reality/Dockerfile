@@ -1,4 +1,4 @@
-﻿FROM ubuntu:22.04
+FROM ubuntu:22.04
 
 ENV DEBIAN_FRONTEND=noninteractive
 
@@ -30,6 +30,6 @@ RUN mkdir -p build && cd build && \
 EXPOSE 10000/udp 10000/tcp 11000/tcp
 
 # Working directory for running Reality
-WORKDIR /app/Server/Reality
+WORKDIR /app/Server/Reality/Binaries
 
-CMD ["./Binaries/Reality"]
+CMD ["./Reality"]
