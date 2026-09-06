@@ -232,6 +232,8 @@ using std::string;
 
 #if (COMPILER == COMPILER_MICROSOFT && _MSC_VER >= 1900) || (__cplusplus >= 201103L) || defined(__GNUC__) || defined(__clang__)
 #include <memory>
+#include <mutex>
+#include <shared_mutex>
 using std::shared_ptr;
 using std::make_shared;
 using std::dynamic_pointer_cast;

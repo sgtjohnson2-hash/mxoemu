@@ -6,6 +6,7 @@
 #include <string>
 #include <vector>
 #include <shared_mutex>
+#include <mutex>
 
 struct Organization {
     uint32 id;
