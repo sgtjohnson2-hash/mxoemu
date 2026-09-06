@@ -44,6 +44,7 @@ public:
 	void SpawnSelf();
 	void PopulateWorld();
 	void UpdateAoIStreaming();
+	void setPosition(const LocationVector& pos) override;
 
 	void initGoId(uint32 theGoId);
 	void HandleStateUpdate(ByteBuffer &srcData);

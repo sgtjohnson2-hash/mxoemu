@@ -75,6 +75,10 @@ void DeletePlayerMsg::setReceiver( class GameClient *toWho )
 	{
 		throw PacketNoLongerValid();		
 	}
+	catch (ObjectMgr::ObjectNotAvailable)
+	{
+		viewId = uint16(m_objectId);
+	}
 	DEBUG_LOG(format("Player %1% delete packet serializing for client %2% with viewID %3%") % m_objectId % m_toWho->Address() % viewId);
 
 	//03 01 00 01 01 00 <OBJECT ID:2bytes> <nomoreAttribs (00 00)>

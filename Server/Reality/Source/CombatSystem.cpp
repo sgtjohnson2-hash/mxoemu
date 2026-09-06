@@ -231,7 +231,7 @@ bool CombatSystem::RequestInterlock(uint32 attackerGoId, uint32 targetGoId)
     for (auto* gc : nearbyClients) {
         if (!gc) continue;
         PlayerObject* p = getPlayerSafe(gc->GetPlayerGoId());
-        if (p && gc->isBot() && p->getPosition().DistanceSq(pA->getPosition()) <= (panicRadius * panicRadius) && p->getHandle().find("Civilian") != std::string::npos) {
+        if (p && gc->isBot() && p->getPosition().DistanceSq(pA->getPosition()) <= (panicRadius * panicRadius) && (p->getFactionName() == "Civilian" || p->getHandle().find("Civilian") != std::string::npos)) {
             BotClient* bot = dynamic_cast<BotClient*>(gc);
             if (bot) {
                 bot->triggerPanic(attackerGoId);
@@ -302,12 +302,14 @@ bool CombatSystem::RequestRangedCombat(uint32 attackerGoId, uint32 targetGoId, u
 	PlayerObject* pB = getPlayerSafe(targetGoId);
 	if (!pA || !pB || pA->isDead() || pB->isDead()) return false;
 
-    // Bystander Panic
-    auto players = sObjMgr.getAllGOIds();
-    for (auto id : players) {
-        PlayerObject* p = getPlayerSafe(id);
-        if (p && p->getClient().isBot() && p->getPosition().DistanceSq(pA->getPosition()) < 50*50 && p->getHandle().find("Civilian") != std::string::npos) {
-            BotClient* bot = dynamic_cast<BotClient*>(&p->getClient());
+    // Bystander Panic (15-20m radius = 1500-2000 units, SpatialGrid accelerated)
+    const float panicRadius = 2000.0f;
+    auto nearbyClients = sSpatialGrid.GetClientsInRadius(pA->getPosition().x, pA->getPosition().z, panicRadius);
+    for (auto* gc : nearbyClients) {
+        if (!gc) continue;
+        PlayerObject* p = getPlayerSafe(gc->GetPlayerGoId());
+        if (p && gc->isBot() && p->getPosition().DistanceSq(pA->getPosition()) <= (panicRadius * panicRadius) && (p->getFactionName() == "Civilian" || p->getHandle().find("Civilian") != std::string::npos)) {
+            BotClient* bot = dynamic_cast<BotClient*>(gc);
             if (bot) {
                 bot->triggerPanic(attackerGoId);
             }
@@ -460,9 +462,11 @@ CombatSystem::AttackResult CombatSystem::ResolveAttack(PlayerObject* attacker, P
         }
     }
     else if (move.specialFlags & ABILITY_FLAG_BOMB) {
-        auto players = sObjMgr.getAllGOIds();
-        for (auto goId : players) {
-            PlayerObject* p = getPlayerSafe(goId);
+        const float bombRadius = 500.0f;
+        auto nearbyClients = sSpatialGrid.GetClientsInRadius(target->getPosition().x, target->getPosition().z, bombRadius);
+        for (auto* gc : nearbyClients) {
+            if (!gc) continue;
+            PlayerObject* p = getPlayerSafe(gc->GetPlayerGoId());
             if (p && p != target && p->getFaction() == target->getFaction()) {
                 if (p->getPosition().DistanceSq(target->getPosition()) < 250000.0f) { // 500 range
                     p->takeDamage(attacker->getGoId(), move.minDmg, 201);
@@ -537,13 +541,13 @@ CombatSystem::AttackResult CombatSystem::ResolveAttack(PlayerObject* attacker, P
 
     // Civilian Panic: bystanders flee in terror from active combat
     if (res.hit && !res.isBlocked) {
-        auto nearbyClients = sSpatialGrid.GetClientsInRadius(attacker->getPosition().x, attacker->getPosition().z);
+        auto nearbyClients = sSpatialGrid.GetClientsInRadius(attacker->getPosition().x, attacker->getPosition().z, 2500.0f);
         for (GameClient* gc : nearbyClients) {
-            if (gc->isBot()) {
+            if (gc && gc->isBot()) {
                 BotClient* bc = dynamic_cast<BotClient*>(gc);
                 if (bc && !bc->IsPanicking()) {
                     PlayerObject* botPo = BotGetPlayer(bc->GetPlayerGoId());
-                    if (botPo && botPo->getFactionName() == "Civilian") {
+                    if (botPo && (botPo->getFactionName() == "Civilian" || botPo->getHandle().find("Civilian") != std::string::npos)) {
                         float distSq = attacker->getPosition().DistanceSq(botPo->getPosition().x, botPo->getPosition().y, botPo->getPosition().z);
                         if (distSq < 2500.0f * 2500.0f) { // 25m radius
                             bc->triggerPanic(attacker->getGoId());

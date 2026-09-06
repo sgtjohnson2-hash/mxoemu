@@ -318,6 +318,11 @@ void BotClient::UpdateBotAI(float deltaSeconds)
         }
     }
 
+    // Periodic Theory of Mind cache eviction for inactive/stale targets
+    if (rand() % 50 == 0) {
+        m_tomSolver.EvictInactiveTargets(60);
+    }
+
     // Talkativeness trigger
     if (m_personality->talkativeness > 0.5f && (rand() % 1000) > 995) {
         if (optimal.name == "ATTACK") {
@@ -420,12 +425,14 @@ void BotClient::AttackTarget(uint32 targetGoId)
         }
         
         // Move towards target scaled by deltaSeconds for uniform movement across LOD tiers
-        float speed = 60.0f; 
+        float speed = 450.0f; // 4.5 m/s combat approach speed
         float dt = (m_deltaSeconds > 0.0001f) ? m_deltaSeconds : 0.033f;
         float newX = me->getPosition().x + dirX * speed * dt;
         float newZ = me->getPosition().z + dirZ * speed * dt;
         if (!sSpatialGrid.CheckCollision(newX, newZ, 1.0f, m_playerGoId)) {
             me->setPosition(LocationVector(newX, me->getPosition().y, newZ));
+            sGame.AnnounceStateUpdateNear(newX, newZ, 20000.0f, std::make_shared<PositionStateMsg>(m_playerGoId));
+            sSpatialGrid.UpdateClientPosition(this, newX, newZ);
         }
     }
 }
@@ -450,6 +457,8 @@ void BotClient::MoveTo(float x, float y, float z)
     m_spawnX = x;
     m_spawnY = y;
     m_spawnZ = z;
+
+    sSpatialGrid.UpdateClientPosition(this, x, z);
 
     if (m_playerGoId != 0)
     {

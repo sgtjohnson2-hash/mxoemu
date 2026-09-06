@@ -218,6 +218,7 @@ PlayerObject::~PlayerObject()
 		setOnlineStatus(false);
 
 		INFO_LOG(format("Player object for %1%:%2% deconstructing") % m_handle % m_goId);
+		sSpatialGrid.RemoveClient(&m_parent);
 		sGame.AnnounceStateUpdate(&m_parent,make_shared<DeletePlayerMsg>(m_goId));
 		sGame.AnnounceCommand(&m_parent,make_shared<SystemChatMsg>((format("Player %1% with object id %2% disconnected")%m_handle%m_goId).str()));
 		
@@ -390,6 +391,7 @@ void PlayerObject::SpawnSelf()
 			m_parent.QueueState(dMsg,false,boost::bind(&PlayerObject::PopulateWorld,this));
 			sGame.AnnounceStateUpdate(&m_parent,dMsg);
 			m_spawnedInWorld=true;
+			sSpatialGrid.UpdateClientPosition(&m_parent, m_pos.x, m_pos.z);
 		}
 	} catch (std::exception& e) {
 		std::cout << "DEBUG: SpawnSelf EXCEPTION: " << e.what() << std::endl;
@@ -502,6 +504,15 @@ void PlayerObject::UpdateAoIStreaming()
 		{
 			++it;
 		}
+	}
+}
+
+void PlayerObject::setPosition(const LocationVector& pos)
+{
+	IGO::setPosition(pos);
+	if (m_spawnedInWorld)
+	{
+		sSpatialGrid.UpdateClientPosition(&m_parent, pos.x, pos.z);
 	}
 }
 
