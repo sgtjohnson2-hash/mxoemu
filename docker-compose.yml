@@ -21,7 +21,8 @@ services:
     ports:
       - "80:80"
     volumes:
-      - ./Server/PatchServer/patch_data:/app/patch_data:ro
+      - ./Server/PatchServer/patch_data:/app/patch_data
+      - ./Server/PatchServer/server.js:/app/server.js
 
   reality-server:
     build:

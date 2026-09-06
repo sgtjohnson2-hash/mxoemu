@@ -30,8 +30,12 @@ const defaultManifest = {
     }
 };
 
-if (!fs.existsSync(manifestJsonPath)) {
-    fs.writeFileSync(manifestJsonPath, JSON.stringify(defaultManifest, null, 2));
+try {
+    if (!fs.existsSync(manifestJsonPath)) {
+        fs.writeFileSync(manifestJsonPath, JSON.stringify(defaultManifest, null, 2));
+    }
+} catch (err) {
+    console.log('[PatchServer] Notice: manifest writing skipped (read-only filesystem or permissions):', err.message);
 }
 
 const server = http.createServer((req, res) => {
