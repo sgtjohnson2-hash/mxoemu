@@ -28,6 +28,8 @@ target_include_directories(Sockets PUBLIC "../Dependencies10/Sockets")
 if(MSVC)
     target_compile_options(Sockets PRIVATE /W3 /wd4244 /wd4267)
     target_compile_definitions(Sockets PRIVATE _HAS_STD_BYTE=0)
+else()
+    target_compile_options(Sockets PRIVATE -Wno-deprecated -Wno-narrowing -fpermissive)
 endif()
 
 # Lua 5.4 Library
@@ -44,17 +46,19 @@ if(MSVC)
     target_compile_options(Lua PRIVATE /W3 /wd4244 /wd4334)
 endif()
 
-# CryptoPP Library
-file(GLOB CRYPTOPP_SRC 
-    "../Dependencies10/CryptoPP/*.cpp"
-)
-list(FILTER CRYPTOPP_SRC EXCLUDE REGEX "test|bench|validat")
+# CryptoPP Library (On Linux/UNIX, use system libcrypto++-dev)
+if(WIN32)
+    file(GLOB CRYPTOPP_SRC 
+        "../Dependencies10/CryptoPP/*.cpp"
+    )
+    list(FILTER CRYPTOPP_SRC EXCLUDE REGEX "test|bench|validat")
 
-add_library(CryptoPP STATIC ${CRYPTOPP_SRC})
-target_include_directories(CryptoPP PUBLIC "../Dependencies10/CryptoPP")
-if(MSVC)
-    target_compile_options(CryptoPP PRIVATE /wd4244 /wd4267 /wd4100 /wd4127 /wd4505 /wd4530)
-    target_compile_definitions(CryptoPP PRIVATE CRYPTOPP_DISABLE_ASM=1 _HAS_STD_BYTE=0)
+    add_library(CryptoPP STATIC ${CRYPTOPP_SRC})
+    target_include_directories(CryptoPP PUBLIC "../Dependencies10/CryptoPP")
+    if(MSVC)
+        target_compile_options(CryptoPP PRIVATE /wd4244 /wd4267 /wd4100 /wd4127 /wd4505 /wd4530)
+        target_compile_definitions(CryptoPP PRIVATE CRYPTOPP_DISABLE_ASM=1 _HAS_STD_BYTE=0)
+    endif()
 endif()
 
 # Reality Engine
@@ -82,6 +86,10 @@ target_include_directories(Reality PRIVATE
     "Source"
 )
 
+if(NOT WIN32)
+    target_include_directories(Reality PRIVATE "/usr/include/crypto++")
+endif()
+
 if(WIN32)
     target_link_directories(Reality PRIVATE
         "../Dependencies10/MySQL/lib/64"
@@ -102,7 +110,7 @@ if(WIN32)
 else()
     target_link_libraries(Reality PRIVATE
         Sockets
-        CryptoPP
+        cryptopp
         Lua
         mysqlclient
         Recast
@@ -119,8 +127,7 @@ if(MSVC)
     set_target_properties(Reality PROPERTIES LINK_FLAGS /OPT:NOREF)
     set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} /MAP")
 else()
-    target_compile_options(Reality PRIVATE -Wall -O3)
-    set_target_properties(Reality PROPERTIES INTERPROCEDURAL_OPTIMIZATION TRUE)
+    target_compile_options(Reality PRIVATE -O3 -fpermissive -Wno-deprecated -Wno-narrowing)
 endif()
 
 set_target_properties(Reality PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/Binaries")
