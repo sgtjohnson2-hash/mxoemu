@@ -23,7 +23,10 @@ enum class DisciplineType
     NONE = 0,
     CODER = 1,
     HACKER = 2,
-    OPERATIVE = 3
+    OPERATIVE = 3,
+    MARTIAL_ARTIST = 4,
+    GUNNER = 5,
+    SPY = 6
 };
 
 // Basic structures for abilities

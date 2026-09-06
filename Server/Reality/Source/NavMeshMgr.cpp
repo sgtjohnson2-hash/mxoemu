@@ -7,6 +7,7 @@
 #include "DetourCommon.h"
 #include <cstring>
 #include <cmath>
+#include <algorithm>
 
 createFileSingleton(NavMeshMgr);
 
@@ -27,6 +28,37 @@ void NavMeshMgr::Initialize()
     } else {
         ERROR_LOG("Detour NavMesh failed to initialize!");
     }
+    PopulateDefaultVerticalLinks();
+}
+
+void NavMeshMgr::RegisterOffMeshLink(uint32 id, OffMeshLinkType type, LocationVector start, LocationVector end, bool biDir)
+{
+    std::lock_guard<std::mutex> lock(m_navMutex);
+    m_verticalLinks.push_back({id, type, start, end, biDir});
+}
+
+void NavMeshMgr::PopulateDefaultVerticalLinks()
+{
+    std::lock_guard<std::mutex> lock(m_navMutex);
+    m_verticalLinks.clear();
+
+    // 1. Slums Fire Escapes (Creston Tenements)
+    m_verticalLinks.push_back({101, LINK_FIRE_ESCAPE, LocationVector(-30434.0f, 95.0f, 20325.0f), LocationVector(-30434.0f, 495.0f, 20325.0f), true});
+    m_verticalLinks.push_back({102, LINK_LADDER_CLIMB, LocationVector(-6415.0f, 95.0f, -7121.0f), LocationVector(-6415.0f, 395.0f, -7121.0f), true});
+
+    // 2. Downtown Rooftops (Metacortex Plaza & Downtown Lofts)
+    m_verticalLinks.push_back({201, LINK_ROOFTOP_STAIRS, LocationVector(17043.0f, 95.0f, 2398.0f), LocationVector(17043.0f, 495.0f, 2398.0f), true});
+    m_verticalLinks.push_back({202, LINK_FIRE_ESCAPE, LocationVector(9844.0f, 95.0f, 1314.0f), LocationVector(9844.0f, 1295.0f, 1314.0f), true});
+    m_verticalLinks.push_back({203, LINK_JUMP_DOWN, LocationVector(9844.0f, 1295.0f, 1314.0f), LocationVector(9844.0f, 95.0f, 1514.0f), false});
+
+    // 3. International Diplomatic Tower Stairs
+    m_verticalLinks.push_back({301, LINK_ROOFTOP_STAIRS, LocationVector(111180.0f, 95.0f, -40913.0f), LocationVector(111180.0f, 695.0f, -40913.0f), true});
+    m_verticalLinks.push_back({302, LINK_FIRE_ESCAPE, LocationVector(82745.0f, 95.0f, -66760.0f), LocationVector(82745.0f, 695.0f, -66760.0f), true});
+
+    // 4. Richland Financial Skywalk
+    m_verticalLinks.push_back({401, LINK_ROOFTOP_STAIRS, LocationVector(107619.0f, 95.0f, -149092.0f), LocationVector(107619.0f, 495.0f, -149092.0f), true});
+
+    INFO_LOG(format("NavMeshMgr: Registered %1% 3D vertical off-mesh links across Megacity districts.") % m_verticalLinks.size());
 }
 
 bool NavMeshMgr::BuildFlatNavMesh()
@@ -206,6 +238,76 @@ std::vector<std::pair<float, float>> NavMeshMgr::FindPath(float startX, float st
     // Direct fallback
     path.push_back({targetX, targetZ});
     return path;
+}
+
+std::vector<LocationVector> NavMeshMgr::FindPath3D(float startX, float startY, float startZ,
+                                                  float targetX, float targetY, float targetZ,
+                                                  bool ignoreCollision)
+{
+    std::vector<LocationVector> path3D;
+    float heightDiff = std::abs(targetY - startY);
+
+    // If both points are approximately at same elevation, standard 2D path suffices
+    if (heightDiff <= 150.0f || m_verticalLinks.empty()) {
+        auto pts2D = FindPath(startX, startZ, targetX, targetZ, ignoreCollision);
+        for (const auto& pt : pts2D) {
+            path3D.push_back(LocationVector(pt.first, targetY, pt.second));
+        }
+        return path3D;
+    }
+
+    // Look for best vertical link connecting start elevation to target elevation
+    const VerticalOffMeshLink* bestLink = nullptr;
+    float bestLinkDistSq = -1.0f;
+
+    for (const auto& link : m_verticalLinks) {
+        float linkHeightDiff = std::abs(link.end.y - link.start.y);
+        if (linkHeightDiff < 100.0f) continue;
+
+        // Check direction
+        bool canTraverse = false;
+        if (startY < targetY) { // Ascending
+            if (std::abs(link.start.y - startY) < 200.0f && std::abs(link.end.y - targetY) < 200.0f) canTraverse = true;
+            else if (link.isBiDirectional && std::abs(link.end.y - startY) < 200.0f && std::abs(link.start.y - targetY) < 200.0f) canTraverse = true;
+        } else { // Descending
+            if (std::abs(link.end.y - startY) < 200.0f && std::abs(link.start.y - targetY) < 200.0f) canTraverse = true;
+            else if (link.isBiDirectional && std::abs(link.start.y - startY) < 200.0f && std::abs(link.end.y - targetY) < 200.0f) canTraverse = true;
+        }
+
+        if (canTraverse) {
+            float dSq = std::pow(link.start.x - startX, 2) + std::pow(link.start.z - startZ, 2);
+            if (bestLinkDistSq < 0.0f || dSq < bestLinkDistSq) {
+                bestLinkDistSq = dSq;
+                bestLink = &link;
+            }
+        }
+    }
+
+    if (bestLink) {
+        // Path to link entrance
+        auto toLink2D = FindPath(startX, startZ, bestLink->start.x, bestLink->start.z, ignoreCollision);
+        for (const auto& pt : toLink2D) {
+            path3D.push_back(LocationVector(pt.first, startY, pt.second));
+        }
+        // Vertical traversal point
+        path3D.push_back(bestLink->end);
+        // Path from link exit to destination
+        auto fromLink2D = FindPath(bestLink->end.x, bestLink->end.z, targetX, targetZ, ignoreCollision);
+        for (const auto& pt : fromLink2D) {
+            path3D.push_back(LocationVector(pt.first, targetY, pt.second));
+        }
+        return path3D;
+    }
+
+    // Fallback: straight 3D line interpolation
+    auto pts2D = FindPath(startX, startZ, targetX, targetZ, ignoreCollision);
+    size_t count = pts2D.size();
+    for (size_t i = 0; i < count; ++i) {
+        float frac = (count > 1) ? float(i) / float(count - 1) : 1.0f;
+        float currY = startY + (targetY - startY) * frac;
+        path3D.push_back(LocationVector(pts2D[i].first, currY, pts2D[i].second));
+    }
+    return path3D;
 }
 
 bool NavMeshMgr::CheckLineOfSight(float startX, float startZ, float targetX, float targetZ)

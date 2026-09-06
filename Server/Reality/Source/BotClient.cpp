@@ -20,6 +20,10 @@
 #include "Database/DatabaseEnv.h"
 #include "SniffDump.h"
 #include "AI/PedestrianEcology.h"
+#include "AI/RVO2Steering.h"
+#include "AI/SentientMajorCharacters.h"
+#include "AI/CoverSystem.h"
+#include "AI/SensoryPerceptionSystem.h"
 #include <cmath>
 #include <fstream>
 #include <typeinfo>
@@ -163,6 +167,16 @@ void BotClient::UpdateBotAI(float deltaSeconds)
     if (me->getFactionName() == "Civilian") {
         sPedestrianEcology.UpdateCivilian(this, deltaSeconds);
         return;
+    }
+
+    // 1b. Sentient Major Characters Logic (Morpheus, Merovingian, Trinity)
+    std::string botHandle = me->getHandle();
+    if (botHandle.find("Morpheus") != std::string::npos) {
+        sSentientCharacters.ProcessMorpheusStance(this, me);
+    } else if (botHandle.find("Merovingian") != std::string::npos) {
+        sSentientCharacters.ProcessMerovingianCombat(this, me);
+    } else if (botHandle.find("Trinity") != std::string::npos) {
+        sSentientCharacters.ProcessTrinityCombat(this, me);
     }
 
     float healthPct = float(me->getCurrentHealth()) / float(me->getMaximumHealth());
@@ -470,7 +484,16 @@ void BotClient::MoveTo(float x, float y, float z)
             // Item 10: Ghost AI / The Twins bypass NavMesh collision
             bool ignoreCollision = (me->getHandle() == "The_Twins");
             
-            m_pathWaypoints = NavMeshMgr::getSingletonPtr()->FindPath(loc.x, loc.z, x, z, ignoreCollision);
+            // Check 3D vertical elevation (stairs, fire escapes, rooftop ladders)
+            if (std::abs(loc.y - y) > 150.0f) {
+                auto pts3D = NavMeshMgr::getSingletonPtr()->FindPath3D(loc.x, loc.y, loc.z, x, y, z, ignoreCollision);
+                m_pathWaypoints.clear();
+                for (const auto& p : pts3D) {
+                    m_pathWaypoints.push_back({p.x, p.z});
+                }
+            } else {
+                m_pathWaypoints = NavMeshMgr::getSingletonPtr()->FindPath(loc.x, loc.z, x, z, ignoreCollision);
+            }
             m_currentWaypointIndex = 0;
             
             if (m_pathWaypoints.empty())
@@ -518,6 +541,8 @@ BotVector2D BotClient::CalculateBoidsVelocity(PlayerObject* me)
     
     // O(1) neighboring cast
     auto neighbors = sSpatialGrid.GetClientsNearClient(this);
+    std::vector<RVOAgentState> rvoNeighbors;
+    rvoNeighbors.reserve(neighbors.size());
     
     for (GameClient* client : neighbors)
     {
@@ -526,8 +551,6 @@ BotVector2D BotClient::CalculateBoidsVelocity(PlayerObject* me)
         // We only flock with other bots for now
         BotClient* otherBot = dynamic_cast<BotClient*>(client);
         if (!otherBot) continue;
-        
-        if (otherBot->GetFaction() != this->GetFaction()) continue; // Only flock with allies
 
         PlayerObject* otherPo = BotGetPlayer(otherBot->m_playerGoId);
         if (!otherPo || otherPo->isDead()) continue;
@@ -537,24 +560,33 @@ BotVector2D BotClient::CalculateBoidsVelocity(PlayerObject* me)
         float dz = myLoc.z - otherLoc.z;
         float distSq = dx*dx + dz*dz;
 
-        // Separation (< 2.0m)
-        if (distSq > 0.0001f && distSq < 4.0f)
+        // Build RVO neighbor state
+        RVOAgentState rvoOther;
+        rvoOther.goId = otherBot->m_playerGoId;
+        rvoOther.position = RVOVector2D(otherLoc.x, otherLoc.z);
+        rvoOther.velocity = RVOVector2D(-dx * 0.05f, -dz * 0.05f);
+        rvoOther.prefVelocity = rvoOther.velocity;
+        rvoOther.radius = 50.0f; // 50 cm
+        rvoOther.maxSpeed = 500.0f;
+        rvoNeighbors.push_back(rvoOther);
+
+        if (otherBot->GetFaction() != this->GetFaction()) continue; // Only flock with allies
+
+        // Separation (< 2.0m = 200 units, or scaled)
+        if (distSq > 0.0001f && distSq < 40000.0f)
         {
             float dist = std::sqrt(distSq);
             separation.x += (dx / dist) / dist; // scale by inverse distance
             separation.z += (dz / dist) / dist;
         }
 
-        // Alignment & Cohesion (< 10.0m)
-        if (distSq < 100.0f)
+        // Alignment & Cohesion (< 10.0m = 1000 units)
+        if (distSq < 1000000.0f)
         {
             // Cohesion (Add positions, average later)
             cohesion.x += otherLoc.x;
             cohesion.z += otherLoc.z;
             flockCount++;
-            
-            // Note: Alignment would average velocities, but Bots in MXO don't have a rigid velocity vector, 
-            // they teleport incrementally. We skip strict alignment to save CPU and focus on Cohesion/Separation.
         }
     }
 
@@ -576,6 +608,21 @@ BotVector2D BotClient::CalculateBoidsVelocity(PlayerObject* me)
     BotVector2D totalVel;
     totalVel.x = (separation.x * 2.5f) + (cohesion.x * 0.5f);
     totalVel.z = (separation.z * 2.5f) + (cohesion.z * 0.5f);
+
+    // RVO2 Reciprocal Velocity Obstacle collision avoidance refinement
+    if (!rvoNeighbors.empty()) {
+        RVOAgentState meState;
+        meState.goId = m_playerGoId;
+        meState.position = RVOVector2D(myLoc.x, myLoc.z);
+        meState.velocity = RVOVector2D(totalVel.x, totalVel.z);
+        meState.prefVelocity = RVOVector2D(totalVel.x, totalVel.z);
+        meState.radius = 50.0f;
+        meState.maxSpeed = 500.0f;
+
+        RVOVector2D rvoVel = RVO2Solver::ComputeRVOVelocity(meState, rvoNeighbors);
+        totalVel.x = rvoVel.x;
+        totalVel.z = rvoVel.z;
+    }
 
     // Clamp max swarm velocity
     float tLenSq = totalVel.x*totalVel.x + totalVel.z*totalVel.z;

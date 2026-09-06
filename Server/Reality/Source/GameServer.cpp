@@ -63,6 +63,9 @@
 #include "AI/MatrixThreatHeatmap.h"
 #include "LogisticsManager.h"
 #include "WorldDirector.h"
+#include "AI/SensoryPerceptionSystem.h"
+#include "AI/SentientMajorCharacters.h"
+#include "AI/CoverSystem.h"
 // removed duplicate include
 #include <boost/bind.hpp>
 
@@ -108,6 +111,9 @@ bool GameServer::Start()
 	sAsyncDatabase.Initialize();
 	sStatusEffectManager.Initialize();
 	sHackerSystem.Initialize();
+	sSensoryPerception.Initialize();
+	sSentientCharacters.Initialize();
+	sCoverSystem.Initialize();
 
 	string Interface = sConfig.GetStringDefault("GameServer.IP", "0.0.0.0");
 	int Port = sConfig.GetIntDefault("GameServer.Port", 10000);
@@ -190,6 +196,8 @@ void GameServer::SimulationLoop()
 			try { sMissionSys.Update(aiDeltaMs); } catch (const std::exception& e) { ERROR_LOG(format("SimulationLoop: sMissionSys caught %1%") % e.what()); }
 			try { sLogisticsMgr.Update(aiDeltaMs); } catch (const std::exception& e) { ERROR_LOG(format("SimulationLoop: sLogisticsMgr caught %1%") % e.what()); }
 			try { sWorldDirector.Update(aiDeltaMs); } catch (const std::exception& e) { ERROR_LOG(format("SimulationLoop: sWorldDirector caught %1%") % e.what()); }
+			try { sSensoryPerception.Update(aiDeltaMs / 1000.0f, currentMs); } catch (const std::exception& e) { ERROR_LOG(format("SimulationLoop: sSensoryPerception caught %1%") % e.what()); }
+			try { sSentientCharacters.Update(aiDeltaMs / 1000.0f); } catch (const std::exception& e) { ERROR_LOG(format("SimulationLoop: sSentientCharacters caught %1%") % e.what()); }
 
 			static uint32 lastMetricLogMs = 0;
 			static uint32 tickCount = 0;

@@ -1,6 +1,7 @@
 #pragma once
 #include <string>
 #include <unordered_map>
+#include <vector>
 #include <cmath>
 #include <algorithm>
 #include <ctime>
@@ -15,6 +16,17 @@ struct alignas(64) TheoryOfMindState {
     float trustP = 1.0f;
     float threatP = 1.0f;
     uint32_t lastInteractionTime = 0;
+
+    // Series II: Predictability & Move Tracking
+    uint16_t lastTargetMoveId = 0;
+    uint32_t moveRepetitionCount = 0;
+    float targetPredictability = 0.0f; // 0.0 to 1.0
+    float counterPredictionChance = 0.0f;
+
+    // Series II: Neurochemical Somatic Emotion Vectors
+    float dopamine = 0.5f;       // Reward / Goal Pursuit (increases on combos/kills)
+    float serotonin = 0.7f;      // Composure / Confidence (suppresses panic/fleeing)
+    float noradrenaline = 0.2f;  // Fight-or-flight arousal (accelerates reactions under fire)
 };
 
 class TheoryOfMindSolver {
@@ -63,12 +75,40 @@ public:
             }
         }
 
-        m_states[targetId] = TheoryOfMindState{targetId, 0.5f, 0.5f, 0.1f, 0.5f, 0.1f, 1.0f, 1.0f, now};
+        TheoryOfMindState newState;
+        newState.targetId = targetId;
+        newState.lastInteractionTime = now;
+        m_states[targetId] = newState;
         return m_states[targetId];
     }
 
     float CalculateResonance(const TheoryOfMindState& state) const {
         return 1.0f + (state.selfIntent * state.threatBeliefSelfToTarget * 2.0f);
+    }
+
+    void RecordTargetMove(const std::string& targetId, uint16_t moveId) {
+        auto& state = GetState(targetId);
+        if (state.lastTargetMoveId == moveId) {
+            state.moveRepetitionCount++;
+            // Roadmap Phase 17: spamming same move increments counter-prediction chance by 25% per iteration
+            state.targetPredictability = std::min(1.0f, state.targetPredictability + 0.25f);
+            state.counterPredictionChance = std::min(0.95f, 0.20f + 0.25f * float(state.moveRepetitionCount));
+        } else {
+            state.lastTargetMoveId = moveId;
+            state.moveRepetitionCount = 1;
+            state.targetPredictability = std::max(0.1f, state.targetPredictability * 0.7f);
+            state.counterPredictionChance = 0.20f;
+        }
+    }
+
+    void UpdateNeurochemistry(const std::string& targetId, float successDelta, float dangerDelta, float dt) {
+        auto& state = GetState(targetId);
+        // Dopamine surges upon successful strikes/kills, decaying slowly over time
+        state.dopamine = std::clamp(state.dopamine + (successDelta * 0.3f) - (0.05f * dt), 0.0f, 1.0f);
+        // Serotonin drops under extreme danger, restored by composure
+        state.serotonin = std::clamp(state.serotonin - (dangerDelta * 0.2f) + (0.04f * dt), 0.05f, 1.0f);
+        // Noradrenaline surges under incoming fire (fight-or-flight)
+        state.noradrenaline = std::clamp(state.noradrenaline + (dangerDelta * 0.4f) - (0.1f * dt), 0.0f, 1.0f);
     }
 
     void ApplyRecencyDecay(const std::string& targetId, float dt) {

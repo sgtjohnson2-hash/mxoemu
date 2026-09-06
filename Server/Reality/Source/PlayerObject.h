@@ -113,11 +113,16 @@ public:
         void recordAttack(uint16 moveId) {
             attackTypeCount[moveId]++;
         }
+        uint32 getSpamCount(uint16 moveId) const {
+            auto it = attackTypeCount.find(moveId);
+            return (it != attackTypeCount.end()) ? it->second : 0;
+        }
         float getMitigationModifier(uint16 moveId) const {
             auto it = attackTypeCount.find(moveId);
             if (it != attackTypeCount.end() && it->second > 3) {
-                // Diminishing returns: reduce damage by 50% if the same attack is spammed > 3 times
-                return 0.5f; 
+                // Roadmap Phase 48 adaptive learning mitigation: 0.5 * (1.0 - 0.15 * (SpamCount - 3))
+                float mitigation = 0.5f * (1.0f - 0.15f * float(it->second - 3));
+                return std::clamp(mitigation, 0.15f, 0.50f);
             }
             return 1.0f;
         }
@@ -127,7 +132,15 @@ public:
     bool isStunned() const; //ms-expiry check, in PlayerObjectCombat.cpp
     
     // Organizations and Factions
-    int getFaction() const { return int(m_alignment); } //organization: 0 Zion / 1 Machine / 2 Merovingian
+    int getFaction() const {
+        if (m_factionName == "Zion") return FACTION_ZION;
+        if (m_factionName == "Machines") return FACTION_MACHINES;
+        if (m_factionName == "Merovingian") return FACTION_MEROVINGIAN;
+        if (m_alignment == 0) return FACTION_ZION;
+        if (m_alignment == 1) return FACTION_MACHINES;
+        if (m_alignment == 2) return FACTION_MEROVINGIAN;
+        return FACTION_NONE;
+    }
     void setFactionName(const std::string& name) { m_factionName = name; }
     std::string getFactionName() const { return m_factionName; }
     void setCrewName(const std::string& name) { m_crewName = name; }

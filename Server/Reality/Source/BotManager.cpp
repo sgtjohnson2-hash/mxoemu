@@ -542,9 +542,10 @@ void BotManager::SpawnFactionDefenders(uint8 district, uint32 hlId, uint8 factio
     SpawnBot(3, loc.x + 200.0f, loc.y, loc.z + 200.0f, faction);
 
     std::string factionName = "Unknown Faction";
-    if (faction == 1) factionName = "Zion";
-    else if (faction == 2) factionName = "Machines";
-    else if (faction == 3) factionName = "Merovingian";
+    if (faction == FACTION_ZION || faction == 1) factionName = "Zion";
+    else if (faction == FACTION_MACHINES || faction == 2) factionName = "Machines";
+    else if (faction == FACTION_MEROVINGIAN || faction == 3) factionName = "Merovingian";
+    else if (faction == 0) factionName = "Machines";
 
     std::string msg = (format("{c:00FF00}[Faction Warfare] %1% has deployed defenders to Hardline %2% in District %3%.{/c}") % factionName % hlId % (int)district).str();
     sGame.Broadcast(std::make_shared<SystemChatMsg>(msg)->toBuf(), false);

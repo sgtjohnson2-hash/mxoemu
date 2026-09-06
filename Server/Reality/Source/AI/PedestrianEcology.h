@@ -19,7 +19,9 @@ enum POIType {
     POI_PARK_BENCH = 2,
     POI_NIGHTCLUB_BAR = 3,
     POI_SUBWAY_TRANSIT = 4,
-    POI_RESIDENTIAL_APARTMENT = 5
+    POI_RESIDENTIAL_APARTMENT = 5,
+    POI_PAYPHONE_HARDLINE = 6,
+    POI_ATM_TERMINAL = 7
 };
 
 struct PointOfInterest {
@@ -43,7 +45,10 @@ public:
     PointOfInterest GetNearestPOI(float currentX, float currentZ, POIType type) const;
     PointOfInterest GetNearestSubway(float currentX, float currentZ) const;
 
-    // Proximity social gossip & Theory of Mind belief update
+    // Smart object behavioral affordance interaction
+    void InteractWithPOI(BotClient* bot, PlayerObject* me, const PointOfInterest& poi);
+
+    // Proximity social gossip & Theory of Mind belief update with rumor mutation
     bool TryProximityGossip(BotClient* botA, BotClient* botB, uint32 currentMs);
 
     // Dynamic crowd lane / sidewalk steering force

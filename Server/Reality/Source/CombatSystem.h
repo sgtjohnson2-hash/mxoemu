@@ -50,11 +50,18 @@ typedef enum
 
 // Special logic flags for combat abilities (stuns, hacks, etc.)
 enum mxoAbilityFlag {
-	ABILITY_FLAG_NONE = 0,
-	ABILITY_FLAG_STUN = 1 << 0,
-	ABILITY_FLAG_MASK = 1 << 1,
-	ABILITY_FLAG_TRACE = 1 << 2,
-	ABILITY_FLAG_BOMB = 1 << 3
+	ABILITY_FLAG_NONE        = 0,
+	ABILITY_FLAG_STUN        = 1 << 0,
+	ABILITY_FLAG_MASK        = 1 << 1,
+	ABILITY_FLAG_TRACE       = 1 << 2,
+	ABILITY_FLAG_BOMB        = 1 << 3,
+	ABILITY_FLAG_SUPPRESSION = 1 << 4,
+	ABILITY_FLAG_BACKSTAB    = 1 << 5,
+	ABILITY_FLAG_BUFF_IS     = 1 << 6,
+	ABILITY_FLAG_HEAL        = 1 << 7,
+	ABILITY_FLAG_DEFLECT_BUFF= 1 << 8,
+	ABILITY_FLAG_DISARM      = 1 << 9,
+	ABILITY_FLAG_CLEANSE     = 1 << 10
 };
 
 // Server-side combat move. The real game loads ability stats from

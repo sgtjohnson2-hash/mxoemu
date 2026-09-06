@@ -11,6 +11,8 @@
 #include "SpatialGrid.h"
 #include "StatusEffectManager.h"
 #include "MessageTypes.h"
+#include "AI/SensoryPerceptionSystem.h"
+#include "AI/SentientMajorCharacters.h"
 #include <cmath>
 
 NodeStatus SequenceNode::Tick(BotClient* bot)
@@ -132,12 +134,18 @@ NodeStatus ActionFindTarget::Tick(BotClient* bot)
 
             if (targetFaction == bot->GetFaction()) continue; // Skip same faction
 
-            // Simple aggro radius
+            // Sensory perception: dual-cone vision + acoustic awareness check
             LocationVector myPos = me->getPosition();
             LocationVector targetPos = potentialTarget->getPosition();
             float dist = sqrt(pow(myPos.x - targetPos.x, 2) + pow(myPos.y - targetPos.y, 2) + pow(myPos.z - targetPos.z, 2));
-            if (dist < 1500.0f) //15m aggro radius
+            
+            float visionConfidence = 0.0f;
+            bool canSee = sSensoryPerception.CheckVision(me, potentialTarget, false, visionConfidence);
+            BotAwarenessState awareness = sSensoryPerception.GetAwareness(bot->GetPlayerGoId());
+
+            if (canSee || (dist < 1500.0f) || (awareness.stage >= AWARENESS_ALERTED && awareness.alertSourceGoId == client->GetPlayerGoId()))
             {
+                sSensoryPerception.SetAwareness(bot->GetPlayerGoId(), AWARENESS_IN_COMBAT, client->GetPlayerGoId());
                 bot->SetTargetGoId(client->GetPlayerGoId());
                 
                 // Map BotPersonality to Local Chat Output
@@ -294,6 +302,9 @@ NodeStatus ActionAgentInfect::Tick(BotClient* bot)
             float distSq = pow(myPos.x - tPos.x, 2) + pow(myPos.z - tPos.z, 2);
             if (distSq <= 2250000.0f) // 1500 units (15 meters)
             {
+                // Cascade into SentientMajorCharacters host hijacking
+                sSentientCharacters.HijackNearbyHost(myPos.x, myPos.z, me->getGoId());
+
                 // Viral Assimilation!
                 target->setFactionName("Machines");
                 targetBot->SetFaction(FACTION_MACHINES);

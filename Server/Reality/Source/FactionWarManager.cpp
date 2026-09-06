@@ -638,7 +638,7 @@ void FactionWarManager::updateControlNodes(uint32 deltaMs)
     for (auto& pair : m_controlNodes) {
         ControlNode& node = pair.second;
         
-        int factionPresence[3] = {0, 0, 0}; // 0: Machines, 1: Zion, 2: Merovingian
+        int factionPresence[5] = {0, 0, 0, 0, 0}; // Indexed by mxoFaction: 1: Zion, 2: Machines, 3: Merovingian
         auto nearbyClients = sSpatialGrid.GetClientsInRadius(node.x, node.z);
         
         for (GameClient* gc : nearbyClients) {
@@ -652,7 +652,7 @@ void FactionWarManager::updateControlNodes(uint32 deltaMs)
                     float dz = pos.z - node.z;
                     if ((dx * dx + dz * dz) <= 2250000.0f) { // 1500 units (15m radius)
                         int fac = p->getFaction();
-                        if (fac >= 0 && fac <= 2) {
+                        if (fac >= 1 && fac <= 3) {
                             factionPresence[fac]++;
                         }
                     }
@@ -663,14 +663,14 @@ void FactionWarManager::updateControlNodes(uint32 deltaMs)
         // Determine dominant contesting faction
         int maxPresence = 0;
         int dominantFaction = -1;
-        for (int i = 0; i < 3; ++i) {
+        for (int i = 1; i <= 3; ++i) {
             if (i != (int)node.controllingFaction && factionPresence[i] > maxPresence) {
                 maxPresence = factionPresence[i];
                 dominantFaction = i;
             }
         }
 
-        if (dominantFaction >= 0 && maxPresence > factionPresence[node.controllingFaction]) {
+        if (dominantFaction >= 1 && (node.controllingFaction > 4 || maxPresence > factionPresence[node.controllingFaction])) {
             if (node.capturingFaction != (uint32)dominantFaction) {
                 node.capturingFaction = dominantFaction;
                 node.captureProgress = 0.0f;

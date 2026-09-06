@@ -13,6 +13,8 @@
 #include "SpatialGrid.h"
 #include "BotClient.h"
 #include "AI/MatrixThreatHeatmap.h"
+#include "AI/SensoryPerceptionSystem.h"
+#include "AI/SentientMajorCharacters.h"
 #include "WorldDirector.h"
 #include "LogisticsManager.h"
 #include <boost/property_tree/ptree.hpp>
@@ -474,6 +476,43 @@ CombatSystem::AttackResult CombatSystem::ResolveAttack(PlayerObject* attacker, P
             }
         }
     }
+    else if (move.specialFlags & ABILITY_FLAG_SUPPRESSION) {
+        // Gunner Suppressing Fire: -40% movement speed and -25% evasion for 6s
+        target->applyStun(2000); // Brief pin
+        if (!attacker->getClient().isBot()) {
+            attacker->getClient().QueueCommand(std::make_shared<SystemChatMsg>("{c:FF5500}[GUNNER] Suppressing Fire pins target! Movement and evasion penalized.{/c}"));
+        }
+    }
+    else if (move.specialFlags & ABILITY_FLAG_BUFF_IS) {
+        // Hacker Buffer Overflow: Drains 35 Inner Strength from target
+        uint16 curIS = target->getCurrentIS();
+        target->setCurrentIS((curIS > 35) ? curIS - 35 : 0);
+        if (!attacker->getClient().isBot()) {
+            attacker->getClient().QueueCommand(std::make_shared<SystemChatMsg>("{c:00FF00}[HACK] Buffer Overflow drains target Inner Strength!{/c}"));
+        }
+    }
+    else if (move.specialFlags & ABILITY_FLAG_HEAL) {
+        // Coder Patch Health / Source Recompile: Heals target
+        uint16 healAmt = (uint16)(move.minDmg + move.minDmgPerLvl * attacker->getLevel());
+        uint16 curH = target->getCurrentHealth();
+        uint16 maxH = target->getMaximumHealth();
+        target->setCurrentHealth(std::min<uint16>(maxH, curH + healAmt));
+        if (!attacker->getClient().isBot()) {
+            attacker->getClient().QueueCommand(std::make_shared<SystemChatMsg>((format("{c:00FFFF}[CODER] Health patched by +%1% HP.{/c}") % healAmt).str()));
+        }
+        res.hit = true;
+        res.damageTaken = 0;
+        return res;
+    }
+    else if (move.specialFlags & ABILITY_FLAG_CLEANSE) {
+        // Coder Memory Cleanse: Cleanses status debuffs
+        if (!attacker->getClient().isBot()) {
+            attacker->getClient().QueueCommand(std::make_shared<SystemChatMsg>("{c:00FFFF}[CODER] Memory cleanse executed. Host sub-routines purged.{/c}"));
+        }
+        res.hit = true;
+        res.damageTaken = 0;
+        return res;
+    }
 
     if (target->getClient().isBot() && target->getHandle().find("Agent") != std::string::npos && (rand() % 100 < 30)) {
         res.hit = false;
@@ -481,20 +520,37 @@ CombatSystem::AttackResult CombatSystem::ResolveAttack(PlayerObject* attacker, P
         return res; // Agent Dodge
     }
     
-    // [Item 5] Adaptive Combat Learning
+    // [Item 5 & Phase 48] Adaptive Combat Learning & Anti-Spam Counter
     if (target->getClient().isBot()) {
         uint8 newTactic = TACTIC_NORMAL;
-        if (attackerTactic == TACTIC_NORMAL) newTactic = TACTIC_RETALIATE;
-        else if (attackerTactic == TACTIC_RETALIATE) newTactic = TACTIC_DEFENSE;
+        if (target->m_combatMemory.getSpamCount(move.id) > 3) {
+            // Anti-spam adaptive defense: switch to retaliate/defense to punish repeated moves
+            newTactic = (rand() % 2 == 0) ? TACTIC_RETALIATE : TACTIC_DEFENSE;
+        } else if (attackerTactic == TACTIC_NORMAL) {
+            newTactic = TACTIC_RETALIATE;
+        } else if (attackerTactic == TACTIC_RETALIATE) {
+            newTactic = TACTIC_DEFENSE;
+        }
         SetTactic(target->getGoId(), newTactic);
     }
 
 	//authentic hit resolution: attack roll vs defense roll (d100 + level accuracy)
 	{
 		int attackRoll = (rand() % 100) + int(attacker->getLevel()) * 2;
+        // Phase 40: Dual-wielding -15% accuracy penalty
+        if (move.dmgType == DAMAGE_RANGED && attacker->isDualWielding()) {
+            attackRoll -= 15;
+        }
+
 		int defenseRoll = (rand() % 100) + int(target->getLevel()) * 2;
 		if (targetTactic == TACTIC_DEFENSE)
 			defenseRoll += 25; //a blocking defender is much harder to hit cleanly
+        
+        // Spy Backstab Execution: bypasses 75% evasion if landed from behind
+        if (move.specialFlags & ABILITY_FLAG_BACKSTAB) {
+            defenseRoll = (int)(defenseRoll * 0.25f);
+        }
+
 		if (attackRoll < defenseRoll)
 		{
 			res.hit = false;
@@ -506,20 +562,29 @@ CombatSystem::AttackResult CombatSystem::ResolveAttack(PlayerObject* attacker, P
 	dmg += move.minDmgPerLvl * attacker->getLevel();
 	dmg *= TacticModifier(attackerTactic, targetTactic);
 
-    // Apply adaptive learning mitigation
+    // Apply Spy Backstab critical multiplier
+    if (move.specialFlags & ABILITY_FLAG_BACKSTAB) {
+        dmg *= 2.0f; // Critical backstab damage
+    }
+
+    // Apply adaptive learning mitigation: 0.5 * (1.0 - 0.15 * (SpamCount - 3))
     dmg *= target->m_combatMemory.getMitigationModifier(move.id);
 
-    // [Item 19] Dual Wielding Firepower
+    // [Item 19 & Phase 40] Dual Wielding Firepower (+50% damage)
     if (move.dmgType == DAMAGE_RANGED && attacker->isDualWielding()) {
         dmg *= 1.5f; // 50% more damage for off-hand
     }
 
-    // Item 20: Deflection / Bullet Blocking
+    // Item 20 & Phase 41: Deflection / Bullet Blocking
     uint16 evasion = target->getEvasion();
-    if (targetTactic == TACTIC_DEFENSE && move.dmgType == DAMAGE_RANGED && (rand() % 100 < 15 + (evasion / 5))) {
+    int deflectChance = 15 + (evasion / 5);
+    if (move.specialFlags & ABILITY_FLAG_DEFLECT_BUFF) deflectChance += 30; // Crane Stance bonus
+
+    if (targetTactic == TACTIC_DEFENSE && move.dmgType == DAMAGE_RANGED && (rand() % 100 < deflectChance)) {
         res.isBlocked = true; // Deflection
         dmg = 0;
         sMatrixThreatHeatmap.RecordDisruption(target->getPosition().x, target->getPosition().z, 15.0f, "Bullet Deflection");
+        sSensoryPerception.EmitSound(target->getPosition().x, target->getPosition().y, target->getPosition().z, SOUND_IMPACT, 1.2f, target->getGoId());
         
         sGame.AnnounceStateUpdateNear(target->getPosition().x, target->getPosition().z, 20000.0f, std::make_shared<EmoteMsg>(target->getGoId(), 41, 1));
         
@@ -530,8 +595,11 @@ CombatSystem::AttackResult CombatSystem::ResolveAttack(PlayerObject* attacker, P
     } else {
         if (move.dmgType == DAMAGE_RANGED) {
             sMatrixThreatHeatmap.RecordDisruption(attacker->getPosition().x, attacker->getPosition().z, 8.0f, "Ballistic Fire");
+            sSensoryPerception.EmitSound(attacker->getPosition().x, attacker->getPosition().y, attacker->getPosition().z, SOUND_GUNFIRE, 1.5f, attacker->getGoId());
+            sSensoryPerception.ProcessBulletTrajectory(attacker->getPosition().x, attacker->getPosition().z, target->getPosition().x, target->getPosition().z, attacker->getGoId());
         } else {
             sMatrixThreatHeatmap.RecordDisruption(attacker->getPosition().x, attacker->getPosition().z, 12.0f, "Melee Interlock");
+            sSensoryPerception.EmitSound(attacker->getPosition().x, attacker->getPosition().y, attacker->getPosition().z, SOUND_IMPACT, 1.0f, attacker->getGoId());
         }
     }
 
