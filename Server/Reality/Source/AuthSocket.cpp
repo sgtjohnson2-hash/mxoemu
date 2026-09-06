@@ -572,7 +572,7 @@ void AuthSocket::HandleCreateCharacterRequest( ByteBuffer &packet )
 			return;
 		}
 
-		const byte* raw = &packet.contents()[packet.rpos()];
+		const byte* raw = (const byte*)&packet.contents()[packet.rpos()];
 		size_t remaining = packet.remaining();
 
 		string handle;

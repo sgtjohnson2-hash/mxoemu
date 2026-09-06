@@ -379,8 +379,7 @@ void BotManager::Update()
             tickRate = 250;
         else if (targetLOD == ExecutionLOD::APPROACH_AREA)
             tickRate = 1000;
-        else if (targetLOD == ExecutionLOD::BACKGROUND_AREA)
-            tickRate = 3500; // Continuous macro-simulation keeps world active when unobserved
+        // BACKGROUND_AREA: 0Hz (skip logic per ExecutionLOD specification)
 
         if (tickRate > 0 && (now - bot->GetLastLodTick() >= tickRate))
         {

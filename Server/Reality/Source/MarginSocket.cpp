@@ -984,7 +984,7 @@ void MarginSocket::HandleClaimCharacterNameRequest(ByteBuffer &packetData)
 		return;
 	}
 
-	const byte* raw = &packetData.contents()[packetData.rpos()];
+	const byte* raw = (const byte*)&packetData.contents()[packetData.rpos()];
 	size_t remaining = packetData.remaining();
 
 	string handleStr;
