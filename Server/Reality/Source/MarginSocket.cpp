@@ -61,9 +61,12 @@ MarginSocket::~MarginSocket()
 
 void MarginSocket::OnDisconnect( short info, int code )
 {
-/*	if (GameClient *udpClient = sGame.GetClientWithSessionId(sessionId))
-		udpClient->Invalidate();
-*/
+	if (sessionId != 0)
+	{
+		std::shared_ptr<GameClient> udpClient = sGame.GetClientWithSessionId(sessionId);
+		if (udpClient)
+			udpClient->Invalidate();
+	}
 
 	DEBUG_LOG(format("Margin socket with %1% disconnected") % GetRemoteSocketAddress()->Convert(true));
 }

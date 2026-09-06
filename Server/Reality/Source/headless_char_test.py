@@ -479,10 +479,8 @@ def run_test(host: str, auth_port: int, margin_port: int, username: str, passwor
         session_block = struct.pack("<I12x", session_id)
         udp_pkt[27:43] = tf_encrypt_ecb(session_block, margin_twofish_key)
 
-        # Send UDP initial packet (send twice 100ms apart to guard against WAN packet drop)
+        # Send UDP initial packet
         margin_sock.settimeout(10.0)
-        udp_sock.sendto(bytes(udp_pkt), (host, udp_world_port))
-        time.sleep(0.1)
         udp_sock.sendto(bytes(udp_pkt), (host, udp_world_port))
 
         raw_reply = recv_var_packet(margin_sock)
