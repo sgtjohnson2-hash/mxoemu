@@ -6,6 +6,7 @@
 #include <unordered_set>
 #include <unordered_map>
 #include <shared_mutex>
+#include <atomic>
 
 class GameClient;
 

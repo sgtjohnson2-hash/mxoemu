@@ -234,6 +234,7 @@ using std::string;
 #include <memory>
 #include <mutex>
 #include <shared_mutex>
+#include <atomic>
 using std::shared_ptr;
 using std::make_shared;
 using std::dynamic_pointer_cast;
