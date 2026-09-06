@@ -7,6 +7,8 @@
 #include "BotClient.h"
 #include "FactionWarManager.h"
 #include "Timer.h"
+#include "SpatialGrid.h"
+#include "MessageTypes.h"
 #include <algorithm>
 
 createFileSingleton(BackdoorNetwork);
@@ -311,6 +313,30 @@ void BackdoorNetwork::Update(uint32 deltaMs)
             ++it;
         }
     }
+
+    // Check for civilians / redpills arriving at anchored hardlines to jack out
+    const auto& nodes = sFactionWarMgr.GetControlNodes();
+    for (const auto& kv : m_firewallAnchors) {
+        uint32 hardlineNodeId = kv.first;
+        auto it = nodes.find(hardlineNodeId);
+        if (it == nodes.end()) continue;
+
+        float hx = it->second.x;
+        float hz = it->second.z;
+        auto nearbyClients = sSpatialGrid.GetClientsInRadius(hx, hz, 600.0f);
+        for (GameClient* gc : nearbyClients) {
+            if (!gc || !gc->isBot()) continue;
+            uint32 gid = gc->GetPlayerGoId();
+            PlayerObject* po = sObjMgr.getGOPtrSafe(gid);
+            if (!po || po->isDead()) continue;
+            auto bot = sBotMgr.GetBotByGOID(gid);
+            if (!bot) continue;
+            if (bot->IsEvacuating() || po->getFactionName() == "Civilian" ||
+                po->getHandle().find("Awakened_Redpill") != std::string::npos) {
+                ExecuteCivilianJackout(gid, hardlineNodeId);
+            }
+        }
+    }
 }
 
 bool BackdoorNetwork::DeployFirewallAnchor(uint32 hardlineId, uint32 durationMs, uint32 squadId)
@@ -358,14 +384,16 @@ bool BackdoorNetwork::ExecuteCivilianJackout(uint32 entityGoId, uint32 hardlineI
     if (!po || po->isDead()) return false;
 
     LocationVector pos = po->getPosition();
+    sGame.BroadcastNear((float)pos.x, (float)pos.z, 2000.0f, std::make_shared<JackoutEffectMsg>(entityGoId, true)->toBuf(), false);
     sGame.AnnounceStateUpdateNear((float)pos.x, (float)pos.z, 20000.0f, std::make_shared<EmoteMsg>(entityGoId, 45, 1)); // Digital dissolution FX
 
     auto bot = sBotMgr.GetBotByGOID(entityGoId);
     if (bot) {
         bot->Say("Civilian: The telephone... I hear the operator! Pulling me out!");
+        bot->Invalidate();
     }
 
-    po->setCurrentHealth(0); // Safely despawn from Matrix
+    po->die(0); // Safely despawn from Matrix
     sFactionWarMgr.registerPvPKill(FACTION_ZION, FACTION_MACHINES); // Zion score reward
     INFO_LOG(format("BackdoorNetwork: Civilian %1% successfully jacked out to Zion via Hardline %2%!") % entityGoId % hardlineId);
     return true;

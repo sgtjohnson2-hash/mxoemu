@@ -53,6 +53,8 @@
 #include "ArchitectDialogueTree.h"
 #include "NeuralVoiceSystem.h"
 #include "RadioDispatchSystem.h"
+#include "CombatSystem.h"
+#include "AI/SentientMajorCharacters.h"
 #include "OpenXRPipeline.h"
 #include "APUCombatSystem.h"
 #include "MegacityDestructionEngine.h"
@@ -1428,6 +1430,59 @@ void PlayerObject::RPC_HandleChat( ByteBuffer &srcCmd )
         m_parent.QueueCommand(make_shared<SystemChatMsg>(
             (format("{c:FF0000}[OUTBREAK SIMULATION] Outbreak initiated in District %1%! Agent Gray override triggered, Tactical Cordon deployed, Fear Aura propagated.{/c}")
              % dId).str()
+        ));
+        return;
+    }
+
+    if (boost::iequals(theMessage, "/pirate")) {
+        float px = getPosition().x;
+        float pz = getPosition().z;
+        uint32 dId = sMatrixThreatHeatmap.GetDistrictAt(px, pz);
+        sRadioDispatchSystem.BroadcastPirateOverride(dId);
+        m_parent.QueueCommand(make_shared<SystemChatMsg>(
+            (format("{c:00FF00}[PIRATE UPLINK] Zion pirate override transmitted in District %1%! Machine martial law revoked, panicking civilians routed to Hardlines.{/c}")
+             % dId).str()
+        ));
+        return;
+    }
+
+    if (boost::iequals(theMessage, "/breach")) {
+        float px = getPosition().x;
+        float pz = getPosition().z;
+        uint32 dId = sMatrixThreatHeatmap.GetDistrictAt(px, pz);
+        bool ok = sPedestrianEcology.BreachTacticalCordon(dId);
+        m_parent.QueueCommand(make_shared<SystemChatMsg>(
+            (format("{c:00FFFF}[TACTICAL BREACH] SWAT cordon breach in District %1%: %2%{/c}")
+             % dId % (ok ? "SUCCESS - Barricades Overrun" : "FAILED - No Active Cordon")).str()
+        ));
+        return;
+    }
+
+    if (boost::iequals(theMessage, "/decontaminate")) {
+        float px = getPosition().x;
+        float pz = getPosition().z;
+        auto nearby = sSpatialGrid.GetClientsInRadius(px, pz, 1500.0f);
+        uint32 targetId = 0;
+        for (GameClient* gc : nearby) {
+            if (!gc->isBot()) continue;
+            PlayerObject* enemyPo = BotGetPlayer(gc->GetPlayerGoId());
+            if (enemyPo && !enemyPo->isDead() && (enemyPo->getHandle().find("Smith") != std::string::npos || sSentientCharacters.IsHijackedHost(enemyPo->getGoId()))) {
+                targetId = enemyPo->getGoId();
+                break;
+            }
+        }
+        if (targetId == 0) {
+            m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FF3333}No viral Smith clone found within 15m to scrub.{/c}"));
+            return;
+        }
+        PlayerObject* targetPo = BotGetPlayer(targetId);
+        if (targetPo && targetPo->getCurrentHealth() > targetPo->getMaximumHealth() * 0.40f) {
+            targetPo->setCurrentHealth((uint16)(targetPo->getMaximumHealth() * 0.35f));
+        }
+        bool purged = sCombatSys.UseAbility(this, 401, targetId);
+        m_parent.QueueCommand(make_shared<SystemChatMsg>(
+            (format("{c:00FF00}[ANTIVIRAL SCRUB] Decontamination of %1%: %2%{/c}")
+             % (targetPo ? targetPo->getHandle() : "Target") % (purged ? "SUCCESS" : "FAILED")).str()
         ));
         return;
     }

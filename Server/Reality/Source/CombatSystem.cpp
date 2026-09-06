@@ -854,8 +854,10 @@ bool CombatSystem::UseAbility(PlayerObject* caster, uint16 abilityId, uint32 tar
         sSmithCascade.PurgeEntity(targetGoId, caster, PURGE_METHOD_ANTIVIRAL_PULSE);
         sSentientCharacters.RevertHijackedHost(targetGoId);
         caster->addFactionReputation(50);
+        caster->addInformation(750);
 
         if (!caster->getClient().isBot()) {
+            caster->getClient().QueueCommand(std::make_shared<SetInformationCmd>(caster->getInformation()));
             caster->getClient().QueueCommand(std::make_shared<SystemChatMsg>("{c:00FF00}Viral code successfully scrubbed! Host restored to civilian state. (+750 Info, +50 Zion Standing){/c}"));
         }
         sBotMgr.LogCombat((format("[ANTIVIRAL PURGE] %1% executed Ability 401 on %2%! Viral code purged.")

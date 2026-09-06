@@ -7,6 +7,7 @@
 #include "SpatialGrid.h"
 #include "ObjectMgr.h"
 #include "GameServer.h"
+#include "AI/MatrixThreatHeatmap.h"
 #include <sstream>
 #include <iomanip>
 #include <cmath>
@@ -304,14 +305,15 @@ void RadioDispatchSystem::SetMartialLaw(uint32 districtId, bool active)
 void RadioDispatchSystem::BroadcastPirateOverride(uint32 districtId, const std::string& operatorName, const std::string& directive)
 {
     std::lock_guard<std::recursive_mutex> lock(m_dispatchMutex);
+    
+    // Counter Machine martial-law orders in this district
+    m_martialLawDistricts[districtId] = false;
+
     uint32 now = getMSTime();
     if (now - m_lastPirateOverrideMs < 5000) {
         return; // Throttle broadcasts
     }
     m_lastPirateOverrideMs = now;
-
-    // Counter Machine martial-law orders in this district
-    m_martialLawDistricts[districtId] = false;
 
     RadioTransmission tx;
     tx.transmissionId = m_nextTransmissionId++;
@@ -349,12 +351,15 @@ void RadioDispatchSystem::BroadcastPirateOverride(uint32 districtId, const std::
         if (!po || po->isDead() || !po->getClient().isBot()) continue;
         if (po->getFactionName() == "Civilian" || po->getHandle().find("Civilian") != std::string::npos ||
             po->getHandle().find("Suit") != std::string::npos || po->getHandle().find("Office") != std::string::npos) {
+            LocationVector pos = po->getPosition();
+            if (districtId != 0 && sMatrixThreatHeatmap.GetDistrictAt((float)pos.x, (float)pos.z) != districtId) {
+                continue;
+            }
             auto bot = sBotMgr.GetBotByGOID(goId);
             if (bot && (bot->IsPanicking() || bot->GetFearLevel() > 0.35f)) {
-                LocationVector pos = po->getPosition();
                 LocationVector hl = sBotMgr.GetNearestHardline((float)pos.x, (float)pos.z);
                 if (hl.x != 0.0f || hl.z != 0.0f) {
-                    bot->MoveTo((float)hl.x, (float)hl.y, (float)hl.z);
+                    bot->SetEvacTarget(hl);
                     bot->SetPanicking(false);
                     bot->SetFearLevel(0.20f);
                     if (rand() % 15 == 0) {

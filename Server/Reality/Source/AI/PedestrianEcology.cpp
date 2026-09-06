@@ -12,6 +12,7 @@
 #include "BotManager.h"
 #include "SmithVirusCascade.h"
 #include "GameServer.h"
+#include "BackdoorNetwork.h"
 #include <cmath>
 #include <algorithm>
 
@@ -539,6 +540,27 @@ void PedestrianEcology::UpdateCivilian(BotClient* bot, float deltaSeconds)
     if (!bot) return;
     PlayerObject* me = BotGetPlayer(bot->GetPlayerGoId());
     if (!me || me->isDead()) return;
+
+    // 0. Hardline Evacuation Corridor Override (Zion Pirate Radio / Cleansing Evac)
+    if (bot->IsEvacuating()) {
+        LocationVector evacTarget = bot->GetEvacTarget();
+        LocationVector pos = me->getPosition();
+        float dx = evacTarget.x - (float)pos.x;
+        float dz = evacTarget.z - (float)pos.z;
+        float dist = std::sqrt(dx * dx + dz * dz);
+
+        if (dist <= 300.0f) {
+            // Reached the evacuation Hardline! Jack out safely!
+            sBackdoorNetwork.ExecuteCivilianJackout(me->getGoId(), 0);
+            return;
+        }
+
+        float evacSpeed = 8.5f;
+        dx /= dist;
+        dz /= dist;
+        bot->MoveTo((float)pos.x + dx * evacSpeed * deltaSeconds * 100.0f, (float)pos.y, (float)pos.z + dz * evacSpeed * deltaSeconds * 100.0f);
+        return;
+    }
 
     // 1. Calculate & Evolve Emergent Fear Scale (0.0 to 1.0)
     UpdateCivilianFear(bot, me, deltaSeconds);

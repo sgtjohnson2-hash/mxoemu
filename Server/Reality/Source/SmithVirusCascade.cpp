@@ -166,8 +166,12 @@ void SmithVirusCascade::CheckStageTransitions()
             if (newStage == CONTAGION_STAGE_CASCADE) {
                 sRadioDispatchSystem.BroadcastPirateOverride(2, "Zion Operator Uplink", "Quarantine perimeter breached! Smith replication slowing. Maintain extraction corridors!");
             } else if (newStage == CONTAGION_STAGE_OUTBREAK) {
+                sPedestrianEcology.SetCordonActive(3, false);
+                sPedestrianEcology.SetCordonActive(4, false);
                 sRadioDispatchSystem.BroadcastPirateOverride(1, "Zion Operator Uplink", "Contagion suppressed below 50%! Free operatives continue code scrubs!");
             } else if (newStage == CONTAGION_STAGE_ELEVATED) {
+                sPedestrianEcology.SetCordonActive(1, false);
+                sPedestrianEcology.SetCordonActive(2, false);
                 sRadioDispatchSystem.BroadcastPirateOverride(1, "Zion Operator Uplink", "Viral anomalies contained below 25%. Civilians proceeding safely to Hardlines.");
             } else if (newStage == CONTAGION_STAGE_LATENT) {
                 // Shard recovery! Reset martial law & SWAT cordons across all districts

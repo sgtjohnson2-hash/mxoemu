@@ -92,6 +92,7 @@ bool SentientMajorCharacters::CheckMorpheusAuraDeflection(uint32 targetGoId, uin
             smithPo->setPosition(LocationVector(kbX, sPos.y, kbZ));
             auto smithBot = sBotMgr.GetBotByGOID(smithGoId);
             if (smithBot) {
+                smithBot->StopInfecting();
                 smithBot->MoveTo(kbX, (float)sPos.y, kbZ);
                 smithBot->Emote(51); // Knockdown stagger
             }
@@ -196,41 +197,48 @@ bool SentientMajorCharacters::RevertHijackedHost(uint32 entityGoId)
 {
     std::lock_guard<std::recursive_mutex> lock(m_majorMutex);
 
-    auto it = m_hijackedHosts.find(entityGoId);
-    if (it == m_hijackedHosts.end()) {
-        return false;
-    }
-
-    HostHijackRecord rec = it->second;
-    m_hijackedHosts.erase(it);
-
     PlayerObject* po = BotGetPlayer(entityGoId);
-    if (po) {
-        po->setHandle(rec.originalHandle);
-        po->setFactionName(rec.originalFaction);
-        po->setRsiHex(rec.originalRsi);
-        po->setMaximumHealth(1000);
-        po->setCurrentHealth(150); // Baseline conscious civilian state (1000 max, 150 current)
-        
-        // Apply 30s Viral Immunity status buff
-        SetViralImmunity(entityGoId, 30000);
+    if (!po) return false;
 
-        LocationVector pos = po->getPosition();
-        // Green Matrix waterfall cleansing FX
-        sGame.AnnounceStateUpdateNear((float)pos.x, (float)pos.z, 20000.0f, std::make_shared<EmoteMsg>(entityGoId, 45, 1));
-
-        auto bot = sBotMgr.GetBotByGOID(entityGoId);
-        if (bot) {
-            bot->setAgent(false);
-            if (rec.originalFaction == "Machines") bot->SetFaction(FACTION_MACHINES);
-            else if (rec.originalFaction == "Zion") bot->SetFaction(FACTION_ZION);
-            else if (rec.originalFaction == "Merovingian") bot->SetFaction(FACTION_MEROVINGIAN);
-            else bot->SetFaction(FACTION_NONE);
-        }
-
-        // Trigger memory awakening / Redpill recruit check on BotManager
-        sBotMgr.HandleCleanseAwakening(entityGoId);
+    auto it = m_hijackedHosts.find(entityGoId);
+    HostHijackRecord rec;
+    if (it != m_hijackedHosts.end()) {
+        rec = it->second;
+        m_hijackedHosts.erase(it);
+    } else {
+        // Fallback for naturally or command-spawned Smith clones
+        rec.entityGoId = entityGoId;
+        rec.originalHandle = "Civilian_" + std::to_string(entityGoId % 10000);
+        rec.originalFaction = "Civilian";
+        rec.originalRsi = "00000000";
+        rec.hijackTimeMs = 0;
     }
+
+    po->setHandle(rec.originalHandle);
+    po->setFactionName(rec.originalFaction);
+    po->setRsiHex(rec.originalRsi);
+    po->setMaximumHealth(1000);
+    po->setCurrentHealth(150); // Baseline conscious civilian state (1000 max, 150 current)
+    
+    // Apply 30s Viral Immunity status buff
+    SetViralImmunity(entityGoId, 30000);
+
+    LocationVector pos = po->getPosition();
+    // Green Matrix waterfall cleansing FX
+    sGame.AnnounceStateUpdateNear((float)pos.x, (float)pos.z, 20000.0f, std::make_shared<EmoteMsg>(entityGoId, 45, 1));
+
+    auto bot = sBotMgr.GetBotByGOID(entityGoId);
+    if (bot) {
+        bot->setAgent(false);
+        bot->StopInfecting();
+        if (rec.originalFaction == "Machines") bot->SetFaction(FACTION_MACHINES);
+        else if (rec.originalFaction == "Zion") bot->SetFaction(FACTION_ZION);
+        else if (rec.originalFaction == "Merovingian") bot->SetFaction(FACTION_MEROVINGIAN);
+        else bot->SetFaction(FACTION_NONE);
+    }
+
+    // Trigger memory awakening / Redpill recruit check on BotManager
+    sBotMgr.HandleCleanseAwakening(entityGoId);
 
     INFO_LOG(format("SentientMajorCharacters: Host %1% reverted back to civilian shell ('%2%') with 30s viral immunity.")
              % entityGoId % rec.originalHandle);
@@ -272,8 +280,12 @@ void SentientMajorCharacters::ProcessMorpheusAura(PlayerObject* morpheusPo)
                 bot->SetPanicking(false);
                 bot->SetFearLevel(0.15f); // Calm alertness
                 target->getClient().QueueState(std::make_shared<EmoteMsg>(goId, 0, 1)); // Clear cower emote
+                LocationVector hl = sBotMgr.GetNearestHardline((float)target->getPosition().x, (float)target->getPosition().z);
+                if (hl.x != 0.0f || hl.z != 0.0f) {
+                    bot->SetEvacTarget(hl);
+                }
                 if (rand() % 12 == 0) {
-                    bot->Say("Civilian: Morpheus is with us! Don't look back, stay close!");
+                    bot->Say("Civilian: Morpheus is with us! Don't look back, get to the Hardlines!");
                 }
             }
         }
@@ -391,16 +403,28 @@ void SentientMajorCharacters::ProcessTrinityCombat(BotClient* trinityBot, Player
     LocationVector pos = trinityPo->getPosition();
     uint32 targetGoId = trinityBot->GetTargetGoId();
 
-    // Target Prioritization: Prioritize active Smith infectors / clones in radius
+    // Target Prioritization: Prioritize active Smith infectors channeling on victims
     if (targetGoId == 0) {
         auto nearby = sSpatialGrid.GetClientsInRadius((float)pos.x, (float)pos.z, 2500.0f);
         for (GameClient* gc : nearby) {
             if (!gc || !gc->isBot()) continue;
-            PlayerObject* enemyPo = BotGetPlayer(gc->GetPlayerGoId());
-            if (enemyPo && !enemyPo->isDead() && (enemyPo->getHandle().find("Smith") != std::string::npos || IsHijackedHost(enemyPo->getGoId()))) {
-                targetGoId = enemyPo->getGoId();
+            auto enemyBot = sBotMgr.GetBotByGOID(gc->GetPlayerGoId());
+            if (enemyBot && enemyBot->IsInfecting()) {
+                targetGoId = enemyBot->GetPlayerGoId();
                 trinityBot->SetTargetGoId(targetGoId);
                 break;
+            }
+        }
+        // Fallback: any Smith clone or hijacked host
+        if (targetGoId == 0) {
+            for (GameClient* gc : nearby) {
+                if (!gc || !gc->isBot()) continue;
+                PlayerObject* enemyPo = BotGetPlayer(gc->GetPlayerGoId());
+                if (enemyPo && !enemyPo->isDead() && (enemyPo->getHandle().find("Smith") != std::string::npos || IsHijackedHost(enemyPo->getGoId()))) {
+                    targetGoId = enemyPo->getGoId();
+                    trinityBot->SetTargetGoId(targetGoId);
+                    break;
+                }
             }
         }
     }
@@ -418,6 +442,12 @@ void SentientMajorCharacters::ProcessTrinityCombat(BotClient* trinityBot, Player
     if (dist <= 250.0f) {
         // High-angle dive kick (Ability 5005 - Eagle Strike) interrupting active infectors
         sCombatSys.UseAbility(trinityPo, 5005, targetGoId);
+        auto enemyBot = sBotMgr.GetBotByGOID(targetGoId);
+        if (enemyBot && enemyBot->IsInfecting()) {
+            enemyBot->StopInfecting();
+            enemyBot->SetTargetGoId(0);
+            sBotMgr.LogCombat((format("[TRINITY AIR SUPPORT] Trinity executed Eagle Strike dive-kick on %1%! Infection broken.") % target->getHandle()).str());
+        }
         if (rand() % 100 < 15) {
             trinityBot->Say("Trinity: Dodge this.");
         }

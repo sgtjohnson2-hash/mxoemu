@@ -583,7 +583,7 @@ void BotManager::HandleCleanseAwakening(uint32 entityGoId)
         bot->Say("Awakened Redpill: I saw it... the green code behind the walls. Get me out of here.");
         LocationVector hl = GetNearestHardline((float)pos.x, (float)pos.z);
         if (hl.x != 0.0f || hl.z != 0.0f) {
-            bot->MoveTo((float)hl.x, (float)hl.y, (float)hl.z);
+            bot->SetEvacTarget(hl);
         }
         bot->SetPanicking(false);
         bot->SetFearLevel(0.05f);
@@ -595,7 +595,7 @@ void BotManager::HandleCleanseAwakening(uint32 entityGoId)
         bot->SetFearLevel(0.20f);
         LocationVector hl = GetNearestHardline((float)pos.x, (float)pos.z);
         if (hl.x != 0.0f || hl.z != 0.0f) {
-            bot->MoveTo((float)hl.x, (float)hl.y, (float)hl.z);
+            bot->SetEvacTarget(hl);
         }
     }
 }

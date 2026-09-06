@@ -24,6 +24,7 @@
 #include "AI/SentientMajorCharacters.h"
 #include "AI/CoverSystem.h"
 #include "AI/SensoryPerceptionSystem.h"
+#include "BackdoorNetwork.h"
 #include <cmath>
 #include <fstream>
 #include <typeinfo>
@@ -125,6 +126,19 @@ void BotClient::CheckAndResend()
     // Do nothing. Overrides GameClient to prevent packet resends.
 }
 
+void BotClient::StartInfecting(uint32 targetGoId, uint32 durationMs)
+{
+    m_infectingTargetGoId = targetGoId;
+    m_infectChannelStartMs = getMSTime();
+    m_infectChannelDurationMs = durationMs;
+}
+
+void BotClient::StopInfecting()
+{
+    m_infectingTargetGoId = 0;
+    m_infectChannelStartMs = 0;
+}
+
 void BotClient::UpdateBotAI(float deltaSeconds)
 {
 
@@ -169,6 +183,23 @@ void BotClient::UpdateBotAI(float deltaSeconds)
         return;
     }
 
+    // 1a. Awakened Redpill / Rescued Combatant Hardline Evacuation
+    if (m_isEvacuating) {
+        LocationVector myPos = me->getPosition();
+        float dx = m_evacTarget.x - (float)myPos.x;
+        float dz = m_evacTarget.z - (float)myPos.z;
+        float dist = std::sqrt(dx * dx + dz * dz);
+        if (dist <= 300.0f) {
+            sBackdoorNetwork.ExecuteCivilianJackout(me->getGoId(), 0);
+            return;
+        }
+        float evacSpeed = 8.5f;
+        dx /= dist;
+        dz /= dist;
+        MoveTo((float)myPos.x + dx * evacSpeed * deltaSeconds * 100.0f, (float)myPos.y, (float)myPos.z + dz * evacSpeed * deltaSeconds * 100.0f);
+        return;
+    }
+
     // 1b. Sentient Major Characters Logic (Morpheus, Merovingian, Trinity)
     std::string botHandle = me->getHandle();
     if (botHandle.find("Morpheus") != std::string::npos) {
@@ -184,7 +215,8 @@ void BotClient::UpdateBotAI(float deltaSeconds)
     // 2. Agent Viral Assimilation Trigger
     if (m_isAgent || (m_faction == FACTION_MACHINES && healthPct < 0.5f)) {
         ActionAgentInfect infect;
-        if (infect.Tick(this) == NodeStatus::SUCCESS) {
+        NodeStatus status = infect.Tick(this);
+        if (status == NodeStatus::SUCCESS || status == NodeStatus::RUNNING) {
             return;
         }
     }

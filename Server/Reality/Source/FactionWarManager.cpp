@@ -432,25 +432,26 @@ void FactionWarManager::updateStrikeSquads(uint32 deltaMs)
         float ty = squad.targetPos.y;
         float tz = squad.targetPos.z;
 
-        if (squad.operative.isAlive) {
-            LocationVector opPos = op->getPosition();
-            float distToTarget = std::sqrt(std::pow(opPos.x - tx, 2) + std::pow(opPos.z - tz, 2));
+        PlayerObject* squadLead = squad.operative.isAlive ? op : (squad.martialArtist.isAlive ? ma : hack);
+        if (squadLead) {
+            LocationVector leadPos = squadLead->getPosition();
+            float distToTarget = std::sqrt(std::pow(leadPos.x - tx, 2) + std::pow(leadPos.z - tz, 2));
 
             if (distToTarget > 1500.0f) { // Advancing to node
                 squad.state = SQUAD_STATE_ADVANCING;
-                auto opBot = sBotMgr.GetBotByGOID(squad.operative.goId);
-                if (opBot) opBot->MoveTo(tx, ty, tz);
+                auto leadBot = sBotMgr.GetBotByGOID(squadLead->getGoId());
+                if (leadBot) leadBot->MoveTo(tx, ty, tz);
 
-                // Hacker trails behind operative
-                if (squad.hacker.isAlive) {
+                // Hacker trails behind lead
+                if (squad.hacker.isAlive && squadLead != hack) {
                     auto hackBot = sBotMgr.GetBotByGOID(squad.hacker.goId);
-                    if (hackBot) hackBot->MoveTo(opPos.x - 1200.0f, opPos.y, opPos.z - 1200.0f);
+                    if (hackBot) hackBot->MoveTo(leadPos.x - 1200.0f, leadPos.y, leadPos.z - 1200.0f);
                 }
 
                 // Martial Artist on the flank
-                if (squad.martialArtist.isAlive) {
+                if (squad.martialArtist.isAlive && squadLead != ma) {
                     auto maBot = sBotMgr.GetBotByGOID(squad.martialArtist.goId);
-                    if (maBot) maBot->MoveTo(opPos.x + 1000.0f, opPos.y, opPos.z - 500.0f);
+                    if (maBot) maBot->MoveTo(leadPos.x + 1000.0f, leadPos.y, leadPos.z - 500.0f);
                 }
 
                 if (now - squad.lastCalloutTime > 20000) {
@@ -488,95 +489,98 @@ void FactionWarManager::updateStrikeSquads(uint32 deltaMs)
                     }
 
                     // Synchronized triad action:
-                    // 1. Operative engages closest enemy defender & acts as heavy aggro magnet
-                    auto opBot = sBotMgr.GetBotByGOID(squad.operative.goId);
-                    if (opBot) {
-                        if (opBot->GetTargetGoId() == 0) {
+                    // 1. Point combatant engages closest enemy defender & acts as heavy aggro magnet
+                    uint32 targetGoId = 0;
+                    auto pointBot = sBotMgr.GetBotByGOID(squadLead->getGoId());
+                    if (pointBot) {
+                        if (pointBot->GetTargetGoId() == 0) {
                             auto localClients = sSpatialGrid.GetClientsInRadius(tx, tz, 2500.0f);
                             for (GameClient* gc : localClients) {
                                 uint32 gid = gc->GetPlayerGoId();
                                 if (gid == 0 || gid == squad.operative.goId || gid == squad.hacker.goId || gid == squad.martialArtist.goId) continue;
                                 PlayerObject* p = BotGetPlayer(gid);
                                 if (p && !p->isDead() && (p->getFaction() != squad.faction || sSentientCharacters.IsHijackedHost(gid) || p->getHandle().find("Smith") != std::string::npos) && p->getFactionName() != "Civilian") {
-                                    opBot->SetTargetGoId(gid);
+                                    pointBot->SetTargetGoId(gid);
                                     break;
                                 }
                             }
                         }
+                        targetGoId = pointBot->GetTargetGoId();
+                    }
 
-                        if (opBot->GetTargetGoId() != 0) {
-                            uint32 enemyGoId = opBot->GetTargetGoId();
-                            PlayerObject* enemyPo = BotGetPlayer(enemyGoId);
+                    if (targetGoId != 0) {
+                        uint32 enemyGoId = targetGoId;
+                        PlayerObject* enemyPo = BotGetPlayer(enemyGoId);
 
-                            // Zion Operative Vanguard Tank Synergies: High-threat aggro redirect / body-blocking
-                            if (squad.faction == FACTION_ZION && enemyPo && !enemyPo->isDead()) {
-                                auto enemyBot = sBotMgr.GetBotByGOID(enemyGoId);
-                                if (enemyBot && (enemyBot->GetTargetGoId() == squad.hacker.goId || enemyBot->GetTargetGoId() == 0)) {
-                                    enemyBot->SetTargetGoId(squad.operative.goId); // Force aggro onto Vanguard tank
-                                    if (rand() % 15 == 0) {
-                                        BroadcastSquadCallout(squad, "Operative", "Eyes on me, suit! Leave the civilians and support alone!");
-                                    }
+                        // Zion Operative Vanguard Tank Synergies: High-threat aggro redirect / body-blocking
+                        if (squad.faction == FACTION_ZION && enemyPo && !enemyPo->isDead() && squad.operative.isAlive) {
+                            auto enemyBot = sBotMgr.GetBotByGOID(enemyGoId);
+                            if (enemyBot && (enemyBot->GetTargetGoId() == squad.hacker.goId || enemyBot->GetTargetGoId() == 0)) {
+                                enemyBot->SetTargetGoId(squad.operative.goId); // Force aggro onto Vanguard tank
+                                if (rand() % 15 == 0) {
+                                    BroadcastSquadCallout(squad, "Operative", "Eyes on me, suit! Leave the civilians and support alone!");
                                 }
                             }
+                        }
+                        
+                        // 2. Hacker supports by debuffing, healing, replenishing IS, and antiviral code purging
+                        if (squad.hacker.isAlive) {
+                            auto hackBot = sBotMgr.GetBotByGOID(squad.hacker.goId);
+                            if (hackBot) {
+                                // Maintain 8-10m standoff behind the tank/lead
+                                LocationVector leadCurPos = squadLead->getPosition();
+                                hackBot->MoveTo((float)leadCurPos.x - 900.0f, (float)leadCurPos.y, (float)leadCurPos.z - 900.0f);
+                            }
+
+                            sHackerSystem.CompileProgram(hack, 1, enemyGoId);
+                            sHackerSystem.ExecuteProgram(hack, 1, enemyGoId);
                             
-                            // 2. Hacker supports by debuffing, healing, replenishing IS, and antiviral code purging
-                            if (squad.hacker.isAlive) {
-                                auto hackBot = sBotMgr.GetBotByGOID(squad.hacker.goId);
-                                if (hackBot) {
-                                    // Maintain 8-10m standoff behind the tank
-                                    LocationVector opCurrentPos = op->getPosition();
-                                    hackBot->MoveTo((float)opCurrentPos.x - 900.0f, (float)opCurrentPos.y, (float)opCurrentPos.z - 900.0f);
-                                }
+                            // Heal operative if wounded
+                            if (op && op->getCurrentHealth() < op->getMaximumHealth() * 0.6f) {
+                                op->setCurrentHealth(std::min<uint32>(op->getMaximumHealth(), op->getCurrentHealth() + 600));
+                                BroadcastSquadCallout(squad, "Hacker", "Patching operative health matrix!");
+                            }
 
-                                sHackerSystem.CompileProgram(hack, 1, enemyGoId);
-                                sHackerSystem.ExecuteProgram(hack, 1, enemyGoId);
-                                
-                                // Heal operative if wounded
-                                if (op->getCurrentHealth() < op->getMaximumHealth() * 0.6f) {
-                                    op->setCurrentHealth(std::min<uint32>(op->getMaximumHealth(), op->getCurrentHealth() + 600));
-                                    BroadcastSquadCallout(squad, "Hacker", "Patching operative health matrix!");
-                                }
+                            // Replenish Inner Strength to strike team (+35 IS)
+                            if (op && op->getCurrentIS() < op->getMaximumIS()) {
+                                op->setCurrentIS(std::min<uint16>(op->getMaximumIS(), op->getCurrentIS() + 35));
+                            }
+                            if (ma && ma->getCurrentIS() < ma->getMaximumIS()) {
+                                ma->setCurrentIS(std::min<uint16>(ma->getMaximumIS(), ma->getCurrentIS() + 35));
+                            }
 
-                                // Replenish Inner Strength to strike team (+35 IS)
-                                if (op->getCurrentIS() < op->getMaximumIS()) {
-                                    op->setCurrentIS(std::min<uint16>(op->getMaximumIS(), op->getCurrentIS() + 35));
+                            // Series 4: Antiviral Code Scrubbing on virally unstable Smith clones (<40% HP)
+                            if (squad.faction == FACTION_ZION && enemyPo && !enemyPo->isDead()) {
+                                bool isSmith = (sSentientCharacters.IsHijackedHost(enemyGoId) || enemyPo->getHandle().find("Smith") != std::string::npos);
+                                float enemyHpPct = float(enemyPo->getCurrentHealth()) / float(std::max<uint16>(1, enemyPo->getMaximumHealth()));
+                                if (isSmith && enemyHpPct <= 0.40f) {
+                                    sSmithCascade.PurgeEntity(enemyGoId, hack, PURGE_METHOD_ANTIVIRAL_PULSE);
+                                    sSentientCharacters.RevertHijackedHost(enemyGoId);
+                                    BroadcastSquadCallout(squad, "Hacker", "Viral core unstable! Antiviral pulse successful— host decontaminated!");
+                                    if (pointBot) pointBot->SetTargetGoId(0);
                                 }
-                                if (ma && ma->getCurrentIS() < ma->getMaximumIS()) {
-                                    ma->setCurrentIS(std::min<uint16>(ma->getMaximumIS(), ma->getCurrentIS() + 35));
-                                }
+                            }
+                        }
 
-                                // Series 4: Antiviral Code Scrubbing on virally unstable Smith clones (<40% HP)
+                        // 3. Martial Artist flanks, executes power combat, and 85% interlock infection interrupt
+                        if (squad.martialArtist.isAlive) {
+                            auto maBot = sBotMgr.GetBotByGOID(squad.martialArtist.goId);
+                            if (maBot) {
+                                maBot->SetTargetGoId(enemyGoId);
+                                ma->setTactic(TACTIC_POWER);
+                                sCombatSys.SetTactic(squad.martialArtist.goId, TACTIC_POWER);
+
+                                // 85% interrupt on clones actively attempting infection
                                 if (squad.faction == FACTION_ZION && enemyPo && !enemyPo->isDead()) {
                                     bool isSmith = (sSentientCharacters.IsHijackedHost(enemyGoId) || enemyPo->getHandle().find("Smith") != std::string::npos);
-                                    float enemyHpPct = float(enemyPo->getCurrentHealth()) / float(std::max<uint16>(1, enemyPo->getMaximumHealth()));
-                                    if (isSmith && enemyHpPct <= 0.40f) {
-                                        sSmithCascade.PurgeEntity(enemyGoId, hack, PURGE_METHOD_ANTIVIRAL_PULSE);
-                                        sSentientCharacters.RevertHijackedHost(enemyGoId);
-                                        BroadcastSquadCallout(squad, "Hacker", "Viral core unstable! Antiviral pulse successful— host decontaminated!");
-                                        opBot->SetTargetGoId(0);
-                                    }
-                                }
-                            }
-
-                            // 3. Martial Artist flanks, executes power combat, and 85% interlock infection interrupt
-                            if (squad.martialArtist.isAlive) {
-                                auto maBot = sBotMgr.GetBotByGOID(squad.martialArtist.goId);
-                                if (maBot) {
-                                    maBot->SetTargetGoId(enemyGoId);
-                                    ma->setTactic(TACTIC_POWER);
-                                    sCombatSys.SetTactic(squad.martialArtist.goId, TACTIC_POWER);
-
-                                    // 85% interrupt on clones attempting infection or in melee
-                                    if (squad.faction == FACTION_ZION && enemyPo && !enemyPo->isDead()) {
-                                        bool isSmith = (sSentientCharacters.IsHijackedHost(enemyGoId) || enemyPo->getHandle().find("Smith") != std::string::npos);
-                                        if (isSmith && (rand() % 100) < 85) {
-                                            LocationVector ePos = enemyPo->getPosition();
-                                            sGame.AnnounceStateUpdateNear((float)ePos.x, (float)ePos.z, 20000.0f, std::make_shared<EmoteMsg>(enemyGoId, 51, 1));
-                                            enemyPo->takeDamage(ma->getGoId(), 250, 43);
-                                            if (rand() % 12 == 0) {
-                                                BroadcastSquadCallout(squad, "Striker", "Wire-fu sweep! Knocked the clone down, breaking the channel!");
-                                            }
-                                        }
+                                    auto enemyBot = sBotMgr.GetBotByGOID(enemyGoId);
+                                    if (isSmith && (enemyBot && enemyBot->IsInfecting()) && (rand() % 100) < 85) {
+                                        enemyBot->StopInfecting();
+                                        enemyBot->SetTargetGoId(0);
+                                        LocationVector ePos = enemyPo->getPosition();
+                                        sGame.AnnounceStateUpdateNear((float)ePos.x, (float)ePos.z, 20000.0f, std::make_shared<EmoteMsg>(enemyGoId, 51, 1));
+                                        enemyPo->takeDamage(ma->getGoId(), 250, 43);
+                                        BroadcastSquadCallout(squad, "Striker", "Wire-fu sweep! Knocked the clone down, breaking the channel!");
                                     }
                                 }
                             }

@@ -107,8 +107,24 @@ public:
     uint32 GetPossessedBy() const { return m_possessedBy; }
     void SetPossessedBy(uint32 goId) { m_possessedBy = goId; }
 
+#include "LocationVector.h"
+
     uint32 GetLastGossipTime() const { return m_lastGossipTime; }
     void SetLastGossipTime(uint32 t) { m_lastGossipTime = t; }
+
+    // Agent Smith Viral Infection Channeling State
+    bool IsInfecting() const { return m_infectingTargetGoId != 0; }
+    uint32 GetInfectionTargetGoId() const { return m_infectingTargetGoId; }
+    uint32 GetInfectChannelStartMs() const { return m_infectChannelStartMs; }
+    uint32 GetInfectChannelDurationMs() const { return m_infectChannelDurationMs; }
+    void StartInfecting(uint32 targetGoId, uint32 durationMs = 2500);
+    void StopInfecting();
+
+    // Civilian & Awakened Redpill Hardline Evacuation
+    bool IsEvacuating() const { return m_isEvacuating; }
+    void SetEvacuating(bool evac) { m_isEvacuating = evac; }
+    LocationVector GetEvacTarget() const { return m_evacTarget; }
+    void SetEvacTarget(const LocationVector& loc) { m_evacTarget = loc; m_isEvacuating = true; }
 
 private:
     BotVector2D CalculateBoidsVelocity(class PlayerObject* me);
@@ -147,6 +163,11 @@ private:
     
     uint32 m_possessedBy;
     bool m_isAgent = false;
+    uint32 m_infectingTargetGoId{0};
+    uint32 m_infectChannelStartMs{0};
+    uint32 m_infectChannelDurationMs{2500};
+    bool m_isEvacuating{false};
+    LocationVector m_evacTarget;
 };
 
 #endif
