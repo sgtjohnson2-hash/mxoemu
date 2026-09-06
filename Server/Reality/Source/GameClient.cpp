@@ -92,7 +92,7 @@ void GameClient::HandlePacket( const char *pData, size_t nLength )
 	m_lastActivity = getTime();
 	m_lastPacketReceivedMS = getMSTime();
 
-	if (m_encryptionInitialized == false && pData[0] == 0 && nLength == 43)
+	if (pData[0] == 0 && nLength == 43)
 	{
 		m_lastServerMS = getMSTime();
 

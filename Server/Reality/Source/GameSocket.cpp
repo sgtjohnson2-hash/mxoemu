@@ -75,25 +75,40 @@ void GameSocket::OnRawData( const char *pData,size_t len,struct sockaddr *sa_fro
 	{
 		std::lock_guard<std::recursive_mutex> lock(m_clientsMutex);
 		GClientList::iterator it = m_clients.find(IPStr);
-		if (it != m_clients.end())
+		if (len == 43 && pData[0] == 0)
 		{
-			std::shared_ptr<GameClient> Client = it->second;
-			if (Client->IsValid() == false)
+			// InitialUDPPacket handshake: if a stale client session exists on this endpoint, invalidate and replace it
+			if (it != m_clients.end())
 			{
-				DEBUG_LOG( format("Removing dead client [%1%]") % IPStr );
+				it->second->Invalidate();
 				m_clients.erase(it);
 			}
-			else
-			{
-				targetClient = Client;
-			}
+			targetClient = std::make_shared<GameClient>(inc_addr, this);
+			m_clients[IPStr] = targetClient;
+			DEBUG_LOG(format("New InitialUDPPacket session [%1%], clients: %2%") % IPStr % m_clients.size());
 		}
 		else
 		{
-			targetClient = std::make_shared<GameClient>(inc_addr, this);
-			m_clients[IPStr] = targetClient;
-			DEBUG_LOG(format ("Client connected [%1%], now have [%2%] clients")
-				% IPStr % m_clients.size());
+			if (it != m_clients.end())
+			{
+				std::shared_ptr<GameClient> Client = it->second;
+				if (Client->IsValid() == false)
+				{
+					DEBUG_LOG( format("Removing dead client [%1%]") % IPStr );
+					m_clients.erase(it);
+				}
+				else
+				{
+					targetClient = Client;
+				}
+			}
+			else
+			{
+				targetClient = std::make_shared<GameClient>(inc_addr, this);
+				m_clients[IPStr] = targetClient;
+				DEBUG_LOG(format ("Client connected [%1%], now have [%2%] clients")
+					% IPStr % m_clients.size());
+			}
 		}
 	}
 

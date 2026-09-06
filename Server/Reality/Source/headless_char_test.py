@@ -353,12 +353,16 @@ def run_test(host: str, auth_port: int, margin_port: int, username: str, passwor
         opcode, auth_result, unk1, user_id, off_auth_data, off_enc_data, unk2, unk3, off_char, off_world, off_user = struct.unpack_from("<BIHIHHHHHHH", auth_reply, 0)
         assert auth_result == 0, f"Authentication rejected by AuthServer (status code {auth_result})"
 
-        auth_enc_data = auth_reply[off_enc_data:]
-        dec_auth = tf_decrypt_cbc(auth_enc_data, auth_twofish_key)
+        ticket_len = struct.unpack_from("<H", auth_reply, off_auth_data)[0]
+        ticket_bytes = auth_reply[off_auth_data + 2 : off_auth_data + 2 + ticket_len]
 
-        user_d = int.from_bytes(dec_auth[:96], 'big')
-        user_modulus = int.from_bytes(dec_auth[96:192], 'big')
-        ticket_bytes = auth_reply[off_auth_data : off_auth_data + 310]
+        enc_priv_len = struct.unpack_from("<H", auth_reply, off_enc_data)[0]
+        enc_priv_bytes = auth_reply[off_enc_data + 2 : off_enc_data + 2 + enc_priv_len]
+        dec_priv_exp = tf_decrypt_cbc(enc_priv_bytes, auth_twofish_key, iv=b'\x00'*16)
+
+        signed_data_bytes = ticket_bytes[128:]
+        user_modulus = int.from_bytes(signed_data_bytes[82 : 82 + 96], 'big')
+        user_d = int.from_bytes(dec_priv_exp, 'big')
 
         print(f"    [AUTH OK] Authenticated as '{username}' (UID {user_id}). Ticket: {len(ticket_bytes)} bytes.")
         auth_sock.close()
@@ -475,21 +479,15 @@ def run_test(host: str, auth_port: int, margin_port: int, username: str, passwor
         session_block = struct.pack("<I12x", session_id)
         udp_pkt[27:43] = tf_encrypt_ecb(session_block, margin_twofish_key)
 
-        margin_sock.settimeout(0.6)
-        received_reply = False
-        for attempt in range(10):
-            udp_sock.sendto(bytes(udp_pkt), (host, udp_world_port))
-            try:
-                raw_reply = recv_var_packet(margin_sock)
-                margin_udp_reply = unwrap_twofish_envelope(raw_reply, margin_twofish_key)
-                if margin_udp_reply[0] == 0x11:
-                    received_reply = True
-                    break
-            except (socket.timeout, TimeoutError):
-                time.sleep(0.1)
-                continue
+        # Send UDP initial packet (send twice 100ms apart to guard against WAN packet drop)
+        margin_sock.settimeout(10.0)
+        udp_sock.sendto(bytes(udp_pkt), (host, udp_world_port))
+        time.sleep(0.1)
+        udp_sock.sendto(bytes(udp_pkt), (host, udp_world_port))
 
-        assert received_reply, "Timed out waiting for MS_EstablishUDPSessionReply (0x11) on Margin TCP"
+        raw_reply = recv_var_packet(margin_sock)
+        margin_udp_reply = unwrap_twofish_envelope(raw_reply, margin_twofish_key)
+        assert margin_udp_reply[0] == 0x11, f"Expected MS_EstablishUDPSessionReply (0x11), got 0x{margin_udp_reply[0]:02X}"
 
         print(f"    [WORLD ENTRY OK] Received MS_EstablishUDPSessionReply (0x11) from MarginServer!")
         print(f"    >>> Character '{target_handle}' (ID: {world_char_id}) successfully entered MegaCity Simulation! <<<")
@@ -539,6 +537,9 @@ def main():
             print(f"\n[!] TEST CYCLE {i+1} FAILED: {e}")
             import traceback
             traceback.print_exc()
+
+        if i + 1 < args.cycles:
+            time.sleep(1.0)
 
     print("\n" + "=" * 75)
     print(f"TEST RUN COMPLETED: {success_count}/{args.cycles} cycles passed (100% success rate required)")
