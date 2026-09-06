@@ -1,0 +1,9 @@
+<?xml version='1.0' encoding='utf-8'?>
+<mission id="10111" faction="Zion">
+  <data title="Chapter 1.1: Intelligence Gathering" exp="200" info="100">
+    <objective1 command="TALK" idNpc="9010" description="Meet the Zion Operative" dial="The Truce is fragile. We need you to gather intelligence on a new threat. Some call him the Assassin. Head to the slums." />
+    <objective2 command="DEFEAT" idNpc="9011" description="Defeat the Corrupted Program" dial="You are too late... the flies have already scattered." />
+    <objective3 command="DEFEAT" idNpc="9999" description="Fight through the ambush" dial="They knew we were coming! Defend yourself!" spawnAmbush="true" />
+    <objective4 command="TALK" idNpc="9012" description="Report to Ghost" dial="Corrupted programs? This bears the signature of the Merovingian. Keep your eyes open." />
+  </data>
+</mission>

@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<mission id="99999" faction="None">
+  <data title="Rebirth: The Legacy of Rajko" exp="100000" info="50000">
+    <objective1 command="TALK" idNpc="9700" description="Meet the Archivist" dial="The Matrix died years ago. You know this. We all felt the servers power down. Yet... here we stand. The simulation is running again." />
+    <objective2 command="GIVE" idNpc="9701" description="Access the Core Emulator Node" dial="A lone Architect, operating outside the Source, wrote the emulation protocols to bring us back. We call him Rajko." />
+    <objective3 command="DEFEAT" idNpc="9702" description="Defeat the Deletion Protocol" dial="Error 404: World State Not Found. Purging anomaly." spawnAmbush="true" />
+    <objective4 command="DEFEAT" idNpc="9703" description="Defend the Emulator Server" dial="The system is trying to shut down the ghost shards! Defend the node while the server injects the legacy code!" isTimed="true" timeLimitSeconds="300" />
+    <objective5 command="GIVE" idNpc="9704" description="Recover the Source Code Fragment" dial="Reverse-engineering the packet data... The connection is stable." />
+    <objective6 command="TALK" idNpc="9705" description="Meet the Architect of the Rebirth" dial="Welcome back. It took many years of sifting through hexadecimal dust and packet captures, but the Matrix is online once more. Go forth. Your story didn't end in 2009." />
+    <objective7 command="REBIRTH" idNpc="9705" description="Finalize Rebirth Protocol" dial="Initiating LTM Stream integration..." />
+  </data>
+</mission>

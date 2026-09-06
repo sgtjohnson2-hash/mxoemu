@@ -1,0 +1,13 @@
+<?xml version='1.0' encoding='utf-8'?>
+<mission id="10330" faction="None">
+  <data title="Chapter 3.3: Commando Assault" exp="1500" info="800">
+    <objective1 command="GIVE" idNpc="9997" description="Hack the terminal to open the gate" dial="Access granted." item="1001" isTimed="true" timeLimitSeconds="300" />
+    <objective2 command="TALK" idNpc="9150" description="Join the Strike Team" dial="The General's commandos are heavily armed. This won't be easy. Move in!" />
+    <objective3 command="DEFEAT" idNpc="9999" description="Fight through the ambush" dial="They knew we were coming! Defend yourself!" spawnAmbush="true" />
+    <objective4 command="DEFEAT" idNpc="9151" description="Defeat Commando Alpha" dial="Target acquired. Engaging hostile." />
+    <objective5 command="DEFEAT" idNpc="9998" description="Eliminate the guards blocking the path" dial="Intruder detected in sector 4." />
+    <objective6 command="DEFEAT" idNpc="9152" description="Defeat Commando Beta" dial="Lethal force authorized." />
+    <objective7 command="GIVE" idNpc="9997" description="Hack the terminal to open the gate" dial="Access granted." item="1001" isTimed="true" timeLimitSeconds="300" />
+    <objective8 command="TALK" idNpc="9150" description="Secure the Compound" dial="The area is secure. The General has fled, but we've crippled his forces. Excellent work." />
+  </data>
+</mission>

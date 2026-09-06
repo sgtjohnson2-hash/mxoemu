@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<mission id="11120" faction="None">
+  <data title="Chapter 11.2: Wright" exp="8000" info="4000">
+    <objective1 command="TALK" idNpc="9640" description="Meet with The Kid" dial="A rogue element named Wright is rallying the scattered EPN forces. We need to find out if he's an ally or a threat." />
+    <objective2 command="DEFEAT" idNpc="9641" description="Bypass Wright's Security" dial="Halt! Wright's sanctuary is off-limits." spawnAmbush="true" />
+    <objective3 command="TALK" idNpc="9642" description="Confront Wright" dial="You seek the truth? The truth is that we must tear this entire system down." />
+    <objective4 command="GIVE" idNpc="9643" description="Analyze Wright's Manifesto" dial="This data... it's a blueprint for a massive EMP blast within the Matrix." />
+    <objective5 command="DEFEAT" idNpc="9644" description="Survive Wright's Zealots" dial="Death to the system! Death to the Truce!" spawnAmbush="true" />
+    <objective6 command="DEFEAT" idNpc="9645" description="Survive Wright's Zealots" dial="For Neo!" />
+    <objective7 command="TALK" idNpc="9640" description="Return to The Kid" dial="Wright is a fanatic. We must stop him before he destroys everything we've built." />
+  </data>
+</mission>

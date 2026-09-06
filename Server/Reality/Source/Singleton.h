@@ -27,6 +27,9 @@
 #define MXOSIM_SINGLETON_H
 
 #include "Errors.h"
+#include <typeinfo>
+#include <iostream>
+#include "StackWalker.h"
 
 /// Should be placed in the appropriate .cpp file somewhere
 #define initialiseSingleton( type ) \
@@ -54,8 +57,23 @@ template < class type > class Singleton
             mSingleton = 0;
         }
 
-        /// Retrieve the singleton object, if you hit this assert this singleton object doesn't exist yet
-        static type & getSingleton( ) { WPAssert( mSingleton ); return *mSingleton; }
+        static type & getSingleton( ) { 
+            if ( !mSingleton ) {
+                std::cerr << "Singleton missing for: " << typeid(type).name() << std::endl;
+                #ifdef _WIN32
+                class MyStackWalker : public StackWalker {
+                public:
+                    MyStackWalker() : StackWalker() {}
+                protected:
+                    virtual void OnOutput(LPCSTR szText) { std::cerr << szText; }
+                };
+                MyStackWalker sw;
+                sw.ShowCallstack();
+                #endif
+                exit(1);
+            }
+            return *mSingleton;
+        }
 
         /// Retrieve a pointer to the singleton object
         static type * getSingletonPtr( ) { return mSingleton; }

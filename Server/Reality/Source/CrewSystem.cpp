@@ -1,6 +1,9 @@
 #include "CrewSystem.h"
 #include "PlayerObject.h"
 #include "Log.h"
+#include "Log.h"
+#include "Database/Database.h"
+#include "Database/PreparedStatement.h"
 
 createFileSingleton(CrewSystem);
 
@@ -29,6 +32,14 @@ uint32 CrewSystem::CreateCrew(const std::string& name, FactionType faction, Play
 
     m_crews[newCrew.crewId] = newCrew;
     
+    // Save to database
+    PreparedStatement stmt("INSERT INTO `crews` (`id`, `name`, `faction`, `leader_goid`) VALUES (?0, ?1, ?2, ?3)");
+    stmt.SetUInt32(0, newCrew.crewId);
+    stmt.SetString(1, newCrew.name);
+    stmt.SetUInt32(2, (uint32)newCrew.faction);
+    stmt.SetUInt32(3, leader->getGoId());
+    sDatabase.ExecutePrepared(&stmt);
+    
     // Update player
     leader->setCrewName(name);
     leader->setFactionName(GetFactionName(faction));
@@ -52,6 +63,13 @@ bool CrewSystem::JoinCrew(uint32 crewId, PlayerObject* player)
     
     player->setCrewName(it->second.name);
     player->setFactionName(GetFactionName(it->second.faction));
+
+    // Save to database
+    PreparedStatement stmt("INSERT INTO `crew_members` (`crew_id`, `member_goid`, `rank`) VALUES (?0, ?1, ?2)");
+    stmt.SetUInt32(0, it->second.crewId);
+    stmt.SetUInt32(1, player->getGoId());
+    stmt.SetUInt32(2, 1);
+    sDatabase.ExecutePrepared(&stmt);
 
     INFO_LOG(format("%1% joined crew %2%") % player->getHandle() % it->second.name);
     return true;
@@ -78,6 +96,11 @@ void CrewSystem::LeaveCrew(PlayerObject* player)
             break;
         }
     }
+
+    // Remove from database
+    PreparedStatement stmt("DELETE FROM `crew_members` WHERE `member_goid` = ?0");
+    stmt.SetUInt32(0, player->getGoId());
+    sDatabase.ExecutePrepared(&stmt);
 
     player->setCrewName("");
 }

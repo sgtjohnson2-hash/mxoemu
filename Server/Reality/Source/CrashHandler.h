@@ -61,6 +61,8 @@ void __cdecl PrintSharedPtrInformation(bool m_sharedPtrDestructed, long referenc
 
 #else
 
+void StartCrashHandler();
+
 // We dont wanna confuse nix ;p
 #define THREAD_TRY_EXECUTION 
 #define THREAD_HANDLE_CRASH 

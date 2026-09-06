@@ -32,6 +32,8 @@
 #include "GameServer.h"
 #include "AuthServer.h"
 #include "BotManager.h"
+#include "ObjectMgr.h"
+#include "PlayerObject.h"
 
 #include <boost/algorithm/string.hpp>
 using boost::iequals;
@@ -44,6 +46,13 @@ bool ConsoleThread::run()
 	{
 		string command;
 		cin >> command;
+
+		if (cin.eof() || cin.fail())
+		{
+			cin.clear();
+			Sleep(1000);
+			continue;
+		}
 
 		if (iequals(command, "exit"))
 		{
@@ -172,6 +181,37 @@ bool ConsoleThread::run()
 			cin >> targetStr;
 			sBotMgr.CommandBotAttack(targetStr);
 			INFO_LOG(format("Bots ordered to attack %1%") % targetStr);
+		}
+		else if (iequals(command, "hurtBot"))
+		{
+			// Deterministic combat-packet trigger for the --sniff bench: apply
+			// damage straight through PlayerObject::takeDamage so the real
+			// SelfHitFx / CombatHitFx / vitals encoders (and death/respawn at 0
+			// HP) fire, independent of bot-AI cast timing or range checks.
+			string targetStr, dmgStr;
+			cin >> targetStr >> dmgStr;
+			int dmg = atoi(dmgStr.c_str());
+			if (dmg <= 0) dmg = 100;
+			std::vector<uint32> ids = sObjMgr.getAllGOIds();
+			bool found = false;
+			for (size_t i = 0; i < ids.size(); i++)
+			{
+				PlayerObject* po = sObjMgr.getGOPtr(ids[i]);
+				if (po && po->getHandle() == targetStr)
+				{
+					// Revive first if the target already died (e.g. from bot
+					// combat) so takeDamage always runs its full packet path
+					// instead of the m_isDead early-return.
+					if (po->isDead())
+						po->respawn();
+					po->takeDamage(0, (uint16)dmg, 0x280001C1);
+					INFO_LOG(format("Console: hurt %1% for %2% (hp now %3%)") % targetStr % dmg % po->getCurrentHealth());
+					found = true;
+					break;
+				}
+			}
+			if (!found)
+				ERROR_LOG(format("hurtBot: target %1% not found") % targetStr);
 		}
 		else if (iequals(command, "send") || iequals(command, "sendCmd") )
 		{

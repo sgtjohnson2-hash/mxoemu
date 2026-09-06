@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<mission id="10710" faction="None">
+  <data title="Chapter 7.1: The Oligarchs Arrive" exp="3000" info="1500">
+    <objective1 command="TALK" idNpc="9300" description="Meet with The Oracle" dial="A new presence has entered the Matrix. Programs that do not belong to the Source, nor to the Merovingian. They call themselves Oligarchs." />
+    <objective2 command="DEFEAT" idNpc="9301" description="Defeat the Unknown Observer" dial="You perceive what you cannot understand. We are above your simulation." spawnAmbush="true" />
+    <objective3 command="GIVE" idNpc="9302" description="Extract Code Signature" dial="Analyzing... this code doesn't match standard Machine architecture. It's older. Much older." />
+    <objective4 command="DEFEAT" idNpc="9303" description="Survive the Oligarch Purge Team" dial="Erase the anomaly." spawnAmbush="true" />
+    <objective5 command="DEFEAT" idNpc="9304" description="Survive the Oligarch Purge Team" dial="Resistance is a mathematical error." />
+    <objective6 command="TALK" idNpc="9300" description="Return to The Oracle" dial="As I feared. Halborn has returned. The Oligarchs will not rest until they control both the Matrix and the real world." />
+    <objective7 command="GIVE" idNpc="9305" description="Deliver Data to Faction Leader" dial="This intelligence is terrifying. The Oligarchs have physical bodies? We must prepare." />
+  </data>
+</mission>

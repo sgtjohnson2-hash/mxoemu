@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<mission id="10810" faction="None">
+  <data title="Chapter 8.1: The Assassin's Source" exp="3500" info="1800">
+    <objective1 command="TALK" idNpc="9400" description="Meet the Informant" dial="I found where the Assassin came from. It wasn't the Machines. It was the Frenchman's deepest code vaults." />
+    <objective2 command="GIVE" idNpc="9401" description="Hack the Merovingian Sub-node" dial="Uploading decryption keys..." isTimed="true" timeLimitSeconds="120" />
+    <objective3 command="DEFEAT" idNpc="9402" description="Defeat Merovingian Security" dial="You are trespassing in the Chateau's private network!" />
+    <objective4 command="DEFEAT" idNpc="9403" description="Defeat Merovingian Security" dial="The Frenchman will have your shell for this." spawnAmbush="true" />
+    <objective5 command="GIVE" idNpc="9401" description="Extract the Assassin Blueprints" dial="Download complete. The flies... they were a scrapped deletion protocol." />
+    <objective6 command="DEFEAT" idNpc="9404" description="Fight the Assassin Remnant" dial="BZZZ... Eradicate... BZZZ..." />
+    <objective7 command="TALK" idNpc="9400" description="Escape with the Data" dial="You made it. But now the Merovingian knows we know. This changes everything." />
+  </data>
+</mission>

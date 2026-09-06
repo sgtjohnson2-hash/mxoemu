@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<mission id="11130" faction="None">
+  <data title="Chapter 11.3: Overrides" exp="10000" info="5000" nextSuccess="11131">
+    <objective1 command="TALK" idNpc="9650" description="Emergency Broadcast" dial="The system is failing. Wright and the Oligarchs are initiating a massive override sequence. We have to shut down the core processors." />
+    <objective2 command="GIVE" idNpc="9651" description="Plant the Disruption Virus" dial="Virus planted. 60 seconds until detonation." isTimed="true" timeLimitSeconds="60" />
+    <objective3 command="DEFEAT" idNpc="9652" description="Defend the Virus Payload" dial="Intruder alert. Purging anomalous code." spawnAmbush="true" />
+    <objective4 command="DEFEAT" idNpc="9653" description="Defeat the Final Sentinel" dial="The Matrix will survive you." />
+    <objective5 command="TALK" idNpc="9654" description="Access the Core Override" dial="The overrides have been halted, but the damage is done. The simulation is permanently altered." branch="success:11131,fail:0" />
+  </data>
+</mission>

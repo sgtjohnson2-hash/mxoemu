@@ -1,0 +1,54 @@
+﻿version: '3.8'
+
+services:
+  database:
+    image: mariadb:10.11
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: reality_root_password
+      MYSQL_DATABASE: reality
+      MYSQL_USER: reality
+      MYSQL_PASSWORD: reality_password
+    ports:
+      - "127.0.0.1:3307:3306"
+    volumes:
+      - db_data:/var/lib/mysql
+      - ./Server/Reality/SQL:/docker-entrypoint-initdb.d:ro
+
+  patch-server:
+    build:
+      context: ./Server/PatchServer
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    ports:
+      - "80:80"
+
+  reality-server:
+    build:
+      context: .
+      dockerfile: ./Server/Reality/Dockerfile
+    restart: unless-stopped
+    depends_on:
+      - database
+    ports:
+      # Margin Server (TCP) & Game Server World RCC (UDP)
+      - "10000:10000/tcp"
+      - "10000:10000/udp"
+      # Auth Server (TCP)
+      - "11000:11000/tcp"
+    environment:
+      - DB_HOST=database
+      - DB_PORT=3306
+      - DB_USER=reality
+      - DB_PASSWORD=reality_password
+      - DB_NAME=reality
+      - WORLD_NAME=Reality
+    volumes:
+      - ./Server/Reality/Binaries/Reality.conf:/app/Server/Reality/Binaries/Reality.conf:ro
+      - ./Server/Reality/Binaries/privkey.dat:/app/Server/Reality/Binaries/privkey.dat:ro
+      - ./Server/Reality/Binaries/pubkey.dat:/app/Server/Reality/Binaries/pubkey.dat:ro
+      - ./Server/Reality/Binaries/signPriv.dat:/app/Server/Reality/Binaries/signPriv.dat:ro
+      - ./Server/Reality/Binaries/signPub.dat:/app/Server/Reality/Binaries/signPub.dat:ro
+
+volumes:
+  db_data:

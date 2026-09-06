@@ -14,8 +14,13 @@
 #include "InventorySystem.h"
 #include "PlayerObject.h"
 #include "Database/Database.h"
+#include "Database/AsyncDatabase.h"
+#include "Database/PreparedStatement.h"
 #include "Log.h"
 #include "DataLoader.h"
+#include "ItemSerializer.h"
+#include "MessageTypes.h"
+#include "GameClient.h"
 
 InventorySystem::InventorySystem(PlayerObject* owner) : m_owner(owner)
 {
@@ -30,13 +35,9 @@ void InventorySystem::loadFromDB()
     m_items.clear();
     m_goIdToSlot.clear();
     
-    // Load character inventory from the DB
-    // Expected table: inventory (`invId`, `charId`, `goid`, `slot`)
-    // TODO: A proper item template cache is required to lookup templateIds based on goid
-    // For now, we load the raw DB rows
-    format sql = format("SELECT `goid`, `slot` FROM `inventory` WHERE `charId` = '%1%'") % m_owner->getGuid();
-    
-    scoped_ptr<QueryResult> result(sDatabase.Query(sql));
+    PreparedStatement stmt("SELECT `goid`, `slot`, `item_metadata` FROM `inventory` WHERE `charId` = ?0");
+    stmt.SetUInt32(0, m_owner->getCharacterUID());
+    scoped_ptr<QueryResult> result(sDatabase.QueryPrepared(&stmt));
     if (result)
     {
         do
@@ -44,15 +45,15 @@ void InventorySystem::loadFromDB()
             Field *field = result->Fetch();
             uint32 goId = field[0].GetUInt32();
             uint8 slot = field[1].GetUInt8();
+            std::string metadata = field[2].GetString();
             
-            // Note: We need a way to resolve goId -> templateId.
-            // Ideally we'd look it up from an items table (goid -> templateid), 
-            // but for now we query DataLoader if it has a template for this goId directly.
             uint32 templateId = 1; // Default
             if (sDataLoader.GetItemTemplate(goId))
-                templateId = goId; // Assuming goId maps directly to templateId in this stub
+                templateId = goId; 
 
             shared_ptr<Item> newItem(new Item(goId, templateId));
+            newItem->setMetadata(metadata);
+            ItemSerializer::Deserialize(newItem, metadata);
             
             m_items[slot] = newItem;
             m_goIdToSlot[goId] = slot;
@@ -65,15 +66,20 @@ void InventorySystem::loadFromDB()
 
 void InventorySystem::saveToDB()
 {
-    // Clear existing for simplicity (or use UPSERT/UPDATE in production)
-    sDatabase.Execute(format("DELETE FROM `inventory` WHERE `charId` = '%1%'") % m_owner->getCharacterUID());
+    PreparedStatement* delStmt = new PreparedStatement("DELETE FROM `inventory` WHERE `charId` = ?0");
+    delStmt->SetUInt64(0, m_owner->getCharacterUID());
+    sAsyncDatabase.Enqueue(delStmt);
     
     for (auto it = m_items.begin(); it != m_items.end(); ++it)
     {
-        sDatabase.Execute(format("INSERT INTO `inventory` (`charId`, `goid`, `slot`) VALUES ('%1%', '%2%', '%3%')")
-            % m_owner->getCharacterUID()
-            % it->second->getGoId()
-            % (uint32)it->first);
+        PreparedStatement* insStmt = new PreparedStatement("INSERT INTO `inventory` (`charId`, `goid`, `slot`, `item_metadata`) VALUES (?0, ?1, ?2, ?3)");
+        insStmt->SetUInt64(0, m_owner->getCharacterUID());
+        insStmt->SetUInt32(1, it->second->getGoId());
+        insStmt->SetUInt32(2, (uint32)it->first);
+        std::string metadata = ItemSerializer::Serialize(it->second);
+        it->second->setMetadata(metadata);
+        insStmt->SetString(3, metadata);
+        sAsyncDatabase.Enqueue(insStmt);
     }
 }
 
@@ -85,6 +91,23 @@ bool InventorySystem::addItem(shared_ptr<Item> item, uint8 slot)
     m_items[slot] = item;
     m_goIdToSlot[item->getGoId()] = slot;
     return true;
+}
+
+uint8 InventorySystem::getFirstFreeSlot() const
+{
+    for (uint8 i = 1; i <= 64; ++i) { // Assuming 64 slots max for now
+        if (m_items.find(i) == m_items.end()) {
+            return i;
+        }
+    }
+    return 0; // Inventory full
+}
+
+bool InventorySystem::addItemAuto(shared_ptr<Item> item)
+{
+    uint8 slot = getFirstFreeSlot();
+    if (slot == 0) return false;
+    return addItem(item, slot);
 }
 
 bool InventorySystem::removeItem(uint32 goId)
@@ -153,5 +176,64 @@ bool InventorySystem::moveItem(uint8 fromSlot, uint8 toSlot)
 
 void InventorySystem::sendFullInventory()
 {
-    // TODO: Send packet to client with all items and their slots
+    // TODO: Send binary 0x63 packet to client with all items and their slots once reverse engineered.
+    // For now, we will dump the inventory state to the player's chat log for validation.
+    std::string msg = "{c:00FF00}[Inventory Loader] Loaded " + std::to_string(m_items.size()) + " items.{/c}";
+    m_owner->getClient().QueueCommand(std::make_shared<SystemChatMsg>(msg));
+    
+    for (const auto& pair : m_items) {
+        std::string itemMsg = (format("{c:00FFFF}Slot %1%: GOID %2% Template %3%{/c}") 
+            % (int)pair.first % pair.second->getGoId() % pair.second->getTemplateId()).str();
+        m_owner->getClient().QueueCommand(std::make_shared<SystemChatMsg>(itemMsg));
+    }
+}
+
+bool InventorySystem::hasItemByTemplate(uint32 templateId)
+{
+    for (auto it = m_items.begin(); it != m_items.end(); ++it)
+    {
+        if (it->second->getTemplateId() == templateId)
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
+shared_ptr<Item> InventorySystem::getItemByTemplate(uint32 templateId)
+{
+    for (auto it = m_items.begin(); it != m_items.end(); ++it)
+    {
+        if (it->second->getTemplateId() == templateId)
+        {
+            return it->second;
+        }
+    }
+    return nullptr;
+}
+
+bool InventorySystem::consumeItemByTemplate(uint32 templateId)
+{
+    for (auto it = m_items.begin(); it != m_items.end(); ++it)
+    {
+        if (it->second->getTemplateId() == templateId)
+        {
+            removeItem(it->second->getGoId());
+            return true;
+        }
+    }
+    return false;
+}
+
+void InventorySystem::clear() {
+    m_items.clear();
+    m_goIdToSlot.clear();
+}
+
+std::vector<shared_ptr<Item>> InventorySystem::getAllItems() const {
+    std::vector<shared_ptr<Item>> items;
+    for (auto const& pair : m_items) {
+        items.push_back(pair.second);
+    }
+    return items;
 }

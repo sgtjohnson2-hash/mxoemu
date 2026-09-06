@@ -40,6 +40,7 @@ private:
 	void HandleGetPublicKeyRequest(ByteBuffer &packet);
 	void HandleAuthRequest(ByteBuffer &packet);
 	void HandleAuthChallengeResponse(ByteBuffer &packet);
+	void HandleCreateCharacterRequest(ByteBuffer &packet);
 
 
 	void ProcessData(const byte *buf,size_t len);

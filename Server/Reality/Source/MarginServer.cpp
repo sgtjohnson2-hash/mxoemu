@@ -86,15 +86,32 @@ void MarginServer::Stop()
 
 void MarginServer::Loop(void)
 {
+	std::lock_guard<std::mutex> lock(m_marginMutex);
 	marginSocketHandler.Select(0, 100000);// 100 ms
 }
 
 vector<MarginSocket*> MarginServer::GetSocketsForCharacterUID( uint64 charUID )
 {
+	std::lock_guard<std::mutex> lock(m_marginMutex);
 	return marginSocketHandler.FindByCharacterUID(charUID);
 }
 
 MarginSocket *MarginServer::GetSocketBySessionId( uint32 sessionId )
 {
+	if (sessionId == 0)
+		return NULL;
+	std::lock_guard<std::mutex> lock(m_marginMutex);
 	return marginSocketHandler.FindBySessionId(sessionId);
+}
+
+void MarginServer::ForceDisconnectSession( uint32 sessionId )
+{
+	if (sessionId == 0)
+		return;
+	std::lock_guard<std::mutex> lock(m_marginMutex);
+	MarginSocket* sock = marginSocketHandler.FindBySessionId(sessionId);
+	if (sock)
+	{
+		sock->SetCloseAndDelete();
+	}
 }

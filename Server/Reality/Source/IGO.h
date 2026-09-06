@@ -16,9 +16,10 @@
 
 #include "Common.h"
 #include "LocationVector.h"
-#include "StatusEffect.h"
 #include <vector>
 #include <memory>
+#include <shared_mutex>
+#include <mutex>
 
 // Interactive Game Object base class
 class IGO
@@ -29,51 +30,50 @@ public:
 
     virtual void Update();
 
-    uint32 getGoId() const { return m_goId; }
-    void setGoId(uint32 goId) { m_goId = goId; }
+    uint32 getGoId() const { std::shared_lock<std::shared_mutex> lock(m_igoMutex); return m_goId; }
+    void setGoId(uint32 goId) { std::unique_lock<std::shared_mutex> lock(m_igoMutex); m_goId = goId; }
 
-    LocationVector getPosition() const { return m_pos; }
-    void setPosition(const LocationVector& pos) { m_pos = pos; }
+    LocationVector getPosition() const { std::shared_lock<std::shared_mutex> lock(m_igoMutex); return m_pos; }
+    virtual void setPosition(const LocationVector& pos) { std::unique_lock<std::shared_mutex> lock(m_igoMutex); m_pos = pos; }
 
     // Combat interface
-    bool isDead() const { return m_isDead; }
-    void setDead(bool dead) { m_isDead = dead; }
+    bool isDead() const { std::shared_lock<std::shared_mutex> lock(m_igoMutex); return m_isDead; }
+    void setDead(bool dead) { std::unique_lock<std::shared_mutex> lock(m_igoMutex); m_isDead = dead; }
     
-    bool isInCombat() const { return m_inCombat; }
-    void setInCombat(bool inCombat) { m_inCombat = inCombat; }
+    bool isInCombat() const { std::shared_lock<std::shared_mutex> lock(m_igoMutex); return m_inCombat; }
+    void setInCombat(bool inCombat) { std::unique_lock<std::shared_mutex> lock(m_igoMutex); m_inCombat = inCombat; }
     
-    uint8 getTactic() const { return m_tactic; }
-    void setTactic(uint8 tactic) { m_tactic = tactic; }
+    uint8 getTactic() const { std::shared_lock<std::shared_mutex> lock(m_igoMutex); return m_tactic; }
+    void setTactic(uint8 tactic) { std::unique_lock<std::shared_mutex> lock(m_igoMutex); m_tactic = tactic; }
     
-    uint32 getTargetGoId() const { return m_targetGoId; }
-    void setTargetGoId(uint32 target) { m_targetGoId = target; }
+    uint32 getTargetGoId() const { std::shared_lock<std::shared_mutex> lock(m_igoMutex); return m_targetGoId; }
+    void setTargetGoId(uint32 target) { std::unique_lock<std::shared_mutex> lock(m_igoMutex); m_targetGoId = target; }
     
-    uint32 getInterlockPartner() const { return m_ilPartner; }
-    void setInterlockPartner(uint32 partner) { m_ilPartner = partner; }
+    uint32 getInterlockPartner() const { std::shared_lock<std::shared_mutex> lock(m_igoMutex); return m_ilPartner; }
+    void setInterlockPartner(uint32 partner) { std::unique_lock<std::shared_mutex> lock(m_igoMutex); m_ilPartner = partner; }
     
-    uint8 nextSpawnCounter() { return m_spawnCounter++; }
+    uint8 nextSpawnCounter() { std::unique_lock<std::shared_mutex> lock(m_igoMutex); return m_spawnCounter++; }
 
     virtual void takeDamage(uint32 attackerGoId, uint16 damage, uint32 fxId);
     virtual void die(uint32 killerGoId);
     
-    virtual uint16 getCurrentHealth() const { return m_healthC; }
-    virtual void setCurrentHealth(uint16 h) { m_healthC = h; }
+    virtual uint8 getLevel() const { return 1; }
     
-
-    virtual uint16 getMaximumHealth() const { return m_healthM; }
-    virtual void setMaximumHealth(uint16 m) { m_healthM = m; }
+    virtual uint16 getCurrentHealth() const { std::shared_lock<std::shared_mutex> lock(m_igoMutex); return m_healthC; }
+    virtual void setCurrentHealth(uint16 h) { std::unique_lock<std::shared_mutex> lock(m_igoMutex); m_healthC = h; }
+    
+    virtual uint16 getMaximumHealth() const { std::shared_lock<std::shared_mutex> lock(m_igoMutex); return m_healthM; }
+    virtual void setMaximumHealth(uint16 m) { std::unique_lock<std::shared_mutex> lock(m_igoMutex); m_healthM = m; }
 
     virtual uint16 getInnerStrength() const { return 0; }
     virtual void setInnerStrength(uint16 is) { }
-
-    void addStatusEffect(std::shared_ptr<StatusEffect> effect);
-    void clearStatusEffects();
 
     virtual void setCombatStance(bool inCombatStance) {}
     virtual void enterInterlock(uint32 partnerGoId);
     virtual void leaveInterlock();
 
 protected:
+    mutable std::shared_mutex m_igoMutex;
     uint32 m_goId;
     LocationVector m_pos;
     
@@ -89,8 +89,6 @@ protected:
     uint8 m_hitCounter;     // increments per hit taken
     uint8 m_spawnCounter;   // per-client dynamic GO spawn id counter
     float m_lastRegenTime;
-
-    std::vector<std::shared_ptr<StatusEffect>> m_statusEffects;
 };
 
 #endif // MXOEMU_IGO_H

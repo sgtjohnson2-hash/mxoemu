@@ -27,18 +27,18 @@
 #define MXOSIM_CRYPTO_H
 
 //Crypto ++
-#include <cryptopp/cryptlib.h>
-#include <cryptopp/sha.h>
-#include <cryptopp/rsa.h>
-#include <cryptopp/files.h>
-#include <cryptopp/osrng.h>
-#include <cryptopp/crc.h>
-#include <cryptopp/modes.h>
-#include <cryptopp/twofish.h>
-#include <cryptopp/filters.h>
-#include <cryptopp/asn.h>
-#include <cryptopp/hex.h>
+#include <cryptlib.h>
+#include <sha.h>
+#include <rsa.h>
+#include <files.h>
+#include <osrng.h>
+#include <crc.h>
+#include <modes.h>
+#include <twofish.h>
+#include <filters.h>
+#include <asn.h>
+#include <hex.h>
 #define CRYPTOPP_ENABLE_NAMESPACE_WEAK 1
-#include <cryptopp/md5.h>
+#include <md5.h>
 
 #endif

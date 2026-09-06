@@ -26,6 +26,7 @@
 #include "Common.h"
 
 #include "GameClient.h"
+#include "SpatialGrid.h"
 #include "Timer.h"
 #include "Util.h"
 #include "MersenneTwister.h"
@@ -47,20 +48,40 @@ GameClient::GameClient(sockaddr_in inc_addr, GameSocket *sock):m_address(inc_add
 	ResetRCC();
 
 	m_characterUID = 0;
-	m_playerGoId=0;
+	m_charWorldId = 0;
+	m_sessionId = 0;
+	m_playerGoId = 0;
+	m_marginConn = nullptr;
+	m_lastActivity = getTime();
+	m_lastPacketReceivedMS = getMSTime();
+	m_lastServerMS = 0;
+	m_spatialCellHash.store(0xFFFFFFFFFFFFFFFF);
 }
 
 GameClient::~GameClient()
 {
-	if (m_playerGoId != 0)
-	{
-		sObjMgr.destroyObject(m_playerGoId);
-	}
-	sObjMgr.releaseRelevantSet(this);
+	try {
+		if (m_playerGoId != 0)
+		{
+			// Item 54: Lazy-deletion queue to prevent synchronous GC hitching
+			sObjMgr.QueueDeletion(m_playerGoId);
+		}
+		sObjMgr.releaseRelevantSet(this);
+		sSpatialGrid.RemoveClient(this);
 
-	MarginSocket* marginConn = sMargin.GetSocketBySessionId(m_sessionId);
-	if(marginConn)
-		marginConn->ForceDisconnect();
+		if (m_sessionId != 0)
+		{
+			sMargin.ForceDisconnectSession(m_sessionId);
+		}
+	}
+	catch (const std::exception& e)
+	{
+		ERROR_LOG(format("GameClient::~GameClient exception caught: %1%") % e.what());
+	}
+	catch (...)
+	{
+		ERROR_LOG("GameClient::~GameClient unknown exception caught");
+	}
 }
 
 void GameClient::HandlePacket( const char *pData, size_t nLength )
@@ -88,8 +109,7 @@ void GameClient::HandlePacket( const char *pData, size_t nLength )
 		{
 			m_playerGoId = sObjMgr.constructPlayer(this,m_characterUID);
 		}
-		catch (ObjectMgr::ObjectNotAvailable)
-		{
+		catch (...) {
 			ERROR_LOG(format("InitialUDPPacket(%1%): Character doesn't exist") % Address() );
 			Invalidate();
 			return;
@@ -231,14 +251,19 @@ void GameClient::HandlePacket( const char *pData, size_t nLength )
 				DEBUG_LOG( format("(%s) Recv FLAGS: %x CSeq: %d SSeq: %d") % Address() % uint32(packetData.getFlags()) % packetData.getLocalSeq() % packetData.getRemoteSeq() );
 			}*/
 
+			if (g_sniffPackets && dataToParse.size() > 0)
+			{
+				std::ofstream dumpFile("protocol_dump.json", std::ios::app);
+				if (dumpFile.is_open())
+				{
+					dumpFile << "{\"direction\": \"in\", \"client\": \"" << Address() << "\", \"type\": \"WorldPacket\", \"hex\": \"" << Bin2Hex(dataToParse) << "\"}\n";
+				}
+			}
+
 			//add to need to ack list
 			PacketReceived(packetData.getLocalSeq());						
 
-			//TODO: hack,we should update things irrespective of packets received
-			if (m_playerGoId != 0)
-			{
-				sObjMgr.getGOPtr(m_playerGoId)->Update();
-			}
+			// Player objects are now updated in the main simulation loop
 
 			if (dataToParse.size() > 0)
 			{
@@ -383,6 +408,22 @@ void GameClient::SendEncrypted(SequencedPacket withSequences)
 {
 	if (!m_tfEngine.IsValid())
 		return;
+
+	if (g_sniffPackets && withSequences.size() > 0)
+	{
+		std::ofstream dumpFile("protocol_dump.json", std::ios::app);
+		if (dumpFile.is_open())
+		{
+			// Skip the header (sequence + ack) to log just the payload
+			ByteBuffer payload;
+			if (withSequences.size() > 2) {
+				payload.append(&withSequences.contents()[2], withSequences.size() - 2);
+				dumpFile << "{\"direction\": \"out\", \"client\": \"" << Address() << "\", \"type\": \"WorldPacket\", \"hex\": \"" << Bin2Hex(payload) << "\"}\n";
+			} else {
+				dumpFile << "{\"direction\": \"out\", \"client\": \"" << Address() << "\", \"type\": \"WorldPacket\", \"hex\": \"" << Bin2Hex(withSequences) << "\"}\n";
+			}
+		}
+	}
 
 	TwofishEncryptedPacket withEncryption(withSequences.getDataWithHeader());
 	ByteBuffer sendMe;
@@ -940,3 +981,12 @@ void GameClient::CheckAndResend()
 {
 	FlushQueue(true);
 }
+
+void GameClient::ClearQueues()
+{
+	m_queuedCommands.clear();
+	m_queuedStates.clear();
+	m_sentCommands.clear();
+}
+
+

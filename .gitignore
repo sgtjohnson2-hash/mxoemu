@@ -1,3 +1,52 @@
+﻿# Build and intermediate files
+**/build/
+**/bin/
+**/obj/
+**/Debug/
+**/Release/
+**/x64/
+**/Win32/
+*.ilk
+*.pdb
+*.obj
+*.lib
+*.a
+*.o
+*.tlog
+*.idb
+*.lastbuildstate
+*.res
+*.pch
+*.exp
 
-/Reality/Source/Reality.log
-/Dependencies/CryptoPP/Win32/Output/Release/vc90.pdb
+# IDE and Editor files
+.vs/
+*.user
+*.suo
+*.sln.docstates
+.vscode/
+.idea/
+
+# Logs and Crash Dumps
+*.log
+*.dmp
+Reality.log
+combat_log.csv
+
+# CMake temporary files
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+Makefile
+ninja.build
+
+# Node.js
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Database & Runtime Data
+RealityDB_Data/
+*.sqlite
+*.sqlite3

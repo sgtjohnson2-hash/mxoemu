@@ -37,33 +37,6 @@ IGO::~IGO()
 
 void IGO::Update()
 {
-    // Process Status Effects
-    for (auto it = m_statusEffects.begin(); it != m_statusEffects.end(); )
-    {
-        if ((*it)->isExpired())
-        {
-            it = m_statusEffects.erase(it);
-        }
-        else
-        {
-            if ((*it)->shouldTick())
-            {
-                (*it)->applyTick(this);
-            }
-            ++it;
-        }
-    }
-}
-
-void IGO::addStatusEffect(std::shared_ptr<StatusEffect> effect)
-{
-    if (effect)
-        m_statusEffects.push_back(effect);
-}
-
-void IGO::clearStatusEffects()
-{
-    m_statusEffects.clear();
 }
 
 void IGO::enterInterlock(uint32 partnerGoId)
@@ -86,8 +59,9 @@ void IGO::takeDamage(uint32 attackerGoId, uint16 damage, uint32 fxId)
         return;
 
     // Apply armor/mitigation formulas here
-    // For now, straight damage
-    uint16 actualDamage = damage; // TODO: Implement stats-based mitigation
+    // Apply basic mitigation based on entity level
+    uint16 mitigation = getLevel() / 2;
+    uint16 actualDamage = (damage > mitigation) ? (damage - mitigation) : 1; 
 
     if (m_healthC <= actualDamage)
     {
@@ -110,7 +84,7 @@ void IGO::die(uint32 killerGoId)
     m_inCombat = false;
     m_targetGoId = 0;
     
-    clearStatusEffects();
+//     clearStatusEffects();
     
     DEBUG_LOG(format("IGO %1% died. Killer: %2%") % m_goId % killerGoId);
 }

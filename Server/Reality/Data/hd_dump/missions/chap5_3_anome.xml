@@ -1,0 +1,8 @@
+<?xml version='1.0' encoding='utf-8'?>
+<mission id="10530" faction="None">
+  <data title="Chapter 5.3: Anome's Unlimit" exp="1500" info="750">
+    <objective1 command="TALK" idNpc="9220" description="Meet Anome" dial="The old factions are obsolete. Zion, the Machines, the Merovingian... they all want control. Unlimit seeks true freedom." />
+    <objective2 command="DEFEAT" idNpc="9221" description="Defeat Machine Loyalists" dial="You are an anomaly." />
+    <objective3 command="TALK" idNpc="9220" description="Join Unlimit" dial="We will break the rules of this world. Are you with us?" />
+  </data>
+</mission>

@@ -1,0 +1,10 @@
+<?xml version='1.0' encoding='utf-8'?>
+<mission id="10121" faction="Zion">
+  <data title="Chapter 1.2: Support Morpheus" exp="300" info="150">
+    <objective1 command="TALK" idNpc="9050" description="Meet Morpheus" dial="The Machines refuse to return Neo's body. We must force their hand. Plant this detonator." />
+    <objective2 command="DEFEAT" idNpc="9996" description="Survive the Exile hit squad" dial="The Frenchman sends his regards." spawnAmbush="true" />
+    <objective3 command="GIVE" idNpc="9051" description="Plant the Detonator" dial="Detonator received. The code mask is falling. The bluepills will see the truth." />
+    <objective4 command="DEFEAT" idNpc="9998" description="Eliminate the guards blocking the path" dial="Intruder detected in sector 4." />
+    <objective5 command="DEFEAT" idNpc="9052" description="Defeat Agent Smith" dial="You are a virus. And viruses must be purged." />
+  </data>
+</mission>

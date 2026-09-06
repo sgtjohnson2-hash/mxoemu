@@ -1,0 +1,12 @@
+<?xml version='1.0' encoding='utf-8'?>
+<mission id="10220" faction="Zion">
+  <data title="Chapter 2.2: E Pluribus Neo" exp="600" info="300">
+    <objective1 command="TALK" idNpc="9110" description="Meet The Kid" dial="Morpheus is gone, but Neo's dream isn't. E Pluribus Neo. We will free them all, one by one. Are you with us?" />
+    <objective2 command="GIVE" idNpc="9997" description="Hack the terminal to open the gate" dial="Access granted." item="1001" isTimed="true" timeLimitSeconds="300" />
+    <objective3 command="TALK" idNpc="9111" description="Recruit Bluepills" dial="I... I had a dream about this. I'm ready to wake up." />
+    <objective4 command="DEFEAT" idNpc="9996" description="Survive the Exile hit squad" dial="The Frenchman sends his regards." spawnAmbush="true" />
+    <objective5 command="DEFEAT" idNpc="9112" description="Defend the Extraction" dial="Agents! They are trying to stop the extraction!" />
+    <objective6 command="DEFEAT" idNpc="9996" description="Survive the Exile hit squad" dial="The Frenchman sends his regards." spawnAmbush="true" />
+    <objective7 command="TALK" idNpc="9110" description="Return to The Kid" dial="We saved another one. The movement is growing." />
+  </data>
+</mission>

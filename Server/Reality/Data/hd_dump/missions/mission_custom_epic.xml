@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<mission.data>
+  <config.data title="The Awakening: Neo's Echo" description="A strange signal has been detected in the Mega City. Investigate its source." exp="10000" info="5000" nextSuccess="99999" nextFail="0">
+    <objective1 command="TALK" idNpc="1337" description="Meet with the Oracle's contact in the Slums." dial="I have been waiting for you. The signal is coming from the old subway station. Beware the Agents." />
+    <objective2 command="DEFEAT" idNpc="2" description="Defeat the Agent ambush!" spawnAmbush="true" />
+    <objective3 command="LOOT" idNpc="2" description="Recover the encrypted data fragment." item="777" />
+    <objective4 command="REBIRTH" description="You have proven your worth. Embrace the rebirth." />
+  </config.data>
+</mission.data>

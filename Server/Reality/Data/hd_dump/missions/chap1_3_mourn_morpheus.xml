@@ -1,0 +1,8 @@
+<?xml version='1.0' encoding='utf-8'?>
+<mission id="10131" faction="None">
+  <data title="Chapter 1.3: Mourning Morpheus" exp="0" info="0">
+    <objective1 command="TALK" idNpc="9080" description="Speak with Niobe" dial="I can't believe he's gone. He believed so fiercely. The Truce means nothing now. We will find whoever did this." />
+    <objective2 command="DEFEAT" idNpc="9996" description="Survive the Exile hit squad" dial="The Frenchman sends his regards." spawnAmbush="true" />
+    <objective3 command="TALK" idNpc="9081" description="Speak with The Kid" dial="He was our leader... I'm going to finish what he started. The Machines will pay." />
+  </data>
+</mission>

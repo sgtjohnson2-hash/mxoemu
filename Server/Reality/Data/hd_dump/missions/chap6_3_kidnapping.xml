@@ -1,0 +1,9 @@
+<?xml version='1.0' encoding='utf-8'?>
+<mission id="10630" faction="None">
+  <data title="Chapter 6.3: Kidnapping" exp="3000" info="1500">
+    <objective1 command="TALK" idNpc="9250" description="Emergency Briefing" dial="Sati has been taken! The Merovingian's men grabbed her from the park. We have to get her back!" />
+    <objective2 command="DEFEAT" idNpc="9251" description="Defeat the Kidnappers" dial="The Oracle's little pet belongs to the Frenchman now." />
+    <objective3 command="DEFEAT" idNpc="9998" description="Eliminate the guards blocking the path" dial="Intruder detected in sector 4." />
+    <objective4 command="TALK" idNpc="9252" description="Rescue Sati" dial="Thank you... I was very scared. Can we go home now?" />
+  </data>
+</mission>

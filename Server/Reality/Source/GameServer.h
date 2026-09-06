@@ -35,6 +35,8 @@
 #include "Timer.h"
 
 #include <boost/timer.hpp>
+#include <thread>
+#include <atomic>
 
 class GameServer : public Singleton <GameServer>
 {
@@ -52,11 +54,14 @@ public:
 	void Stop();
 	void Loop();
 	ObjectMgr &getObjMgr() { return m_objMgr; }
-	class GameClient *GetClientWithSessionId(uint32 sessionId);
-	vector<class GameClient*> GetClientsWithCharacterId(uint64 charId);
+	std::shared_ptr<class GameClient> GetClientWithSessionId(uint32 sessionId);
+	vector<std::shared_ptr<class GameClient>> GetClientsWithCharacterId(uint64 charId);
 	void Broadcast(const ByteBuffer &message, bool command);
+	void BroadcastNear(float x, float z, float radius, const ByteBuffer &message, bool command);
 	void AnnounceStateUpdate(class GameClient* clFrom,msgBaseClassPtr theMsg, bool immediateOnly=false);
+	void AnnounceStateUpdateNear(float x, float z, float radius, msgBaseClassPtr theMsg, bool immediateOnly=false);
 	void AnnounceCommand(class GameClient* clFrom,msgBaseClassPtr theCmd);
+	void AnnounceCommandNear(float x, float z, float radius, msgBaseClassPtr theCmd);
 	float GetSimTime()
 	{
 		return getFloatTime()-m_simtimeStart+m_simtimeOffset;
@@ -81,6 +86,10 @@ private:
 
 	float m_simtimeStart;
 	float m_simtimeOffset;
+
+	std::thread m_simulationThread;
+	std::atomic<bool> m_runSimulation;
+	void SimulationLoop();
 };
 
 

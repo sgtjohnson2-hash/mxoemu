@@ -1,0 +1,6 @@
+<?xml version='1.0' encoding='utf-8'?>
+<mission id="10432" faction="Machine">
+  <data title="Chapter 4.3: Secure for Machines" exp="500" info="500">
+    <objective1 command="GIVE" idNpc="9191" description="Give Item to Agent Gray" dial="This code is dangerous. It will be quarantined immediately. You have served the system well." />
+  </data>
+</mission>

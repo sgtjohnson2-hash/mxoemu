@@ -1,0 +1,10 @@
+<?xml version='1.0' encoding='utf-8'?>
+<mission id="10420" faction="Zion">
+  <data title="Chapter 4.2: From Many, One" exp="1100" info="650">
+    <objective1 command="GIVE" idNpc="9997" description="Hack the terminal to open the gate" dial="Access granted." item="1001" isTimed="true" timeLimitSeconds="300" />
+    <objective2 command="TALK" idNpc="9170" description="Meet EPN Recruiter" dial="E Pluribus Neo is no longer just an idea. We are an army. But we need access codes to the broadcast arrays." />
+    <objective3 command="DEFEAT" idNpc="9171" description="Defeat Cypherite Guards" dial="You will not corrupt the system!" />
+    <objective4 command="DEFEAT" idNpc="9998" description="Eliminate the guards blocking the path" dial="Intruder detected in sector 4." />
+    <objective5 command="GIVE" idNpc="9170" description="Return the Codes" dial="Perfect. Neo's message will be broadcast across the entire Megacity." />
+  </data>
+</mission>

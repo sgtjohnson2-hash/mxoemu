@@ -1,0 +1,10 @@
+<?xml version='1.0' encoding='utf-8'?>
+<mission id="10430" faction="None">
+  <data title="Chapter 4.3: The General's Items" exp="1500" info="800" nextSuccess="10431" nextFail="10432">
+    <objective1 command="DEFEAT" idNpc="9999" description="Fight through the ambush" dial="They knew we were coming! Defend yourself!" spawnAmbush="true" />
+    <objective2 command="TALK" idNpc="9180" description="Intel Briefing" dial="The General has scattered powerful code fragments across the city. We must secure them before the other factions do." />
+    <objective3 command="DEFEAT" idNpc="9998" description="Eliminate the guards blocking the path" dial="Intruder detected in sector 4." />
+    <objective4 command="DEFEAT" idNpc="9181" description="Defeat the Commando Elite" dial="The General's property is not for you." />
+    <objective5 command="TALK" idNpc="9182" description="Secure the Item" dial="You have it. Now, who are you giving it to? The Machines, or Zion?" branch="success:10431,fail:10432" />
+  </data>
+</mission>

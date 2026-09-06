@@ -1,0 +1,9 @@
+<?xml version='1.0' encoding='utf-8'?>
+<mission id="10122" faction="Machine">
+  <data title="Chapter 1.2: Stop Morpheus" exp="300" info="150">
+    <objective1 command="TALK" idNpc="9060" description="Meet Agent Gray" dial="Morpheus is a terrorist. His actions threaten the Truce. Defuse the bombs he has planted." />
+    <objective2 command="DEFEAT" idNpc="9998" description="Eliminate the guards blocking the path" dial="Intruder detected in sector 4." />
+    <objective3 command="GIVE" idNpc="9061" description="Defuse the Detonator" dial="The device has been neutralized. The simulation remains stable." />
+    <objective4 command="DEFEAT" idNpc="9062" description="Defeat Zion Zealot" dial="You are a slave to the system! Morpheus is right!" />
+  </data>
+</mission>

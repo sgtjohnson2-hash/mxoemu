@@ -28,6 +28,15 @@
 #include "GameClient.h"
 #include "Database/DatabaseEnv.h"
 
+ObjectMgr::ObjectMgr() : m_currFreeObjectId(OBJECTMANAGER_STARTINGOBJECTID),
+    m_playerPool(std::make_unique<ObjectPool<PlayerObject>>())
+{
+}
+
+ObjectMgr::~ObjectMgr()
+{
+}
+
 uint32 ObjectMgr::constructPlayer( GameClient* requester, uint64 charUID, bool isBot )
 {
 	if (requester == NULL)
@@ -36,24 +45,32 @@ uint32 ObjectMgr::constructPlayer( GameClient* requester, uint64 charUID, bool i
 	PlayerObject *newPlayerObj = NULL;
 	try
 	{
-		if (isBot)
-			newPlayerObj = new PlayerObject(*requester, charUID, true);
-		else
-			newPlayerObj = new PlayerObject(*requester, charUID);
+		newPlayerObj = m_playerPool->acquire(*requester, charUID, isBot);
 	}
 	catch (PlayerObject::CharacterNotFound)
 	{
+		m_playerPool->release(newPlayerObj);
 		throw ObjectNotAvailable();
 	}
 
 	uint32 theNewObjectId = getNewObjectId();
 	newPlayerObj->initGoId(theNewObjectId);
-	m_objects[theNewObjectId]=objectPtr(newPlayerObj);
+	
+	// Use custom deleter for shared_ptr to return memory to pool
+	auto customDeleter = [this](PlayerObject* p) {
+		m_playerPool->release(p);
+	};
+	{
+		std::unique_lock<std::shared_mutex> lock(m_objMutex);
+		m_objects[theNewObjectId] = std::shared_ptr<PlayerObject>(newPlayerObj, customDeleter);
+	}
+
 	return theNewObjectId;
 }
 
 void ObjectMgr::destroyObject( uint32 goId )
 {
+	std::unique_lock<std::shared_mutex> lock(m_objMutex);
 	//erase from valid objects
 	objectsMap::iterator it=m_objects.find(goId);
 	if (it!=m_objects.end())
@@ -81,25 +98,32 @@ void ObjectMgr::destroyObject( uint32 goId )
 
 class PlayerObject* ObjectMgr::getGOPtr( uint32 goId )
 {
+	std::shared_lock<std::shared_mutex> lock(m_objMutex);
 	objectsMap::iterator it=m_objects.find(goId);
 	if (it!=m_objects.end())
 		return it->second.get();
 
-	throw ObjectNotAvailable();
+	return NULL;
+}
+
+class PlayerObject* ObjectMgr::getGOPtrSafe( uint32 goId )
+{
+	return getGOPtr(goId);
 }
 
 uint32 ObjectMgr::getGOId( class PlayerObject* forWhichObj )
 {
 	if (forWhichObj==NULL)
-		throw ObjectNotAvailable();
+		return 0;
 
+	std::shared_lock<std::shared_mutex> lock(m_objMutex);
 	for (objectsMap::iterator it=m_objects.begin();it!=m_objects.end();++it)
 	{
 		if (it->second.get() == forWhichObj)
 			return it->first;
 	}
 
-	throw ObjectNotAvailable();
+	return 0;
 }
 
 uint16 ObjectMgr::getViewForGO( GameClient* requester, uint32 goId )
@@ -107,6 +131,7 @@ uint16 ObjectMgr::getViewForGO( GameClient* requester, uint32 goId )
 	if (requester==NULL)
 		throw ClientNotAvailable();
 
+	std::shared_lock<std::shared_mutex> lock(m_objMutex);
 	if (m_objects.find(goId)==m_objects.end())
 		throw ObjectNotAvailable();
 
@@ -125,35 +150,9 @@ uint16 ObjectMgr::getViewForGO( GameClient* requester, uint32 goId )
 	return uint16(goId);
 }
 
-uint32 ObjectMgr::getGOForView( GameClient* requester, uint16 viewId )
-{
-	//views are currently identity mapped to goIds (see getViewForGO)
-	if (m_objects.find(uint32(viewId)) != m_objects.end())
-		return uint32(viewId);
-
-	return 0;
-}
-
-uint16 ObjectMgr::allocateDynamicView( GameClient* requester, uint32 tagObjId )
-{
-	uint16 viewId = allocateViewId(requester);
-	m_views[requester][viewId] = tagObjId;
-	return viewId;
-}
-
-void ObjectMgr::releaseDynamicView( GameClient* requester, uint16 viewId )
-{
-	clientToViewMap::iterator it = m_views.find(requester);
-	if (it == m_views.end())
-		return;
-
-	viewIdsMap::iterator it2 = it->second.find(viewId);
-	if (it2 != it->second.end())
-		it->second.erase(it2);
-}
-
 void ObjectMgr::releaseRelevantSet( GameClient *requester )
 {
+	std::unique_lock<std::shared_mutex> lock(m_objMutex);
 	clientToViewMap::iterator it=m_views.find(requester);
 	if (it!=m_views.end())
 		m_views.erase(it);
@@ -164,16 +163,41 @@ uint16 ObjectMgr::allocateViewId( GameClient* requester)
 	if (requester == NULL)
 		throw ClientNotAvailable();
 
+	std::unique_lock<std::shared_mutex> lock(m_objMutex);
 	//get the views map for current client
 	const viewIdsMap &viewsOfClient = m_views[requester];
 	//go through all possible viewIds, when we find one thats not in the list, return it
-	for (uint16 i=3;i<0xFFFF;i++) //we start from 2 because 1 is the object manager id, it spawns and deletes objects  // we start from 3, cuz 2 doesnt work
+	for (uint16 id=3;id<OBJECTMANAGER_STARTINGOBJECTID;++id) //1 = object manager, 2 = self view (client-reserved)
 	{
-		if (viewsOfClient.find(i)==viewsOfClient.end())
-			return i;
+		if (viewsOfClient.find(id) == viewsOfClient.end())
+			return id;
 	}
+
 	throw NoMoreFreeViews();
 }
+
+uint32 ObjectMgr::getGOForView(class GameClient *requester, uint16 viewId) {
+    if (requester == NULL) throw ClientNotAvailable();
+    return uint32(viewId); // Simple 1:1 mapping for now
+}
+
+uint16 ObjectMgr::allocateDynamicView(class GameClient *requester, uint32 tagObjId) {
+    if (requester == NULL) throw ClientNotAvailable();
+    uint16 newViewId = allocateViewId(requester);
+    std::unique_lock<std::shared_mutex> lock(m_objMutex);
+    m_views[requester][newViewId] = tagObjId;
+    return newViewId;
+}
+
+void ObjectMgr::releaseDynamicView(class GameClient *requester, uint16 viewId) {
+    if (requester == NULL) return;
+    std::unique_lock<std::shared_mutex> lock(m_objMutex);
+    clientToViewMap::iterator it = m_views.find(requester);
+    if (it != m_views.end()) {
+        it->second.erase(viewId);
+    }
+}
+
 
 #include "GameServer.h"
 
@@ -288,4 +312,17 @@ vector<msgBaseClassPtr> ObjectMgr::GetAllOpenDoors( GameClient* requester )
 		}
 	}
 	return tempVec;
+}
+
+void ObjectMgr::FlushDeletions() {
+    std::vector<uint32> toDelete;
+    {
+        std::unique_lock<std::shared_mutex> lock(m_objMutex);
+        toDelete = std::move(m_pendingDeletions);
+        m_pendingDeletions.clear();
+    }
+    
+    for (uint32 id : toDelete) {
+        destroyObject(id);
+    }
 }

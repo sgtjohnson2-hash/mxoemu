@@ -42,7 +42,7 @@ void TCPVarLenSocket::OnRead()
 	TcpSocket::OnRead();
 	// get number of bytes in input buffer
 	size_t n = ibuf.GetLength();
-	if (n >= 2)
+	while (n >= 2)
 	{
 		byte firstTwoBytes[2];
 		//peek first 2 bytes
@@ -66,6 +66,13 @@ void TCPVarLenSocket::OnRead()
 			packetSize = swap16(packetSize);
 		}
 
+		// Security: Prevent OOM exploits via massive spoofed packet sizes
+		if (packetSize > 8192)
+		{
+			SetCloseAndDelete();
+			return;
+		}
+
 		n = ibuf.GetLength();
 		size_t requiredLen = sizeOfPacketSize+packetSize;
 		if (n >= requiredLen)
@@ -77,6 +84,14 @@ void TCPVarLenSocket::OnRead()
 			ibuf.Read((char*)&tempStorage[0],tempStorage.size());
 
 			ProcessData(&tempStorage[0],tempStorage.size());
+			
+			// Update buffer size for next loop iteration
+			n = ibuf.GetLength();
+		}
+		else
+		{
+			// Need more data
+			break;
 		}
 	}
 }

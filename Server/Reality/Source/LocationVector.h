@@ -37,7 +37,7 @@
 class LocationVector
 {
 public:
-	LocationVector(double X, double Y, double Z, uint8 O) : x(x), y(Y), z(Z), rot(MxoToDoubleRot(O)) {}
+	LocationVector(double X, double Y, double Z, uint8 O) : x(X), y(Y), z(Z), rot(MxoToDoubleRot(O)) {}
 	LocationVector(double X, double Y, double Z) : x(X), y(Y), z(Z), rot(0) {}
 	LocationVector() : x(0), y(0), z(0), rot(0) {}
 private:
@@ -191,7 +191,7 @@ public:
 		return *this;
 	}
 
-	bool operator == (const LocationVector & eq)
+	bool operator == (const LocationVector & eq) const
 	{
 		if(eq.x == x && eq.y == y && eq.z == z)
 			return true;

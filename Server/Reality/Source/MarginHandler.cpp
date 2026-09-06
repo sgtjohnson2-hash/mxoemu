@@ -62,6 +62,8 @@ vector<MarginSocket*> MarginHandler::FindByCharacterUID( uint64 charUID )
 
 class MarginSocket *MarginHandler::FindBySessionId( uint32 sessionId )
 {
+	if (sessionId == 0)
+		return NULL;
 	for (socket_m::iterator it = m_sockets.begin(); it != m_sockets.end(); it++)
 	{
 		Socket *p = it->second;

@@ -1,0 +1,8 @@
+<?xml version='1.0' encoding='utf-8'?>
+<mission id="10112" faction="Machine">
+  <data title="Chapter 1.1: Monitor the Unrest" exp="200" info="100">
+    <objective1 command="TALK" idNpc="9020" description="Meet the Machine Operative" dial="Humanity grows restless. The anomaly known as Morpheus is agitating the populace. Monitor the area." />
+    <objective2 command="DEFEAT" idNpc="9021" description="Defeat the Rioters" dial="Stay out of our way, copper top!" />
+    <objective3 command="TALK" idNpc="9022" description="Report to Agent Gray" dial="Excellent. We must maintain order. The Truce will hold as long as we control the narrative." />
+  </data>
+</mission>

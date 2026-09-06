@@ -27,13 +27,18 @@
 #include "../Log.h"
 #include "../Util.h"
 #include "../Threading/Threading.h"
+#include "PreparedStatement.h"
 
 SQLCallbackBase::~SQLCallbackBase()
 {
 
 }
 
-Database::Database() : ThreadContext()
+// Mock mode is a FALLBACK entered only if the real DB connection fails during
+// Initialize(); it must NOT be the default, or Initialize() short-circuits at
+// its `if (m_isMockMode)` check and never connects — making every query return
+// NULL (which broke auth: the user lookup always came back empty).
+Database::Database() : ThreadContext(), m_isMockMode(false)
 {
 	_counter=0;
 	ThreadRunning = true;
@@ -67,14 +72,43 @@ bool Database::Initialize(const char* Hostname, unsigned int port, const char* U
 		if (mysql_options(temp, MYSQL_OPT_RECONNECT, &my_true))
 			WARNING_LOG("MYSQL_OPT_RECONNECT could not be set, connection drops may occur but will be counteracted.");
 
-		temp2 = mysql_real_connect( temp, Hostname, Username, Password, DatabaseName, port, NULL, 0 );
-		if( temp2 == NULL )
+		if (m_isMockMode)
 		{
-			CRITICAL_LOG(format("MySQLDatabase Connection failed due to: `%1%`") % mysql_error( temp ) );
-			return false;
+			DatabaseConnection* mockConn = new DatabaseConnection(NULL);
+			m_connections.push_back(mockConn);
+			m_freeConnections.push(mockConn);
+			continue;
 		}
 
-		m_connections.push_back(new DatabaseConnection(temp2));
+		bool connected = false;
+		for(int attempt = 0; attempt < 5; ++attempt)
+		{
+			temp2 = mysql_real_connect( temp, Hostname, Username, Password, DatabaseName, port, NULL, 0 );
+			if( temp2 != NULL )
+			{
+				connected = true;
+				break;
+			}
+			WARNING_LOG(format("MySQLDatabase Connection failed on attempt %1% due to: `%2%`. Retrying in 2 seconds...") % (attempt + 1) % mysql_error( temp ) );
+			Sleep(2000); // Wait 2 seconds before retrying
+		}
+
+		if( !connected )
+		{
+			CRITICAL_LOG(format("MySQLDatabase Connection failed after 5 attempts due to: `%1%`") % mysql_error( temp ) );
+			WARNING_LOG("Please ensure MySQL is running and `schema.sql` has been imported into the database.");
+			WARNING_LOG("Entering MOCK DATABASE MODE. State will not be saved.");
+			m_isMockMode = true;
+			DatabaseConnection* mockConn = new DatabaseConnection(NULL);
+			m_connections.push_back(mockConn);
+			m_freeConnections.push(mockConn);
+		}
+		else 
+		{
+			DatabaseConnection* dbConn = new DatabaseConnection(temp2);
+			m_connections.push_back(dbConn);
+			m_freeConnections.push(dbConn);
+		}
 	}
 
 	// Spawn Database thread
@@ -84,31 +118,69 @@ bool Database::Initialize(const char* Hostname, unsigned int port, const char* U
 	qt = new QueryThread(this);
 	ThreadPool.ExecuteTask(qt);
 
+	// Ensure schema migrations and persistence tables exist
+	if (!m_isMockMode) {
+		Execute("ALTER TABLE `characters` ADD COLUMN IF NOT EXISTS `rebirth_count` INT DEFAULT 0;");
+		Execute("ALTER TABLE `hardlines` ADD COLUMN IF NOT EXISTS `FactionTag` INT UNSIGNED NOT NULL DEFAULT 0;");
+		Execute("ALTER TABLE `inventory` ADD COLUMN IF NOT EXISTS `item_metadata` TEXT DEFAULT NULL;");
+		Execute("CREATE TABLE IF NOT EXISTS `ai_ltm` ("
+				"`botId` INT UNSIGNED NOT NULL, "
+				"`targetId` INT UNSIGNED NOT NULL, "
+				"`trustScore` FLOAT NOT NULL DEFAULT 0, "
+				"`dangerScore` FLOAT NOT NULL DEFAULT 0, "
+				"PRIMARY KEY (`botId`, `targetId`)"
+				") ENGINE=InnoDB DEFAULT CHARSET=utf8;");
+		Execute("CREATE TABLE IF NOT EXISTS `abilities` ("
+				"`charId` BIGINT(30) UNSIGNED NOT NULL, "
+				"`abilityId` SMALLINT(6) UNSIGNED NOT NULL, "
+				"`level` SMALLINT(6) UNSIGNED NOT NULL DEFAULT 1, "
+				"`slot` SMALLINT(6) UNSIGNED NOT NULL DEFAULT 0, "
+				"PRIMARY KEY (`charId`, `abilityId`)"
+				") ENGINE=InnoDB DEFAULT CHARSET=utf8;");
+		Execute("CREATE TABLE IF NOT EXISTS `crews` ("
+				"`id` INT(11) UNSIGNED NOT NULL AUTO_INCREMENT, "
+				"`name` VARCHAR(64) NOT NULL, "
+				"`faction` INT(11) UNSIGNED NOT NULL DEFAULT 0, "
+				"`leader_goid` INT(11) UNSIGNED NOT NULL DEFAULT 0, "
+				"PRIMARY KEY (`id`)"
+				") ENGINE=InnoDB DEFAULT CHARSET=utf8;");
+		Execute("CREATE TABLE IF NOT EXISTS `crew_members` ("
+				"`crew_id` INT(11) UNSIGNED NOT NULL, "
+				"`member_goid` INT(11) UNSIGNED NOT NULL, "
+				"`rank` TINYINT(3) UNSIGNED NOT NULL DEFAULT 1, "
+				"PRIMARY KEY (`crew_id`, `member_goid`)"
+				") ENGINE=InnoDB DEFAULT CHARSET=utf8;");
+		Execute("CREATE TABLE IF NOT EXISTS `territory_map` ("
+				"`territory_id` INT(11) UNSIGNED NOT NULL, "
+				"`faction` INT(11) UNSIGNED NOT NULL DEFAULT 0, "
+				"`control_points` INT(11) UNSIGNED NOT NULL DEFAULT 0, "
+				"PRIMARY KEY (`territory_id`, `faction`)"
+				") ENGINE=InnoDB DEFAULT CHARSET=utf8;");
+		Execute("INSERT IGNORE INTO `territory_map` (`territory_id`, `faction`, `control_points`) VALUES (1, 1, 0), (1, 2, 0), (1, 3, 0);");
+		INFO_LOG("Database: Schema migrations and table checks completed successfully.");
+	}
+
 	return true;
 }
 
 DatabaseConnection &Database::GetFreeConnection()
 {
-	uint32 i = 0;
-	for(;;)
-	{
-		DatabaseConnection *con = m_connections[ ((i++) % m_connections.size()) ];
-		if(con->Busy.AttemptAcquire())
-			return *con;
+	std::unique_lock<std::mutex> lock(m_poolMutex);
+	m_poolCond.wait(lock, [this]() { return !m_freeConnections.empty(); });
+	DatabaseConnection* con = m_freeConnections.front();
+	m_freeConnections.pop();
+	return *con;
+}
 
-		// sleep every 20 iterations, otherwise this can cause 100% cpu if the db link goes dead
-		if( !(i % 20) )
-		{
-			Sleep(10);
-		}
-	}
-
-	// shouldn't be reached
-	throw(exception());
+void Database::ReleaseConnection(DatabaseConnection &con)
+{
+	std::lock_guard<std::mutex> lock(m_poolMutex);
+	m_freeConnections.push(&con);
+	m_poolCond.notify_one();
 }
 
 QueryResult *Database::Query( string QueryString )
-{	
+{
 	// Send the query
 	QueryResult * qResult = NULL;
 	DatabaseConnection &con = GetFreeConnection();
@@ -116,7 +188,7 @@ QueryResult *Database::Query( string QueryString )
 	if( _SendQuery( con, QueryString.c_str(), false ) )
 		qResult = _StoreQueryResult( con );
 
-	con.Busy.Release();
+	ReleaseConnection(con);
 	return qResult;
 }
 
@@ -134,6 +206,22 @@ void Database::FWaitExecute( string QueryString, DatabaseConnection &con)
 {	
 	// Send the query
 	_SendQuery( con, QueryString.c_str(), false );
+}
+
+bool Database::ExecutePrepared(PreparedStatement* stmt)
+{
+	if (!stmt)
+		return false;
+
+	return Execute(stmt->GetQueryString(this));
+}
+
+QueryResult* Database::QueryPrepared(PreparedStatement* stmt)
+{
+	if (!stmt)
+		return nullptr;
+
+	return Query(stmt->GetQueryString(this));
 }
 
 void QueryBuffer::AddQuery(string fmt)
@@ -154,6 +242,14 @@ void Database::PerformQueryBuffer(QueryBuffer * b, DatabaseConnection &con)
 	}
 }
 
+void Database::ExecuteAsync( string QueryString )
+{
+    if (m_isMockMode) return;
+    
+    string* q = new string(QueryString);
+    queries_queue.push(q);
+}
+
 void Database::PerformQueryBuffer(QueryBuffer * b)
 {
 	if(!b->queries.size())
@@ -168,7 +264,7 @@ void Database::PerformQueryBuffer(QueryBuffer * b)
 		b->queries.pop_front();
 	}
 
-	con.Busy.Release();
+	ReleaseConnection(con);
 }
 
 
@@ -186,7 +282,7 @@ bool Database::WaitExecute( string QueryString)
 {
 	DatabaseConnection &con = GetFreeConnection();
 	bool Result = _SendQuery(con, QueryString.c_str(), false);
-	con.Busy.Release();
+	ReleaseConnection(con);
 	return Result;
 }
 
@@ -206,7 +302,7 @@ bool Database::run()
 		query = queries_queue.pop();
 	}
 
-	con.Busy.Release();
+	ReleaseConnection(con);
 
 	if(queries_queue.get_size() > 0)
 	{
@@ -216,7 +312,7 @@ bool Database::run()
 		{
 			DatabaseConnection &con = GetFreeConnection();
 			_SendQuery( con, query->c_str(), false );
-			con.Busy.Release();
+			ReleaseConnection(con);
 			delete query;
 			query=queries_queue.pop_nowait();
 		}
@@ -247,7 +343,7 @@ void AsyncQuery::Perform()
 	for(vector<AsyncQueryResult>::iterator itr = queries.begin(); itr != queries.end(); ++itr)
 		itr->result = db->FQuery(itr->query, conn);
 
-	conn.Busy.Release();
+	db->ReleaseConnection(conn);
 	func->run(queries);
 
 	delete this;
@@ -314,7 +410,7 @@ void Database::thread_proc_query()
 		q = query_buffer.pop( );
 	}
 
-	con.Busy.Release();
+	ReleaseConnection(con);
 
 	// kill any queries
 	q = query_buffer.pop_nowait( );
@@ -358,6 +454,8 @@ void Database::FreeQueryResult(QueryResult * p)
 
 string Database::EscapeString(std::string Escape)
 {
+	if (m_isMockMode) return Escape;
+
 	char a2[16384] = {0};
 
 	DatabaseConnection &con = GetFreeConnection();
@@ -367,12 +465,16 @@ string Database::EscapeString(std::string Escape)
 	else
 		ret = a2;
 
-	con.Busy.Release();
+	ReleaseConnection(con);
 	return string(ret);
 }
 
 void Database::EscapeLongString(const char * str, uint32 len, stringstream& out)
 {
+	if (m_isMockMode) {
+		out.write(str, len);
+		return;
+	}
 	char a2[65536*3] = {0};
 
 	DatabaseConnection &con = GetFreeConnection();
@@ -383,11 +485,12 @@ void Database::EscapeLongString(const char * str, uint32 len, stringstream& out)
 		ret = a2;
 
 	out.write(a2, (std::streamsize)strlen(a2));
-	con.Busy.Release();
+	ReleaseConnection(con);
 }
 
 string Database::EscapeString(const char * esc, DatabaseConnection * con)
 {
+	if (m_isMockMode || !con || !con->conn) return string(esc);
 	char a2[16384] = {0};
 	const char * ret;
 	if(mysql_real_escape_string(con->conn, a2, (char*)esc, (unsigned long)strlen(esc)) == 0)
@@ -400,6 +503,7 @@ string Database::EscapeString(const char * esc, DatabaseConnection * con)
 
 bool Database::_SendQuery(DatabaseConnection &con, const char* Sql, bool Self)
 {
+	if (m_isMockMode) return true;
 	mysql_thread_init();
 	//dunno what it does ...leaving untouched 
 	int result = mysql_query(con.conn, Sql);
@@ -462,10 +566,15 @@ bool QueryResult::NextRow()
 
 QueryResult * Database::_StoreQueryResult(DatabaseConnection &con)
 {
+	if (m_isMockMode) return NULL;
 	QueryResult *res;
 	MYSQL_RES * pRes = mysql_store_result( con.conn );
-	uint32 uRows = (uint32)mysql_affected_rows( con.conn );
 	uint32 uFields = (uint32)mysql_field_count( con.conn );
+	// Use mysql_num_rows on the stored result, NOT mysql_affected_rows on the
+	// connection: for a SELECT the latter is connection-state dependent and can
+	// return 0 (e.g. when the query ran on a worker thread), which made valid
+	// single-row results — like the auth user lookup — get dropped as NULL.
+	uint32 uRows = pRes ? (uint32)mysql_num_rows( pRes ) : 0;
 
 	if( uRows == 0 || uFields == 0 || pRes == 0 )
 	{

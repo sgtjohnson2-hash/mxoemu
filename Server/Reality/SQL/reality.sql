@@ -74,6 +74,7 @@ CREATE TABLE `hardlines` (
   `Z` double NOT NULL,
   `ROT` double NOT NULL,
   `DistrictId` smallint(6) unsigned NOT NULL,
+  `FactionTag` int(11) unsigned NOT NULL DEFAULT '0',
   PRIMARY KEY (`Id`),
   UNIQUE KEY `Id` (`Id`)
 ) ENGINE=MyISAM AUTO_INCREMENT=139 DEFAULT CHARSET=utf8;
@@ -86,6 +87,7 @@ CREATE TABLE `inventory` (
   `charId` bigint(30) unsigned NOT NULL,
   `goid` int(11) unsigned NOT NULL,
   `slot` tinyint(11) unsigned DEFAULT NULL,
+  `item_metadata` text DEFAULT NULL,
   PRIMARY KEY (`invId`),
   UNIQUE KEY `invId` (`invId`)
 ) ENGINE=MyISAM DEFAULT CHARSET=utf8;
@@ -167,6 +169,53 @@ CREATE TABLE `worlds` (
   UNIQUE KEY `worldId` (`worldId`),
   UNIQUE KEY `name` (`name`)
 ) ENGINE=MyISAM AUTO_INCREMENT=6 DEFAULT CHARSET=utf8;
+
+-- ----------------------------
+-- Table structure for abilities
+-- ----------------------------
+CREATE TABLE IF NOT EXISTS `abilities` (
+  `charId` bigint(30) unsigned NOT NULL,
+  `abilityId` smallint(6) unsigned NOT NULL,
+  `level` smallint(6) unsigned NOT NULL DEFAULT '1',
+  `slot` smallint(6) unsigned NOT NULL DEFAULT '0',
+  PRIMARY KEY (`charId`, `abilityId`)
+) ENGINE=MyISAM DEFAULT CHARSET=utf8;
+
+-- ----------------------------
+-- Table structure for crews
+-- ----------------------------
+CREATE TABLE IF NOT EXISTS `crews` (
+  `id` int(11) unsigned NOT NULL AUTO_INCREMENT,
+  `name` varchar(64) NOT NULL,
+  `faction` int(11) unsigned NOT NULL DEFAULT '0',
+  `leader_goid` int(11) unsigned NOT NULL DEFAULT '0',
+  PRIMARY KEY (`id`)
+) ENGINE=MyISAM DEFAULT CHARSET=utf8;
+
+-- ----------------------------
+-- Table structure for crew_members
+-- ----------------------------
+CREATE TABLE IF NOT EXISTS `crew_members` (
+  `crew_id` int(11) unsigned NOT NULL,
+  `member_goid` int(11) unsigned NOT NULL,
+  `rank` tinyint(3) unsigned NOT NULL DEFAULT '1',
+  PRIMARY KEY (`crew_id`, `member_goid`)
+) ENGINE=MyISAM DEFAULT CHARSET=utf8;
+
+-- ----------------------------
+-- Table structure for territory_map
+-- ----------------------------
+CREATE TABLE IF NOT EXISTS `territory_map` (
+  `territory_id` int(11) unsigned NOT NULL,
+  `faction` int(11) unsigned NOT NULL DEFAULT '0',
+  `control_points` int(11) unsigned NOT NULL DEFAULT '0',
+  PRIMARY KEY (`territory_id`, `faction`)
+) ENGINE=MyISAM DEFAULT CHARSET=utf8;
+
+INSERT IGNORE INTO `territory_map` (`territory_id`, `faction`, `control_points`) VALUES
+('1', '1', '0'),
+('1', '2', '0'),
+('1', '3', '0');
 
 -- ----------------------------
 -- Records 

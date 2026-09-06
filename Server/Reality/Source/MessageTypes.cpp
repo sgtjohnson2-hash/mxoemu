@@ -30,6 +30,7 @@
 #include "ObjectMgr.h"
 #include "LocationVector.h"
 #include "Config.h"
+#include <algorithm>
 
 ObjectUpdateMsg::ObjectUpdateMsg( uint32 objectId ):m_objectId(objectId),m_toWho(NULL)
 {
@@ -180,27 +181,28 @@ const ByteBuffer& PlayerSpawnMsg::toBuf()
 	} ;
 
 	PlayerObject *m_player = NULL;
-	try
-	{
-		m_player = sObjMgr.getGOPtr(m_objectId);
-	}
-	catch (ObjectMgr::ObjectNotAvailable)
+	m_player = sObjMgr.getGOPtr(m_objectId);
+	if (m_player == NULL)
 	{
 		m_buf.clear();
+		// throw PacketNoLongerValid(); (was removed in V3, returning instead)
+        // Wait, did I remove this earlier? Let's check my earlier changes.
+        // I actually replaced throw ObjectNotAvailable with return.
+        // Actually, this file throws PacketNoLongerValid which is caught in GameClient.
 		throw PacketNoLongerValid();
 	}
 
 	byte *firstNamePos = &sampleSpawnPacket[0x11];
 	memset(firstNamePos,0,32);
-	memcpy(firstNamePos,m_player->getFirstName().c_str(),m_player->getFirstName().length());
+	memcpy(firstNamePos,m_player->getFirstName().c_str(),std::min<size_t>(31, m_player->getFirstName().length()));
 	byte *lastNamePos = &sampleSpawnPacket[0x32];
 	memset(lastNamePos,0,32);
-	memcpy(lastNamePos,m_player->getLastName().c_str(),m_player->getLastName().length());
+	memcpy(lastNamePos,m_player->getLastName().c_str(),std::min<size_t>(31, m_player->getLastName().length()));
 	byte *handlePos = &sampleSpawnPacket[0x5F];
 	memset(handlePos,0,32);
 //	string testHandle = lexical_cast<string,uint32>(m_objectId);
 //	memcpy(handlePos,testHandle.c_str(),testHandle.length());
-	memcpy(handlePos,m_player->getHandle().c_str(),m_player->getHandle().length());
+	memcpy(handlePos,m_player->getHandle().c_str(),std::min<size_t>(31, m_player->getHandle().length()));
 
 	byte *rsiDataPos = &sampleSpawnPacket[0x8C];
 	memset(rsiDataPos,0,15);
@@ -292,11 +294,8 @@ const ByteBuffer& PlayerAppearanceMsg::toBuf()
 	vector<byte> rsiBuf(15,0);
 
 	PlayerObject *player = NULL;
-	try
-	{
-		player = sObjMgr.getGOPtr(m_objectId);
-	}
-	catch (ObjectMgr::ObjectNotAvailable)
+	player = sObjMgr.getGOPtr(m_objectId);
+	if (player == NULL)
 	{
 		m_buf.clear();
 		throw PacketNoLongerValid();
@@ -323,11 +322,8 @@ const ByteBuffer& StateUpdateMsg::toBuf()
 	m_buf.clear();
 
 	PlayerObject *m_player = NULL;
-	try
-	{
-		m_player = sObjMgr.getGOPtr(m_objectId);
-	}
-	catch (ObjectMgr::ObjectNotAvailable)
+	m_player = sObjMgr.getGOPtr(m_objectId);
+	if (m_player == NULL)
 	{
 		m_buf.clear();
 		throw PacketNoLongerValid();
@@ -584,11 +580,8 @@ const ByteBuffer& EmoteMsg::toBuf()
 	}
 
 	PlayerObject *m_player = NULL;
-	try
-	{
-		m_player = sObjMgr.getGOPtr(m_objectId);
-	}
-	catch (ObjectMgr::ObjectNotAvailable)
+	m_player = sObjMgr.getGOPtr(m_objectId);
+	if (m_player == NULL)
 	{
 		m_buf.clear();
 		throw PacketNoLongerValid();
@@ -629,11 +622,8 @@ const ByteBuffer& AnimationStateMsg::toBuf()
 	} ;
 
 	PlayerObject *m_player = NULL;
-	try
-	{
-		m_player = sObjMgr.getGOPtr(m_objectId);
-	}
-	catch (ObjectMgr::ObjectNotAvailable)
+	m_player = sObjMgr.getGOPtr(m_objectId);
+	if (m_player == NULL)
 	{
 		m_buf.clear();
 		throw PacketNoLongerValid();
@@ -674,11 +664,8 @@ const ByteBuffer& PositionStateMsg::toBuf()
 	m_buf << uint8(0x03);
 
 	PlayerObject *m_player = NULL;
-	try
-	{
-		m_player = sObjMgr.getGOPtr(m_objectId);
-	}
-	catch (ObjectMgr::ObjectNotAvailable)
+	m_player = sObjMgr.getGOPtr(m_objectId);
+	if (m_player == NULL)
 	{
 		m_buf.clear();
 		throw PacketNoLongerValid();
@@ -723,11 +710,8 @@ const ByteBuffer& JackoutEffectMsg::toBuf()
 	} ;
 
 	PlayerObject *m_player = NULL;
-	try
-	{
-		m_player = sObjMgr.getGOPtr(m_objectId);
-	}
-	catch (ObjectMgr::ObjectNotAvailable)
+	m_player = sObjMgr.getGOPtr(m_objectId);
+	if (m_player == NULL)
 	{
 		m_buf.clear();
 		throw PacketNoLongerValid();
@@ -1097,11 +1081,8 @@ const ByteBuffer& HealthUpdateMsg::toBuf()
 	m_buf.clear();
 
 	PlayerObject *m_player = NULL;
-	try
-	{
-		m_player = sObjMgr.getGOPtr(m_objectId);
-	}
-	catch (ObjectMgr::ObjectNotAvailable)
+	m_player = sObjMgr.getGOPtr(m_objectId);
+	if (m_player == NULL)
 	{
 		throw PacketNoLongerValid();
 	}
@@ -1143,11 +1124,8 @@ const ByteBuffer& CombatHitFxMsg::toBuf()
 	m_buf.clear();
 
 	PlayerObject *m_player = NULL;
-	try
-	{
-		m_player = sObjMgr.getGOPtr(m_objectId);
-	}
-	catch (ObjectMgr::ObjectNotAvailable)
+	m_player = sObjMgr.getGOPtr(m_objectId);
+	if (m_player == NULL)
 	{
 		throw PacketNoLongerValid();
 	}
@@ -1332,3 +1310,4 @@ InterlockInitMsg::InterlockInitMsg( uint16 ilViewId, LocationVector pos, uint32 
 		m_buf.append(output);
 	}
 }
+

@@ -36,6 +36,11 @@
 #include "MarginRunnable.h"
 #include "GameRunnable.h"
 #include "ConsoleThread.h"
+#include "BotManager.h"
+
+#include "Timer.h"
+#include "CombatSystem.h"
+#include "Scripting/ScriptEngine.h"
 
 createFileSingleton( Master );
 
@@ -97,6 +102,9 @@ bool Master::Run()
 	uint32 seed = uint32(time(NULL));
 	new MTRand(seed);
 	srand(seed);
+
+	CombatSystem::getSingleton().Init();
+	ScriptEngine::getSingleton().Init();
 
 	_HookSignals();
 

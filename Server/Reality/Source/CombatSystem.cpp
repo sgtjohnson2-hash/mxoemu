@@ -1,97 +1,30 @@
-// ***************************************************************************
-//
-// Reality - The Matrix Online Server Emulator
-//
-// ---------------------------------------------------------------------------
-//
-// This program is free software: you can redistribute it and/or modify
-// it under the terms of the GNU Affero General Public License as
-// published by the Free Software Foundation, either version 3 of the
-// License, or (at your option) any later version.
-//
-// ***************************************************************************
-
+#include "Common.h"
 #include "CombatSystem.h"
 #include "PlayerObject.h"
 #include "ObjectMgr.h"
 #include "GameServer.h"
-#include "GameClient.h"
-#include "GOAttributes.h"
-#include "MessageTypes.h"
-#include "DataLoader.h"
-#include "MissionSystem.h"
 #include "BotManager.h"
+#include "MissionSystem.h"
+#include "DataLoader.h"
+#include "MessageTypes.h"
+#include "GOAttributes.h"
+#include "GameClient.h"
 #include "Timer.h"
-#include "Log.h"
-#include <boost/algorithm/string.hpp>
+#include "SpatialGrid.h"
+#include "BotClient.h"
+#include "AI/MatrixThreatHeatmap.h"
+#include "WorldDirector.h"
+#include "LogisticsManager.h"
+#include <boost/property_tree/ptree.hpp>
+#include <boost/property_tree/json_parser.hpp>
 
-using boost::iequals;
+const float CombatSystem::INTERLOCK_ROUND_SECONDS = 4.0f; //authentic MxO interlock round
+const float CombatSystem::FREEFIRE_SHOT_SECONDS = 2.0f;
 
 createFileSingleton(CombatSystem);
 
-const float CombatSystem::INTERLOCK_ROUND_SECONDS = 4.0f; //real MxO interlock rounds are 4 seconds
-const float CombatSystem::FREEFIRE_SHOT_SECONDS = 2.0f;
-
-// Known-good hit FX id captured from live combat traffic (HDS combat.log)
-static const uint32 DEFAULT_HIT_FX = 0x280001C1;
-
-// Built-in combat move table exercising every damage form. Damage model
-// follows the client.dll combat resolution structure:
-//   raw = random(scaledMin,scaledMax), scaled per attacker level
-static const CombatMove s_moveTable[] =
-{
-	//id name              dmgType           min   max  min/L max/L  IS   range    fx              ILonly FFonly cast
-	{ 1, "punch",          DAMAGE_MELEE,      6.0f, 12.0f, 0.8f, 1.2f,  0,   300.0f, DEFAULT_HIT_FX, false, false, 0.0f },
-	{ 2, "kick",           DAMAGE_MELEE,      8.0f, 15.0f, 1.0f, 1.4f,  3,   300.0f, DEFAULT_HIT_FX, false, false, 0.0f },
-	{ 3, "handgun",        DAMAGE_BALLISTIC, 10.0f, 18.0f, 1.2f, 1.6f,  0,  6000.0f, DEFAULT_HIT_FX, false, true,  0.0f },
-	{ 4, "rifle",          DAMAGE_BALLISTIC, 14.0f, 24.0f, 1.4f, 2.0f,  4,  9000.0f, DEFAULT_HIT_FX, false, true,  0.5f },
-	{ 5, "virus",          DAMAGE_VIRAL,     12.0f, 20.0f, 1.3f, 1.8f, 10,  5000.0f, DEFAULT_HIT_FX, false, true,  2.0f },
-	{ 6, "logicbarrage",   DAMAGE_HACKING,   18.0f, 28.0f, 1.6f, 2.2f, 18,  5000.0f, DEFAULT_HIT_FX, false, true,  2.5f },
-	{ 7, "hyperstrike",    DAMAGE_MELEE,     20.0f, 34.0f, 1.8f, 2.6f, 22,   300.0f, DEFAULT_HIT_FX, true,  false, 0.0f },
-	{ 8, "hyperkick",      DAMAGE_MELEE,     24.0f, 40.0f, 2.0f, 3.0f, 30,   300.0f, DEFAULT_HIT_FX, true,  false, 0.0f },
-	{ 9, "throwingknife",  DAMAGE_RANGED,     9.0f, 16.0f, 1.1f, 1.5f,  2,  4000.0f, DEFAULT_HIT_FX, false, true,  0.0f },
-};
-
-static const size_t s_moveTableSize = sizeof(s_moveTable)/sizeof(s_moveTable[0]);
-
-const CombatMove* CombatSystem::GetMove( uint16 moveId )
-{
-	for (size_t i=0;i<s_moveTableSize;i++)
-	{
-		if (s_moveTable[i].id == moveId)
-			return &s_moveTable[i];
-	}
-	return NULL;
-}
-
-const CombatMove* CombatSystem::GetMoveByName( const string &name )
-{
-	for (size_t i=0;i<s_moveTableSize;i++)
-	{
-		if (iequals(name,s_moveTable[i].name))
-			return &s_moveTable[i];
-	}
-	return NULL;
-}
-
-const CombatMove* CombatSystem::DefaultMelee()
-{
-	return GetMove(1); //punch
-}
-
-const CombatMove* CombatSystem::DefaultRanged()
-{
-	return GetMove(3); //handgun
-}
-
-CombatSystem::CombatSystem()
-{
-}
-
-CombatSystem::~CombatSystem()
-{
-}
-
+// sObjMgr.getGOPtr throws on missing objects - combat wants a null instead so
+// a mid-fight disconnect can never unwind the server loop
 static PlayerObject* getPlayerSafe(uint32 goId)
 {
 	if (goId == 0)
@@ -106,607 +39,686 @@ static PlayerObject* getPlayerSafe(uint32 goId)
 	}
 }
 
+CombatSystem::CombatSystem() {}
+CombatSystem::~CombatSystem() {}
+
+void CombatSystem::Init()
+{
+	LoadAbilities();
+}
+
+void CombatSystem::LoadAbilities()
+{
+	m_moveTable.clear();
+	boost::property_tree::ptree pt;
+	try {
+		boost::property_tree::read_json("Data/abilities.json", pt);
+		for (auto& item : pt.get_child("abilities")) {
+			CombatMove move;
+			move.id = item.second.get<uint16>("id");
+			move.name = item.second.get<std::string>("name");
+			move.dmgType = (mxoDamageType)item.second.get<int>("dmgType");
+			move.minDmg = item.second.get<float>("minDmg");
+			move.maxDmg = item.second.get<float>("maxDmg");
+			move.minDmgPerLvl = item.second.get<float>("minDmgPerLvl");
+			move.maxDmgPerLvl = item.second.get<float>("maxDmgPerLvl");
+			move.isCost = item.second.get<uint16>("isCost");
+			// abilities.json authors range in METERS; the world uses centi-units
+			// (100 units = 1m), so convert or every attack is ~100x out of range.
+			move.range = item.second.get<float>("range") * 100.0f;
+			move.hitFxId = item.second.get<uint32>("hitFxId");
+			move.interlockOnly = item.second.get<bool>("interlockOnly");
+			move.freefireOnly = item.second.get<bool>("freefireOnly");
+			move.castTime = item.second.get<float>("castTime");
+			move.specialFlags = item.second.get<uint32>("specialFlags", 0);
+			m_moveTable[move.id] = move;
+		}
+	} catch (...) {
+        CombatMove defaultMelee;
+        defaultMelee.id = 1;
+        defaultMelee.name = "Melee Attack";
+        defaultMelee.dmgType = DAMAGE_MELEE;
+        defaultMelee.minDmg = 10.0f;
+        defaultMelee.maxDmg = 15.0f;
+        defaultMelee.minDmgPerLvl = 1.0f;
+        defaultMelee.maxDmgPerLvl = 1.5f;
+        defaultMelee.isCost = 0;
+        defaultMelee.range = 300.0f; //world units: 3m
+        defaultMelee.hitFxId = 1234;
+        defaultMelee.interlockOnly = true;
+        defaultMelee.freefireOnly = false;
+        defaultMelee.castTime = 0.0f;
+        defaultMelee.specialFlags = 0;
+        m_moveTable[defaultMelee.id] = defaultMelee;
+    }
+}
+
+const CombatMove* CombatSystem::GetMove(uint16 moveId)
+{
+    std::lock_guard<std::recursive_mutex> lock(sCombatSys.m_combatMutex);
+    auto it = sCombatSys.m_moveTable.find(moveId);
+    if (it != sCombatSys.m_moveTable.end()) return &it->second;
+    return nullptr;
+}
+
+const CombatMove* CombatSystem::GetMoveByName(const std::string &name)
+{
+    std::lock_guard<std::recursive_mutex> lock(sCombatSys.m_combatMutex);
+    for (auto& pair : sCombatSys.m_moveTable) {
+        if (pair.second.name == name) return &pair.second;
+    }
+    return nullptr;
+}
+
+const CombatMove* CombatSystem::DefaultMelee()
+{
+    return GetMove(1);
+}
+
+const CombatMove* CombatSystem::DefaultRanged()
+{
+    return GetMove(2);
+}
+
 void CombatSystem::Update()
 {
-	float currTime = getFloatTime();
+	std::lock_guard<std::recursive_mutex> lock(m_combatMutex);
+	uint32 currTime = getMSTime();
 
-	//tick interlock rounds
-	for (list<InterlockSession>::iterator it=m_interlocks.begin();it!=m_interlocks.end();)
-	{
-		PlayerObject *pA = getPlayerSafe(it->goIdA);
-		PlayerObject *pB = getPlayerSafe(it->goIdB);
-		if (pA == NULL || pB == NULL || pA->isDead() || pB->isDead())
-		{
-			if (pA)
-			{
-				if (it->ilViewIdA)
-				{
-					pA->getClient().QueueState(shared_ptr<DeleteViewMsg>(new DeleteViewMsg(it->ilViewIdA)));
-					sObjMgr.releaseDynamicView(&pA->getClient(),it->ilViewIdA);
-				}
-				pA->leaveInterlock();
+	for (auto it = m_interlocks.begin(); it != m_interlocks.end(); ) {
+		PlayerObject* pA = getPlayerSafe(it->goIdA);
+		PlayerObject* pB = getPlayerSafe(it->goIdB);
+
+		//reap sessions whose participants vanished or died
+		bool keepAlive = (pA && pB && !pA->isDead() && !pB->isDead());
+
+		if (keepAlive && currTime >= it->nextRoundTime) {
+			keepAlive = RunInterlockRound(*it);
+
+			// [Item 13] Bullet Time / Dilation Zones
+			float avgDilation = (pA->GetTimeDilation() + pB->GetTimeDilation()) / 2.0f;
+			if (avgDilation <= 0.1f) avgDilation = 0.1f; // Prevent infinite division
+
+			it->nextRoundTime = currTime + uint32((INTERLOCK_ROUND_SECONDS * 1000.0f) / avgDilation);
+			it->roundNumber++;
+		}
+
+		if (!keepAlive) {
+			//tear the interlock UI down on both clients
+			if (pA && it->ilViewIdA) {
+				pA->getClient().QueueState(std::make_shared<DeleteViewMsg>(it->ilViewIdA));
+				sObjMgr.releaseDynamicView(&pA->getClient(), it->ilViewIdA);
 			}
-			if (pB)
-			{
-				if (it->ilViewIdB)
-				{
-					pB->getClient().QueueState(shared_ptr<DeleteViewMsg>(new DeleteViewMsg(it->ilViewIdB)));
-					sObjMgr.releaseDynamicView(&pB->getClient(),it->ilViewIdB);
-				}
-				pB->leaveInterlock();
+			if (pB && it->ilViewIdB) {
+				pB->getClient().QueueState(std::make_shared<DeleteViewMsg>(it->ilViewIdB));
+				sObjMgr.releaseDynamicView(&pB->getClient(), it->ilViewIdB);
 			}
+			if (pA) pA->leaveInterlock();
+			if (pB) pB->leaveInterlock();
 			it = m_interlocks.erase(it);
 			continue;
 		}
-
-		if (currTime >= it->nextRoundTime)
-		{
-			RunInterlockRound(*it);
-			it->nextRoundTime = currTime + INTERLOCK_ROUND_SECONDS;
-			it->roundNumber++;
-		}
 		++it;
 	}
 
-	//tick free-fire engagements
-	for (list<FreeFireState>::iterator it=m_freefires.begin();it!=m_freefires.end();)
-	{
-		PlayerObject *attacker = getPlayerSafe(it->attackerGoId);
-		PlayerObject *target = getPlayerSafe(it->targetGoId);
-
-		//engagement over: someone left/died, or either side got interlocked
-		if (attacker == NULL || target == NULL || attacker->isDead() || target->isDead()
-			|| IsInterlocked(it->attackerGoId) || IsInterlocked(it->targetGoId))
-		{
-			if (attacker && !IsInterlocked(it->attackerGoId))
-			{
-				attacker->setInCombat(false);
-				attacker->setCombatStance(false);
-			}
+	for (auto it = m_freefires.begin(); it != m_freefires.end(); ) {
+		bool keepAlive = true;
+		if (currTime >= it->nextShotTime) {
+			keepAlive = RunFreeFireShot(*it);
+            
+            PlayerObject* pA = getPlayerSafe(it->attackerGoId);
+            float dilation = pA ? pA->GetTimeDilation() : 1.0f;
+            if (dilation <= 0.1f) dilation = 0.1f;
+			it->nextShotTime = currTime + uint32((FREEFIRE_SHOT_SECONDS * 1000.0f) / dilation);
+		}
+		if (!keepAlive) {
+			PlayerObject* pA = getPlayerSafe(it->attackerGoId);
+			if (pA) pA->setCombatStance(false);
 			it = m_freefires.erase(it);
 			continue;
 		}
-
-		if (currTime >= it->nextShotTime)
-		{
-			RunFreeFireShot(*it);
-			it->nextShotTime = currTime + FREEFIRE_SHOT_SECONDS;
-		}
 		++it;
+	}
+
+	// Phase 3: Matrix Threat Heatmap Diffusion & Escalation Tick
+	static uint32 lastHeatmapTickMs = 0;
+	if (currTime - lastHeatmapTickMs >= 1000) {
+		float dtSeconds = (lastHeatmapTickMs == 0) ? 1.0f : (float)(currTime - lastHeatmapTickMs) / 1000.0f;
+		sMatrixThreatHeatmap.Update(dtSeconds, currTime);
+		lastHeatmapTickMs = currTime;
 	}
 }
 
-bool CombatSystem::RequestInterlock( uint32 attackerGoId, uint32 targetGoId )
+bool CombatSystem::IsInterlocked(uint32 goId) const
 {
-	if (attackerGoId == targetGoId)
-		return false;
-	if (IsInterlocked(attackerGoId) || IsInterlocked(targetGoId))
-		return false;
+	std::lock_guard<std::recursive_mutex> lock(const_cast<CombatSystem*>(this)->m_combatMutex);
+	for (const auto& session : m_interlocks) {
+		if (session.goIdA == goId || session.goIdB == goId) return true;
+	}
+	return false;
+}
 
-	PlayerObject *pA = getPlayerSafe(attackerGoId);
-	PlayerObject *pB = getPlayerSafe(targetGoId);
-	if (pA == NULL || pB == NULL || pA->isDead() || pB->isDead())
-		return false;
+bool CombatSystem::IsFreeFiring(uint32 goId) const
+{
+	std::lock_guard<std::recursive_mutex> lock(const_cast<CombatSystem*>(this)->m_combatMutex);
+	for (const auto& state : m_freefires) {
+		if (state.attackerGoId == goId) return true;
+	}
+	return false;
+}
 
-	//interlock cancels any running free-fire from either side
-	StopFreeFire(attackerGoId);
-	StopFreeFire(targetGoId);
+InterlockSession* CombatSystem::GetInterlockSession(uint32 goId)
+{
+	std::lock_guard<std::recursive_mutex> lock(m_combatMutex);
+	for (auto& session : m_interlocks) {
+		if (session.goIdA == goId || session.goIdB == goId) return &session;
+	}
+	return nullptr;
+}
+
+bool CombatSystem::RequestInterlock(uint32 attackerGoId, uint32 targetGoId)
+{
+	std::lock_guard<std::recursive_mutex> lock(m_combatMutex);
+	if (IsInterlocked(attackerGoId) || IsInterlocked(targetGoId)) return false;
+
+	PlayerObject* pA = getPlayerSafe(attackerGoId);
+	PlayerObject* pB = getPlayerSafe(targetGoId);
+	if (!pA || !pB || pA->isDead() || pB->isDead()) return false;
+
+    // Bystander Panic
+    auto players = sObjMgr.getAllGOIds();
+    for (auto id : players) {
+        PlayerObject* p = getPlayerSafe(id);
+        if (p && p->getClient().isBot() && p->getPosition().DistanceSq(pA->getPosition()) < 50*50 && p->getHandle().find("Civilian") != std::string::npos) {
+            // Panic bot
+            BotClient* bot = dynamic_cast<BotClient*>(&p->getClient());
+            if (bot) {
+                bot->triggerPanic(attackerGoId);
+            }
+        }
+    }
 
 	InterlockSession session;
 	session.goIdA = attackerGoId;
 	session.goIdB = targetGoId;
-	session.tacticA = TACTIC_SPEED;
-	session.tacticB = TACTIC_SPEED;
+	session.tacticA = TACTIC_NORMAL;
+	session.tacticB = TACTIC_NORMAL;
 	session.queuedMoveA = 0;
 	session.queuedMoveB = 0;
-	session.nextRoundTime = getFloatTime() + INTERLOCK_ROUND_SECONDS;
-	session.roundNumber = 1;
+	session.nextRoundTime = getMSTime() + uint32(INTERLOCK_ROUND_SECONDS * 1000.0f);
+	session.roundNumber = 0;
 	session.ilViewIdA = 0;
 	session.ilViewIdB = 0;
 
-	//spawn the ILCombatHandler view + pairing packet on both clients - this is
-	//what drives the client-side interlock camera and round UI
-	float simTime = sGame.GetSimTime();
-	LocationVector ilPos = pA->getPosition();
-
-	struct SideSetup { PlayerObject* self; PlayerObject* other; uint16* viewSlot; };
-	SideSetup sides[2] =
+	//spawn the ILCombatHandler view + pairing packet on both clients - this
+	//drives the client-side interlock camera and round UI
 	{
-		{ pA, pB, &session.ilViewIdA },
-		{ pB, pA, &session.ilViewIdB },
-	};
+		float simTime = sGame.GetSimTime();
+		LocationVector ilPos = pA->getPosition();
 
-	for (int i=0;i<2;i++)
-	{
-		PlayerObject *self = sides[i].self;
-		PlayerObject *other = sides[i].other;
-
-		try
+		struct SideSetup { PlayerObject* self; PlayerObject* other; uint16* viewSlot; };
+		SideSetup sides[2] =
 		{
-			uint16 ilViewId = sObjMgr.allocateDynamicView(&self->getClient(),uint32(GOID_ILCOMBATHANDLER)<<16);
-			*(sides[i].viewSlot) = ilViewId;
+			{ pA, pB, &session.ilViewIdA },
+			{ pB, pA, &session.ilViewIdB },
+		};
 
-			self->getClient().QueueState(shared_ptr<SpawnILCombatHandlerMsg>(
-				new SpawnILCombatHandlerMsg(ilViewId,self->nextSpawnCounter(),ilPos,simTime)));
-
-			//the pairing references the opponent's view as this client sees it
-			uint16 otherViewId = sObjMgr.getViewForGO(&self->getClient(),other->getGoId());
-			uint32 otherViewWithSpawnId = uint32(otherViewId) | (uint32(2) << 16);
-
-			self->getClient().QueueState(shared_ptr<InterlockInitMsg>(
-				new InterlockInitMsg(ilViewId,ilPos,otherViewWithSpawnId,self->nextSpawnCounter())));
-		}
-		catch (ObjectMgr::NoMoreFreeViews)
+		for (int i = 0; i < 2; i++)
 		{
-			WARNING_LOG("No free views for interlock handler spawn");
+			try
+			{
+				uint16 ilViewId = sObjMgr.allocateDynamicView(&sides[i].self->getClient(), uint32(GOID_ILCOMBATHANDLER) << 16);
+				*(sides[i].viewSlot) = ilViewId;
+
+				sides[i].self->getClient().QueueState(std::make_shared<SpawnILCombatHandlerMsg>(
+					ilViewId, uint8(0x41 + i), ilPos, simTime));
+
+				//the pairing references the opponent's view as this client sees it
+				uint16 otherViewId = sObjMgr.getViewForGO(&sides[i].self->getClient(), sides[i].other->getGoId());
+				uint32 otherViewWithSpawnId = uint32(otherViewId) | (uint32(2) << 16);
+
+				sides[i].self->getClient().QueueState(std::make_shared<InterlockInitMsg>(
+					ilViewId, ilPos, otherViewWithSpawnId, uint16(2)));
+			}
+			catch (ObjectMgr::NoMoreFreeViews) { WARNING_LOG("No free views for interlock handler spawn"); }
+			catch (ObjectMgr::ObjectNotAvailable) {}
+			catch (ObjectMgr::ClientNotAvailable) {}
 		}
-		catch (ObjectMgr::ObjectNotAvailable) {}
-		catch (ObjectMgr::ClientNotAvailable) {}
 	}
 
 	m_interlocks.push_back(session);
-
 	pA->enterInterlock(targetGoId);
 	pB->enterInterlock(attackerGoId);
-
-	sBotMgr.LogCombat((format("%1% entered interlock with %2%") % pA->getHandle() % pB->getHandle()).str());
-	INFO_LOG(format("Interlock started between %1% and %2%") % pA->getHandle() % pB->getHandle());
 	return true;
 }
 
-bool CombatSystem::RequestRangedCombat( uint32 attackerGoId, uint32 targetGoId, uint16 moveId )
+bool CombatSystem::RequestRangedCombat(uint32 attackerGoId, uint32 targetGoId, uint16 moveId)
 {
-	PlayerObject *attacker = getPlayerSafe(attackerGoId);
-	PlayerObject *target = getPlayerSafe(targetGoId);
-	if (attacker == NULL || target == NULL)
-		return false;
-	if (attacker->isDead() || target->isDead())
-		return false;
-	if (IsInterlocked(attackerGoId) || IsInterlocked(targetGoId))
-		return false;
+	std::lock_guard<std::recursive_mutex> lock(m_combatMutex);
+	if (IsFreeFiring(attackerGoId)) return false;
 
-	if (moveId == 0)
-		moveId = DefaultRanged()->id;
+	PlayerObject* pA = getPlayerSafe(attackerGoId);
+	PlayerObject* pB = getPlayerSafe(targetGoId);
+	if (!pA || !pB || pA->isDead() || pB->isDead()) return false;
 
-	const CombatMove *move = GetMove(moveId);
-	if (move == NULL || move->interlockOnly)
-		return false;
+    // Bystander Panic
+    auto players = sObjMgr.getAllGOIds();
+    for (auto id : players) {
+        PlayerObject* p = getPlayerSafe(id);
+        if (p && p->getClient().isBot() && p->getPosition().DistanceSq(pA->getPosition()) < 50*50 && p->getHandle().find("Civilian") != std::string::npos) {
+            BotClient* bot = dynamic_cast<BotClient*>(&p->getClient());
+            if (bot) {
+                bot->triggerPanic(attackerGoId);
+            }
+        }
+    }
 
-	//refresh existing engagement instead of stacking a second one
-	foreach(FreeFireState &state, m_freefires)
-	{
-		if (state.attackerGoId == attackerGoId)
-		{
-			state.targetGoId = targetGoId;
-			state.moveId = moveId;
-			return true;
+	FreeFireState state;
+	state.attackerGoId = attackerGoId;
+	state.targetGoId = targetGoId;
+	state.moveId = moveId;
+	state.nextShotTime = getMSTime() + uint32(FREEFIRE_SHOT_SECONDS * 1000.0f);
+
+	m_freefires.push_back(state);
+	pA->setCombatStance(true);
+	return true;
+}
+
+void CombatSystem::SetTactic(uint32 goId, uint8 tactic)
+{
+	std::lock_guard<std::recursive_mutex> lock(m_combatMutex);
+	InterlockSession* session = GetInterlockSession(goId);
+	if (session) {
+		if (session->goIdA == goId) session->tacticA = tactic;
+		else session->tacticB = tactic;
+	}
+}
+
+void CombatSystem::QueueAbility(uint32 goId, uint16 moveId)
+{
+	std::lock_guard<std::recursive_mutex> lock(m_combatMutex);
+	InterlockSession* session = GetInterlockSession(goId);
+	if (session) {
+		if (session->goIdA == goId) session->queuedMoveA = moveId;
+		else session->queuedMoveB = moveId;
+	}
+}
+
+void CombatSystem::StopFreeFire(uint32 goId)
+{
+	std::lock_guard<std::recursive_mutex> lock(m_combatMutex);
+	for (auto it = m_freefires.begin(); it != m_freefires.end(); ) {
+		if (it->attackerGoId == goId) {
+			PlayerObject* pA = getPlayerSafe(it->attackerGoId);
+			if (pA) pA->setCombatStance(false);
+			it = m_freefires.erase(it);
+		} else {
+			++it;
 		}
 	}
-
-	FreeFireState newState;
-	newState.attackerGoId = attackerGoId;
-	newState.targetGoId = targetGoId;
-	newState.moveId = moveId;
-	newState.nextShotTime = getFloatTime(); //first shot resolves on next tick
-	m_freefires.push_back(newState);
-
-	attacker->setInCombat(true);
-	attacker->setCombatStance(true);
-
-	sBotMgr.LogCombat((format("%1% opened fire on %2%") % attacker->getHandle() % target->getHandle()).str());
-	return true;
 }
 
-void CombatSystem::StopFreeFire( uint32 goId )
+void CombatSystem::EndInterlock(uint32 goId, bool byWithdraw)
 {
-	for (list<FreeFireState>::iterator it=m_freefires.begin();it!=m_freefires.end();)
-	{
-		if (it->attackerGoId == goId)
-			it = m_freefires.erase(it);
-		else
-			++it;
-	}
+	std::lock_guard<std::recursive_mutex> lock(m_combatMutex);
+	for (auto it = m_interlocks.begin(); it != m_interlocks.end(); ) {
+		if (it->goIdA == goId || it->goIdB == goId) {
+			PlayerObject* pA = getPlayerSafe(it->goIdA);
+			PlayerObject* pB = getPlayerSafe(it->goIdB);
+			
+            if (byWithdraw && pA && pB && !pA->isDead() && !pB->isDead()) {
+                // Parting Shot
+                uint32 attackerId = (it->goIdA == goId) ? it->goIdB : it->goIdA;
+                PlayerObject* pAttacker = getPlayerSafe(attackerId);
+                PlayerObject* pTarget = getPlayerSafe(goId);
+                const CombatMove* move = DefaultMelee();
+                if (pAttacker && pTarget && move) {
+                    float dmg = move->minDmg + (move->maxDmg - move->minDmg) * ((rand() % 100) / 100.0f);
+                    dmg += move->minDmgPerLvl * pAttacker->getLevel();
+                    dmg *= 1.5f; // Parting shot does 50% extra damage
+                    
+                    if (pTarget->getCurrentHealth() <= dmg) {
+                        sGame.AnnounceStateUpdateNear(pAttacker->getPosition().x, pAttacker->getPosition().z, 20000.0f, std::make_shared<EmoteMsg>(pAttacker->getGoId(), 43, 1));
+                    }
+                    pTarget->takeDamage(attackerId, (uint16)dmg, move->hitFxId);
+                    
+                    if (!pTarget->getClient().isBot()) {
+                        pTarget->getClient().QueueCommand(std::make_shared<SystemChatMsg>("{c:FF0000}[COMBAT] Withdraw Penalty! You suffer a parting shot!{/c}"));
+                    }
+                }
+            }
 
-	PlayerObject *attacker = getPlayerSafe(goId);
-	if (attacker && !IsInterlocked(goId))
-	{
-		attacker->setInCombat(false);
-		attacker->setCombatStance(false);
-	}
-}
-
-bool CombatSystem::IsFreeFiring( uint32 goId ) const
-{
-	foreach(const FreeFireState &state, m_freefires)
-	{
-		if (state.attackerGoId == goId)
-			return true;
-	}
-	return false;
-}
-
-void CombatSystem::EndInterlock( uint32 goId, bool byWithdraw )
-{
-	for (list<InterlockSession>::iterator it=m_interlocks.begin();it!=m_interlocks.end();)
-	{
-		if (it->goIdA == goId || it->goIdB == goId)
-		{
-			PlayerObject *pA = getPlayerSafe(it->goIdA);
-			PlayerObject *pB = getPlayerSafe(it->goIdB);
-			if (pA)
-			{
-				if (it->ilViewIdA)
-				{
-					pA->getClient().QueueState(shared_ptr<DeleteViewMsg>(new DeleteViewMsg(it->ilViewIdA)));
-					sObjMgr.releaseDynamicView(&pA->getClient(),it->ilViewIdA);
-				}
-				pA->leaveInterlock();
-				if (byWithdraw)
-					pA->getClient().QueueCommand(shared_ptr<SystemChatMsg>(new SystemChatMsg("{c:FFFF00}Interlock has ended.{/c}")));
+			if (pA && it->ilViewIdA) {
+				pA->getClient().QueueState(std::make_shared<DeleteViewMsg>(it->ilViewIdA));
+				sObjMgr.releaseDynamicView(&pA->getClient(), it->ilViewIdA);
 			}
-			if (pB)
-			{
-				if (it->ilViewIdB)
-				{
-					pB->getClient().QueueState(shared_ptr<DeleteViewMsg>(new DeleteViewMsg(it->ilViewIdB)));
-					sObjMgr.releaseDynamicView(&pB->getClient(),it->ilViewIdB);
-				}
-				pB->leaveInterlock();
-				if (byWithdraw)
-					pB->getClient().QueueCommand(shared_ptr<SystemChatMsg>(new SystemChatMsg("{c:FFFF00}Interlock has ended.{/c}")));
+			if (pB && it->ilViewIdB) {
+				pB->getClient().QueueState(std::make_shared<DeleteViewMsg>(it->ilViewIdB));
+				sObjMgr.releaseDynamicView(&pB->getClient(), it->ilViewIdB);
 			}
+			if (pA) pA->leaveInterlock();
+			if (pB) pB->leaveInterlock();
 			it = m_interlocks.erase(it);
-		}
-		else
+		} else {
 			++it;
+		}
 	}
 }
 
-bool CombatSystem::IsInterlocked( uint32 goId ) const
+void CombatSystem::RemoveCombatant(uint32 goId)
 {
-	foreach(const InterlockSession &session, m_interlocks)
-	{
-		if (session.goIdA == goId || session.goIdB == goId)
-			return true;
-	}
-	return false;
-}
-
-InterlockSession* CombatSystem::GetInterlockSession( uint32 goId )
-{
-	foreach(InterlockSession &session, m_interlocks)
-	{
-		if (session.goIdA == goId || session.goIdB == goId)
-			return &session;
-	}
-	return NULL;
-}
-
-void CombatSystem::SetTactic( uint32 goId, uint8 tactic )
-{
-	InterlockSession *session = GetInterlockSession(goId);
-	if (session == NULL)
-		return;
-
-	if (session->goIdA == goId)
-		session->tacticA = tactic;
-	else
-		session->tacticB = tactic;
-}
-
-void CombatSystem::QueueAbility( uint32 goId, uint16 moveId )
-{
-	InterlockSession *session = GetInterlockSession(goId);
-	if (session == NULL)
-		return;
-
-	const CombatMove *move = GetMove(moveId);
-	if (move == NULL)
-	{
-		// If it's a data-driven ability that isn't mapped to a specific hardcoded combat move,
-		// allow it to queue anyway (it will resolve as a generic attack carrying the FX).
-		const AbilityTemplate *dataTemplate = sDataLoader.GetAbilityTemplate(moveId);
-		if (dataTemplate == NULL) return;
-	}
-	else if (move->freefireOnly)
-	{
-		return;
-	}
-
-	if (session->goIdA == goId)
-		session->queuedMoveA = moveId;
-	else
-		session->queuedMoveB = moveId;
-}
-
-void CombatSystem::RemoveCombatant( uint32 goId )
-{
+	std::lock_guard<std::recursive_mutex> lock(m_combatMutex);
 	StopFreeFire(goId);
-	EndInterlock(goId,false);
+	EndInterlock(goId, false);
+}
 
-	//also remove free-fire engagements targeting this combatant
-	for (list<FreeFireState>::iterator it=m_freefires.begin();it!=m_freefires.end();)
+float CombatSystem::TacticModifier(uint8 attackerTactic, uint8 targetTactic)
+{
+	//classic interlock triangle: Power beats Grab, Grab beats Speed, Speed beats Power
+	if (attackerTactic == TACTIC_POWER && targetTactic == TACTIC_RETALIATE) return 1.30f;
+	if (attackerTactic == TACTIC_RETALIATE && targetTactic == TACTIC_SPEED) return 1.30f;
+	if (attackerTactic == TACTIC_SPEED && targetTactic == TACTIC_POWER) return 1.30f;
+	if (attackerTactic == targetTactic && attackerTactic != TACTIC_NORMAL) return 0.90f; //mirrored tactics glance off
+	return 1.0f;
+}
+
+CombatSystem::AttackResult CombatSystem::ResolveAttack(PlayerObject* attacker, PlayerObject* target, const CombatMove& move, uint8 attackerTactic, uint8 targetTactic)
+{
+	AttackResult res;
+	res.hit = true;
+	res.isCrit = false;
+	res.isBlocked = false;
+	res.isGlancing = false;
+
+    // Item 33: Hacker System Integration (Stun)
+    if (attacker->isStunned()) {
+        res.hit = false;
+        if (!attacker->getClient().isBot()) {
+            attacker->getClient().QueueCommand(std::make_shared<SystemChatMsg>("{c:FF0000}[SYSTEM] You are Stunned. Attack aborted.{/c}"));
+        }
+        return res;
+    }
+
+    // Phase 3 Hacker Domain Abilities
+    if (move.specialFlags & ABILITY_FLAG_MASK) {
+        // attacker->setMaskFaction(target->getFaction(), 300000); // 5 minutes (STUBBED: Faction masking not implemented)
+        if (!attacker->getClient().isBot()) {
+            attacker->getClient().QueueCommand(std::make_shared<SystemChatMsg>("{c:00FF00}[HACK] Simulacra Mask Active. Spoofing target faction.{/c}"));
+        }
+    }
+    else if (move.specialFlags & ABILITY_FLAG_TRACE) {
+        if (!attacker->getClient().isBot()) {
+            std::string msg = (format("{c:00FF00}[TRACE SUCCESS] %1% is at X: %2%, Y: %3%, Z: %4%{/c}") % target->getHandle() % target->getPosition().x % target->getPosition().y % target->getPosition().z).str();
+            attacker->getClient().QueueCommand(std::make_shared<SystemChatMsg>(msg));
+        }
+    }
+    else if (move.specialFlags & ABILITY_FLAG_STUN) {
+        target->applyStun(5000); // 5 seconds
+        if (!attacker->getClient().isBot()) {
+            attacker->getClient().QueueCommand(std::make_shared<SystemChatMsg>("{c:00FF00}[HACK] Target Stunned for 5 seconds.{/c}"));
+        }
+    }
+    else if (move.specialFlags & ABILITY_FLAG_BOMB) {
+        auto players = sObjMgr.getAllGOIds();
+        for (auto goId : players) {
+            PlayerObject* p = getPlayerSafe(goId);
+            if (p && p != target && p->getFaction() == target->getFaction()) {
+                if (p->getPosition().DistanceSq(target->getPosition()) < 250000.0f) { // 500 range
+                    p->takeDamage(attacker->getGoId(), move.minDmg, 201);
+                }
+            }
+        }
+    }
+
+    if (target->getClient().isBot() && target->getHandle().find("Agent") != std::string::npos && (rand() % 100 < 30)) {
+        res.hit = false;
+        sMatrixThreatHeatmap.RecordDisruption(target->getPosition().x, target->getPosition().z, 15.0f, "Agent Wire-Fu Dodge");
+        return res; // Agent Dodge
+    }
+    
+    // [Item 5] Adaptive Combat Learning
+    if (target->getClient().isBot()) {
+        uint8 newTactic = TACTIC_NORMAL;
+        if (attackerTactic == TACTIC_NORMAL) newTactic = TACTIC_RETALIATE;
+        else if (attackerTactic == TACTIC_RETALIATE) newTactic = TACTIC_DEFENSE;
+        SetTactic(target->getGoId(), newTactic);
+    }
+
+	//authentic hit resolution: attack roll vs defense roll (d100 + level accuracy)
 	{
-		if (it->targetGoId == goId)
+		int attackRoll = (rand() % 100) + int(attacker->getLevel()) * 2;
+		int defenseRoll = (rand() % 100) + int(target->getLevel()) * 2;
+		if (targetTactic == TACTIC_DEFENSE)
+			defenseRoll += 25; //a blocking defender is much harder to hit cleanly
+		if (attackRoll < defenseRoll)
 		{
-			PlayerObject *attacker = getPlayerSafe(it->attackerGoId);
-			if (attacker)
-			{
-				attacker->setInCombat(false);
-				attacker->setCombatStance(false);
-				attacker->getClient().QueueCommand(shared_ptr<SystemChatMsg>(new SystemChatMsg("Your target is gone.")));
-			}
-			it = m_freefires.erase(it);
+			res.hit = false;
+			return res;
 		}
-		else
-			++it;
 	}
-}
 
-// Per-tactic vulnerability modifier, from the client.dll combat resolution
-// structure (DefenseVulnerability/PowerVulnerability/SpeedVulnerability).
-// Until per-character vulnerability stats exist we derive them from the
-// classic tactic triangle: Power beats Grab, Grab beats Speed, Speed beats Power.
-float CombatSystem::TacticModifier( uint8 attackerTactic, uint8 targetTactic )
-{
-	float vulnerability = 0.0f;
-	if (attackerTactic == TACTIC_POWER && targetTactic == TACTIC_RETALIATE)
-		vulnerability = 0.30f;
-	else if (attackerTactic == TACTIC_RETALIATE && targetTactic == TACTIC_SPEED)
-		vulnerability = 0.30f;
-	else if (attackerTactic == TACTIC_SPEED && targetTactic == TACTIC_POWER)
-		vulnerability = 0.30f;
-	else if (attackerTactic == targetTactic)
-		vulnerability = -0.10f; //mirrored tactics glance off
+	float dmg = move.minDmg + (move.maxDmg - move.minDmg) * ((rand() % 100) / 100.0f);
+	dmg += move.minDmgPerLvl * attacker->getLevel();
+	dmg *= TacticModifier(attackerTactic, targetTactic);
 
-	return 1.0f + vulnerability;
-}
+    // Apply adaptive learning mitigation
+    dmg *= target->m_combatMemory.getMitigationModifier(move.id);
 
-CombatSystem::AttackResult CombatSystem::ResolveAttack( PlayerObject* attacker, PlayerObject* target,
-	const CombatMove& move, uint8 attackerTactic, uint8 targetTactic )
-{
-	AttackResult result;
-	result.hit = false;
-	result.damageTaken = 0;
+    // [Item 19] Dual Wielding Firepower
+    if (move.dmgType == DAMAGE_RANGED && attacker->isDualWielding()) {
+        dmg *= 1.5f; // 50% more damage for off-hand
+    }
 
-	//attack roll vs defense roll, accuracy/defense scale with level
-	int attackRoll = (rand() % 100) + int(attacker->getLevel()) * 2;
-	int defenseRoll = (rand() % 100) + int(target->getLevel()) * 2;
+    // Item 20: Deflection / Bullet Blocking
+    uint16 evasion = target->getEvasion();
+    if (targetTactic == TACTIC_DEFENSE && move.dmgType == DAMAGE_RANGED && (rand() % 100 < 15 + (evasion / 5))) {
+        res.isBlocked = true; // Deflection
+        dmg = 0;
+        sMatrixThreatHeatmap.RecordDisruption(target->getPosition().x, target->getPosition().z, 15.0f, "Bullet Deflection");
+        
+        sGame.AnnounceStateUpdateNear(target->getPosition().x, target->getPosition().z, 20000.0f, std::make_shared<EmoteMsg>(target->getGoId(), 41, 1));
+        
+        if (!target->getClient().isBot())
+            target->getClient().QueueCommand(std::make_shared<SystemChatMsg>("{c:00FFFF}You deflect the incoming fire!{/c}"));
+        if (!attacker->getClient().isBot())
+            attacker->getClient().QueueCommand(std::make_shared<SystemChatMsg>("{c:FFFF00}Your shot is deflected!{/c}"));
+    } else {
+        if (move.dmgType == DAMAGE_RANGED) {
+            sMatrixThreatHeatmap.RecordDisruption(attacker->getPosition().x, attacker->getPosition().z, 8.0f, "Ballistic Fire");
+        } else {
+            sMatrixThreatHeatmap.RecordDisruption(attacker->getPosition().x, attacker->getPosition().z, 12.0f, "Melee Interlock");
+        }
+    }
 
-	//block tactic makes the defender much harder to hit cleanly
-	if (targetTactic == TACTIC_DEFENSE)
-		defenseRoll += 25;
+    if (target->getClient().isBot() && target->getHandle().find("Agent") != std::string::npos) {
+        dmg *= 0.5f; // Agent Resilience
+    }
 
-	result.hit = (attackRoll >= defenseRoll);
-	if (!result.hit)
-		return result;
+    // Civilian Panic: bystanders flee in terror from active combat
+    if (res.hit && !res.isBlocked) {
+        auto nearbyClients = sSpatialGrid.GetClientsInRadius(attacker->getPosition().x, attacker->getPosition().z);
+        for (GameClient* gc : nearbyClients) {
+            if (gc->isBot()) {
+                BotClient* bc = dynamic_cast<BotClient*>(gc);
+                if (bc && !bc->IsPanicking()) {
+                    PlayerObject* botPo = BotGetPlayer(bc->GetPlayerGoId());
+                    if (botPo && botPo->getFactionName() == "Civilian") {
+                        float distSq = attacker->getPosition().DistanceSq(botPo->getPosition().x, botPo->getPosition().y, botPo->getPosition().z);
+                        if (distSq < 2500.0f * 2500.0f) { // 25m radius
+                            bc->triggerPanic(attacker->getGoId());
+                        }
+                    }
+                }
+            }
+        }
+    }
 
-	//rawDamage = random(scaledMin, scaledMax)
-	float scaledMin = move.minDmg + move.minDmgPerLvl * float(attacker->getLevel());
-	float scaledMax = move.maxDmg + move.maxDmgPerLvl * float(attacker->getLevel());
-	float rawDamage = scaledMin + (float(rand())/float(RAND_MAX)) * (scaledMax - scaledMin);
-
-	//Modifier = tacticModifier * (1 + DamageModifier)
-	float modifier = TacticModifier(attackerTactic,targetTactic);
-
-	//DamageAbsorbed = toughness, derived from target level for now
-	float damageAbsorbed = float(target->getLevel()) * 0.5f;
-
-	//blocking halves what gets through
-	if (targetTactic == TACTIC_DEFENSE)
-		modifier *= 0.5f;
-
-	float damageTaken = rawDamage * modifier - damageAbsorbed;
-	if (damageTaken < 0.0f)
-		damageTaken = 0.0f;
-
-	result.damageTaken = uint16(damageTaken);
-	return result;
-}
-
-void CombatSystem::AwardKill( PlayerObject* killer, PlayerObject* victim )
-{
-	if (killer == NULL || victim == NULL)
-		return;
-
-	//experience reward scales with the victim's level
-	uint32 expGained = uint32(victim->getLevel()) * 150 + (rand() % 100);
-	killer->awardCombatExperience(expGained);
-
-	//mission kill objectives
-	sMissionSys.AdvanceObjective(killer,ObjectiveCommand::DEFEAT,victim->getGoId());
-
-	sBotMgr.LogCombat((format("%1% defeated %2% (+%3% exp)") % killer->getHandle() % victim->getHandle() % expGained).str());
-}
-
-bool CombatSystem::ResolveSingleAttack( uint32 attackerGoId, uint32 targetGoId, uint16 moveId, bool inInterlock )
-{
-	PlayerObject *attacker = getPlayerSafe(attackerGoId);
-	PlayerObject *target = getPlayerSafe(targetGoId);
-	if (attacker == NULL || target == NULL || attacker->isDead() || target->isDead())
-		return false;
-
-	const CombatMove *movePtr = GetMove(moveId);
-	const AbilityTemplate *dataTemplate = NULL;
-	CombatMove tempMove;
-
-	if (movePtr == NULL)
+	//toughness absorbs part of the blow; blocking halves what gets through
+	//and recovers Inner Strength (documented block behavior)
 	{
-		dataTemplate = sDataLoader.GetAbilityTemplate(moveId);
-		if (dataTemplate == NULL)
-			return false; // Actually unknown
-		
-		tempMove = *(DefaultMelee());
-		tempMove.id = moveId;
-		tempMove.name = dataTemplate->name.c_str();
-		tempMove.hitFxId = dataTemplate->executionFX ? dataTemplate->executionFX : tempMove.hitFxId;
-		tempMove.isCost = dataTemplate->innerStrengthCost;
-		
-		movePtr = &tempMove;
-	}
-	else
-	{
-		tempMove = *movePtr;
-		movePtr = &tempMove;
+		float absorbed = float(target->getLevel()) * 0.5f;
+		if (targetTactic == TACTIC_DEFENSE)
+		{
+			dmg *= 0.5f;
+			target->restoreIS(5);
+		}
+		dmg = (dmg > absorbed) ? (dmg - absorbed) : 0.0f;
 	}
 
-	//range gate
-	float distance = float(attacker->getPosition().Distance(target->getPosition()));
-	if (movePtr->range > 0 && distance > movePtr->range)
-	{
-		attacker->getClient().QueueCommand(shared_ptr<SystemChatMsg>(new SystemChatMsg("{c:FF0000}Target is out of range.{/c}")));
-		return false;
-	}
+	res.damageTaken = (uint16)dmg;
+    
+    // [Item 15] Melee Weapon Durability
+    if (res.hit && move.dmgType == DAMAGE_MELEE) {
+        attacker->degradeEquippedWeapon(1);
+    }
+    
+    // Item 32: Takedown Moves
+    if (res.hit && target->getCurrentHealth() <= res.damageTaken) {
+        // Play cinematic takedown emote for attacker based on weapon type
+        uint32 emoteId = (move.dmgType == DAMAGE_MELEE) ? 43 : 42;
+        sGame.AnnounceStateUpdateNear(attacker->getPosition().x, attacker->getPosition().z, 20000.0f, std::make_shared<EmoteMsg>(attacker->getGoId(), emoteId, 1)); 
+        sGame.AnnounceStateUpdateNear(target->getPosition().x, target->getPosition().z, 20000.0f, std::make_shared<EmoteMsg>(target->getGoId(), emoteId, 1)); // Victim plays matched emote
+        target->m_deathDelayMS = getMSTime() + 3000; // 3 seconds takedown animation
+        target->m_deathDelayKillerId = attacker->getGoId();
+    }
 
-	//inner strength gate
-	if (movePtr->isCost > 0 && !attacker->spendIS(movePtr->isCost))
-	{
-		attacker->getClient().QueueCommand(shared_ptr<SystemChatMsg>(new SystemChatMsg("{c:FF0000}Not enough Inner Strength.{/c}")));
-		return false;
-	}
-
-	AttackResult result = ResolveAttack(attacker,target,*movePtr,
-		attacker->getTactic(),target->getTactic());
-
-	if (result.hit && result.damageTaken > 0)
+	if (res.hit)
 	{
 		bool wasAlive = !target->isDead();
-		target->takeDamage(attackerGoId,result.damageTaken,movePtr->hitFxId);
-
-		attacker->getClient().QueueCommand(shared_ptr<SystemChatMsg>(new SystemChatMsg(
-			(format("{c:00FF00}Your %1% hits %2% for %3% damage.{/c}") % movePtr->name % target->getHandle() % result.damageTaken).str() )));
-		target->getClient().QueueCommand(shared_ptr<SystemChatMsg>(new SystemChatMsg(
-			(format("{c:FF0000}%1%'s %2% hits you for %3% damage.{/c}") % attacker->getHandle() % movePtr->name % result.damageTaken).str() )));
-
-		if (sBotMgr.IsCombatLoggingEnabled())
-			sBotMgr.LogCombat((format("%1% hit %2% with %3% for %4%") % attacker->getHandle() % target->getHandle() % movePtr->name % result.damageTaken).str());
-
+		target->takeDamage(attacker->getGoId(), res.damageTaken, move.hitFxId);
+        target->recordIncomingAttack(move.id);
 		if (wasAlive && target->isDead())
-			AwardKill(attacker,target);
+			AwardKill(attacker, target);
 	}
-	else
-	{
-		attacker->getClient().QueueCommand(shared_ptr<SystemChatMsg>(new SystemChatMsg(
-			(format("{c:FFFF00}Your %1% misses %2%.{/c}") % movePtr->name % target->getHandle()).str() )));
-		target->getClient().QueueCommand(shared_ptr<SystemChatMsg>(new SystemChatMsg(
-			(format("{c:FFFF00}%1%'s %2% misses you.{/c}") % attacker->getHandle() % movePtr->name).str() )));
-	}
-
-	//defender in block regains inner strength (documented block behavior)
-	if (target->getTactic() == TACTIC_DEFENSE && !target->isDead())
-		target->restoreIS(5);
-
-	return true;
+	return res;
 }
 
-bool CombatSystem::UseAbility( PlayerObject* caster, uint16 abilityId, uint32 targetGoId )
+bool CombatSystem::RunInterlockRound(InterlockSession &session)
 {
-	if (caster == NULL)
-		return false;
+	PlayerObject* pA = getPlayerSafe(session.goIdA);
+	PlayerObject* pB = getPlayerSafe(session.goIdB);
+	if (!pA || !pB) return false;
 
-	PlayerObject *target = getPlayerSafe(targetGoId);
-
-	//real client ability ids resolve through the DataLoader templates for
-	//cast time and FX; damage stats come from a matching combat move or a
-	//generic level-scaled fallback
-	const AbilityTemplate *dataTemplate = sDataLoader.GetAbilityTemplate(abilityId);
-	const CombatMove *move = GetMove(abilityId);
-
-	float castTime = 0.0f;
-	if (dataTemplate)
-		castTime = float(dataTemplate->castTime) / 1000.0f;
-	else if (move)
-		castTime = move->castTime;
-
-	//cast bar for anything with a cast time
-	if (castTime > 0.05f)
-		caster->getClient().QueueCommand(shared_ptr<CastBarMsg>(new CastBarMsg(abilityId,castTime)));
-
-	if (move == NULL)
-	{
-		//unmapped ability: play its FX so the client still animates, apply a
-		//generic strike so combat progresses, and log the id for mapping work
-		INFO_LOG(format("%1% used data-driven ability %2% (%3%)")
-			% caster->getHandle() % abilityId % (dataTemplate ? dataTemplate->name : string("unknown")));
-
-		if (target && !target->isDead() && target != caster)
-		{
-			const CombatMove *generic = CombatSystem::DefaultMelee();
-			uint32 fx = (dataTemplate && dataTemplate->executionFX) ? dataTemplate->executionFX : generic->hitFxId;
-
-			//resolve as a generic hit carrying the ability's own FX
-			CombatMove tempMove = *generic;
-			tempMove.hitFxId = fx;
-			tempMove.range = 6000.0f;
-
-			AttackResult result = ResolveAttack(caster,target,tempMove,caster->getTactic(),target->getTactic());
-			if (result.hit && result.damageTaken > 0)
-			{
-				bool wasAlive = !target->isDead();
-				target->takeDamage(caster->getGoId(),result.damageTaken,fx);
-				if (wasAlive && target->isDead())
-					AwardKill(caster,target);
-			}
-		}
-		return true;
+	// Interlock broken by movement without explicit withdraw
+	float dist = float(pA->getPosition().Distance(pB->getPosition()));
+	if (dist > 1500.0f) {
+		if (!pA->getClient().isBot()) pA->getClient().QueueCommand(std::make_shared<SystemChatMsg>("{c:FFFF00}[SYSTEM] Interlock broken due to distance.{/c}"));
+		if (!pB->getClient().isBot()) pB->getClient().QueueCommand(std::make_shared<SystemChatMsg>("{c:FFFF00}[SYSTEM] Interlock broken due to distance.{/c}"));
+		return false; //Update() reaps the session and tears down the IL views
 	}
 
-	if (IsInterlocked(caster->getGoId()))
-	{
-		QueueAbility(caster->getGoId(),move->id);
-		caster->getClient().QueueCommand(shared_ptr<SystemChatMsg>(new SystemChatMsg(
-			(format("%1% queued for the next interlock round.") % move->name).str() )));
-	}
-	else if (targetGoId != 0)
-	{
-		ResolveSingleAttack(caster->getGoId(),targetGoId,move->id,false);
-		if (move->freefireOnly)
-			RequestRangedCombat(caster->getGoId(),targetGoId,move->id);
-	}
-	return true;
-}
+	const CombatMove* moveA = session.queuedMoveA ? GetMove(session.queuedMoveA) : DefaultMelee();
+	const CombatMove* moveB = session.queuedMoveB ? GetMove(session.queuedMoveB) : DefaultMelee();
 
-void CombatSystem::RunInterlockRound( InterlockSession &session )
-{
-	PlayerObject *pA = getPlayerSafe(session.goIdA);
-	PlayerObject *pB = getPlayerSafe(session.goIdB);
-	if (pA == NULL || pB == NULL)
-		return;
-
-	pA->setTactic(session.tacticA);
-	pB->setTactic(session.tacticB);
-
-	//round resolution: A attacks B and B attacks A. When a special ability is
-	//queued there is no hit-hit round - the special preempts the exchange.
-	uint16 moveA = session.queuedMoveA ? session.queuedMoveA : DefaultMelee()->id;
-	uint16 moveB = session.queuedMoveB ? session.queuedMoveB : DefaultMelee()->id;
+	//a queued special preempts the counter-exchange (no hit-hit round)
 	bool specialFromA = (session.queuedMoveA != 0);
 
-	ResolveSingleAttack(session.goIdA,session.goIdB,moveA,true);
-	if (!specialFromA && !pB->isDead())
-		ResolveSingleAttack(session.goIdB,session.goIdA,moveB,true);
+	if (moveA) ResolveAttack(pA, pB, *moveA, session.tacticA, session.tacticB);
+	if (moveB && !specialFromA && !pB->isDead()) ResolveAttack(pB, pA, *moveB, session.tacticB, session.tacticA);
 
 	session.queuedMoveA = 0;
 	session.queuedMoveB = 0;
 
-	//deaths end the session on the next Update() pass
+	return !pA->isDead() && !pB->isDead();
 }
 
-void CombatSystem::RunFreeFireShot( FreeFireState &state )
+bool CombatSystem::RunFreeFireShot(FreeFireState &state)
 {
-	PlayerObject *attacker = getPlayerSafe(state.attackerGoId);
-	PlayerObject *target = getPlayerSafe(state.targetGoId);
-	if (attacker == NULL || target == NULL)
-		return;
+	PlayerObject* pA = getPlayerSafe(state.attackerGoId);
+	PlayerObject* pB = getPlayerSafe(state.targetGoId);
+	if (!pA || !pB || pA->isDead() || pB->isDead())
+		return false; //Update() reaps the engagement (never erase mid-iteration)
 
-	//drifting out of range pauses the engagement rather than ending it
-	const CombatMove *move = GetMove(state.moveId);
-	if (move == NULL)
-		return;
+	const CombatMove* moveA = state.moveId ? GetMove(state.moveId) : DefaultRanged();
+	if (!moveA)
+		return false;
 
-	float distance = float(attacker->getPosition().Distance(target->getPosition()));
-	if (move->range > 0 && distance > move->range)
-		return;
+	//out of range pauses rather than ends the engagement
+	float dist = float(pA->getPosition().Distance(pB->getPosition()));
+	if (moveA->range > 0 && dist > moveA->range)
+		return true;
 
-	ResolveSingleAttack(state.attackerGoId,state.targetGoId,state.moveId,false);
+	ResolveAttack(pA, pB, *moveA, pA->getTactic(), pB->getTactic());
+	return !pB->isDead();
 }
+
+bool CombatSystem::ResolveSingleAttack(uint32 attackerGoId, uint32 targetGoId, uint16 moveId, bool inInterlock)
+{
+    PlayerObject* pA = getPlayerSafe(attackerGoId);
+	PlayerObject* pB = getPlayerSafe(targetGoId);
+    if (!pA || !pB) return false;
+    const CombatMove* move = moveId ? GetMove(moveId) : DefaultRanged();
+    if (move) ResolveAttack(pA, pB, *move, TACTIC_NORMAL, TACTIC_NORMAL);
+    return true;
+}
+
+bool CombatSystem::UseAbility(PlayerObject* caster, uint16 abilityId, uint32 targetGoId)
+{
+    std::lock_guard<std::recursive_mutex> lock(m_combatMutex);
+    const CombatMove* move = GetMove(abilityId);
+    if (!move) return false;
+
+    //cast bar for anything with a cast time
+    if (move->castTime > 0.05f && !caster->getClient().isBot())
+        caster->getClient().QueueCommand(std::make_shared<CastBarMsg>(abilityId, move->castTime));
+    
+    // Disruption from special ability execution
+    sMatrixThreatHeatmap.RecordDisruption(caster->getPosition().x, caster->getPosition().z, 12.0f, move->name);
+
+    if (move->interlockOnly && !IsInterlocked(caster->getGoId())) return false;
+    if (move->freefireOnly && IsInterlocked(caster->getGoId())) return false;
+    
+    if (IsInterlocked(caster->getGoId())) {
+        QueueAbility(caster->getGoId(), abilityId);
+        return true;
+    } else {
+        return RequestRangedCombat(caster->getGoId(), targetGoId, abilityId);
+    }
+}
+
+void CombatSystem::AwardKill(PlayerObject* killer, PlayerObject* victim)
+{
+    if (!killer || !victim) return;
+    
+    // Record elimination on Matrix Threat Heatmap
+    sMatrixThreatHeatmap.RecordDisruption(victim->getPosition().x, victim->getPosition().z, 
+                                         killer->getClient().isBot() ? 30.0f : 50.0f, "Combat Elimination");
+
+    // Original experience logic
+    uint32 exp = victim->getLevel() * 100;
+    killer->awardCombatExperience(exp);
+
+    // Economy: $Info drop logic
+    // Base amount based on victim level
+    uint32 baseInfo = victim->getLevel() * 10;
+    
+    // Faction multipliers
+    float multiplier = 1.0f;
+    std::string victimHandle = victim->getHandle();
+    if (victimHandle.find("Machine") != std::string::npos || victimHandle.find("Agent") != std::string::npos) {
+        multiplier = 1.5f; // Machine +50%
+    } else if (victimHandle.find("Merovingian") != std::string::npos || victimHandle.find("Exile") != std::string::npos) {
+        multiplier = 1.2f; // Merovingian +20%
+    }
+    
+    uint32 infoAmount = (uint32)(baseInfo * multiplier);
+    
+    // Living History Notoriety & Reputation Update
+    if (victimHandle.find("Agent") != std::string::npos && !killer->getClient().isBot()) {
+        sWorldDirector.RecordAgentDefeated(killer->getClient().GetCharacterId(), killer->getHandle());
+        sWorldDirector.PropagatePlayerDeedGossip(
+            (format("%1% terminated an Agent in combat!") % killer->getHandle()).str(),
+            victim->getPosition().x, victim->getPosition().z
+        );
+    }
+
+    // Logistics courier ambush check
+    sLogisticsMgr.OnCourierDestroyed(victim->getGoId(), killer->getGoId());
+
+    killer->getClient().QueueCommand(std::make_shared<SystemChatMsg>(
+        (format("{c:00FF00}Looted %1% $Info!{/c}") % infoAmount).str()
+    ));
+}
+
+
+

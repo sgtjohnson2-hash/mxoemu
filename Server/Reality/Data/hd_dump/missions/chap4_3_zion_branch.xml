@@ -1,0 +1,6 @@
+<?xml version='1.0' encoding='utf-8'?>
+<mission id="10431" faction="Zion">
+  <data title="Chapter 4.3: Secure for Zion" exp="500" info="500">
+    <objective1 command="GIVE" idNpc="9190" description="Give Item to Zion" dial="With this, we can crack the General's encryption. Excellent work." />
+  </data>
+</mission>

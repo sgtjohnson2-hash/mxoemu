@@ -27,7 +27,11 @@
 #define MXOSIM_LOG_H
 
 #include "Singleton.h"
-#include "Threading/NativeMutex.h"
+#include "Singleton.h"
+#include <queue>
+#include <thread>
+#include <mutex>
+#include <condition_variable>
 
 class Log : public Singleton< Log >
 {
@@ -55,14 +59,25 @@ public:
 	void Info( string fmt );
 	void Debug( boost::format &fmt );
 	void Debug( string fmt );
+	void outString( const char *str, ... );
 private:
 	string ProcessString(LogLevel level,const string &str,bool forFile = false);
 	void OutputConsole(LogLevel level,const string &str);
 	void OutputFile(LogLevel level,const string &str);
 	void Output(LogLevel level,const string &str);
 
-	NativeMutex printMutex;
-	NativeMutex fileMutex;
+	struct LogMessage {
+		bool isConsole;
+		string message;
+	};
+	std::queue<LogMessage> m_logQueue;
+	std::mutex m_queueMutex;
+	std::condition_variable m_queueCond;
+	std::thread m_logThread;
+	bool m_stopLogging;
+	
+	void AsyncLogThread();
+
 	ofstream LogFile;
 };
 

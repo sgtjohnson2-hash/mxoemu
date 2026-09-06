@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<mission id="11110" faction="None">
+  <data title="Chapter 11.1: Fractures" exp="7500" info="3750">
+    <objective1 command="TALK" idNpc="9630" description="Meet with Zion Command" dial="The truce is in pieces. Factions are splintering. We need to secure our communications before the network fractures completely." />
+    <objective2 command="GIVE" idNpc="9631" description="Repair the Comm Relay" dial="Routing power... The relay is damaged." isTimed="true" timeLimitSeconds="240" />
+    <objective3 command="DEFEAT" idNpc="9632" description="Fight off Cypherite Saboteurs" dial="The bluepills must remain asleep! Destroy the relay!" spawnAmbush="true" />
+    <objective4 command="TALK" idNpc="9633" description="Access the Network Node" dial="Communications restored. But we are picking up strange signals." />
+    <objective5 command="DEFEAT" idNpc="9634" description="Defeat Machine Interceptors" dial="You are violating Machine airspace." />
+    <objective6 command="TALK" idNpc="9630" description="Report back to Command" dial="The fractures are deep. It's not just Zion... the Machines are fighting themselves." />
+  </data>
+</mission>

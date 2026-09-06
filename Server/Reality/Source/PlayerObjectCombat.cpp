@@ -13,13 +13,47 @@
 
 #include "Common.h"
 #include "PlayerObject.h"
+#include "GameServer.h"
 #include "CombatSystem.h"
-#include "AbilitySystem.h"
-#include "GOAttributes.h"
+#include "BotManager.h"
+#include "FactionWarManager.h"
+#include "AdaptiveMusicSystem.h"
+#include "Database/AsyncDatabase.h"
+#include <mutex>
+#include <boost/algorithm/string.hpp>
+#include <algorithm>
 #include "Log.h"
 #include "Database/Database.h"
 #include "GameServer.h"
 #include "GameClient.h"
+#include "GameSocket.h"
+#include "AbilitySystem.h"
+#include "MessageTypes.h"
+#include "Database/PreparedStatement.h"
+#include "DataLoader.h"
+#include "MissionSystem.h"
+#include "InventorySystem.h"
+
+std::map<uint32, std::vector<LocationVector>> PlayerObject::s_hardlineCache;
+
+void PlayerObject::LoadHardlines()
+{
+    INFO_LOG("Loading Hardlines into cache...");
+    PreparedStatement stmt("SELECT `DistrictId`,`X`,`Y`,`Z`,`ROT` FROM `hardlines`");
+    scoped_ptr<QueryResult> result(sDatabase.QueryPrepared(&stmt));
+    if (result)
+    {
+        do
+        {
+            Field *field = result->Fetch();
+            uint32 districtId = field[0].GetUInt32();
+            LocationVector hlPos(field[1].GetDouble(), field[2].GetDouble(), field[3].GetDouble());
+            hlPos.rot = field[4].GetDouble();
+            s_hardlineCache[districtId].push_back(hlPos);
+        } while (result->NextRow());
+    }
+    INFO_LOG(format("Loaded %1% hardline districts.") % s_hardlineCache.size());
+}
 
 // ---------------------------------------------------------------------------
 // combat state transitions
@@ -56,20 +90,31 @@ void PlayerObject::takeDamage( uint32 attackerGoId, uint16 damage, uint32 fxId )
 	if (m_isDead)
 		return;
 
-	if (damage >= m_healthC)
+	// Apply basic mitigation based on player level
+	uint16 mitigation = m_lvl / 2;
+	uint16 actualDamage = (damage > mitigation) ? (damage - mitigation) : 1;
+
+	if (actualDamage >= m_healthC)
 		m_healthC = 0;
 	else
-		m_healthC -= damage;
+		m_healthC -= actualDamage;
+
 
 	m_hitCounter++;
+
+	// Notify Adaptive Music System of combat intensity (threat level)
+	sAdaptiveMusicSystem.registerThreat(m_goId, actualDamage * 2, getMSTime());
 
 	//health change + hit FX: other clients get the other-view layout,
 	//the victim's own client gets the self-view layout (HUD bar + FX)
 	sGame.AnnounceStateUpdate(&m_parent,shared_ptr<CombatHitFxMsg>(new CombatHitFxMsg(m_goId,fxId,m_hitCounter)));
 	m_parent.QueueState(shared_ptr<SelfHitFxMsg>(new SelfHitFxMsg(this,fxId,m_hitCounter)));
 
-	if (m_healthC == 0)
-		die(attackerGoId);
+	if (m_healthC == 0) {
+        if (m_deathDelayMS == 0) {
+		    die(attackerGoId);
+        }
+    }
 }
 
 bool PlayerObject::spendIS( uint16 amount )
@@ -105,12 +150,47 @@ void PlayerObject::sendHealthUpdate()
 void PlayerObject::awardCombatExperience( uint32 amount )
 {
 	m_exp += amount;
-	m_parent.QueueCommand(shared_ptr<SetExperienceCmd>(new SetExperienceCmd(m_exp)));
-	m_parent.QueueCommand(shared_ptr<SystemChatMsg>(new SystemChatMsg(
-		(format("{c:00FFFF}You gained %1% experience.{/c}") % amount).str() )));
+	
+	// Check for Level Up (Bots and Players)
+    // The authentic Matrix Online XP curve (approximated polynomial: level * (level + 1) * 500)
+    auto getRequiredExpForLevel = [](uint8 level) -> uint32 {
+        if (level >= 50) return 0xFFFFFFFF;
+        // Example curve: L1->2=1000, L2->3=3000, L10->11=55000
+        return level * (level + 1) * 500;
+    };
+    
+	uint32 requiredExp = getRequiredExpForLevel(m_lvl);
+	bool leveledUp = false;
+	while (m_exp >= requiredExp && m_lvl < 50) {
+		m_lvl++;
+		m_healthM += 50;
+		m_healthC = m_healthM;
+		m_innerStrM += 25;
+		m_innerStrC = m_innerStrM;
+		requiredExp = getRequiredExpForLevel(m_lvl);
+		leveledUp = true;
+	}
 
-	sDatabase.Execute(format("UPDATE `characters` SET `exp` = '%1%' WHERE `charId` = '%2%'")
-		% m_exp % m_characterUID);
+	m_parent.QueueCommand(shared_ptr<SetExperienceCmd>(new SetExperienceCmd(m_exp)));
+	
+	if (leveledUp) {
+		INFO_LOG(format("Character %1% leveled up to %2%!") % m_handle % (uint32)m_lvl);
+		m_parent.QueueCommand(shared_ptr<SystemChatMsg>(new SystemChatMsg(
+			(format("{c:00FF00}Congratulations! You are now level %1%.{/c}") % (uint32)m_lvl).str() )));
+	} else {
+		m_parent.QueueCommand(shared_ptr<SystemChatMsg>(new SystemChatMsg(
+			(format("{c:00FFFF}You gained %1% experience.{/c}") % amount).str() )));
+	}
+
+	if (m_characterUID < 9000000) { // Only save real players to DB
+		PreparedStatement stmt("UPDATE `characters` SET `exp` = ?0, `level` = ?1, `healthM` = ?2, `innerStrM` = ?3 WHERE `charId` = ?4");
+		stmt.SetUInt32(0, m_exp);
+		stmt.SetUInt32(1, (uint32)m_lvl);
+		stmt.SetUInt32(2, m_healthM);
+		stmt.SetUInt32(3, m_innerStrM);
+		stmt.SetUInt64(4, m_characterUID);
+		sDatabase.ExecutePrepared(&stmt);
+	}
 }
 
 void PlayerObject::die( uint32 killerGoId )
@@ -121,17 +201,20 @@ void PlayerObject::die( uint32 killerGoId )
 	m_isDead = true;
 	m_inCombat = false;
 	m_healthC = 0;
-	clearStatusEffects();
 	sCombatSys.RemoveCombatant(m_goId);
 
 	string killerName = "the Matrix";
 	try
 	{
 		PlayerObject *killer = sObjMgr.getGOPtr(killerGoId);
-		if (killer)
+		if (killer) {
 			killerName = killer->getHandle();
+			uint32 killerFaction = killer->getFaction();
+			uint32 victimFaction = getFaction();
+			sFactionWarMgr.registerPvPKill(killerFaction, victimFaction);
+		}
 	}
-	catch (ObjectMgr::ObjectNotAvailable) {}
+	catch (...) {}
 
 	INFO_LOG(format("Player %1%:%2% was defeated by %3%") % m_handle % m_goId % killerName);
 
@@ -141,9 +224,36 @@ void PlayerObject::die( uint32 killerGoId )
 		(format("{c:FF4444}%1% has been defeated by %2%.{/c}") % m_handle % killerName).str() )));
 
 	//IsDead attribute so clients render the death state on our views
-	sGame.AnnounceStateUpdate(&m_parent,shared_ptr<HealthUpdateMsg>(new HealthUpdateMsg(m_goId,false,true)));
+	sGame.AnnounceStateUpdate(&m_parent,shared_ptr<HealthUpdateMsg>(new HealthUpdateMsg(m_goId,false,true)), true);
 	sendVitals(false,true);
 	setCombatStance(false);
+    
+    // V17: The Loot Engine (Only bots drop loot)
+    if (m_parent.isBot())
+    {
+        try {
+            PlayerObject *killer = sObjMgr.getGOPtr(killerGoId);
+            if (killer && !killer->isDead())
+            {
+                // Advance mission objective
+                sMissionSys.AdvanceObjective(killer, ObjectiveCommand::LOOT, m_goId);
+                
+                // Random item drop
+                const auto& allItems = sDataLoader.GetAllItems();
+                if (!allItems.empty()) {
+                    auto it = allItems.begin();
+                    std::advance(it, rand() % allItems.size());
+                    killer->getInventory()->addItem(make_shared<Item>(sObjMgr.getNewObjectId(), it->second.templateId), 1);
+                    killer->getClient().QueueCommand(make_shared<SystemChatMsg>(
+                        (format("{c:00FF00}Loot Received: %1%{/c}") % it->second.name).str()));
+                }
+            }
+        } catch (...) {}
+    }
+    
+	sAdaptiveMusicSystem.clearThreat(m_goId, getMSTime());
+
+	setOnlineStatus(false);
 
 	//downed visual - the jackout beam doubles as the emergency-jackout effect
 	sGame.AnnounceStateUpdate(NULL,shared_ptr<JackoutEffectMsg>(new JackoutEffectMsg(m_goId,true)));
@@ -167,27 +277,25 @@ void PlayerObject::respawn()
 
 	//respawn at the nearest hardline in this district, if we know any
 	{
-		format sql = format("SELECT `X`,`Y`,`Z`,`ROT` FROM `hardlines` WHERE `DistrictId`='%1%'") % int(m_district);
-		scoped_ptr<QueryResult> result(sDatabase.Query(sql));
-		if (result)
+        // V17: Use cached hardlines instead of synchronous DB query
+		if (s_hardlineCache.count((uint32)m_district) > 0)
 		{
 			double bestDistSq = -1;
 			LocationVector bestPos = m_pos;
-			do
+            const auto& hardlines = s_hardlineCache[(uint32)m_district];
+            for (const auto& hlPos : hardlines)
 			{
-				Field *field = result->Fetch();
-				LocationVector hlPos(field[0].GetDouble(),field[1].GetDouble(),field[2].GetDouble());
-				hlPos.rot = field[3].GetDouble();
 				double distSq = m_pos.DistanceSq(hlPos);
 				if (bestDistSq < 0 || distSq < bestDistSq)
 				{
 					bestDistSq = distSq;
 					bestPos = hlPos;
 				}
-			} while (result->NextRow());
-
+			}
+			
 			m_pos = bestPos;
 			sGame.AnnounceStateUpdate(NULL,shared_ptr<PositionStateMsg>(new PositionStateMsg(m_goId)));
+			// m_parent.QueueCommand(shared_ptr<TeleportSelfCmd>(new TeleportSelfCmd(m_goId,bestPos,m_district)));
 		}
 	}
 
@@ -363,4 +471,20 @@ void PlayerObject::RPC_HandleAbilityLoad( ByteBuffer &srcCmd )
 
 	if (m_abilitySystem)
 		m_abilitySystem->saveToDB();
+}
+
+
+
+
+// crowd-control state: hacker System Stun etc. CC resistance shortens stuns.
+bool PlayerObject::isStunned() const
+{
+	return getMSTime() < m_stunExpiresMS;
+}
+
+void PlayerObject::applyStun(uint32 durationMs)
+{
+	uint32 until = getMSTime() + durationMs;
+	if (until > m_stunExpiresMS)
+		m_stunExpiresMS = until;
 }

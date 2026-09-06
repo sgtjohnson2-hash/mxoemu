@@ -52,15 +52,19 @@
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
     <ClCompile>
       <Optimization>Disabled</Optimization>
-      <AdditionalIncludeDirectories>E:\Games\The Matrix Online\boost\boost_1_84_0;..\..\Dependencies10\CryptoPP\Win32\Include;..\..\Dependencies10\Sockets\Project.net\Include;..\..\Dependencies10\MySQL\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>E:\Games\The Matrix Online\boost\boost_1_84_0;..\..\Dependencies10\CryptoPP\Win32\Include\CryptoPP;..\..\Dependencies10\Lua;..\..\Dependencies10\recastnavigation\Detour\Include;..\..\Dependencies10\CryptoPP\Win32\Include;..\..\Dependencies10\Sockets\Project.net\Include;..\..\Dependencies10\MySQL\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <PreprocessorDefinitions>WIN32;_DEBUG;_CONSOLE;_CRT_SECURE_NO_DEPRECATE;BOOST_TIMER_ENABLE_DEPRECATED;%(PreprocessorDefinitions)</PreprocessorDefinitions>
-      <MinimalRebuild>true</MinimalRebuild>
       <BasicRuntimeChecks>EnableFastChecks</BasicRuntimeChecks>
       <RuntimeLibrary>MultiThreadedDebug</RuntimeLibrary>
       <PrecompiledHeader>
       </PrecompiledHeader>
       <WarningLevel>Level3</WarningLevel>
+      <LanguageStandard>stdcpp17</LanguageStandard>
       <DebugInformationFormat>EditAndContinue</DebugInformationFormat>
+      <!-- Parallel compilation (see Release notes). MinimalRebuild removed above
+           because /Gm is incompatible with /MP. -->
+      <MultiProcessorCompilation>true</MultiProcessorCompilation>
+      <ProcessorNumber>4</ProcessorNumber>
     </ClCompile>
     <Link>
       <AdditionalDependencies>Dbghelp.lib;Winmm.lib;ws2_32.lib;libmysql.lib;cryptlib.lib;Sockets.lib;%(AdditionalDependencies)</AdditionalDependencies>
@@ -77,14 +81,23 @@
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
     <ClCompile>
-      <AdditionalIncludeDirectories>E:\Games\The Matrix Online\boost\boost_1_84_0;..\..\Dependencies10\CryptoPP\Win32\Include;..\..\Dependencies10\Sockets\Project.net\Include;..\..\Dependencies10\MySQL\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>E:\Games\The Matrix Online\boost\boost_1_84_0;..\..\Dependencies10\CryptoPP\Win32\Include\CryptoPP;..\..\Dependencies10\Lua;..\..\Dependencies10\recastnavigation\Detour\Include;..\..\Dependencies10\CryptoPP\Win32\Include;..\..\Dependencies10\Sockets\Project.net\Include;..\..\Dependencies10\MySQL\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <PreprocessorDefinitions>WIN32;NDEBUG;_CONSOLE;_CRT_SECURE_NO_DEPRECATE;BOOST_TIMER_ENABLE_DEPRECATED;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
       <PrecompiledHeader>
       </PrecompiledHeader>
       <WarningLevel>Level3</WarningLevel>
+      <LanguageStandard>stdcpp17</LanguageStandard>
       <DebugInformationFormat>
       </DebugInformationFormat>
+      <!-- Compile the ~66 TUs across parallel cl.exe processes instead of one
+           serial, memory-pressured process. Cuts wall-clock build time on
+           multi-core hosts and dramatically lowers peak memory per process
+           (the single-process batch build was slow and intermittently failed
+           with LNK1104 / mid-compile aborts). ProcessorNumber caps at the 4
+           physical cores to stay within RAM headroom. -->
+      <MultiProcessorCompilation>true</MultiProcessorCompilation>
+      <ProcessorNumber>4</ProcessorNumber>
     </ClCompile>
     <Link>
       <AdditionalDependencies>Dbghelp.lib;Winmm.lib;ws2_32.lib;libmysql.lib;cryptlib.lib;Sockets.lib;%(AdditionalDependencies)</AdditionalDependencies>
@@ -131,7 +144,6 @@
     <ClInclude Include="ObjectMgr.h" />
     <ClInclude Include="IGO.h" />
     <ClInclude Include="InfluenceMap.h" />
-    <ClInclude Include="StatusEffect.h" />
     <ClInclude Include="DataLoader.h" />
     <ClInclude Include="HackerSystem.h" />
     <ClInclude Include="PlayerObject.h" />
@@ -196,7 +208,6 @@
     <ClCompile Include="ObjectMgr.cpp" />
     <ClCompile Include="IGO.cpp" />
     <ClCompile Include="InfluenceMap.cpp" />
-    <ClCompile Include="StatusEffect.cpp" />
     <ClCompile Include="DataLoader.cpp" />
     <ClCompile Include="PlayerObject.cpp" />
     <ClCompile Include="PlayerObjectCombat.cpp" />
@@ -204,6 +215,65 @@
     <ClCompile Include="InventorySystem.cpp" />
     <ClCompile Include="AbilitySystem.cpp" />
     <ClCompile Include="CombatSystem.cpp" />
+    <ClCompile Include="AI\MemoryStreamCuller.cpp" />
+    <ClCompile Include="SocketsShim.cpp" />
+    <ClCompile Include="SniffDump.cpp" />
+    <ClCompile Include="AdaptiveMusicSystem.cpp" />
+    <ClCompile Include="CustomClient.cpp" />
+    <ClCompile Include="Database\AsyncDatabase.cpp" />
+    <ClCompile Include="Database\PreparedStatement.cpp" />
+    <ClCompile Include="FactionWarManager.cpp" />
+    <ClCompile Include="HackerSystem.cpp" />
+    <ClCompile Include="HovercraftSystem.cpp" />
+    <ClCompile Include="ItemSerializer.cpp" />
+    <ClCompile Include="LootManager.cpp" />
+    <ClCompile Include="NavGrid.cpp" />
+    <ClCompile Include="NavMeshMgr.cpp" />
+    <ClCompile Include="SocketSystem.cpp" />
+    <ClCompile Include="SpatialGrid.cpp" />
+    <ClCompile Include="StatusEffectManager.cpp" />
+    <ClCompile Include="VehicleSystem.cpp" />
+    <ClCompile Include="WeatherSystem.cpp" />
+    <ClCompile Include="Scripting\ScriptEngine.cpp" />
+    <ClCompile Include="..\..\Dependencies10\Lua\lapi.c" />
+    <ClCompile Include="..\..\Dependencies10\Lua\lauxlib.c" />
+    <ClCompile Include="..\..\Dependencies10\Lua\lbaselib.c" />
+    <ClCompile Include="..\..\Dependencies10\Lua\lcode.c" />
+    <ClCompile Include="..\..\Dependencies10\Lua\lcorolib.c" />
+    <ClCompile Include="..\..\Dependencies10\Lua\lctype.c" />
+    <ClCompile Include="..\..\Dependencies10\Lua\ldblib.c" />
+    <ClCompile Include="..\..\Dependencies10\Lua\ldebug.c" />
+    <ClCompile Include="..\..\Dependencies10\Lua\ldo.c" />
+    <ClCompile Include="..\..\Dependencies10\Lua\ldump.c" />
+    <ClCompile Include="..\..\Dependencies10\Lua\lfunc.c" />
+    <ClCompile Include="..\..\Dependencies10\Lua\lgc.c" />
+    <ClCompile Include="..\..\Dependencies10\Lua\linit.c" />
+    <ClCompile Include="..\..\Dependencies10\Lua\liolib.c" />
+    <ClCompile Include="..\..\Dependencies10\Lua\llex.c" />
+    <ClCompile Include="..\..\Dependencies10\Lua\lmathlib.c" />
+    <ClCompile Include="..\..\Dependencies10\Lua\lmem.c" />
+    <ClCompile Include="..\..\Dependencies10\Lua\loadlib.c" />
+    <ClCompile Include="..\..\Dependencies10\Lua\lobject.c" />
+    <ClCompile Include="..\..\Dependencies10\Lua\lopcodes.c" />
+    <ClCompile Include="..\..\Dependencies10\Lua\loslib.c" />
+    <ClCompile Include="..\..\Dependencies10\Lua\lparser.c" />
+    <ClCompile Include="..\..\Dependencies10\Lua\lstate.c" />
+    <ClCompile Include="..\..\Dependencies10\Lua\lstring.c" />
+    <ClCompile Include="..\..\Dependencies10\Lua\lstrlib.c" />
+    <ClCompile Include="..\..\Dependencies10\Lua\ltable.c" />
+    <ClCompile Include="..\..\Dependencies10\Lua\ltablib.c" />
+    <ClCompile Include="..\..\Dependencies10\Lua\ltm.c" />
+    <ClCompile Include="..\..\Dependencies10\Lua\lundump.c" />
+    <ClCompile Include="..\..\Dependencies10\Lua\lutf8lib.c" />
+    <ClCompile Include="..\..\Dependencies10\Lua\lvm.c" />
+    <ClCompile Include="..\..\Dependencies10\Lua\lzio.c" />
+    <ClCompile Include="..\..\Dependencies10\recastnavigation\Detour\Source\DetourAlloc.cpp" />
+    <ClCompile Include="..\..\Dependencies10\recastnavigation\Detour\Source\DetourAssert.cpp" />
+    <ClCompile Include="..\..\Dependencies10\recastnavigation\Detour\Source\DetourCommon.cpp" />
+    <ClCompile Include="..\..\Dependencies10\recastnavigation\Detour\Source\DetourNavMesh.cpp" />
+    <ClCompile Include="..\..\Dependencies10\recastnavigation\Detour\Source\DetourNavMeshBuilder.cpp" />
+    <ClCompile Include="..\..\Dependencies10\recastnavigation\Detour\Source\DetourNavMeshQuery.cpp" />
+    <ClCompile Include="..\..\Dependencies10\recastnavigation\Detour\Source\DetourNode.cpp" />
     <ClCompile Include="SequencedPacket.cpp" />
     <ClCompile Include="BitStream.cpp" />
     <ClCompile Include="BitVarStream.cpp" />

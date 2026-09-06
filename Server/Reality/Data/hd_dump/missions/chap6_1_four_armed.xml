@@ -1,0 +1,8 @@
+<?xml version='1.0' encoding='utf-8'?>
+<mission id="10610" faction="None">
+  <data title="Chapter 6.1: Four-Armed Frenzy" exp="2000" info="1000">
+    <objective1 command="TALK" idNpc="9230" description="Investigate the Disturbance" dial="Something is wrong. Programs are mutating. They have... four arms? This is the Assassin's code gone wild!" />
+    <objective2 command="DEFEAT" idNpc="9231" description="Defeat Four-Armed Mutants" dial="*Guttural digital screeching*" />
+    <objective3 command="TALK" idNpc="9230" description="Report the Mutation" dial="We must find the source of this corruption before it spreads to the rest of the grid." />
+  </data>
+</mission>

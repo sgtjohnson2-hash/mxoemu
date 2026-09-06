@@ -31,6 +31,7 @@
 #include "AuthSocket.h"
 #include "Crypto.h"
 #include "ByteBuffer.h"
+#include <future>
 
 #include <Sockets/ListenSocket.h>
 
@@ -44,18 +45,21 @@ public:
 	void Loop();
 	string Encrypt(string input);
 	string Decrypt(string input);
+	std::future<string> EncryptAsync(string input);
+	std::future<string> DecryptAsync(string input);
 	ByteBuffer SignWith1024Bit(byte *message,size_t messageLen);
 	bool VerifyWith1024Bit(byte *message,size_t messageLen,byte *signature,size_t signatureLen);
 	ByteBuffer GetPubKeyData();
 	string HashPassword(const string& salt, const string& password);
 	bool CreateAccount(const string& username,const string& password);
 	bool ChangePassword(const string& username,const string& newPass);
+	string getWorldNameForId(uint32 worldId);
 	bool CreateWorld(const string& worldName);
 	bool CreateCharacter(const string& worldName, const string& userName, const string& charHandle, const string& firstName, const string& lastName);
-private:
 	uint32 getAccountIdForUsername(const string &username);
-	uint16 getWorldIdForName(const string &worldName);
 	uint64 getCharIdForHandle(const string &handle);
+private:
+	uint16 getWorldIdForName(const string &worldName);
 	void GenerateRSAKeys(unsigned int keyLen,CryptoPP::RSA::PublicKey &publicOutput, CryptoPP::RSA::PrivateKey &privateOutput);
 	void GenerateSignKeys(string &privKeyOut, string &pubKeyOut);
 	void LoadSignKeys();

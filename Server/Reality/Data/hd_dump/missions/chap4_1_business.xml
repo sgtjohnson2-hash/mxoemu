@@ -1,0 +1,9 @@
+<?xml version='1.0' encoding='utf-8'?>
+<mission id="10410" faction="Merovingian">
+  <data title="Chapter 4.1: I Think We Can Do Business" exp="1000" info="600">
+    <objective1 command="DEFEAT" idNpc="9996" description="Survive the Exile hit squad" dial="The Frenchman sends his regards." spawnAmbush="true" />
+    <objective2 command="TALK" idNpc="9160" description="Meet the Merovingian Proxy" dial="Zion is desperate. The Machines are distracted. It is time we made a deal. Deliver these terms to the Zion operative." />
+    <objective3 command="GIVE" idNpc="9161" description="Deliver the Terms" dial="The Frenchman wants an alliance? Or just our money? We'll review this." />
+    <objective4 command="DEFEAT" idNpc="9162" description="Eliminate the Machine Spy" dial="The Truce forbids this interaction!" />
+  </data>
+</mission>

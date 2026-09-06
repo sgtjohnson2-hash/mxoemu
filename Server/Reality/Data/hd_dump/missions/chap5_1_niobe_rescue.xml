@@ -1,0 +1,9 @@
+<?xml version='1.0' encoding='utf-8'?>
+<mission id="10510" faction="Zion">
+  <data title="Chapter 5.1: Saving Captain Niobe" exp="2000" info="1000" nextSuccess="10520">
+    <objective1 command="DEFEAT" idNpc="9999" description="Fight through the ambush" dial="They knew we were coming! Defend yourself!" spawnAmbush="true" />
+    <objective2 command="TALK" idNpc="9200" description="Meet Ghost" dial="Niobe's RSI has been fragmented. We need to find the pieces before the simulation overwrites her completely." />
+    <objective3 command="DEFEAT" idNpc="9201" description="Defeat the Data Wardens" dial="Access Denied." />
+    <objective4 command="TALK" idNpc="9200" description="Return Fragment" dial="That's one piece. We need more." />
+  </data>
+</mission>

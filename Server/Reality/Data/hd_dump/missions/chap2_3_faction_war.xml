@@ -1,0 +1,9 @@
+<?xml version='1.0' encoding='utf-8'?>
+<mission id="10230" faction="None">
+  <data title="Chapter 2.3: Faction War" exp="800" info="400" nextSuccess="10231" nextFail="10232">
+    <objective1 command="DEFEAT" idNpc="9998" description="Eliminate the guards blocking the path" dial="Intruder detected in sector 4." />
+    <objective2 command="TALK" idNpc="9120" description="Meet the Informant" dial="The streets are a warzone. The Cypherites are trying to shut down EPN's broadcast node. You have to choose a side." />
+    <objective3 command="DEFEAT" idNpc="9121" description="Fight your way to the Broadcast Node" dial="Stop them! The node must be secured!" />
+    <objective4 command="TALK" idNpc="9122" description="Secure the Node" dial="Will you activate the node for EPN or destroy it for the Cypherites?" branch="success:10231,fail:10232" />
+  </data>
+</mission>

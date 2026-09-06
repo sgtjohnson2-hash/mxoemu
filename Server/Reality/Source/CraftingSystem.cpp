@@ -14,18 +14,12 @@ CraftingSystem::~CraftingSystem()
 {
 }
 
+#include "DataLoader.h"
+
 void CraftingSystem::LoadBlueprints()
 {
-    // Hardcoded mock blueprints for now
-    CraftingBlueprint bp1;
-    bp1.blueprintId = 1;
-    bp1.resultingName = "Logic Bomb v1.0";
-    bp1.infoCost = 50;
-    bp1.craftTimeMs = 3000;
-    bp1.requiredComponentIds.push_back(1001); // source code fragment 1
-    
-    m_blueprints[bp1.blueprintId] = bp1;
-    INFO_LOG(format("Loaded %1% crafting blueprints") % m_blueprints.size());
+    m_blueprints = sDataLoader.GetAllBlueprints();
+    INFO_LOG(format("Loaded %1% crafting blueprints from data file.") % m_blueprints.size());
 }
 
 bool CraftingSystem::HandleCraftRequest(PlayerObject* player, uint32 blueprintId)
@@ -56,7 +50,8 @@ bool CraftingSystem::HandleCraftRequest(PlayerObject* player, uint32 blueprintId
     // player->removeComponents(bp.requiredComponentIds);
 
     // 4. Give Result
-    // player->giveItem(bp.resultingItem);
+    // templateId = 1000 for mocked logic
+    player->giveItem(1000);
     sBotMgr.LogCombat((format("[Crafting] %1% crafted item: %2%") % player->getHandle() % bp.resultingName).str());
     INFO_LOG(format("Player %1% crafted %2%") % player->getHandle() % bp.resultingName);
 

@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<mission id="10910" faction="None">
+  <data title="Chapter 9.1: The Truce Collapses" exp="5000" info="2500" nextSuccess="10920" nextFail="10930">
+    <objective1 command="TALK" idNpc="9500" description="Emergency Call from Niobe" dial="The Machines are mobilizing in the real world. Hovercrafts are reporting Sentinel clusters near Zion. The Truce is over." />
+    <objective2 command="GIVE" idNpc="9501" description="Arm the Defense Grid" dial="Accessing Zion mainframe... defense grid online." />
+    <objective3 command="DEFEAT" idNpc="9502" description="Repel the Machine Vanguard" dial="Truce condition violated by human anomalies. Extermination protocols engaged." spawnAmbush="true" />
+    <objective4 command="DEFEAT" idNpc="9503" description="Repel the Machine Vanguard" dial="You cannot stop the inevitable." />
+    <objective5 command="GIVE" idNpc="9504" description="Evacuate the Bluepills" dial="The sector is destabilizing! We have to get them out!" isTimed="true" timeLimitSeconds="180" />
+    <objective6 command="DEFEAT" idNpc="9505" description="Hold off the Agents" dial="Only human." spawnAmbush="true" />
+    <objective7 command="DEFEAT" idNpc="9506" description="Defeat Agent Thompson" dial="You survived us once. You will not survive us again." />
+    <objective8 command="TALK" idNpc="9500" description="Regroup with Niobe" dial="We held them off here, but the war has restarted. Which side will you stand on?" branch="success:10920,fail:10930" />
+  </data>
+</mission>

@@ -1,0 +1,10 @@
+<?xml version='1.0' encoding='utf-8'?>
+<mission id="10620" faction="Machine">
+  <data title="Chapter 6.2: A Clever Ruse" exp="1500" info="800">
+    <objective1 command="TALK" idNpc="9240" description="Receive Orders from Agent Pace" dial="Zion believes they are intercepting our tactical data. In reality, we are feeding them a virus. Ensure they 'steal' the package." />
+    <objective2 command="DEFEAT" idNpc="9998" description="Eliminate the guards blocking the path" dial="Intruder detected in sector 4." />
+    <objective3 command="DEFEAT" idNpc="9241" description="Fake the Defense" dial="Oh no, we are losing! (Agent simulates defeat)" />
+    <objective4 command="GIVE" idNpc="9997" description="Hack the terminal to open the gate" dial="Access granted." item="1001" isTimed="true" timeLimitSeconds="300" />
+    <objective5 command="TALK" idNpc="9240" description="Report Success" dial="The Trojan Horse is inside Zion's mainframe. The ruse was successful." />
+  </data>
+</mission>

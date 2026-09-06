@@ -1,0 +1,10 @@
+<?xml version='1.0' encoding='utf-8'?>
+<mission id="10210" faction="None">
+  <data title="Chapter 2.1: The Blue Pill Movement" exp="500" info="250">
+    <objective1 command="GIVE" idNpc="9997" description="Hack the terminal to open the gate" dial="Access granted." item="1001" isTimed="true" timeLimitSeconds="300" />
+    <objective2 command="TALK" idNpc="9100" description="Meet with Cryptos" dial="The real world is cold and dead. We belong here. The Cypherites will ensure the bluepills remain asleep, as they desire." />
+    <objective3 command="GIVE" idNpc="9997" description="Hack the terminal to open the gate" dial="Access granted." item="1001" isTimed="true" timeLimitSeconds="300" />
+    <objective4 command="DEFEAT" idNpc="9101" description="Defeat Zion Saboteurs" dial="You are betraying humanity! The Matrix is a prison!" />
+    <objective5 command="TALK" idNpc="9100" description="Return to Cryptos" dial="They do not understand. Peace is a construct of the mind. The Cypherite movement will bring true peace." />
+  </data>
+</mission>

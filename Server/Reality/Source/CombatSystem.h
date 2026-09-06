@@ -16,6 +16,9 @@
 
 #include "Common.h"
 #include "Singleton.h"
+#include <mutex>
+#include <unordered_map>
+#include <string>
 
 class PlayerObject;
 
@@ -45,13 +48,22 @@ typedef enum
 	TACTIC_NORMAL		= 8, //default, no tactic selected
 } mxoTacticType;
 
+// Special logic flags for combat abilities (stuns, hacks, etc.)
+enum mxoAbilityFlag {
+	ABILITY_FLAG_NONE = 0,
+	ABILITY_FLAG_STUN = 1 << 0,
+	ABILITY_FLAG_MASK = 1 << 1,
+	ABILITY_FLAG_TRACE = 1 << 2,
+	ABILITY_FLAG_BOMB = 1 << 3
+};
+
 // Server-side combat move. The real game loads ability stats from
 // gameobjects.gob - this table stands in for damage/range/cost data while the
 // DataLoader ability templates provide cast times and FX for real ability ids.
 struct CombatMove
 {
 	uint16 id;
-	const char* name;
+	std::string name;
 	mxoDamageType dmgType;
 	float minDmg;			//damage roll floor at level 1
 	float maxDmg;			//damage roll ceiling at level 1
@@ -63,6 +75,7 @@ struct CombatMove
 	bool interlockOnly;		//melee specials usable only in interlock
 	bool freefireOnly;		//guns/viruses usable only outside interlock
 	float castTime;			//cast bar duration in seconds (0 = instant)
+	uint32 specialFlags;	//mxoAbilityFlag bitmask
 };
 
 // One paired interlock encounter between two combatants
@@ -74,7 +87,7 @@ struct InterlockSession
 	uint8 tacticB;
 	uint16 queuedMoveA;		//0 = plain attack this round
 	uint16 queuedMoveB;
-	float nextRoundTime;
+	uint32 nextRoundTime;	//ms timestamp (getMSTime)
 	uint32 roundNumber;
 	uint16 ilViewIdA;		//ILCombatHandler view spawned on A's client
 	uint16 ilViewIdB;		//ILCombatHandler view spawned on B's client
@@ -86,7 +99,7 @@ struct FreeFireState
 	uint32 attackerGoId;
 	uint32 targetGoId;
 	uint16 moveId;
-	float nextShotTime;
+	uint32 nextShotTime;	//ms timestamp (getMSTime)
 };
 
 class CombatSystem : public Singleton<CombatSystem>
@@ -94,6 +107,9 @@ class CombatSystem : public Singleton<CombatSystem>
 public:
 	CombatSystem();
 	~CombatSystem();
+	void Init();
+
+	void LoadAbilities();
 
 	//called from the main server loop
 	void Update();
@@ -131,15 +147,20 @@ private:
 	{
 		bool hit;
 		uint16 damageTaken;
+		bool isCrit;
+		bool isBlocked;
+		bool isGlancing;
 	};
 
 	AttackResult ResolveAttack(PlayerObject* attacker, PlayerObject* target,
 		const CombatMove& move, uint8 attackerTactic, uint8 targetTactic);
-	void RunInterlockRound(InterlockSession &session);
-	void RunFreeFireShot(FreeFireState &state);
+	bool RunInterlockRound(InterlockSession &session); //false = session over, reap it
+	bool RunFreeFireShot(FreeFireState &state); //false = engagement over, reap it
 	float TacticModifier(uint8 attackerTactic, uint8 targetTactic);
 	void AwardKill(PlayerObject* killer, PlayerObject* victim);
 
+	std::unordered_map<uint16, CombatMove> m_moveTable;
+	mutable std::recursive_mutex m_combatMutex;
 	list<InterlockSession> m_interlocks;
 	list<FreeFireState> m_freefires;
 };

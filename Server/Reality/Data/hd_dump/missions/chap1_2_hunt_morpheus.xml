@@ -1,0 +1,8 @@
+<?xml version='1.0' encoding='utf-8'?>
+<mission id="10120" faction="None">
+  <data title="Chapter 1.2: The Hunt for Morpheus" exp="500" info="200" nextSuccess="10121" nextFail="10122">
+    <objective1 command="TALK" idNpc="9040" description="Investigate the Bomb Site" dial="Look at this... code is bleeding through the walls. Morpheus did this. He planted a bomb." />
+    <objective2 command="DEFEAT" idNpc="9041" description="Defeat the Sentinel Guard" dial="You are trespassing on a secure location. Eradication initiated." />
+    <objective3 command="TALK" idNpc="9042" description="Find the Bomb Casing" dial="It's a casing for an RSI corruptor bomb. You need to make a choice. Will you help Morpheus detonate them, or stop him for the Machines?" branch="success:10121,fail:10122" />
+  </data>
+</mission>

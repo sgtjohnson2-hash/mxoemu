@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<mission id="11010" faction="None">
+  <data title="Chapter 10.1: Oligarchy" exp="6000" info="3000">
+    <objective1 command="TALK" idNpc="9600" description="Meet with Ghost" dial="Halborn's presence is tearing the system apart. The Oligarchs operate above the Matrix code, and we are losing ground." />
+    <objective2 command="DEFEAT" idNpc="9601" description="Defeat Halborn's Enforcers" dial="Your code is obsolete." spawnAmbush="true" />
+    <objective3 command="DEFEAT" idNpc="9602" description="Fight through the Oligarch Firewall" dial="Access Denied. Extermination Protocol 1.0." />
+    <objective4 command="GIVE" idNpc="9603" description="Hack the Mainframe Terminal" dial="Uploading virus... this should slow them down." isTimed="true" timeLimitSeconds="300" />
+    <objective5 command="DEFEAT" idNpc="9604" description="Survive the Counter-Attack" dial="Did you think a simple virus could stop us?" spawnAmbush="true" />
+    <objective6 command="TALK" idNpc="9600" description="Report back to Ghost" dial="You bought us some time. But Halborn is not acting alone." />
+  </data>
+</mission>

@@ -14,6 +14,7 @@
 #include "AbilitySystem.h"
 #include "PlayerObject.h"
 #include "Database/Database.h"
+#include "Database/PreparedStatement.h"
 #include "Log.h"
 #include "Timer.h"
 
@@ -36,9 +37,9 @@ void AbilitySystem::loadFromDB()
     // In Reality, we need to create an `abilities` table if it doesn't exist
     // Expected table: `abilities` (`charId`, `abilityId`, `level`, `slot`)
     // If the table doesn't exist yet, we will just silently catch the SQL error for now
-    format sql = format("SELECT `abilityId`, `level`, `slot` FROM `abilities` WHERE `charId` = '%1%'") % m_owner->getGuid();
-    
-    scoped_ptr<QueryResult> result(sDatabase.Query(sql));
+    PreparedStatement stmt("SELECT `abilityId`, `level`, `slot` FROM `abilities` WHERE `charId` = ?0");
+    stmt.SetUInt64(0, m_owner->getCharacterUID());
+    scoped_ptr<QueryResult> result(sDatabase.QueryPrepared(&stmt));
     if (result)
     {
         do
@@ -59,17 +60,24 @@ void AbilitySystem::loadFromDB()
 
 void AbilitySystem::saveToDB()
 {
-    // Skip if table isn't created yet, but here is the logic:
-    // sDatabase.Execute(format("DELETE FROM `abilities` WHERE `charId` = '%1%'") % m_owner->getCharacterUID());
+    if (!m_owner)
+        return;
+
+    PreparedStatement delStmt("DELETE FROM `abilities` WHERE `charId` = ?0");
+    delStmt.SetUInt64(0, m_owner->getCharacterUID());
+    sDatabase.ExecutePrepared(&delStmt);
     
-    // for (auto it = m_loadedAbilities.begin(); it != m_loadedAbilities.end(); ++it)
-    // {
-    //     sDatabase.Execute(format("INSERT INTO `abilities` (`charId`, `abilityId`, `level`, `slot`) VALUES ('%1%', '%2%', '%3%', '%4%')")
-    //         % m_owner->getCharacterUID()
-    //         % it->second->getAbilityId()
-    //         % it->second->getLevel()
-    //         % it->second->getMemorySlot());
-    // }
+    for (auto it = m_loadedAbilities.begin(); it != m_loadedAbilities.end(); ++it)
+    {
+        if (!it->second)
+            continue;
+        PreparedStatement insStmt("INSERT INTO `abilities` (`charId`, `abilityId`, `level`, `slot`) VALUES (?0, ?1, ?2, ?3)");
+        insStmt.SetUInt64(0, m_owner->getCharacterUID());
+        insStmt.SetUInt16(1, it->second->getAbilityId());
+        insStmt.SetUInt16(2, it->second->getLevel());
+        insStmt.SetUInt16(3, it->second->getMemorySlot());
+        sDatabase.ExecutePrepared(&insStmt);
+    }
 }
 
 bool AbilitySystem::loadAbility(uint16 abilityId, uint16 level, uint16 slot)

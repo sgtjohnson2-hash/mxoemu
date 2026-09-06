@@ -1,0 +1,8 @@
+<?xml version='1.0' encoding='utf-8'?>
+<mission id="10113" faction="Merovingian">
+  <data title="Chapter 1.1: Smuggling RSI" exp="200" info="100">
+    <objective1 command="TALK" idNpc="9030" description="Meet the Merovingian Operative" dial="The Frenchman has a task for you. There is chaos in the city. Chaos is profitable. Retrieve the fragmented RSI code." />
+    <objective2 command="GIVE" idNpc="9031" description="Deliver RSI Fragment" dial="Ah, excellent. The Frenchman will be pleased. But beware, flies are buzzing around." />
+    <objective3 command="DEFEAT" idNpc="9032" description="Defeat the Assassin's Minion" dial="You should not be here. Give me the code!" />
+  </data>
+</mission>

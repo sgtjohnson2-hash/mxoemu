@@ -1,0 +1,9 @@
+<mission>
+  <data title="Awakening" description="The path begins here." exp="1000" info="500">
+    <objective1 command="TALK" idNpc="1001" description="Speak to the Operator" dial="Hello, Redpill. Welcome to the Real." />
+    <objective2 command="USE_ITEM" item="Red Pill" description="Take the red pill" />
+    <objective3 command="HACK" idNpc="2001" description="Hack the terminal" />
+    <npc1 type="FRIENDLY" x="0.0" y="0.0" z="0.0" idNpc="1001" handle="Operator" level="10" />
+    <npc2 type="HOSTILE" x="10.0" y="0.0" z="10.0" idNpc="2001" handle="Terminal" level="1" />
+  </data>
+</mission>

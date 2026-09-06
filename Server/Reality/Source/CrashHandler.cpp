@@ -68,7 +68,7 @@ void StartCrashHandler()
 	// just piss us off. :P
 
 	// Check for a debugger.
-#ifndef X64
+#if !defined(_WIN64) && !defined(_M_X64)
 	DWORD code;
 
 	__asm
@@ -103,7 +103,7 @@ static const TCHAR *GetExceptionDescription(DWORD ExceptionCode)
 	struct ExceptionNames
 	{
 		DWORD	ExceptionCode;
-		TCHAR *	ExceptionName;
+		const TCHAR *	ExceptionName;
 	};
 
 #if 0  // from winnt.h
@@ -405,4 +405,46 @@ int __cdecl HandleCrash(PEXCEPTION_POINTERS pExceptPtrs)
 
 	return EXCEPTION_CONTINUE_SEARCH;
 }
+#else
+
+#include <signal.h>
+#include <execinfo.h>
+#include <unistd.h>
+#include <stdlib.h>
+
+void LinuxSignalHandler(int sig)
+{
+	std::string s = "CRASH.LOG";
+	FILE * m_file = fopen(s.c_str(), "a");
+	if(m_file) {
+		fprintf(m_file, "\n--- CRASH DETECTED (Signal %d) ---\n", sig);
+		
+		void *array[50];
+		int size = backtrace(array, 50);
+		char **messages = backtrace_symbols(array, size);
+		
+		if (messages != NULL) {
+			for (int i = 0; i < size; i++) {
+				fprintf(m_file, "[bt]: (%d) %s\n", i, messages[i]);
+			}
+			free(messages);
+		} else {
+			fprintf(m_file, "[bt]: Error getting backtrace symbols\n");
+		}
+		
+		fprintf(m_file, "----------------------------------\n");
+		fclose(m_file);
+	}
+	
+	// Terminate
+	exit(1);
+}
+
+void StartCrashHandler()
+{
+	signal(SIGSEGV, LinuxSignalHandler);
+	signal(SIGABRT, LinuxSignalHandler);
+	signal(SIGFPE, LinuxSignalHandler);
+}
+
 #endif

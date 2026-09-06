@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<mission id="11020" faction="None">
+  <data title="Chapter 10.2: Ouroboros" exp="6500" info="3250">
+    <objective1 command="TALK" idNpc="9610" description="Meet with Agent Pace" dial="The system is in a loop. Halborn is attempting to reset the Matrix to a previous version. We must break the cycle." />
+    <objective2 command="GIVE" idNpc="9611" description="Retrieve the Legacy Code Keys" dial="This key contains the original source architecture." />
+    <objective3 command="DEFEAT" idNpc="9612" description="Defeat the Merovingian's Collectors" dial="The Frenchman wants those keys. Hand them over!" spawnAmbush="true" />
+    <objective4 command="TALK" idNpc="9613" description="Bypass the Firewall" dial="The code is shifting. The Matrix is destabilizing around us." />
+    <objective5 command="DEFEAT" idNpc="9614" description="Defeat the Ouroboros Guardians" dial="The cycle must continue. You are the anomaly." />
+    <objective6 command="DEFEAT" idNpc="9615" description="Survive the Reset Wave" dial="Reality is bending..." isTimed="true" timeLimitSeconds="120" />
+    <objective7 command="TALK" idNpc="9610" description="Return to Pace" dial="The reset was halted. But the cycle is not broken yet." />
+  </data>
+</mission>

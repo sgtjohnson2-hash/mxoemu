@@ -27,6 +27,7 @@
 #define MXOSIM_GAMESOCKET_H
 
 #include "Common.h"
+#include <memory>
 #include "ByteBuffer.h"
 #include "MessageTypes.h"
 #include "GameClient.h"
@@ -42,16 +43,20 @@ public:
 	void OnRawData( const char *pData,size_t len,struct sockaddr *sa_from,socklen_t sa_len );
 	void PruneDeadClients();
 	void CheckAndResend();
-	size_t Clients_Connected(void) { return m_clients.size(); }
-	GameClient *GetClientWithSessionId(uint32 sessionId);
-	vector<GameClient*> GetClientsWithCharacterId( uint64 charId );
+	size_t Clients_Connected(void) const;
+	std::shared_ptr<GameClient> GetClientWithSessionId(uint32 sessionId);
+	vector<std::shared_ptr<GameClient>> GetClientsWithCharacterId( uint64 charId );
 	void Broadcast(const ByteBuffer &message, bool command);
+	void BroadcastNear(float x, float z, float radius, const ByteBuffer &message, bool command);
 	void AnnounceStateUpdate(GameClient* clFrom,msgBaseClassPtr theMsg, bool immediateOnly=false, GameClient::packetAckFunc callFunc=0);
+	void AnnounceStateUpdateNear(float x, float z, float radius, msgBaseClassPtr theMsg, bool immediateOnly=false, GameClient::packetAckFunc callFunc=0);
 	void AnnounceCommand(GameClient* clFrom,msgBaseClassPtr theCmd, GameClient::packetAckFunc callFunc=0);
+	void AnnounceCommandNear(float x, float z, float radius, msgBaseClassPtr theCmd, GameClient::packetAckFunc callFunc=0);
 	void RemoveCharacter(string IPAddr);
 private:
 	// Client List
-	typedef map<string, GameClient*> GClientList;
+	mutable std::recursive_mutex m_clientsMutex;
+	typedef map<string, std::shared_ptr<GameClient>> GClientList;
 	GClientList m_clients;
 
 	uint32 m_lastCleanupTime;

@@ -25,17 +25,17 @@
 
 #include "Common.h"
 #include "Util.h"
+#include "ByteBuffer.h"
 #include "Log.h"
+#include "Timer.h"
+#include "Database/DatabaseEnv.h"
+#include "Database/PreparedStatement.h"
+#include "MarginServer.h"
 #include "MarginSocket.h"
 #include "TCPVariableLengthPacket.h"
 #include "AuthServer.h"
 #include "SignedDataStruct.h"
-#include "Timer.h"
-#include "Database/Database.h"
 #include "MersenneTwister.h"
-#include "MarginSocket.h"
-#include "MarginServer.h"
-#include "Database/Database.h"
 #include "GameClient.h"
 #include "GameServer.h"
 #include "EncryptedPacket.h"
@@ -228,7 +228,9 @@ void MarginSocket::ProcessData( const byte *buf,size_t len )
 
 			//scope for db ptr
 			{
-				scoped_ptr<QueryResult> result(sDatabase.Query(format("SELECT `userId`, `username` FROM `users` WHERE `username` = '%1%' LIMIT 1") % m_username) );
+				PreparedStatement stmt("SELECT `userId`, `username` FROM `users` WHERE `username` = ?0 LIMIT 1");
+				stmt.SetString(0, m_username);
+				scoped_ptr<QueryResult> result(sDatabase.QueryPrepared(&stmt));
 				if (result == NULL)
 				{
 					INFO_LOG(format("CERT_ConnectRequest: Username %1% doesn't exist, disconnecting.") % m_username );
@@ -409,7 +411,10 @@ void MarginSocket::ProcessData( const byte *buf,size_t len )
 			packetData >> charId;
 			//scope for db ptr
 			{
-				scoped_ptr<QueryResult> result(sDatabase.Query(format("SELECT `charId`, `userId`, `handle`, `firstName`, `lastName`, `background` FROM `characters` WHERE `userId` = '%1%' AND `charId` = '%2%' LIMIT 1") % m_userId % charId) );
+				PreparedStatement stmt("SELECT `charId`, `userId`, `handle`, `firstName`, `lastName`, `background` FROM `characters` WHERE `userId` = ?0 AND `charId` = ?1 LIMIT 1");
+				stmt.SetUInt32(0, m_userId);
+				stmt.SetUInt32(1, charId);
+				scoped_ptr<QueryResult> result(sDatabase.QueryPrepared(&stmt));
 				if (result == NULL)
 				{
 					ERROR_LOG(format("MS_LoadCharacterRequest: Character doesn't exist or username %1% doesn't own it") % m_username );
@@ -432,7 +437,7 @@ void MarginSocket::ProcessData( const byte *buf,size_t len )
 			//Don't allow multiple users with the same character id
 			if (sConfig.GetBoolDefault("MarginServer.AllowMultipleSessionsPerCharacter", false)==false)
 			{
-				vector<class GameClient*> allUsers = sGame.GetClientsWithCharacterId(charId);
+				auto allUsers = sGame.GetClientsWithCharacterId(charId);
 				if(allUsers.size() > 0) //someone else already using account
 				{
 					ERROR_LOG(format("MS_LoadCharacterRequest: Closing connection for %1% (one already exists)") % m_charName );
@@ -586,11 +591,11 @@ void MarginSocket::ProcessData( const byte *buf,size_t len )
 			} ;
 
 			memset(&firstNameLastNameBackground[0x28],0,32);
-			strncpy((char*)&firstNameLastNameBackground[0x28],m_firstName.c_str(),31);
+			strncpy((char*)&firstNameLastNameBackground[0x28],m_firstName.c_str(),std::min<size_t>(31, m_firstName.length()));
 			memset(&firstNameLastNameBackground[0x48],0,32);
-			strncpy((char*)&firstNameLastNameBackground[0x48],m_lastName.c_str(),31);
+			strncpy((char*)&firstNameLastNameBackground[0x48],m_lastName.c_str(),std::min<size_t>(31, m_lastName.length()));
 			memset(&firstNameLastNameBackground[0x68],0,1024);
-			strncpy((char*)&firstNameLastNameBackground[0x68],m_background.c_str(),1023);
+			strncpy((char*)&firstNameLastNameBackground[0x68],m_background.c_str(),std::min<size_t>(1023, m_background.length()));
 
 			SendCharacterReply(0,false,2,ByteBuffer(firstNameLastNameBackground,sizeof(firstNameLastNameBackground)));
 

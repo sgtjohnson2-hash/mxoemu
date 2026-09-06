@@ -32,28 +32,66 @@ createFileSingleton( Log );
 
 Log::Log()
 {
+	m_stopLogging = false;
+	m_logThread = std::thread(&Log::AsyncLogThread, this);
 	OpenLogFile("Reality.log");
 }
 
 Log::~Log()
 {
+	{
+		std::lock_guard<std::mutex> lock(m_queueMutex);
+		m_stopLogging = true;
+	}
+	m_queueCond.notify_all();
+	if (m_logThread.joinable())
+		m_logThread.join();
+
 	if (LogFile.is_open() == true)
 	{
 		LogFile.close();
 	}
 }
 
+void Log::AsyncLogThread()
+{
+	while (true)
+	{
+		LogMessage msg;
+		{
+			std::unique_lock<std::mutex> lock(m_queueMutex);
+			m_queueCond.wait(lock, [this]() { return m_stopLogging || !m_logQueue.empty(); });
+			
+			if (m_stopLogging && m_logQueue.empty())
+				break;
+				
+			msg = std::move(m_logQueue.front());
+			m_logQueue.pop();
+		}
+		
+		if (msg.isConsole)
+		{
+			cout << msg.message << std::endl;
+		}
+		else if (LogFile.is_open())
+		{
+			LogFile << msg.message << std::endl;
+			LogFile.flush();
+		}
+	}
+}
+
 
 void Log::OpenLogFile( const char *logFileName )
 {
-	fileMutex.Acquire();
+	// Log initialization does not need queue locking as it happens in constructor before thread spins fully, 
+	// or we can lock it if reassigned
+	std::lock_guard<std::mutex> lock(m_queueMutex);
 
 	if (LogFile.is_open() == true)
 		LogFile.close();
 
 	LogFile.open(logFileName,ios::out | ios::app);
-
-	fileMutex.Release();
 }
 
 string Log::ProcessString( LogLevel level,const string &str,bool forFile)
@@ -131,13 +169,15 @@ void Log::OutputConsole( LogLevel level,const string &str )
 	{
 		ConsoleLogLevel = LOGLEVEL_INFO;
 	}
-	if (ConsoleLogLevel >= level)
-	{
-		string outputMe = ProcessString(level,str,false);
-		printMutex.Acquire();
-		cout << outputMe << std::endl;
-		printMutex.Release();
-	}
+    if (ConsoleLogLevel >= level)
+    {
+        string outputMe = ProcessString(level,str,false);
+        {
+            std::lock_guard<std::mutex> lock(m_queueMutex);
+            m_logQueue.push({true, outputMe});
+        }
+        m_queueCond.notify_one();
+    }
 }
 
 void Log::OutputFile( LogLevel level,const string &str )
@@ -150,14 +190,16 @@ void Log::OutputFile( LogLevel level,const string &str )
 	if (FileLogLevel >= level)
 	{
 		string outputMe = ProcessString(level,str,true);
-		if (LogFile.is_open() == true)
 		{
-			fileMutex.Acquire();
-			LogFile << outputMe << std::endl;
-			fileMutex.Release();
+			std::lock_guard<std::mutex> lock(m_queueMutex);
+			m_logQueue.push({false, outputMe});
 		}
+		m_queueCond.notify_one();
 	}
 }
+
+#include <atomic>
+#include "Timer.h"
 
 void Log::Output( LogLevel level,const string &str )
 {
@@ -244,4 +286,16 @@ void Log::Debug( string fmt )
 {
 	Output(LOGLEVEL_DEBUG,fmt);
 }
+
+void Log::outString( const char *str, ... )
+{
+	if (!str) return;
+	char buf[4096];
+	va_list ap;
+	va_start(ap, str);
+	vsnprintf(buf, sizeof(buf), str, ap);
+	va_end(ap);
+	Info(string(buf));
+}
+
 

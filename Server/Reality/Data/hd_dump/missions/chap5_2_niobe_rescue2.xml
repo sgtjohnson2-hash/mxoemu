@@ -1,0 +1,10 @@
+<?xml version='1.0' encoding='utf-8'?>
+<mission id="10520" faction="Zion">
+  <data title="Chapter 5.2: Saving Captain Niobe Part 2" exp="2500" info="1200">
+    <objective1 command="TALK" idNpc="9210" description="Meet Ghost" dial="We have the coordinates for the final fragment. It's heavily guarded by Exiles." />
+    <objective2 command="DEFEAT" idNpc="9999" description="Fight through the ambush" dial="They knew we were coming! Defend yourself!" spawnAmbush="true" />
+    <objective3 command="DEFEAT" idNpc="9211" description="Defeat Exile Enforcers" dial="The Frenchman says hello." />
+    <objective4 command="DEFEAT" idNpc="9996" description="Survive the Exile hit squad" dial="The Frenchman sends his regards." spawnAmbush="true" />
+    <objective5 command="TALK" idNpc="9210" description="Restore Niobe" dial="It's done. Recompiling her RSI now... Niobe is back." />
+  </data>
+</mission>

@@ -33,9 +33,17 @@ public:
 
     // Inventory operations
     bool addItem(shared_ptr<Item> item, uint8 slot);
+    bool addItemAuto(shared_ptr<Item> item);
+    uint8 getFirstFreeSlot() const;
     bool removeItem(uint32 goId);
     shared_ptr<Item> getItemByGoId(uint32 goId);
     shared_ptr<Item> getItemBySlot(uint8 slot);
+    bool hasItemByTemplate(uint32 templateId);
+    shared_ptr<Item> getItemByTemplate(uint32 templateId);
+    bool consumeItemByTemplate(uint32 templateId);
+    void clear();
+
+    std::vector<shared_ptr<Item>> getAllItems() const;
 
     // Swap items between slots
     bool moveItem(uint8 fromSlot, uint8 toSlot);

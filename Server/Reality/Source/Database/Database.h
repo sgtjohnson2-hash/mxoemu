@@ -31,7 +31,13 @@
 #include "../CallBack.h"
 #include "../Threading/ThreadStarter.h"
 #include "Field.h"
+#ifdef _WIN32
+#include <winsock2.h>
+#endif
 #include <mysql/mysql.h>
+#include <mutex>
+#include <condition_variable>
+#include <queue>
 
 class QueryResult;
 class QueryThread;
@@ -41,7 +47,6 @@ struct DatabaseConnection
 {
 	DatabaseConnection(MYSQL *rawPtr):conn(rawPtr) {}
 	~DatabaseConnection() {}
-	FastMutex Busy;
 	MYSQL *conn;
 };
 
@@ -101,12 +106,16 @@ public:
 
 	QueryResult* Query(string QueryString);
 	QueryResult* Query(format &fmt) { return Query(fmt.str()); }
+	QueryResult* QueryPrepared(class PreparedStatement* stmt);
 	QueryResult * FQuery( string QueryString, DatabaseConnection &con);
 	void FWaitExecute( string QueryString, DatabaseConnection &con);
 	bool WaitExecute( string QueryString);//Wait For Request Completion
 	bool WaitExecute(format &fmt) { return WaitExecute(fmt.str()); }
 	bool Execute( string QueryString);
 	bool Execute(format &fmt) { return Execute(fmt.str()); }
+	bool ExecutePrepared(class PreparedStatement* stmt);
+	void ExecuteAsync( string QueryString);
+	void ExecuteAsync(format &fmt) { ExecuteAsync(fmt.str()); }
 
 	inline const string& GetHostName() { return mHostname; }
 	inline const string& GetDatabaseName() { return mDatabaseName; }
@@ -123,6 +132,7 @@ public:
 	void FreeQueryResult(QueryResult * p);
 
 	DatabaseConnection &GetFreeConnection();
+	void ReleaseConnection(DatabaseConnection &con);
 
 	void PerformQueryBuffer(QueryBuffer * b);
 	void PerformQueryBuffer(QueryBuffer * b, DatabaseConnection &ccon);
@@ -133,6 +143,9 @@ public:
 
 	/* database is killed off manually. */
 	void OnShutdown() {}
+	
+	// Phase 26: Mock Mode
+	bool m_isMockMode = false;
 
 protected:
 
@@ -149,6 +162,9 @@ protected:
 	FQueue<string*> queries_queue;
 	typedef vector<DatabaseConnection*> connectionsList;
 	connectionsList m_connections;
+	std::queue<DatabaseConnection*> m_freeConnections;
+	std::mutex m_poolMutex;
+	std::condition_variable m_poolCond;
 
 	uint32 _counter;
 	///////////////////////////////

@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<mission id="11131" faction="None">
+  <data title="Epilogue: The End of an Era" exp="0" info="0">
+    <objective1 command="TALK" idNpc="9660" description="The Final Stand" dial="The servers are shutting down. But the legacy of Zion, the Machines, and the Merovingian will live on." />
+  </data>
+</mission>

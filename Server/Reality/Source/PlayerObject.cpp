@@ -32,18 +32,44 @@
 #include "Log.h"
 #include "GameClient.h"
 #include "Timer.h"
-#include "CombatSystem.h"
-#include "AbilitySystem.h"
+#include "DataLoader.h"
+#include "InventorySystem.h"
+#include "Item.h"
+#include "ObjectMgr.h"
 #include <boost/algorithm/string.hpp>
 
-PlayerObject::PlayerObject( GameClient &parent,uint64 charUID ) :m_parent(parent),m_characterUID(charUID),m_spawnedInWorld(false),m_worldPopulated(false)
+PlayerObject::PlayerObject( GameClient &parent,uint64 charUID, bool isBot ) :m_parent(parent),m_characterUID(charUID),m_spawnedInWorld(false),m_worldPopulated(false)
 {
-	loadFromDB(true);
+	if (!isBot) {
+		loadFromDB(true);
+	} else {
+		m_handle = "Bot_" + std::to_string(charUID);
+		m_firstName = "Bot";
+		m_lastName = "NPC";
+		m_background = "";
+		m_healthC = 100;
+		m_healthM = 100;
+		m_innerStrC = 100;
+		m_innerStrM = 100;
+		m_lvl = 1;
+		m_prof = 0;
+		m_alignment = 0;
+		m_pvpflag = false;
+		m_exp = 0;
+		m_cash = 0;
+		m_district = 0;
+		m_isAdmin = false;
+
+		//default RSI so bots render as a standard male avatar
+		m_rsi.reset(new RsiDataMale);
+		const byte defaultRsiValues[] = {0x00,0x0C,0x71,0x48,0x18,0x0C,0xE2,0x00,0x23,0x00,0xB0,0x00,0x40,0x00,0x00};
+		m_rsi->FromBytes(defaultRsiValues,sizeof(defaultRsiValues));
+	}
 
 	m_goId=0;
-    m_info=0;
-    m_isStealthed=false;
-	INFO_LOG(format("Player object for %1% constructed") % m_handle);
+	if (!isBot) {
+		INFO_LOG(format("Player object for %1% constructed") % m_handle);
+	}
 	testCount=0;
 	m_lastStore = getTime();
 	m_storeCntr = 0;
@@ -51,52 +77,8 @@ PlayerObject::PlayerObject( GameClient &parent,uint64 charUID ) :m_parent(parent
 	m_currMood=0;
 	m_emoteCounter=0;
 
-	m_abilitySystem.reset(new AbilitySystem(this));
-	m_abilitySystem->loadFromDB();
-
-	setOnlineStatus(true);
-}
-
-PlayerObject::PlayerObject( GameClient &parent, uint64 charUID, bool isBot ) :m_parent(parent),m_characterUID(charUID),m_spawnedInWorld(false),m_worldPopulated(false)
-{
-	m_goId=0;
-    m_info=0;
-    m_isStealthed=false;
-	m_handle = (format("Bot_%1%") % m_characterUID).str();
-	m_firstName = "Bot";
-	m_lastName = "Test";
-	m_background = "";
-	m_pos.ChangeCoords(0, 0, 0);
-	m_pos.rot = 0;
-	m_savedPos = m_pos;
-	m_healthC = 1000;
-	m_healthM = 1000;
-	m_innerStrC = 1000;
-	m_innerStrM = 1000;
-	m_lvl = 50;
-	m_prof = 0;
-	m_alignment = 1;
-	m_pvpflag = true;
-	m_exp = 0;
-	m_cash = 0;
-	m_district = 1;
-	m_isAdmin = false;
-	
-	m_rsi.reset(new RsiDataMale);
-	const byte defaultRsiValues[] = {0x00,0x0C,0x71,0x48,0x18,0x0C,0xE2,0x00,0x23,0x00,0xB0,0x00,0x40,0x00,0x00};
-	m_rsi->FromBytes(defaultRsiValues,sizeof(defaultRsiValues));
-
-	INFO_LOG(format("Bot Player object for %1% constructed") % m_handle);
-	testCount=0;
-	m_lastStore = getTime();
-	m_storeCntr = 0;
-	m_currAnimation=0;
-	m_currMood=0;
-	m_emoteCounter=0;
-
-	m_abilitySystem.reset(new AbilitySystem(this));
-	
-	setOnlineStatus(true);
+	if (!isBot)
+		setOnlineStatus(true); //bots are memory-only, never touch the DB
 }
 
 void PlayerObject::loadFromDB( bool updatePos )
@@ -218,15 +200,16 @@ void PlayerObject::loadFromDB( bool updatePos )
 void PlayerObject::initGoId(uint32 theGoId)
 {
 	m_goId = theGoId;
-	INFO_LOG(format("Player name %1% has goid %2%") % m_handle % m_goId);
-	m_parent.QueueCommand(make_shared<SystemChatMsg>((format("Your Object Id is %1%")%m_goId).str()));
-	sGame.AnnounceCommand(&m_parent,make_shared<SystemChatMsg>((format("Player %1% connected with object id %2%")%m_handle%m_goId).str()));
+	if (!m_parent.isBot())
+	{
+		INFO_LOG(format("Player name %1% has goid %2%") % m_handle % m_goId);
+		m_parent.QueueCommand(make_shared<SystemChatMsg>((format("Your Object Id is %1%")%m_goId).str()));
+		sGame.AnnounceCommand(&m_parent,make_shared<SystemChatMsg>((format("Player %1% connected with object id %2%")%m_handle%m_goId).str()));
+	}
 }
 
 PlayerObject::~PlayerObject()
 {
-	sCombatSys.RemoveCombatant(m_goId);
-
 	if (m_spawnedInWorld == true)
 	{
 		//commit position changes
@@ -249,6 +232,73 @@ uint8 PlayerObject::getRsiData( byte* outputBuf, size_t maxBufLen ) const
 	return m_rsi->ToBytes(outputBuf,maxBufLen);
 }
 
+void PlayerObject::setRsiHex(const std::string& hexStr)
+{
+	if (hexStr.empty()) return;
+
+	std::vector<byte> bytes;
+	for (size_t i = 0; i + 1 < hexStr.size(); i += 2) {
+		std::string byteString = hexStr.substr(i, 2);
+		try {
+			byte b = (byte)std::stoul(byteString, nullptr, 16);
+			bytes.push_back(b);
+		} catch (...) {
+			break;
+		}
+	}
+
+	if (bytes.empty()) return;
+
+	if (bytes.size() >= 15) {
+		if (!m_rsi) {
+			m_rsi.reset(new RsiDataMale);
+		}
+		m_rsi->FromBytes(&bytes[0], bytes.size());
+		return;
+	}
+
+	uint8 sex = (bytes[0] & 0x01);
+	std::string nameLower = m_handle;
+	std::transform(nameLower.begin(), nameLower.end(), nameLower.begin(), ::tolower);
+	if (nameLower.find("madonna") != std::string::npos ||
+		nameLower.find("girl") != std::string::npos ||
+		nameLower.find("woman") != std::string::npos ||
+		nameLower.find("female") != std::string::npos ||
+		nameLower.find("lady") != std::string::npos ||
+		nameLower.find("sister") != std::string::npos)
+	{
+		sex = 1;
+	}
+
+	if (sex == 0)
+		m_rsi.reset(new RsiDataMale);
+	else
+		m_rsi.reset(new RsiDataFemale);
+
+	RsiData& rsi = *m_rsi;
+	rsi["Sex"] = sex;
+	rsi["Body"] = (bytes[0] >> 1) & 0x03;
+	rsi["Hat"] = (bytes.size() > 1) ? (bytes[1] & 0x3F) : 0;
+	rsi["Face"] = (bytes.size() > 2) ? (bytes[2] & 0x1F) : (uint8)(m_handle.length() % 20);
+	rsi["Shirt"] = (bytes.size() > 3) ? (bytes[3] & 0x1F) : (uint8)((bytes[0] * 7) % 25);
+	rsi["Coat"] = (bytes[0] % 15);
+	rsi["Pants"] = ((bytes.size() > 1 ? bytes[1] : 3) % 20);
+	rsi["Shoes"] = ((bytes.size() > 2 ? bytes[2] : 5) % 15);
+	rsi["Gloves"] = (bytes[0] % 10);
+	rsi["Glasses"] = (nameLower.find("agent") != std::string::npos) ? 1 : ((bytes[0] % 8));
+	rsi["Hair"] = (bytes.size() > 1 ? (bytes[1] >> 2) % 20 : 2);
+	rsi["FacialDetail"] = (bytes[0] % 10);
+	rsi["ShirtColor"] = (nameLower.find("agent") != std::string::npos) ? 1 : ((bytes[0] * 3) % 40);
+	rsi["PantsColor"] = (nameLower.find("agent") != std::string::npos) ? 1 : ((bytes[0] * 5) % 30);
+	rsi["CoatColor"] = (nameLower.find("agent") != std::string::npos) ? 1 : ((bytes[0] * 2) % 30);
+	rsi["ShoeColor"] = 1;
+	rsi["GlassesColor"] = 1;
+	rsi["HairColor"] = (bytes.size() > 2 ? (bytes[2] % 12) : 1);
+	rsi["SkinTone"] = (bytes.size() > 3 ? (bytes[3] % 10) : 2);
+	rsi["Tattoo"] = (bytes[0] % 8);
+	rsi["FacialDetailColor"] = 0;
+}
+
 void PlayerObject::checkAndStore()
 {
 	if (getTime() - m_lastStore > 10) //every 10 seconds
@@ -260,16 +310,17 @@ void PlayerObject::checkAndStore()
 
 void PlayerObject::saveDataToDB()
 {
+	if (m_characterUID >= 9000000) //virtual bots are memory-only
+		return;
+
 	if (m_savedPos == m_pos)
 		return setOnlineStatus(true);
 
-	bool storeSuccess = sDatabase.Execute(format("UPDATE `characters` SET `x` = '%1%', `y` = '%2%', `z` = '%3%', `rot` = '%4%', `healthC` = '%5%', `innerStrC` = '%6%', `lastOnline` = NOW() WHERE `charId` = '%7%'")
+	bool storeSuccess = sDatabase.Execute(format("UPDATE `characters` SET `x` = '%1%', `y` = '%2%', `z` = '%3%', `rot` = '%4%', `lastOnline` = NOW() WHERE `charId` = '%5%'")
 		% m_pos.x
 		% m_pos.y
 		% m_pos.z
 		% m_pos.rot
-		% m_healthC
-		% m_innerStrC
 		% m_characterUID );
 
 	if (!storeSuccess)
@@ -288,6 +339,9 @@ void PlayerObject::saveDataToDB()
 
 void PlayerObject::setOnlineStatus( bool isOnline )
 {
+	if (m_characterUID >= 9000000) //virtual bots are memory-only
+		return;
+
 	sDatabase.Execute(format("UPDATE `characters` SET `lastOnline` = NOW(), `isOnline` = '%1%' WHERE `charId` = '%2%'")
 		% int(isOnline)
 		% m_characterUID );
@@ -295,8 +349,6 @@ void PlayerObject::setOnlineStatus( bool isOnline )
 
 void PlayerObject::InitializeWorld()
 {
-	if (m_parent.isBot()) return;
-	
 	m_parent.QueueCommand(make_shared<LoadWorldCmd>((LoadWorldCmd::mxoLocation)m_district,"Massive"));
 	m_parent.QueueCommand(make_shared<SetExperienceCmd>(m_exp));
 	m_parent.QueueCommand(make_shared<SetInformationCmd>(m_cash));
@@ -330,18 +382,26 @@ void PlayerObject::UpdateAppearance()
 
 void PlayerObject::SpawnSelf()
 {
-	if (m_spawnedInWorld == false)
-	{
-		shared_ptr<PlayerSpawnMsg> dMsg = make_shared<PlayerSpawnMsg>(m_goId);
-		m_parent.QueueState(dMsg,false,boost::bind(&PlayerObject::PopulateWorld,this));
-		sGame.AnnounceStateUpdate(&m_parent,dMsg);
-		m_spawnedInWorld=true;
+	try {
+		if (m_spawnedInWorld == false)
+		{
+			shared_ptr<PlayerSpawnMsg> dMsg = make_shared<PlayerSpawnMsg>(m_goId);
+			m_parent.QueueState(dMsg,false,boost::bind(&PlayerObject::PopulateWorld,this));
+			sGame.AnnounceStateUpdate(&m_parent,dMsg);
+			m_spawnedInWorld=true;
+		}
+	} catch (std::exception& e) {
+		std::cout << "DEBUG: SpawnSelf EXCEPTION: " << e.what() << std::endl;
+		throw;
+	} catch (...) {
+		std::cout << "DEBUG: SpawnSelf UNKNOWN EXCEPTION" << std::endl;
+		throw;
 	}
 }
 
 void PlayerObject::PopulateWorld()
 {
-	if (m_worldPopulated || m_parent.isBot())
+	if (m_worldPopulated)
 		return;
 
 	//we need to get all other world entities and populate our client with it
@@ -351,16 +411,22 @@ void PlayerObject::PopulateWorld()
 		PlayerObject *theOtherObject = NULL;
 		try
 		{
-			theOtherObject = sObjMgr.getGOPtr(*it);;
+			theOtherObject = sObjMgr.getGOPtr(*it);
 		}
-		catch (ObjectMgr::ObjectNotAvailable)
+		catch (...)
 		{
 			continue;
 		}
 
 		//we self spawned already, so no
-		if (theOtherObject!=this)
+		if (theOtherObject != NULL && theOtherObject != this)
 		{
+			//interest management: with 14k+ NPCs in the world, a connecting
+			//client only gets what is near its spawn point. 30000 units = 300m.
+			//TODO(Phase 4): dynamic spawn-in/out streaming as players move.
+			if (m_pos.Distance2DSq(theOtherObject->getPosition()) > 30000.0*30000.0)
+				continue;
+
 			vector<msgBaseClassPtr> objectsPackets = theOtherObject->getCurrentStatePackets();
 			for (vector<msgBaseClassPtr>::iterator it2=objectsPackets.begin();it2!=objectsPackets.end();++it2)
 			{
@@ -539,12 +605,6 @@ void PlayerObject::HandleCommand( ByteBuffer &srcCmd )
 		m_RPCbyte[0x34] = &PlayerObject::RPC_HandleStartAnimtion;
 		m_RPCbyte[0x35] = &PlayerObject::RPC_HandleChangeMood;
 		m_RPCbyte[0x30] = &PlayerObject::RPC_HandlePerformEmote;
-		//combat (opcodes from the CR2 protocol map)
-		m_RPCbyte[0x40] = &PlayerObject::RPC_HandleCloseCombatRequest;
-		m_RPCbyte[0x41] = &PlayerObject::RPC_HandleRangeCombatRequest;
-		m_RPCbyte[0x42] = &PlayerObject::RPC_HandleChangeTactic;
-		m_RPCbyte[0x44] = &PlayerObject::RPC_HandleLeaveCombat;
-		m_RPCbyte[0x50] = &PlayerObject::RPC_HandleDuelRequest;
 	}
 	if (!m_RPCshort.size())
 	{
@@ -564,37 +624,6 @@ void PlayerObject::HandleCommand( ByteBuffer &srcCmd )
 		m_RPCshort[0x8151] = &PlayerObject::RPC_HandleObjectSelected;
 		m_RPCshort[0x80fc] = &PlayerObject::RPC_HandleJackoutRequest;
 		m_RPCshort[0x80fe] = &PlayerObject::RPC_HandleJackoutFinished;
-		//combat
-		m_RPCshort[0x80b9] = &PlayerObject::RPC_HandleAbilityUse;
-		m_RPCshort[0x80ae] = &PlayerObject::RPC_HandleAbilityLoad;
-
-        // Inventory & Items
-        m_RPCshort[0x80de] = &PlayerObject::RPC_HandleItemMountRSI;
-        m_RPCshort[0x80df] = &PlayerObject::RPC_HandleItemUnmountRSI;
-        m_RPCshort[0x80e0] = &PlayerObject::RPC_HandleItemMoveSlot;
-
-        // Missions
-        m_RPCshort[0x80f0] = &PlayerObject::RPC_HandleMissionRequest;
-        m_RPCshort[0x80f1] = &PlayerObject::RPC_HandleMissionInfo;
-        m_RPCshort[0x80f2] = &PlayerObject::RPC_HandleMissionAccept;
-        m_RPCshort[0x80f3] = &PlayerObject::RPC_HandleMissionAbort;
-
-        // Factions & Crews
-        m_RPCshort[0x80f8] = &PlayerObject::RPC_HandlePartyLeave;
-        m_RPCshort[0x80fc] = &PlayerObject::RPC_HandleMissionInvite;
-        m_RPCshort[0x8101] = &PlayerObject::RPC_HandleFactionInfo;
-
-        // Economy & Vendors
-        m_RPCshort[0x80e8] = &PlayerObject::RPC_HandleVendorBuy;
-        m_RPCshort[0x80ec] = &PlayerObject::RPC_HandleMarketOpen;
-        m_RPCshort[0x80f0] = &PlayerObject::RPC_HandleMarketListItems;
-
-        // Abilities & Memory
-        m_RPCshort[0x80bd] = &PlayerObject::RPC_HandleUpgradeAbility;
-        m_RPCshort[0x80c5] = &PlayerObject::RPC_HandleMemoryChangeTactic;
-
-        // Crafting
-        m_RPCshort[0x8130] = &PlayerObject::RPC_HandleCraftRequest; // Estimated opcode for crafting request
 	}
 
 	uint8 firstByte = srcCmd.read<uint8>();
@@ -684,6 +713,15 @@ void PlayerObject::Update()
 {
 	if (m_spawnedInWorld)
 	{
+		if (m_timeDilation != 1.0f && getMSTime() >= m_timeDilationExpires) {
+			m_timeDilation = 1.0f;
+		}
+
+		if (m_deathDelayMS > 0 && getMSTime() >= m_deathDelayMS) {
+				m_deathDelayMS = 0;
+				die(m_deathDelayKillerId);
+		}
+
 		//flush any updates that queued up while we were spawning
 		while(m_sendAfterSpawn.size())
 		{
@@ -693,73 +731,39 @@ void PlayerObject::Update()
 
 		checkAndStore();
 
-		//tick status effects (DoTs, HoTs, viruses) from the IGO base
-		IGO::Update();
-
-		//health and inner strength regeneration
-		if (!m_isDead && !m_inCombat)
+		//fire events that occurred safely with local buffer under m_eventMutex
+		std::vector<eventFunc> readyCallbacks;
 		{
-			float currTime = getFloatTime();
-			if (currTime - m_lastRegenTime >= 2.0f)
+			std::lock_guard<std::mutex> lock(m_eventMutex);
+			for(list<eventStruct>::iterator it=m_events.begin();it!=m_events.end();)
 			{
-				m_lastRegenTime = currTime;
-				bool healthChanged = false;
-
-				if (m_healthC < m_healthM)
+				if (getFloatTime() >= it->fireTime)
 				{
-					uint32 regen = uint32(m_healthM) / 20; //5% per tick
-					if (regen < 1) regen = 1;
-					uint32 newHealth = uint32(m_healthC) + regen;
-					if (newHealth > m_healthM)
-						newHealth = m_healthM;
-					m_healthC = uint16(newHealth);
-					healthChanged = true;
+					readyCallbacks.push_back(it->func);
+					it=m_events.erase(it);
 				}
-
-				if (m_innerStrC < m_innerStrM)
+				else
 				{
-					uint32 regen = uint32(m_innerStrM) / 10; //10% per tick
-					if (regen < 1) regen = 1;
-					uint32 newIS = uint32(m_innerStrC) + regen;
-					if (newIS > m_innerStrM)
-						newIS = m_innerStrM;
-					m_innerStrC = uint16(newIS);
+					++it;
 				}
-
-				if (healthChanged)
-					sendHealthUpdate();
-				else if (m_innerStrC != m_innerStrM)
-					sendVitals();
 			}
 		}
-		else
+		for(auto& cb : readyCallbacks)
 		{
-			m_lastRegenTime = getFloatTime();
-		}
-
-		//fire events that occurred
-		for(list<eventStruct>::iterator it=m_events.begin();it!=m_events.end();)
-		{
-			if (getFloatTime() >= it->fireTime)
-			{
-				it->func();
-				it=m_events.erase(it);
-			}
-			else
-			{
-				++it;
-			}
+			cb();
 		}
 	}
 }
 
 void PlayerObject::addEvent( eventType type, eventFunc func, float activationTime )
 {
+	std::lock_guard<std::mutex> lock(m_eventMutex);
 	m_events.push_back(eventStruct(type,func,getFloatTime()+activationTime));
 }
 
 size_t PlayerObject::cancelEvents( eventType type )
 {
+	std::lock_guard<std::mutex> lock(m_eventMutex);
 	size_t cancelledEvents=0;
 	for(list<eventStruct>::iterator it=m_events.begin();it!=m_events.end();)
 	{
@@ -775,3 +779,78 @@ size_t PlayerObject::cancelEvents( eventType type )
 	}
 	return cancelledEvents;
 }
+
+// Added stub definitions
+void PlayerObject::PerformRebirth(void) { }
+bool PlayerObject::giveItem(unsigned int templateId)
+{
+    if (!m_inventorySystem) return false;
+    if (m_inventorySystem->getFirstFreeSlot() == 0) return false;
+    uint32 newGoId = sObjMgr.getNewObjectId();
+    shared_ptr<Item> newItem(new Item(newGoId, templateId));
+    if (m_inventorySystem->addItemAuto(newItem)) {
+        m_inventorySystem->saveToDB();
+        return true;
+    }
+    return false;
+}
+
+void PlayerObject::SendWaypoint(float x, float y, float z, const std::string& name) { }
+std::vector<std::shared_ptr<class Item>> PlayerObject::getEquippedWeapons() {
+    std::vector<std::shared_ptr<class Item>> weapons;
+	if (!m_inventorySystem) return weapons;
+	auto items = m_inventorySystem->getAllItems();
+	for (auto item : items) {
+		const ItemTemplate* tpl = sDataLoader.GetItemTemplate(item->getTemplateId());
+		if (tpl && tpl->type == ITEM_TYPE_WEAPON) {
+			weapons.push_back(item);
+		}
+	}
+	return weapons;
+}
+
+void PlayerObject::degradeEquippedWeapon(uint16 degradationAmount) {
+	auto weapons = getEquippedWeapons();
+	for (auto weapon : weapons) {
+		weapon->reduceDurability((float)degradationAmount);
+		if (weapon->getDurability() <= 0.0f) {
+			if (!getClient().isBot()) {
+				getClient().QueueState(std::make_shared<SystemChatMsg>("{c:FF0000}[SYSTEM] Your equipped weapon has broken due to low durability!{/c}"));
+			}
+		}
+	}
+}
+void PlayerObject::addInfo(uint64 amount) { m_cash += amount; }
+void PlayerObject::removeInfo(uint64 amount) { if(m_cash >= amount) m_cash -= amount; }
+void PlayerObject::addExp(uint64 amount) { m_exp += amount; }
+std::shared_ptr<class InventorySystem> PlayerObject::getInventory() { return m_inventorySystem; }
+
+void PlayerObject::ApplyTimeDilation(float amount, unsigned int durationMs) {
+    m_timeDilation = amount;
+    m_timeDilationExpires = getMSTime() + durationMs;
+}
+
+unsigned short PlayerObject::getEvasion() const {
+    unsigned short evasion = 10 + (m_lvl * 2); // Base evasion
+    auto items = m_inventorySystem->getAllItems();
+    for (auto item : items) {
+        const ItemTemplate* tpl = sDataLoader.GetItemTemplate(item->getTemplateId());
+        if (tpl && tpl->type == ITEM_TYPE_CLOTHING) {
+            evasion += tpl->bonusEvasion;
+        }
+    }
+    return evasion;
+}
+
+bool PlayerObject::isDualWielding() const {
+    auto weapons = const_cast<PlayerObject*>(this)->getEquippedWeapons();
+    if (weapons.size() >= 2) return true;
+    if (weapons.size() == 1) {
+        const ItemTemplate* tpl = sDataLoader.GetItemTemplate(weapons[0]->getTemplateId());
+        if (tpl && tpl->type == ITEM_TYPE_WEAPON) {
+            return tpl->isDualWield;
+        }
+    }
+    return false;
+}
+

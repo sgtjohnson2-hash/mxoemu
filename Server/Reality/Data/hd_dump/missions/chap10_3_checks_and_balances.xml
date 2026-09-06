@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<mission id="11030" faction="None">
+  <data title="Chapter 10.3: Checks and Balances" exp="7000" info="3500">
+    <objective1 command="TALK" idNpc="9620" description="Meet with The Oracle" dial="There is an equation that balances the Matrix. Halborn threatens that balance. You must restore it." />
+    <objective2 command="GIVE" idNpc="9621" description="Extract the Balancing Algorithm" dial="The code is encrypted. Defend the node while it downloads." />
+    <objective3 command="DEFEAT" idNpc="9622" description="Defend against the Agents" dial="You are disrupting the core system. Cease immediately." spawnAmbush="true" />
+    <objective4 command="DEFEAT" idNpc="9623" description="Defend against Exiles" dial="We thrive in the chaos! Stop the download!" spawnAmbush="true" />
+    <objective5 command="TALK" idNpc="9624" description="Upload to the Source" dial="The algorithm is ready. The balance will be restored." />
+    <objective6 command="DEFEAT" idNpc="9625" description="Defeat Halborn's Avatar" dial="You dare interfere with the Architects of this reality?" />
+    <objective7 command="TALK" idNpc="9620" description="Return to The Oracle" dial="The balance is held... for now. But fractures remain." />
+  </data>
+</mission>

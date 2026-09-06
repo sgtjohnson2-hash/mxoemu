@@ -35,6 +35,7 @@
 #include "MessageTypes.h"
 #include "Log.h"
 #include "Timer.h"
+#include <atomic>
 #include <Sockets/Ipv4Address.h>
 
 class GameClient
@@ -63,6 +64,9 @@ public:
 	uint32 GetWorldCharId() { return m_charWorldId; }
 	uint32 GetPlayerGoId() const { return m_playerGoId; }
 	void SetPlayerGoId(uint32 id) { m_playerGoId = id; }
+public:
+	uint32 m_instanceId = 0; // Item 104: Instanced Mission Interiors
+    std::atomic<uint64_t> m_spatialCellHash = 0xFFFFFFFFFFFFFFFF;
 	void HandlePacket(const char *pData, size_t nLength);
 	void HandleEncrypted(ByteBuffer &srcData);
 	void HandleOther(ByteBuffer &otherData);
@@ -72,6 +76,7 @@ public:
 
 	void QueueState(msgBaseClassPtr theData,bool immediateOnly=false,packetAckFunc callFunc=0)
 	{
+		if (isBot() && !g_sniffPackets) return;
 		msgBaseClassPtr &realPtr = theData;
 		shared_ptr<ObjectUpdateMsg> amIObjectUpdate = dynamic_pointer_cast<ObjectUpdateMsg>(realPtr);
 		if (amIObjectUpdate != NULL)
@@ -81,6 +86,7 @@ public:
 	}
 	void QueueCommand(msgBaseClassPtr theCmd,packetAckFunc callFunc=0)
 	{
+		if (isBot() && !g_sniffPackets) return;
 		msgBaseClassPtr &realPtr = theCmd;
 		shared_ptr<ObjectUpdateMsg> amIObjectUpdate = dynamic_pointer_cast<ObjectUpdateMsg>(realPtr);
 		if (amIObjectUpdate != NULL)
@@ -89,7 +95,8 @@ public:
 		m_queuedCommands.push_back(queuedMsg(m_serverCommandsSent,theCmd,callFunc));
 		m_serverCommandsSent++;
 	}
-	void FlushQueue(bool alsoResend=false);
+	virtual void FlushQueue(bool alsoResend=false);
+	void ClearQueues();
 	void CheckAndResend();
 	string GetNetStats();
 private:
@@ -295,23 +302,23 @@ private:
 	float m_lastSimTimeUpdate;
 	//RCC end
 
-	bool m_encryptionInitialized;
-	uint64 m_characterUID;
-	uint32 m_charWorldId;
-	uint32 m_sessionId;
+	bool m_encryptionInitialized = false;
+	uint64 m_characterUID = 0;
+	uint32 m_charWorldId = 0;
+	uint32 m_sessionId = 0;
 
 	// client states
-	bool m_validClient;
+	bool m_validClient = true;
 
 	// Master Sock handle, client's address structure, last received packet
-	class GameSocket *m_sock;
+	class GameSocket *m_sock = nullptr;
 	Ipv4Address m_address;
-	uint32 m_lastActivity;
-	uint32 m_lastPacketReceivedMS;
-	uint32 m_lastServerMS;
+	uint32 m_lastActivity = 0;
+	uint32 m_lastPacketReceivedMS = 0;
+	uint32 m_lastServerMS = 0;
 
-	uint32 m_playerGoId;
-	class MarginSocket *m_marginConn;
+	uint32 m_playerGoId = 0;
+	class MarginSocket *m_marginConn = nullptr;
 	TwofishCryptEngine m_tfEngine;
 };
 

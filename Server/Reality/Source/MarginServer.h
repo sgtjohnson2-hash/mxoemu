@@ -27,6 +27,7 @@
 #define MXOSIM_MARGINSERVER_H
 
 #include "Singleton.h"
+#include <mutex>
 #include "MarginHandler.h"
 #include "MarginSocket.h"
 #include <Sockets/ListenSocket.h>
@@ -42,7 +43,9 @@ public:
 
 	vector<class MarginSocket*> GetSocketsForCharacterUID(uint64 charUID);
 	class MarginSocket *GetSocketBySessionId(uint32 sessionId);
+	void ForceDisconnectSession(uint32 sessionId);
 private:
+	std::mutex m_marginMutex;
 	MarginHandler marginSocketHandler;
 	typedef ListenSocket<MarginSocket> MarginListenSocket;
 	MarginListenSocket *listenSocketInst;

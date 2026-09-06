@@ -1,0 +1,11 @@
+<?xml version='1.0' encoding='utf-8'?>
+<mission id="10320" faction="None">
+  <data title="Chapter 3.2: The General's Plot" exp="900" info="500">
+    <objective1 command="GIVE" idNpc="9997" description="Hack the terminal to open the gate" dial="Access granted." item="1001" isTimed="true" timeLimitSeconds="300" />
+    <objective2 command="TALK" idNpc="9140" description="Meet Agent Pace" dial="A program known as The General has gone rogue. He commands a faction of Exiles and poses a threat to the system." />
+    <objective3 command="DEFEAT" idNpc="9999" description="Fight through the ambush" dial="They knew we were coming! Defend yourself!" spawnAmbush="true" />
+    <objective4 command="DEFEAT" idNpc="9141" description="Defeat the Exile Scout" dial="The General sees all. You cannot stop the inevitable!" />
+    <objective5 command="GIVE" idNpc="9997" description="Hack the terminal to open the gate" dial="Access granted." item="1001" isTimed="true" timeLimitSeconds="300" />
+    <objective6 command="TALK" idNpc="9140" description="Return to Agent Pace" dial="We have his location. Prepare for an assault." />
+  </data>
+</mission>

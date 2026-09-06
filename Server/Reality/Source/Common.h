@@ -26,6 +26,9 @@
 #ifndef MXOSIM_COMMON_H
 #define MXOSIM_COMMON_H
 
+#include <string>
+#include <memory>
+
 // current platform and compiler
 #define PLATFORM_WIN32 0
 #define PLATFORM_UNIX  1
@@ -298,6 +301,17 @@ extern Database* Database_Main;
 #endif
 
 #define sDatabase (*Database_Main)
+
+enum mxoFaction : uint8_t {
+    FACTION_ZION = 1,
+    FACTION_MACHINES = 2,
+    FACTION_MEROVINGIAN = 3,
+    FACTION_EXILE = 4,
+    FACTION_NONE = 0
+};
+
+extern bool g_sniffPackets;
+extern bool g_testProtocol;
 
 #endif
 

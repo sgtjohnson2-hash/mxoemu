@@ -1,0 +1,10 @@
+<?xml version='1.0' encoding='utf-8'?>
+<mission id="10130" faction="None">
+  <data title="Chapter 1.3: The Assassin Strikes" exp="1000" info="500" nextSuccess="10131" nextFail="10132">
+    <objective1 command="GIVE" idNpc="9997" description="Hack the terminal to open the gate" dial="Access granted." item="1001" isTimed="true" timeLimitSeconds="300" />
+    <objective2 command="TALK" idNpc="9070" description="Emergency Broadcast" dial="Red alert! Morpheus has been ambushed in a back alley by a rogue program! We need everyone there now!" />
+    <objective3 command="DEFEAT" idNpc="9071" description="Defeat the Assassin's Swarm" dial="BZZZ... The target is locked. You cannot save him." />
+    <objective4 command="DEFEAT" idNpc="9996" description="Survive the Exile hit squad" dial="The Frenchman sends his regards." spawnAmbush="true" />
+    <objective5 command="TALK" idNpc="9072" description="Reach the Alleyway" dial="It's too late... The Assassin got him. Morpheus... he's gone." branch="success:10131,fail:10132" />
+  </data>
+</mission>

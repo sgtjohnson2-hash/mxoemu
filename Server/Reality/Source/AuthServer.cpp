@@ -28,7 +28,9 @@
 #include "AuthSocket.h"
 #include "Log.h"
 #include "Config.h"
-#include "Database/DatabaseEnv.h"
+#include "Database/Database.h"
+#include "Database/PreparedStatement.h"
+#include "AuthServer.h"
 #include "Util.h"
 
 initialiseSingleton( AuthServer );
@@ -352,6 +354,20 @@ string AuthServer::Decrypt(string input)
 	return output;
 }
 
+std::future<string> AuthServer::EncryptAsync(string input)
+{
+	return std::async(std::launch::async, [this, input]() {
+		return this->Encrypt(input);
+	});
+}
+
+std::future<string> AuthServer::DecryptAsync(string input)
+{
+	return std::async(std::launch::async, [this, input]() {
+		return this->Decrypt(input);
+	});
+}
+
 ByteBuffer AuthServer::SignWith1024Bit( byte *message,size_t messageLen )
 {
 	//generate signature
@@ -474,7 +490,9 @@ string AuthServer::GenerateSalt(uint32 length)
 
 uint32 AuthServer::getAccountIdForUsername( const string &username )
 {
-	scoped_ptr<QueryResult> query(sDatabase.Query(format("SELECT `userId` FROM `users` WHERE `username` = '%1%'") % sDatabase.EscapeString(username)));
+	PreparedStatement stmt("SELECT `userId` FROM `users` WHERE `username` = ?0");
+	stmt.SetString(0, username);
+	scoped_ptr<QueryResult> query(sDatabase.QueryPrepared(&stmt));
 	if (query == NULL || query->GetRowCount() == 0)
 		return 0;
 
@@ -489,10 +507,11 @@ bool AuthServer::CreateAccount( const string& username,const string& password )
 		string salt = GenerateSalt(8);
 		string passwordHash = HashPassword(salt,password);
 
-		return sDatabase.Execute(format("INSERT INTO `users` SET `username`='%1%', `passwordSalt`='%2%', `passwordHash`='%3%', `timeCreated`=UNIX_TIMESTAMP()")
-			% sDatabase.EscapeString(username)
-			% sDatabase.EscapeString(salt)
-			% sDatabase.EscapeString(passwordHash) );
+		PreparedStatement stmt("INSERT INTO `users` SET `username`=?0, `passwordSalt`=?1, `passwordHash`=?2, `timeCreated`=UNIX_TIMESTAMP()");
+		stmt.SetString(0, username);
+		stmt.SetString(1, salt);
+		stmt.SetString(2, passwordHash);
+		return sDatabase.ExecutePrepared(&stmt);
 	}
 	return false;
 }
@@ -506,15 +525,18 @@ bool AuthServer::ChangePassword( const string& username,const string& newPass )
 	string salt = GenerateSalt(8);
 	string passwordHash = HashPassword(salt,newPass);
 
-	return sDatabase.Execute(format("UPDATE `users` SET `passwordSalt`='%1%', `passwordHash`='%2%' WHERE `userId`='%3%' LIMIT 1")
-		% sDatabase.EscapeString(salt)
-		% sDatabase.EscapeString(passwordHash)
-		% accountId );
+	PreparedStatement stmt("UPDATE `users` SET `passwordSalt`=?0, `passwordHash`=?1 WHERE `userId`=?2 LIMIT 1");
+	stmt.SetString(0, salt);
+	stmt.SetString(1, passwordHash);
+	stmt.SetUInt32(2, accountId);
+	return sDatabase.ExecutePrepared(&stmt);
 }
 
 uint16 AuthServer::getWorldIdForName( const string &worldName )
 {
-	scoped_ptr<QueryResult> query(sDatabase.Query(format("SELECT `worldId` FROM `worlds` WHERE `name` = '%1%'") % sDatabase.EscapeString(worldName)));
+	PreparedStatement stmt("SELECT `worldId` FROM `worlds` WHERE `name` = ?0");
+	stmt.SetString(0, worldName);
+	scoped_ptr<QueryResult> query(sDatabase.QueryPrepared(&stmt));
 	if (query == NULL || query->GetRowCount() == 0)
 		return 0;
 
@@ -522,17 +544,35 @@ uint16 AuthServer::getWorldIdForName( const string &worldName )
 	return field[0].GetUInt16();
 }
 
+string AuthServer::getWorldNameForId( uint32 worldId )
+{
+	PreparedStatement stmt("SELECT `name` FROM `worlds` WHERE `worldId` = ?0");
+	stmt.SetUInt32(0, worldId);
+	scoped_ptr<QueryResult> query(sDatabase.QueryPrepared(&stmt));
+	if (query == NULL || query->GetRowCount() == 0)
+		return "";
+
+	Field *field = query->Fetch();
+	return field[0].GetString();
+}
+
 bool AuthServer::CreateWorld( const string& worldName )
 {
 	if (getWorldIdForName(worldName) == 0)
-		return sDatabase.Execute(format("INSERT INTO `worlds` SET `name`='%1%'") % sDatabase.EscapeString(worldName) );
+	{
+		PreparedStatement stmt("INSERT INTO `worlds` SET `name`=?0");
+		stmt.SetString(0, worldName);
+		return sDatabase.ExecutePrepared(&stmt);
+	}
 
 	return false;
 }
 
 uint64 AuthServer::getCharIdForHandle( const string &handle )
 {
-	scoped_ptr<QueryResult> query(sDatabase.Query(format("SELECT `charId` FROM `characters` WHERE `handle` = '%1%'") % sDatabase.EscapeString(handle)));
+	PreparedStatement stmt("SELECT `charId` FROM `characters` WHERE `handle` = ?0");
+	stmt.SetString(0, handle);
+	scoped_ptr<QueryResult> query(sDatabase.QueryPrepared(&stmt));
 	if (query == NULL || query->GetRowCount() == 0)
 		return 0;
 
@@ -550,9 +590,11 @@ bool AuthServer::CreateCharacter( const string& worldName, const string& userNam
 	if (getCharIdForHandle(charHandle) != 0)
 		return false;
 
-	return sDatabase.Execute(format("INSERT INTO `characters` SET `userId`='%1%', `worldId`='%2%', `handle`='%3%', `firstName`='%4%', `lastName`='%5%'") 
-		% userId % worldId
-		% sDatabase.EscapeString(charHandle)
-		% sDatabase.EscapeString(firstName)
-		% sDatabase.EscapeString(lastName) );
+	PreparedStatement stmt("INSERT INTO `characters` SET `userId`=?0, `worldId`=?1, `handle`=?2, `firstName`=?3, `lastName`=?4");
+	stmt.SetUInt32(0, userId);
+	stmt.SetUInt32(1, worldId);
+	stmt.SetString(2, charHandle);
+	stmt.SetString(3, firstName);
+	stmt.SetString(4, lastName);
+	return sDatabase.ExecutePrepared(&stmt);
 }
