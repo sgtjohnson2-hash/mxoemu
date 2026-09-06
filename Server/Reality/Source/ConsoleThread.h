@@ -27,11 +27,14 @@
 #define MXOSIM_CONSOLETHREAD_H
 
 #include "Threading/ThreadStarter.h"
+#include <string>
 
 class ConsoleThread : public ThreadContext
 {
 public:
 	bool run();
+	static void ProcessLine(const std::string& fullLine);
 };
 
 #endif
+
