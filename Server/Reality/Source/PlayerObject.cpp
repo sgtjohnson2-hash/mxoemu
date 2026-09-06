@@ -36,6 +36,7 @@
 #include "InventorySystem.h"
 #include "Item.h"
 #include "ObjectMgr.h"
+#include "SpatialGrid.h"
 #include <boost/algorithm/string.hpp>
 
 PlayerObject::PlayerObject( GameClient &parent,uint64 charUID, bool isBot ) :m_parent(parent),m_characterUID(charUID),m_spawnedInWorld(false),m_worldPopulated(false)
@@ -404,29 +405,18 @@ void PlayerObject::PopulateWorld()
 	if (m_worldPopulated)
 		return;
 
-	//we need to get all other world entities and populate our client with it
-	vector<uint32> allWorldObjects = sObjMgr.getAllGOIds();
-	for (vector<uint32>::iterator it=allWorldObjects.begin();it!=allWorldObjects.end();++it)
+	// Dynamic Area-of-Interest (AoI) Streaming: query SpatialGrid within 250m for initial world population
+	auto nearbyClients = sSpatialGrid.GetClientsInAoI(m_pos.x, m_pos.z, 25000.0f);
+	for (GameClient* client : nearbyClients)
 	{
-		PlayerObject *theOtherObject = NULL;
-		try
-		{
-			theOtherObject = sObjMgr.getGOPtr(*it);
-		}
-		catch (...)
-		{
-			continue;
-		}
+		if (!client || client == &m_parent) continue;
+		uint32 otherGoId = client->GetPlayerGoId();
+		if (otherGoId == 0 || otherGoId == m_goId) continue;
 
-		//we self spawned already, so no
-		if (theOtherObject != NULL && theOtherObject != this)
+		PlayerObject* theOtherObject = sObjMgr.getGOPtrSafe(otherGoId);
+		if (theOtherObject != NULL && theOtherObject != this && !theOtherObject->isDead())
 		{
-			//interest management: with 14k+ NPCs in the world, a connecting
-			//client only gets what is near its spawn point. 30000 units = 300m.
-			//TODO(Phase 4): dynamic spawn-in/out streaming as players move.
-			if (m_pos.Distance2DSq(theOtherObject->getPosition()) > 30000.0*30000.0)
-				continue;
-
+			m_knownEntities.insert(otherGoId);
 			vector<msgBaseClassPtr> objectsPackets = theOtherObject->getCurrentStatePackets();
 			for (vector<msgBaseClassPtr>::iterator it2=objectsPackets.begin();it2!=objectsPackets.end();++it2)
 			{
@@ -448,6 +438,71 @@ void PlayerObject::PopulateWorld()
 			m_sendAfterSpawn.push(*it);
 	}
 	m_worldPopulated=true;
+}
+
+void PlayerObject::UpdateAoIStreaming()
+{
+	uint32 now = getMSTime();
+	if (now - m_lastAoIUpdateMs < 250) // Throttle to ~4Hz to minimize CPU overhead
+		return;
+	m_lastAoIUpdateMs = now;
+
+	const float STREAM_IN_RADIUS = 25000.0f;     // 250m: dynamically stream in
+	const float STREAM_OUT_RADIUS_SQ = 30000.0f * 30000.0f; // 300m: cull with hysteresis
+
+	// 1. Stream in entities entering 250m
+	auto nearbyClients = sSpatialGrid.GetClientsInAoI(m_pos.x, m_pos.z, STREAM_IN_RADIUS);
+	for (GameClient* client : nearbyClients)
+	{
+		if (!client || client == &m_parent) continue;
+		uint32 otherGoId = client->GetPlayerGoId();
+		if (otherGoId == 0 || otherGoId == m_goId) continue;
+
+		if (m_knownEntities.find(otherGoId) == m_knownEntities.end())
+		{
+			PlayerObject* otherObj = sObjMgr.getGOPtrSafe(otherGoId);
+			if (otherObj && !otherObj->isDead())
+			{
+				m_knownEntities.insert(otherGoId);
+				vector<msgBaseClassPtr> statePackets = otherObj->getCurrentStatePackets();
+				for (const auto& pkt : statePackets)
+				{
+					m_parent.QueueState(pkt);
+				}
+			}
+		}
+	}
+
+	// 2. Stream out (cull) entities leaving 300m or dead
+	for (auto it = m_knownEntities.begin(); it != m_knownEntities.end(); )
+	{
+		uint32 knownGoId = *it;
+		PlayerObject* otherObj = sObjMgr.getGOPtrSafe(knownGoId);
+		bool cull = false;
+
+		if (!otherObj || otherObj->isDead())
+		{
+			cull = true;
+		}
+		else if (m_pos.Distance2DSq(otherObj->getPosition()) > STREAM_OUT_RADIUS_SQ)
+		{
+			cull = true;
+		}
+
+		if (cull)
+		{
+			try
+			{
+				m_parent.QueueState(make_shared<DeletePlayerMsg>(knownGoId));
+			}
+			catch (...) {}
+			it = m_knownEntities.erase(it);
+		}
+		else
+		{
+			++it;
+		}
+	}
 }
 
 void PlayerObject::HandleStateUpdate( ByteBuffer &srcData )
@@ -727,6 +782,12 @@ void PlayerObject::Update()
 		{
 			m_parent.QueueState(m_sendAfterSpawn.front());
 			m_sendAfterSpawn.pop();
+		}
+
+		// Dynamic Area-of-Interest (AoI) Streaming for human players
+		if (!m_parent.isBot() && m_worldPopulated)
+		{
+			UpdateAoIStreaming();
 		}
 
 		checkAndStore();

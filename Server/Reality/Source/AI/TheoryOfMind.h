@@ -3,6 +3,7 @@
 #include <unordered_map>
 #include <cmath>
 #include <algorithm>
+#include <ctime>
 
 struct alignas(64) TheoryOfMindState {
     std::string targetId;
@@ -13,19 +14,56 @@ struct alignas(64) TheoryOfMindState {
     float threatBeliefTargetToSelf = 0.1f;
     float trustP = 1.0f;
     float threatP = 1.0f;
+    uint32_t lastInteractionTime = 0;
 };
 
 class TheoryOfMindSolver {
+public:
+    static constexpr size_t MAX_TRACKED_TARGETS = 25;
+    static constexpr uint32_t INACTIVE_EVICTION_SECONDS = 300;
+
 private:
     std::unordered_map<std::string, TheoryOfMindState> m_states;
 
 public:
     TheoryOfMindSolver() = default;
 
-    TheoryOfMindState& GetState(const std::string& targetId) {
-        if (m_states.find(targetId) == m_states.end()) {
-            m_states[targetId] = TheoryOfMindState{targetId, 0.5f, 0.5f, 0.1f, 0.5f, 0.1f, 1.0f, 1.0f};
+    void EvictInactiveTargets(uint32_t maxAgeSeconds = INACTIVE_EVICTION_SECONDS) {
+        uint32_t now = static_cast<uint32_t>(time(nullptr));
+        for (auto it = m_states.begin(); it != m_states.end(); ) {
+            if (now - it->second.lastInteractionTime > maxAgeSeconds) {
+                it = m_states.erase(it);
+            } else {
+                ++it;
+            }
         }
+    }
+
+    TheoryOfMindState& GetState(const std::string& targetId) {
+        uint32_t now = static_cast<uint32_t>(time(nullptr));
+        auto it = m_states.find(targetId);
+        if (it != m_states.end()) {
+            it->second.lastInteractionTime = now;
+            return it->second;
+        }
+
+        // Evict inactive targets if capacity reached
+        if (m_states.size() >= MAX_TRACKED_TARGETS) {
+            EvictInactiveTargets();
+            if (m_states.size() >= MAX_TRACKED_TARGETS) {
+                auto oldestIt = m_states.begin();
+                for (auto sIt = m_states.begin(); sIt != m_states.end(); ++sIt) {
+                    if (sIt->second.lastInteractionTime < oldestIt->second.lastInteractionTime) {
+                        oldestIt = sIt;
+                    }
+                }
+                if (oldestIt != m_states.end()) {
+                    m_states.erase(oldestIt);
+                }
+            }
+        }
+
+        m_states[targetId] = TheoryOfMindState{targetId, 0.5f, 0.5f, 0.1f, 0.5f, 0.1f, 1.0f, 1.0f, now};
         return m_states[targetId];
     }
 

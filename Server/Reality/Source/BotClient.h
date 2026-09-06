@@ -42,6 +42,7 @@ public:
     virtual void CheckAndResend();
 
     float m_deltaSeconds = 0.033f;
+    float GetDeltaSeconds() const { return m_deltaSeconds; }
     void UpdateBotAI(float deltaSeconds);
     void RoamAndSwarm(float deltaSeconds = -1.0f);
     void AttackTarget(uint32 targetGoId);

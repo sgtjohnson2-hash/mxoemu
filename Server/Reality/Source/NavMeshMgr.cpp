@@ -34,16 +34,16 @@ bool NavMeshMgr::BuildFlatNavMesh()
     dtNavMeshCreateParams params;
     memset(&params, 0, sizeof(params));
 
-    // Create a massive flat square from -100000 to +100000
-    float bmin[3] = {-100000.0f, -100.0f, -100000.0f};
-    float bmax[3] = {100000.0f, 100.0f, 100000.0f};
+    // Create a massive flat quad covering full MegaCity coordinates
+    float bmin[3] = {-200000.0f, -2500.0f, -220000.0f};
+    float bmax[3] = {200000.0f, 6000.0f, 120000.0f};
     
-    // 4 vertices for a single quad
+    // 4 vertices for a single quad (cs=20, ch=10: X span 400000 / 20 = 20000, Z span 340000 / 20 = 17000, Y=0 -> 2500 / 10 = 250)
     unsigned short verts[12] = {
-        0, 0, 0,
-        10000, 0, 0,
-        10000, 0, 10000,
-        0, 0, 10000
+        0,     250, 0,
+        20000, 250, 0,
+        20000, 250, 17000,
+        0,     250, 17000
     };
     
     // Scale vertices to actual world sizes via bmin/bmax and cellSize
@@ -168,7 +168,7 @@ std::vector<std::pair<float, float>> NavMeshMgr::FindPath(float startX, float st
 
     float startPos[3] = {startX, 0.0f, startZ};
     float endPos[3] = {targetX, 0.0f, targetZ};
-    float extents[3] = {20.0f, 200.0f, 20.0f};
+    float extents[3] = {500.0f, 10000.0f, 500.0f};
 
     dtQueryFilter filter;
     filter.setIncludeFlags(0xffff);
@@ -222,7 +222,7 @@ bool NavMeshMgr::CheckLineOfSight(float startX, float startZ, float targetX, flo
 
     float startPos[3] = {startX, 0.0f, startZ};
     float endPos[3] = {targetX, 0.0f, targetZ};
-    float extents[3] = {20.0f, 200.0f, 20.0f};
+    float extents[3] = {500.0f, 10000.0f, 500.0f};
 
     dtQueryFilter filter;
     filter.setIncludeFlags(0xffff);

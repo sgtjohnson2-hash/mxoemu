@@ -4,6 +4,9 @@ MemoryStreamCuller::MemoryStreamCuller(float decayRate) : m_lambda(decayRate) {}
 
 void MemoryStreamCuller::AddMemory(const MemoryNode& node) {
     m_stream.push_back(node);
+    while (m_stream.size() > MAX_STREAM_ENTRIES) {
+        m_stream.pop_front();
+    }
 }
 
 float MemoryStreamCuller::CalculateCosineSimilarity(const std::vector<float>& vecA, const std::vector<float>& vecB) {
@@ -20,7 +23,7 @@ float MemoryStreamCuller::CalculateCosineSimilarity(const std::vector<float>& ve
     return dotProduct / (std::sqrt(normA) * std::sqrt(normB));
 }
 
-std::vector<MemoryNode> MemoryStreamCuller::RetrieveTopMemories(const std::vector<MemoryNode>& stream, 
+std::vector<MemoryNode> MemoryStreamCuller::RetrieveTopMemories(const std::deque<MemoryNode>& stream, 
                                             const std::vector<float>& queryEmbedding, 
                                             double currentTime, 
                                             size_t k) {
@@ -29,7 +32,7 @@ std::vector<MemoryNode> MemoryStreamCuller::RetrieveTopMemories(const std::vecto
     for (const auto& node : stream) {
         // 1. Recency = exp(-lambda * t)
         double dt_hours = (currentTime - node.timestamp) / 3600.0;
-        float recency = std::exp(-m_lambda * dt_hours);
+        float recency = std::exp(-m_lambda * static_cast<float>(dt_hours));
 
         // 2. Importance
         float importanceNormalized = node.importance / 10.0f;
@@ -53,4 +56,12 @@ std::vector<MemoryNode> MemoryStreamCuller::RetrieveTopMemories(const std::vecto
         results.push_back(scoredNodes[i].second);
     }
     return results;
+}
+
+std::vector<MemoryNode> MemoryStreamCuller::RetrieveTopMemories(const std::vector<MemoryNode>& stream, 
+                                            const std::vector<float>& queryEmbedding, 
+                                            double currentTime, 
+                                            size_t k) {
+    std::deque<MemoryNode> dq(stream.begin(), stream.end());
+    return RetrieveTopMemories(dq, queryEmbedding, currentTime, k);
 }

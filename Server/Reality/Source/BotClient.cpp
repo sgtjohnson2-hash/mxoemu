@@ -68,78 +68,6 @@ BotClient::BotClient(uint64 charUID)
     m_characterUID = charUID;
     m_personality = sDataLoader.GetPersonalityProfile(charUID);
 
-    // Construct the Cognitive Behavior Tree
-    auto root = std::make_shared<SelectorNode>();
-    m_btRoot = root;
-    m_behaviorTree = root;
-
-    // 0.5. Rebirth Sequence (Priority 0.5 - Highest)
-    auto rebirthSeq = std::make_shared<SequenceNode>();
-    rebirthSeq->AddChild(std::make_shared<ActionRebirth>());
-    root->AddChild(rebirthSeq);
-
-    // 0. Hyperjump Sequence (Priority 0)
-    auto hyperSeq = std::make_shared<SequenceNode>();
-    hyperSeq->AddChild(std::make_shared<ActionHyperjump>());
-    root->AddChild(hyperSeq);
-    
-    // 1. Flee Sequence (Priority 1)
-    auto fleeSeq = std::make_shared<SequenceNode>();
-    fleeSeq->AddChild(std::make_shared<ActionFlee>()); // Flee triggers on low health
-    root->AddChild(fleeSeq);
-
-    // 1.5. Evade (Priority 1.5)
-    root->AddChild(std::make_shared<ActionEvade>());
-
-    // 1.75. Agent Infection (Priority 1.75)
-    auto infectSeq = std::make_shared<SequenceNode>();
-    infectSeq->AddChild(std::make_shared<ActionAgentInfect>());
-    root->AddChild(infectSeq);
-
-    // 2. Engage Sequence (Priority 2)
-    auto engageSeq = std::make_shared<SequenceNode>();
-    engageSeq->AddChild(std::make_shared<ActionEngageTarget>());
-    engageSeq->AddChild(std::make_shared<ActionCombatCycle>());
-    root->AddChild(engageSeq);
-
-    // 2.5 Heal Ally Sequence
-    auto healSeq = std::make_shared<SequenceNode>();
-    healSeq->AddChild(std::make_shared<ActionHealAlly>());
-    root->AddChild(healSeq);
-
-    // 2.75. Smuggle (Priority 2.75)
-    auto smuggleSeq = std::make_shared<SequenceNode>();
-    smuggleSeq->AddChild(std::make_shared<ActionSmuggle>());
-    root->AddChild(smuggleSeq);
-
-    // 3. Find Target Sequence (Priority 3)
-    auto findSeq = std::make_shared<SequenceNode>();
-    findSeq->AddChild(std::make_shared<ActionFindTarget>());
-    root->AddChild(findSeq);
-
-    // 3.5. Party Invite & Crew (Priority 4)
-    auto partySeq = std::make_shared<SequenceNode>();
-    partySeq->AddChild(std::make_shared<ActionPartyInvite>());
-    root->AddChild(partySeq);
-    
-    // Initialize GOAP Planner
-    m_goapPlanner.AddAction(std::make_shared<GOAPFindTargetAction>());
-    m_goapPlanner.AddAction(std::make_shared<GOAPAttackAction>());
-    partySeq->AddChild(std::make_shared<ActionFormCrew>());
-    root->AddChild(partySeq);
-
-    // 3.75. Idle Animations & Gossip (Priority 5)
-    root->AddChild(std::make_shared<ActionIdle>());
-    root->AddChild(std::make_shared<ActionGossip>());
-
-    // 3.8. Sniper Roam (Priority 5.5)
-    root->AddChild(std::make_shared<ActionSniperRoam>());
-
-    // 4. Roam (Fallback)
-    root->AddChild(std::make_shared<ActionRoam>());
-
-    m_btRoot = root;
-    
     // Create the player object
     m_playerGoId = sObjMgr.constructPlayer(this, m_characterUID, true);
     if (m_playerGoId != 0)
@@ -330,9 +258,42 @@ void BotClient::UpdateBotAI(float deltaSeconds)
         }
     } else if (optimal.name == "USE_ABILITY") {
         if (currentTime >= m_nextActionTime && m_targetGoId != 0) {
-            uint16 randomAbilityId = 1 + (rand() % 50);
-            sCombatSys.UseAbility(me, randomAbilityId, m_targetGoId);
-            m_nextActionTime = currentTime + 3000;
+            uint16 chosenAbilityId = 0;
+            if (auto abSys = me->getAbilitySystem()) {
+                const auto& loaded = abSys->getLoadedAbilities();
+                std::vector<uint16> candidateAbilities;
+                for (const auto& [id, ab] : loaded) {
+                    const AbilityTemplate* tmpl = sDataLoader.GetAbilityTemplate(id);
+                    if (tmpl && tmpl->isCastable && me->getCurrentIS() >= tmpl->innerStrengthCost) {
+                        candidateAbilities.push_back(id);
+                    }
+                }
+                if (!candidateAbilities.empty()) {
+                    chosenAbilityId = candidateAbilities[rand() % candidateAbilities.size()];
+                }
+            }
+            if (chosenAbilityId == 0) {
+                // Fallback: match discipline templates from DataLoader
+                DisciplineType botDisc = DisciplineType::NONE;
+                if (m_faction == FACTION_MEROVINGIAN) botDisc = DisciplineType::CODER;
+                else if (m_faction == FACTION_ZION) botDisc = DisciplineType::HACKER;
+                else if (m_faction == FACTION_MACHINES) botDisc = DisciplineType::OPERATIVE;
+
+                std::vector<uint16> discAbilities;
+                for (const auto& [id, tmpl] : sDataLoader.GetAllAbilities()) {
+                    if (tmpl.isCastable && (botDisc == DisciplineType::NONE || tmpl.discipline == botDisc) && me->getCurrentIS() >= tmpl.innerStrengthCost) {
+                        discAbilities.push_back(id);
+                    }
+                }
+                if (!discAbilities.empty()) {
+                    chosenAbilityId = discAbilities[rand() % discAbilities.size()];
+                }
+            }
+
+            if (chosenAbilityId != 0) {
+                sCombatSys.UseAbility(me, chosenAbilityId, m_targetGoId);
+                m_nextActionTime = currentTime + 3000;
+            }
         }
     } else if (optimal.name == "USE_HACKER_ABILITY") {
         if (currentTime >= m_nextActionTime && m_targetGoId != 0) {
@@ -458,10 +419,11 @@ void BotClient::AttackTarget(uint32 targetGoId)
             dirX = 0; dirZ = 0;
         }
         
-        // Move towards target
-        float speed = 2.0f; 
-        float newX = me->getPosition().x + dirX * speed * 0.033f;
-        float newZ = me->getPosition().z + dirZ * speed * 0.033f;
+        // Move towards target scaled by deltaSeconds for uniform movement across LOD tiers
+        float speed = 60.0f; 
+        float dt = (m_deltaSeconds > 0.0001f) ? m_deltaSeconds : 0.033f;
+        float newX = me->getPosition().x + dirX * speed * dt;
+        float newZ = me->getPosition().z + dirZ * speed * dt;
         if (!sSpatialGrid.CheckCollision(newX, newZ, 1.0f, m_playerGoId)) {
             me->setPosition(LocationVector(newX, me->getPosition().y, newZ));
         }

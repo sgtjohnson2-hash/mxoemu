@@ -30,6 +30,7 @@
 #include "MessageTypes.h"
 #include "IGO.h"
 #include <mutex>
+#include <unordered_set>
 
 class PlayerObject : public IGO
 {
@@ -42,6 +43,7 @@ public:
 	void InitializeWorld();
 	void SpawnSelf();
 	void PopulateWorld();
+	void UpdateAoIStreaming();
 
 	void initGoId(uint32 theGoId);
 	void HandleStateUpdate(ByteBuffer &srcData);
@@ -64,7 +66,9 @@ public:
 	uint16 getCurrentHealth() const {return m_healthC;}
 	uint16 getMaximumHealth() const {return m_healthM;}
 	uint16 getCurrentIS() const {return m_innerStrC;}
+	uint16 getCurrentInnerStrength() const {return m_innerStrC;}
 	uint16 getMaximumIS() const {return m_innerStrM;}
+	uint16 getMaximumInnerStrength() const {return m_innerStrM;}
 	uint32 getProfession() const {return m_prof;}
 	virtual uint8 getLevel() const {return m_lvl;}
 	uint8 getAlignment() const {return m_alignment;}
@@ -333,6 +337,9 @@ private:
     
     float m_timeDilation = 1.0f;
     uint64 m_timeDilationExpires = 0;
+
+    std::unordered_set<uint32> m_knownEntities;
+    uint32 m_lastAoIUpdateMs = 0;
 };
 
 #endif

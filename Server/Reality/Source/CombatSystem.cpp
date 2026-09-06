@@ -225,13 +225,14 @@ bool CombatSystem::RequestInterlock(uint32 attackerGoId, uint32 targetGoId)
 	PlayerObject* pB = getPlayerSafe(targetGoId);
 	if (!pA || !pB || pA->isDead() || pB->isDead()) return false;
 
-    // Bystander Panic
-    auto players = sObjMgr.getAllGOIds();
-    for (auto id : players) {
-        PlayerObject* p = getPlayerSafe(id);
-        if (p && p->getClient().isBot() && p->getPosition().DistanceSq(pA->getPosition()) < 50*50 && p->getHandle().find("Civilian") != std::string::npos) {
-            // Panic bot
-            BotClient* bot = dynamic_cast<BotClient*>(&p->getClient());
+    // Bystander Panic (15-20m radius = 1500-2000 units, SpatialGrid accelerated)
+    const float panicRadius = 2000.0f;
+    auto nearbyClients = sSpatialGrid.GetClientsInRadius(pA->getPosition().x, pA->getPosition().z, panicRadius);
+    for (auto* gc : nearbyClients) {
+        if (!gc) continue;
+        PlayerObject* p = getPlayerSafe(gc->GetPlayerGoId());
+        if (p && gc->isBot() && p->getPosition().DistanceSq(pA->getPosition()) <= (panicRadius * panicRadius) && p->getHandle().find("Civilian") != std::string::npos) {
+            BotClient* bot = dynamic_cast<BotClient*>(gc);
             if (bot) {
                 bot->triggerPanic(attackerGoId);
             }
