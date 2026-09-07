@@ -68,6 +68,7 @@
 #include "CityLifeManager.h"
 #include "EmergentAIEngine.h"
 #include "EmergentPoliceManager.h"
+#include "CorruptCopManager.h"
 #include "OracleVisionSimulacra.h"
 #include "AI/SensoryPerceptionSystem.h"
 #include "AI/SentientMajorCharacters.h"
@@ -244,6 +245,7 @@ void GameServer::SimulationLoop()
 			try { sSLMDialogueEngine.Update(aiDeltaMs); } catch (const std::exception& e) { ERROR_LOG(format("SimulationLoop: sSLMDialogueEngine caught %1%") % e.what()); }
 			try { sMafiaMgr.Update(aiDeltaMs); } catch (const std::exception& e) { ERROR_LOG(format("SimulationLoop: sMafiaMgr caught %1%") % e.what()); }
 			try { sExileMgr.Update(aiDeltaMs); } catch (const std::exception& e) { ERROR_LOG(format("SimulationLoop: sExileMgr caught %1%") % e.what()); }
+			try { sCorruptCopMgr.Update(aiDeltaMs); } catch (const std::exception& e) { ERROR_LOG(format("SimulationLoop: sCorruptCopMgr caught %1%") % e.what()); }
 
 			static uint32 lastMetricLogMs = 0;
 			static uint32 tickCount = 0;
