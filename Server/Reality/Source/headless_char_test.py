@@ -350,7 +350,7 @@ def run_test(host: str, auth_port: int, margin_port: int, username: str, passwor
         send_var_packet(auth_sock, bytes([0x08]) + req_hdr + encrypted_blob)
 
         auth_reply = recv_var_packet(auth_sock)
-        opcode, auth_result, unk1, user_id, off_auth_data, off_enc_data, unk2, unk3, off_char, off_world, off_user = struct.unpack_from("<BIHIHHHHHHH", auth_reply, 0)
+        opcode, auth_result, off_user, user_id, off_auth_data, off_enc_data, unk2, unk3, off_world, off_char, unk4 = struct.unpack_from("<BIHIHHHHHHH", auth_reply, 0)
         assert auth_result == 0, f"Authentication rejected by AuthServer (status code {auth_result})"
 
         ticket_len = struct.unpack_from("<H", auth_reply, off_auth_data)[0]
@@ -364,7 +364,9 @@ def run_test(host: str, auth_port: int, margin_port: int, username: str, passwor
         user_modulus = int.from_bytes(signed_data_bytes[82 : 82 + 96], 'big')
         user_d = int.from_bytes(dec_priv_exp, 'big')
 
-        print(f"    [AUTH OK] Authenticated as '{username}' (UID {user_id}). Ticket: {len(ticket_bytes)} bytes.")
+        num_worlds = struct.unpack_from("<H", auth_reply, off_world)[0]
+        num_chars = struct.unpack_from("<H", auth_reply, off_char)[0]
+        print(f"    [AUTH OK] Authenticated as '{username}' (UID {user_id}). Worlds={num_worlds}, Characters={num_chars}. Ticket: {len(ticket_bytes)} bytes.")
         auth_sock.close()
         auth_sock = None
 
