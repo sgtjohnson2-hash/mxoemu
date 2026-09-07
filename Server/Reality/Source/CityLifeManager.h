@@ -353,6 +353,7 @@ public:
 
     // Ambient Life, Rumors & Reactive Panic
     void BroadcastStreetRumor(RumorTopic topic, const std::string& headline, const std::string& content, uint32 districtId);
+    const std::vector<AmbientRumor>& GetActiveRumors() const { return m_rumors; }
     void TriggerAreaPanic(float x, float z, float radius, const std::string& cause, uint32 durationMs = 30000, bool notifyEmergentAI = true);
     void QueueAreaPanic(float x, float z, float radius, const std::string& cause, uint32 durationMs = 30000);
     void ProcessPendingAsyncEvents();
