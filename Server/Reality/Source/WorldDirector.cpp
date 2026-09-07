@@ -26,6 +26,7 @@
 #include "OrbitalSatelliteSystem.h"
 #include "SourceCodeCompilerSystem.h"
 #include "MatrixRebootEngine.h"
+#include "AgentPossessionManager.h"
 #include <cmath>
 #include <algorithm>
 
@@ -194,6 +195,7 @@ void WorldDirector::Update(uint32 deltaMs)
     sOrbitalSatelliteSystem.UpdateSimulation(deltaSec);
     sSourceCodeCompilerSystem.UpdateSimulation(deltaSec);
     sMatrixRebootEngine.UpdateSimulation(deltaSec);
+    sAgentPossessionMgr.Update(deltaMs);
 
     // 1. Check Active Crisis Expiration
     if (m_activeCrisis) {

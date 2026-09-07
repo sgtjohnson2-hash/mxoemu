@@ -1,8 +1,18 @@
-﻿#include "RedpillAwakeningSystem.h"
+#include "RedpillAwakeningSystem.h"
 #include "Log.h"
+#include "GameServer.h"
+#include "BotManager.h"
+#include "ObjectMgr.h"
+#include "PlayerObject.h"
+#include "AgentPossessionManager.h"
+#include "MessageTypes.h"
 #include <algorithm>
 
 createFileSingleton(RedpillAwakeningSystem);
+
+static inline bool Has3DWorldSupport() {
+    return GameServer::getSingletonPtr() != nullptr && BotManager::getSingletonPtr() != nullptr;
+}
 
 RedpillAwakeningSystem::RedpillAwakeningSystem()
 {
@@ -124,6 +134,26 @@ bool RedpillAwakeningSystem::BeginEscort(uint32 potentialId, uint32 playerGoId, 
     p.state = POTENTIAL_ESCORT_ACTIVE;
     p.assignedEscortPlayerGoId = playerGoId;
     p.targetHardlineId = targetHardlineId;
+
+    if (Has3DWorldSupport()) {
+        if (auto player = sObjMgr.getGOPtrSafe(playerGoId)) {
+            LocationVector playerPos = player->getPosition();
+            if (auto bot = sBotMgr.GetBotByGOID(p.npcGoId)) {
+                bot->MoveTo((float)playerPos.x, (float)playerPos.y, (float)playerPos.z);
+            }
+            if (auto po = sObjMgr.getGOPtrSafe(p.npcGoId)) {
+                po->sayChat("You're from outside... you're Zion! Lead me to the hardline!");
+                po->Emote(1);
+            }
+        }
+
+        // Trigger Agent intervention to stop the extraction!
+        if (AgentPossessionManager::getSingletonPtr()) {
+            sAgentPossessionMgr.TriggerEmergencyIntervention(
+                LocationVector(p.position.x, p.position.y, p.position.z), 75.0f, playerGoId);
+        }
+    }
+
     return true;
 }
 
@@ -141,6 +171,19 @@ bool RedpillAwakeningSystem::CheckHardlineExtraction(uint32 potentialId, float h
     if (dist <= 300.0f && p.state == POTENTIAL_ESCORT_ACTIVE) {
         p.state = POTENTIAL_EXTRACTED_SAFE;
         m_totalExtracted++;
+
+        if (Has3DWorldSupport()) {
+            if (auto po = sObjMgr.getGOPtrSafe(p.npcGoId)) {
+                po->sayChat("The telephone is ringing... I see through the simulation. See you in Zion!");
+                po->killPlayer(0, 0x280001C2);
+            }
+            if (auto player = sObjMgr.getGOPtrSafe(p.assignedEscortPlayerGoId)) {
+                player->addInformation(25000); // 25,000 info bits reward
+                player->addFactionReputation(50); // +50 Zion reputation
+                player->addExp(5000); // 5000 XP
+            }
+        }
+
         return true;
     }
     return false;
