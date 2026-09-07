@@ -164,30 +164,7 @@ std::vector<GameClient*> SpatialGrid::GetClientsInRadius(float x, float z, uint3
 
 std::vector<GameClient*> SpatialGrid::GetClientsInRadius(float x, float z, float radius, uint32 instanceId) const
 {
-    std::vector<GameClient*> localClients = GetClientsInRadius(x, z, instanceId);
-    std::vector<GameClient*> filteredClients;
-    float rSq = radius * radius;
-    
-    for (GameClient* client : localClients)
-    {
-        uint32 goId = client->GetPlayerGoId();
-        if (goId == 0) continue;
-        
-        PlayerObject* po = NULL;
-        try { po = sObjMgr.getGOPtr(goId); }
-        catch (ObjectMgr::ObjectNotAvailable) { continue; }
-        if (po)
-        {
-            float dx = float(po->getPosition().x) - x;
-            float dz = float(po->getPosition().z) - z;
-            if (dx*dx + dz*dz <= rSq)
-            {
-                filteredClients.push_back(client);
-            }
-        }
-    }
-    
-    return filteredClients;
+    return GetClientsInAoI(x, z, radius, instanceId);
 }
 
 bool SpatialGrid::CheckCollision(float x, float z, float radius, uint32 ignoreGoId, uint32 instanceId) const

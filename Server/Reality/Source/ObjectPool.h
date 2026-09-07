@@ -59,8 +59,13 @@ public:
         T* ptr = m_freeList.back();
         m_freeList.pop_back();
         
-        // Placement new to call constructor
-        return new(ptr) T(std::forward<Args>(args)...);
+        // Placement new to call constructor with exception safety
+        try {
+            return new(ptr) T(std::forward<Args>(args)...);
+        } catch (...) {
+            m_freeList.push_back(ptr);
+            throw;
+        }
     }
 
     // Release memory back to pool (calls destructor explicitly)

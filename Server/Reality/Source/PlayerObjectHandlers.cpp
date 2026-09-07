@@ -33,6 +33,7 @@
 #include "PlayerObject.h"
 #include "Log.h"
 #include "Database/Database.h"
+#include "Database/PreparedStatement.h"
 #include "Timer.h"
 #include "ObjectMgr.h"
 #include "SpatialGrid.h"
@@ -1449,12 +1450,12 @@ void PlayerObject::ParsePlayerCommand( string theCmd )
 				{
 					playerObj = sObjMgr.getGOPtr(objId);
 				}
-				catch (std::exception)
+				catch (...)
 				{
 					continue;
 				}
 
-				if (iequals(playerName,playerObj->getHandle()))
+				if (playerObj && iequals(playerName,playerObj->getHandle()))
 				{
 					theTargetPlayer = playerObj;
 					break;
@@ -1480,8 +1481,10 @@ void PlayerObject::ParsePlayerCommand( string theCmd )
 		if (cmdStream.fail()) //Get list and whisper it but for now we just fail
 			return;
 
-		format sql = format("SELECT `X`,`Y`,`Z` FROM `locations` Where `District` = '%1%' And `Command` = '%2%' LIMIT 1") % int(getDistrict()) % area ;
-		scoped_ptr<QueryResult> result(sDatabase.Query(sql));
+		PreparedStatement stmt("SELECT `X`,`Y`,`Z` FROM `locations` WHERE `District` = ?0 AND `Command` = ?1 LIMIT 1");
+		stmt.SetUInt32(0, (uint32)getDistrict());
+		stmt.SetString(1, area);
+		scoped_ptr<QueryResult> result(sDatabase.QueryPrepared(&stmt));
 		if (!result)
 			return;
 		else
@@ -3203,14 +3206,17 @@ void PlayerObject::RPC_HandleWho( ByteBuffer &srcCmd )
 		{
 			pObj = sObjMgr.getGOPtr(objId);
 		}
-		catch (std::exception)
+		catch (...)
 		{
 			continue;
 		}
 
-		if (pObj->getDistrict() == this->getDistrict())
+		if (pObj && pObj->getDistrict() == this->getDistrict())
 		{
-			playerList << pObj->getHandle() << " ";
+			if (pObj->getClient().isBot() == false)
+			{
+				playerList << pObj->getHandle() << " ";
+			}
 		}
 	}
 	playerList << "]";
