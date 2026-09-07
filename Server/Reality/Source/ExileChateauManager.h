@@ -87,6 +87,7 @@ struct SupernaturalProgram {
     LocationVector currentLocation;
     std::string assignedSanctuary;       // "Chateau Dining Hall", "Club Hel Pit", "Mobil Ave Limbo"
     bool isAlive{true};
+    uint32 botGoId{0};
 };
 
 struct ExileBackdoorPortal {
@@ -142,6 +143,7 @@ struct ClubHelEnforcer {
     float combatBpmSyncRating{140.0f};   // Beats per minute combat cadence
     LocationVector position;
     bool isHostile{false};
+    uint32 botGoId{0};
 };
 
 struct PersephoneFavorContract {

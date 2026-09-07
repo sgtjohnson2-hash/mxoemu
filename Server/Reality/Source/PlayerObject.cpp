@@ -955,3 +955,20 @@ bool PlayerObject::isDualWielding() const {
     return false;
 }
 
+void PlayerObject::killPlayer(uint32 killerGoId, uint32 fxId)
+{
+    takeDamage(killerGoId, 9999, fxId);
+}
+
+void PlayerObject::sayChat(const std::string& msg)
+{
+    sGame.AnnounceCommand(&m_parent, std::make_shared<PlayerChatMsg>(m_handle, msg));
+}
+
+void PlayerObject::Emote(uint32 emoteId)
+{
+    m_emoteCounter++;
+    sGame.AnnounceStateUpdate(NULL, std::make_shared<EmoteMsg>(m_goId, emoteId, m_emoteCounter));
+}
+
+

@@ -1,9 +1,17 @@
 #include "NPCEmergentLifeEngine.h"
+#include "BotManager.h"
+#include "ObjectMgr.h"
+#include "PlayerObject.h"
+#include "GameServer.h"
 #include <iostream>
 #include <algorithm>
 #include <iomanip>
 #include <cassert>
 #include <cmath>
+
+static inline bool Has3DWorldSupport() {
+    return GameServer::getSingletonPtr() != nullptr && BotManager::getSingletonPtr() != nullptr;
+}
 
 // Singleton instantiation
 createFileSingleton(NPCEmergentLifeEngine);
@@ -287,6 +295,17 @@ LifeMilestoneEvent NPCEmergentLifeEngine::TriggerWeddingCeremony(uint32 spouseA,
     m_entityMilestones[spouseA].push_back(ev.milestoneId);
     m_entityMilestones[spouseB].push_back(ev.milestoneId);
 
+    if (Has3DWorldSupport()) {
+        auto poA = sObjMgr.getGOPtrSafe(spouseA);
+        auto poB = sObjMgr.getGOPtrSafe(spouseB);
+        if (poA && poB) {
+            poA->Emote(20);
+            poB->Emote(20);
+            poA->sayChat("I take thee to have and to hold, beyond all simulated worlds!");
+            poB->sayChat("I do! In this life and in the real!");
+        }
+    }
+
     return ev;
 }
 
@@ -355,6 +374,13 @@ LifeMilestoneEvent NPCEmergentLifeEngine::TriggerMemorialService(uint32 mourning
 
     m_milestones[ev.milestoneId] = ev;
     m_entityMilestones[mourningEntityId].push_back(ev.milestoneId);
+
+    if (Has3DWorldSupport()) {
+        if (auto po = sObjMgr.getGOPtrSafe(mourningEntityId)) {
+            po->Emote(50); // Kneel / mourn
+            po->sayChat("Rest in peace, " + fallenKinName + ". You will never be forgotten.");
+        }
+    }
 
     return ev;
 }
@@ -490,6 +516,13 @@ bool NPCEmergentLifeEngine::ProcessWitnessedAnomaly(uint32 entityId, const std::
     } else if (it->second.stage == AwakeningStage::STAGE_1_MATRIX_SKEPTIC && it->second.cognitiveDissonance >= 0.70f && it->second.anomaliesWitnessedCount >= 2) {
         it->second.stage = AwakeningStage::STAGE_2_AWAKENING_SEARCHER;
         it->second.latestAwakeningEpiphany = "Actively searching for phone booths and whispers of Zion operatives.";
+    }
+
+    if (Has3DWorldSupport()) {
+        if (auto po = sObjMgr.getGOPtrSafe(entityId)) {
+            po->Emote(50); // Kneel / shock
+            po->sayChat("The code... the numbers are cascading... this entire world is an illusion!");
+        }
     }
 
     return true;

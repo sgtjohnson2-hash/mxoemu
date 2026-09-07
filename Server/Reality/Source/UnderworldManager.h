@@ -127,6 +127,8 @@ struct UnderworldRacketNode {
     uint32 totalDecapitations{0};
     uint32 securityTier{2}; // 1 = Low, 2 = Guarded, 3 = Fortified, 4 = High-Tech EMP
     bool tripwireTrapArmed{true};
+    std::vector<uint32> guardBotGoIds;
+    uint32 bossBotGoId{0};
 };
 
 struct SmugglingConvoy {
@@ -146,6 +148,8 @@ struct SmugglingConvoy {
     ConvoyStatus status{ConvoyStatus::CONVOY_PREPARING};
     bool isInterceptedByCastle{false};
     uint32 transitTimerMs{0};
+    uint32 transportBotGoId{0};
+    std::vector<uint32> escortBotGoIds;
 };
 
 struct TurfSector {
@@ -194,6 +198,8 @@ struct EmergentCrimeEvent {
     bool policeDispatched{false};
     bool castleIntervening{false};
     uint32 linkedDispatchId{0};
+    std::vector<uint32> perpBotGoIds;
+    uint32 victimBotGoId{0};
 };
 
 struct PolicePrecinct {

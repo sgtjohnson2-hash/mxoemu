@@ -1455,6 +1455,12 @@ void FrankCastleManager::StartStalkingTarget(uint32 targetGoId)
         it->second.status = HIT_STATUS_RECON;
         m_currentTargetPriority = it->second.priority;
     }
+
+    if (BotManager::getSingletonPtr() && m_frankGoId != 0) {
+        if (auto frankBot = sBotMgr.GetBotByPlayerGoId(m_frankGoId)) {
+            frankBot->MoveTo((float)po->getPosition().x, (float)po->getPosition().y, (float)po->getPosition().z);
+        }
+    }
 }
 
 // ============================================================================
@@ -1797,6 +1803,11 @@ bool FrankCastleManager::TriggerDistrictCleanSweep(uint32 districtId)
             if (r && r->state != RacketState::DecapitatedCooldown) {
                 m_cleanSweepTargetRacketId = r->id;
                 sUnderworldMgr.RaidRacket(r->id, true);
+                if (BotManager::getSingletonPtr() && m_frankGoId != 0) {
+                    if (auto frankBot = sBotMgr.GetBotByPlayerGoId(m_frankGoId)) {
+                        frankBot->MoveTo((float)r->coordinates.x, (float)r->coordinates.y, (float)r->coordinates.z);
+                    }
+                }
                 break;
             }
         }

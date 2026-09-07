@@ -89,6 +89,7 @@ struct MadeSoldier {
     bool isAlive{true};
     uint32 hitsCarriedOut{0};
     LocationVector currentLocation;
+    uint32 botGoId{0};
 };
 
 struct CapoCrew {

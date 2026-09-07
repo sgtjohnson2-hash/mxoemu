@@ -1,4 +1,8 @@
 #include "NPCSocialLifeEngine.h"
+#include "BotManager.h"
+#include "ObjectMgr.h"
+#include "PlayerObject.h"
+#include "GameServer.h"
 #include <iostream>
 #include <iomanip>
 #include <sstream>
@@ -6,6 +10,10 @@
 #include <cassert>
 #include <cmath>
 #include <algorithm>
+
+static inline bool Has3DWorldSupport() {
+    return GameServer::getSingletonPtr() != nullptr && BotManager::getSingletonPtr() != nullptr;
+}
 
 // Singleton instantiation
 createFileSingleton(NPCSocialLifeEngine);
@@ -240,6 +248,17 @@ bool NPCSocialLifeEngine::ScheduleAndExecuteDate(uint32 entityA, uint32 entityB,
     pA.memories.push_back(memA);
     pB.memories.push_back(memB);
 
+    if (Has3DWorldSupport()) {
+        auto poA = sObjMgr.getGOPtrSafe(entityA);
+        auto poB = sObjMgr.getGOPtrSafe(entityB);
+        if (poA && poB) {
+            poA->Emote(10); // Dining / toast emote
+            poB->Emote(10);
+            poA->sayChat("I'm so glad we spent tonight together, " + pB.entityName + ".");
+            poB->sayChat("Me too, " + pA.entityName + ". Best evening in a long time.");
+        }
+    }
+
     return true;
 }
 
@@ -301,6 +320,18 @@ bool NPCSocialLifeEngine::DeepenCommitment(uint32 entityA, uint32 entityB)
         std::string prose = "United in marriage with " + pB.entityName + ". Formed a lifelong union defying the simulation's cold code.";
         pA.memories.push_back({m_nextMemoryId++, 0, "Wedding Day & Marriage", prose, MemoryCategory::ROMANCE_PROPOSAL, 1.0f, 1.0f, entityB, "Megacity Cathedral", true});
         pB.memories.push_back({m_nextMemoryId++, 0, "Wedding Day & Marriage", "Exchanged sacred rings and eternal devotion with " + pA.entityName + ".", MemoryCategory::ROMANCE_PROPOSAL, 1.0f, 1.0f, entityA, "Megacity Cathedral", true});
+
+        if (Has3DWorldSupport()) {
+            auto poA = sObjMgr.getGOPtrSafe(entityA);
+            auto poB = sObjMgr.getGOPtrSafe(entityB);
+            if (poA && poB) {
+                poA->Emote(20); // Celebrate / cheer / dance
+                poB->Emote(20);
+                poA->sayChat("I do! To eternity together, " + pB.entityName + "!");
+                poB->sayChat("Forever and always, " + pA.entityName + "!");
+            }
+        }
+
         return true;
     }
 

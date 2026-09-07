@@ -1,10 +1,18 @@
 #include "MafiaEcosystemManager.h"
+#include "BotManager.h"
+#include "ObjectMgr.h"
+#include "PlayerObject.h"
+#include "GameServer.h"
 
 #include <iostream>
 #include <sstream>
 #include <iomanip>
 #include <algorithm>
 #include <cassert>
+
+static inline bool Has3DWorldSupport() {
+    return GameServer::getSingletonPtr() != nullptr && BotManager::getSingletonPtr() != nullptr;
+}
 
 // Singleton instantiation
 createFileSingleton(MafiaEcosystemManager);
@@ -271,7 +279,39 @@ void MafiaEcosystemManager::InitializeTheFiveFamilies()
 void MafiaEcosystemManager::Update(uint32 deltaMs)
 {
     std::lock_guard<std::mutex> lock(m_mafiaMutex);
-    // Passive decay and circadian pulse
+
+    // Physical 3D World Soldier Manifestation
+    if (Has3DWorldSupport()) {
+        for (auto& kvp : m_soldiers) {
+            MadeSoldier& s = kvp.second;
+            if (s.isAlive && s.botGoId == 0) {
+                float sx = (float)s.currentLocation.x;
+                float sy = (float)s.currentLocation.y;
+                float sz = (float)s.currentLocation.z;
+                if (sx == 0.0f && sz == 0.0f) {
+                    auto cIt = m_crews.find(s.crewId);
+                    if (cIt != m_crews.end()) {
+                        sx = (float)cIt->second.safehouseLocation.x;
+                        sy = (float)cIt->second.safehouseLocation.y;
+                        sz = (float)cIt->second.safehouseLocation.z;
+                    } else {
+                        sx = -2400.0f; sy = 10.0f; sz = 5200.0f;
+                    }
+                }
+                auto sBot = sBotMgr.SpawnSingleBot(sx, sy, sz, FACTION_MEROVINGIAN);
+                if (sBot) {
+                    s.botGoId = sBot->GetPlayerGoId();
+                    if (auto po = sObjMgr.getGOPtrSafe(s.botGoId)) {
+                        po->setHandle(s.name + " ('" + s.moniker + "')");
+                        po->setFactionName("La Commissione");
+                        po->giveItem(500);
+                        po->setMaximumHealth(1500);
+                        po->setCurrentHealth(1500);
+                    }
+                }
+            }
+        }
+    }
 }
 
 // ============================================================================
@@ -448,6 +488,20 @@ bool MafiaEcosystemManager::ExecuteArsonShakedown(uint32 shopId)
     if (fIt != m_families.end()) {
         fIt->second.familyHeat = std::min(100.0f, fIt->second.familyHeat + 15.0f);
     }
+
+    if (Has3DWorldSupport()) {
+        auto cIt = m_crews.find(it->second.crewId);
+        if (cIt != m_crews.end() && !cIt->second.memberEntityIds.empty()) {
+            uint32 sId = cIt->second.memberEntityIds[0];
+            auto sIt = m_soldiers.find(sId);
+            if (sIt != m_soldiers.end() && sIt->second.botGoId != 0) {
+                if (auto po = sObjMgr.getGOPtrSafe(sIt->second.botGoId)) {
+                    po->sayChat("This is what happens when you miss tribute to the family! Burn it down!");
+                }
+            }
+        }
+    }
+
     return true;
 }
 
@@ -633,6 +687,23 @@ bool MafiaEcosystemManager::ExecuteWhacking(uint32 hitId, uint32 hitmanId)
     if (fIt != m_families.end()) {
         fIt->second.totalWhackingsExecuted++;
     }
+
+    if (Has3DWorldSupport()) {
+        uint32 tBotId = (sIt != m_soldiers.end()) ? sIt->second.botGoId : 0;
+        if (tBotId != 0) {
+            if (auto po = sObjMgr.getGOPtrSafe(tBotId)) {
+                po->sayChat("Wait, Carmine sent you?! Please—!");
+                po->killPlayer(0, 0x280001C2);
+            }
+        }
+        uint32 hBotId = (hIt != m_soldiers.end()) ? hIt->second.botGoId : 0;
+        if (hBotId != 0) {
+            if (auto po = sObjMgr.getGOPtrSafe(hBotId)) {
+                po->sayChat("Don Marcone sends his regards.");
+            }
+        }
+    }
+
     return true;
 }
 
@@ -648,6 +719,21 @@ bool MafiaEcosystemManager::DeployExileCleaners(uint32 hitId)
         fIt->second.familyHeat = std::max(0.0f, fIt->second.familyHeat - 20.0f);
         fIt->second.treasuryCleanBits = std::max(0.0, fIt->second.treasuryCleanBits - 2000.0); // Cleaner fee
     }
+
+    if (Has3DWorldSupport()) {
+        auto sIt = m_soldiers.find(it->second.targetEntityId);
+        if (sIt != m_soldiers.end()) {
+            auto cleaner = sBotMgr.SpawnSingleBot((float)sIt->second.currentLocation.x + 1.0f, (float)sIt->second.currentLocation.y, (float)sIt->second.currentLocation.z + 1.0f, FACTION_MEROVINGIAN);
+            if (cleaner) {
+                if (auto po = sObjMgr.getGOPtrSafe(cleaner->GetPlayerGoId())) {
+                    po->setHandle("Merovingian Scene Cleaner");
+                    po->sayChat("The Merovingian sends his regards. Nothing to see here.");
+                    po->Emote(10);
+                }
+            }
+        }
+    }
+
     return true;
 }
 

@@ -1,10 +1,18 @@
 #include "ExileChateauManager.h"
+#include "BotManager.h"
+#include "ObjectMgr.h"
+#include "PlayerObject.h"
+#include "GameServer.h"
 
 #include <iostream>
 #include <sstream>
 #include <iomanip>
 #include <algorithm>
 #include <cassert>
+
+static inline bool Has3DWorldSupport() {
+    return GameServer::getSingletonPtr() != nullptr && BotManager::getSingletonPtr() != nullptr;
+}
 
 // Singleton instantiation
 createFileSingleton(ExileChateauManager);
@@ -76,6 +84,42 @@ void ExileChateauManager::Update(uint32 deltaMs)
             pair.second.anomalyTelemetryRipple = std::max(0.0f, pair.second.anomalyTelemetryRipple - decay);
             if (pair.second.anomalyTelemetryRipple < 0.3f) {
                 pair.second.isBreachedByAgents = false;
+            }
+        }
+    }
+
+    // Physical 3D World Bestiary & Bouncer Manifestation
+    if (Has3DWorldSupport()) {
+        for (auto& pair : m_supernaturals) {
+            SupernaturalProgram& p = pair.second;
+            if (p.isAlive && p.botGoId == 0) {
+                auto bot = sBotMgr.SpawnSingleBot((float)p.currentLocation.x, (float)p.currentLocation.y, (float)p.currentLocation.z, FACTION_MEROVINGIAN);
+                if (bot) {
+                    p.botGoId = bot->GetPlayerGoId();
+                    if (auto po = sObjMgr.getGOPtrSafe(p.botGoId)) {
+                        po->setHandle(p.title);
+                        po->setFactionName("Merovingian Exiles");
+                        po->setMaximumHealth((uint32)p.maxRsiVitality);
+                        po->setCurrentHealth((uint32)p.currentRsiVitality);
+                        po->giveItem(500);
+                    }
+                }
+            }
+        }
+        for (auto& pair : m_clubHelEnforcers) {
+            ClubHelEnforcer& e = pair.second;
+            if (e.botGoId == 0) {
+                auto bot = sBotMgr.SpawnSingleBot((float)e.position.x, (float)e.position.y, (float)e.position.z, FACTION_MEROVINGIAN);
+                if (bot) {
+                    e.botGoId = bot->GetPlayerGoId();
+                    if (auto po = sObjMgr.getGOPtrSafe(e.botGoId)) {
+                        po->setHandle(e.name + " (" + e.roleTitle + ")");
+                        po->setFactionName("Club Hel Enforcers");
+                        po->setMaximumHealth(2500);
+                        po->setCurrentHealth(2500);
+                        po->giveItem(500);
+                    }
+                }
             }
         }
     }
@@ -524,6 +568,12 @@ float ExileChateauManager::ApplyDamageToSupernatural(uint32 programId, float raw
         prog.isAlive = false;
         outDeRezzed = true;
         m_totalVampiresDeRezzedBySilver++;
+        if (Has3DWorldSupport() && prog.botGoId != 0) {
+            if (auto po = sObjMgr.getGOPtrSafe(prog.botGoId)) {
+                po->killPlayer(0, 0x280001C2);
+            }
+            prog.botGoId = 0;
+        }
         return rawDamage * 10.0f;
     }
 
@@ -542,6 +592,12 @@ float ExileChateauManager::ApplyDamageToSupernatural(uint32 programId, float raw
         outDeRezzed = true;
         if (isSilver) {
             m_totalVampiresDeRezzedBySilver++;
+        }
+        if (Has3DWorldSupport() && prog.botGoId != 0) {
+            if (auto po = sObjMgr.getGOPtrSafe(prog.botGoId)) {
+                po->killPlayer(0, 0x280001C2);
+            }
+            prog.botGoId = 0;
         }
     }
 
@@ -581,6 +637,14 @@ bool ExileChateauManager::TriggerLupineBerserkFrenzy(uint32 lupineProgramId)
 
     wolf.isBerserk = true;
     wolf.knockdownChance = 0.95f;
+
+    if (Has3DWorldSupport() && wolf.botGoId != 0) {
+        if (auto po = sObjMgr.getGOPtrSafe(wolf.botGoId)) {
+            po->sayChat("RRAAAAGHH! The pack feeds tonight!");
+            po->Emote(50);
+        }
+    }
+
     return true;
 }
 

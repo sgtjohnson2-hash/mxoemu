@@ -38,6 +38,7 @@ public:
     bool IsWorkHours() const;
     bool IsLeisureHours() const;
     bool IsCommuteHours() const;
+    bool IsRaining() const { return m_currentWeatherType == 1 && m_currentIntensity > 0.1f; }
 
 private:
     uint32 m_currentWeatherType;

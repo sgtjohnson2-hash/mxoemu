@@ -210,6 +210,7 @@ struct SWATSquad {
     bool flashbangDeployed{false};
     bool tearGasDeployed{false};
     std::vector<std::string> operationalLog;
+    std::vector<uint32> officerBotGoIds;
 
     SWATOfficer* GetOfficerByRole(SWATRole role) {
         for (auto& o : officers) {
@@ -243,6 +244,7 @@ struct SniperOverwatchPerch {
     float shotAccuracy{0.98f};
     uint32 totalConfirmedTakedowns{0};
     uint32 stateTimerMs{0};
+    uint32 sniperBotGoId{0};
 };
 
 struct ActiveOrdnanceEffect {
@@ -286,6 +288,7 @@ struct VehicularRoadblock {
     uint32 totalVehiclesIntercepted{0};
     uint32 totalContrabandSeizedValue{0};
     bool isActive{true};
+    std::vector<uint32> roadblockOfficerGoIds;
 };
 
 struct InternalAffairsSting {

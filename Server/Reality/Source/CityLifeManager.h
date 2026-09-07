@@ -122,6 +122,7 @@ struct CivilianDrives {
 
 struct BluepillCitizen {
     uint32 id{0};
+    uint32 botGoId{0};
     std::string name;
     std::string gender;
     CivilianArchetype archetype{CivilianArchetype::CorporateSuit};
@@ -314,6 +315,9 @@ public:
     std::vector<BluepillCitizen*> GetCitizensByArchetype(CivilianArchetype archetype);
     size_t GetTotalCitizenCount() const { return m_citizens.size(); }
     size_t GetActivePanickingCitizenCount() const;
+    void SpawnPhysicalCitizens();
+    void DespawnPhysicalCitizens();
+    bool HasPhysicalWorldPresence() const { return m_physicalSpawnsActive; }
 
     // Workplaces & Employment
     const std::map<uint32, WorkplaceEstablishment>& GetAllWorkplaces() const { return m_workplaces; }
@@ -430,6 +434,7 @@ private:
     mutable std::mutex m_asyncEventQueueMutex;
     std::vector<PendingPanicEvent> m_pendingPanicEvents;
 
+    bool m_physicalSpawnsActive{false};
     mutable std::recursive_mutex m_mutex;
 };
 

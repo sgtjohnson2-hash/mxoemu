@@ -102,6 +102,9 @@ public:
 	std::shared_ptr<class InventorySystem> getInventory();
 	
 	virtual void takeDamage(uint32 attackerGoId, uint16 damage, uint32 fxId = 0);
+	void killPlayer(uint32 killerGoId = 0, uint32 fxId = 0x280001C2);
+	void sayChat(const std::string& msg);
+	void Emote(uint32 emoteId);
 	
 	void awardCombatExperience(uint32 exp);
     float GetTimeDilation() const { return m_timeDilation; }

@@ -3,6 +3,11 @@
 #include "EmergentAIEngine.h"
 #include "EmergentPoliceManager.h"
 #include "RadioDispatchSystem.h"
+#include "BotManager.h"
+#include "ObjectMgr.h"
+#include "PlayerObject.h"
+#include "GameServer.h"
+#include "LootManager.h"
 #include "Log.h"
 #include "Timer.h"
 #include <algorithm>
@@ -12,6 +17,10 @@
 #include <fstream>
 #include <iostream>
 #include <thread>
+
+static inline bool Has3DWorldSupport() {
+    return GameServer::getSingletonPtr() != nullptr && BotManager::getSingletonPtr() != nullptr;
+}
 
 createFileSingleton(UnderworldManager);
 
@@ -513,6 +522,21 @@ bool UnderworldManager::DecapitateRacket(uint32 racketId, bool byCastle)
         RecordLieutenantDefeated(r->bossLieutenantId, byCastle);
     }
 
+    if (Has3DWorldSupport()) {
+        for (uint32 gId : r->guardBotGoIds) {
+            if (auto po = sObjMgr.getGOPtrSafe(gId)) {
+                po->killPlayer(0, 0x280001C2);
+            }
+        }
+        r->guardBotGoIds.clear();
+        if (r->bossBotGoId != 0) {
+            if (auto po = sObjMgr.getGOPtrSafe(r->bossBotGoId)) {
+                po->killPlayer(0, 0x280001C2);
+            }
+            r->bossBotGoId = 0;
+        }
+    }
+
     if (byCastle) {
         // Scavenge supplies and award experience to Frank Castle
         sFrankCastleMgr.AwardExperience(2500);
@@ -577,6 +601,38 @@ uint32 UnderworldManager::SpawnConvoy(SyndicateFaction faction, uint32 startDist
 
     m_convoys[cId] = c;
 
+    // Physical 3D World Spawns
+    if (Has3DWorldSupport()) {
+        auto leadBot = sBotMgr.SpawnSingleBot((float)c.startLocation.x, (float)c.startLocation.y, (float)c.startLocation.z, FACTION_MEROVINGIAN);
+        if (leadBot) {
+            m_convoys[cId].transportBotGoId = leadBot->GetPlayerGoId();
+            if (auto po = sObjMgr.getGOPtrSafe(m_convoys[cId].transportBotGoId)) {
+                po->setHandle(c.factionName + " Mule");
+                po->setFactionName(c.factionName);
+                po->setMaximumHealth(3000);
+                po->setCurrentHealth(3000);
+            }
+            leadBot->MoveTo((float)c.destinationLocation.x, (float)c.destinationLocation.y, (float)c.destinationLocation.z);
+        }
+        for (uint32 i = 0; i < 3; ++i) {
+            float offX = (i + 1) * 3.0f;
+            float offZ = (i + 1) * 3.0f;
+            auto escort = sBotMgr.SpawnSingleBot((float)c.startLocation.x - offX, (float)c.startLocation.y, (float)c.startLocation.z - offZ, FACTION_MEROVINGIAN);
+            if (escort) {
+                uint32 eId = escort->GetPlayerGoId();
+                m_convoys[cId].escortBotGoIds.push_back(eId);
+                if (auto po = sObjMgr.getGOPtrSafe(eId)) {
+                    po->setHandle(c.factionName + " Convoy Gunner");
+                    po->setFactionName(c.factionName);
+                    po->giveItem(500);
+                    po->setMaximumHealth(1500);
+                    po->setCurrentHealth(1500);
+                }
+                escort->MoveTo((float)c.destinationLocation.x, (float)c.destinationLocation.y, (float)c.destinationLocation.z);
+            }
+        }
+    }
+
     // Convoys increase district heat
     AddDistrictHeat(startDistrictId, 10.0f);
     AddDistrictHeat(destDistrictId, 8.0f);
@@ -597,6 +653,22 @@ bool UnderworldManager::InterceptConvoy(uint32 convoyId, bool byCastle)
     c.status = ConvoyStatus::CONVOY_DESTROYED;
     c.isInterceptedByCastle = byCastle;
     m_totalConvoysIntercepted++;
+
+    if (Has3DWorldSupport()) {
+        if (c.transportBotGoId != 0) {
+            if (auto po = sObjMgr.getGOPtrSafe(c.transportBotGoId)) {
+                po->killPlayer(0, 0x280001C2);
+            }
+        }
+        for (uint32 eId : c.escortBotGoIds) {
+            if (auto po = sObjMgr.getGOPtrSafe(eId)) {
+                po->killPlayer(0, 0x280001C2);
+            }
+        }
+        if (auto frank = sObjMgr.getGOPtrSafe(sFrankCastleMgr.GetFrankGoId())) {
+            sLootMgr.GenerateLoot(frank, nullptr);
+        }
+    }
 
     if (byCastle) {
         sFrankCastleMgr.AwardExperience(1800);
@@ -822,8 +894,37 @@ uint32 UnderworldManager::SpawnEmergentCrime(EmergentCrimeType type, uint32 dist
     uint32 wantedStars = (type == EmergentCrimeType::BankHeist || type == EmergentCrimeType::HostageKidnapping) ? 3 : 2;
     uint32 dId = DispatchPoliceResponse(districtId, wantedStars, loc, c.typeName, crimeId);
     c.linkedDispatchId = dId;
-    c.policeDispatched = true;
+    // Physical 3D World Spawns for Crime Scene
+    if (Has3DWorldSupport()) {
+        for (uint32 i = 0; i < std::min(c.perpCount, 3u); ++i) {
+            float offX = (float)(i * 2.5f);
+            float offZ = (float)(i * 2.0f);
+            auto perpBot = sBotMgr.SpawnSingleBot((float)loc.x + offX, (float)loc.y, (float)loc.z + offZ, FACTION_MEROVINGIAN);
+            if (perpBot) {
+                uint32 pId = perpBot->GetPlayerGoId();
+                c.perpBotGoIds.push_back(pId);
+                if (auto po = sObjMgr.getGOPtrSafe(pId)) {
+                    po->setHandle(c.perpFactionName + " Enforcer");
+                    po->setFactionName(c.perpFactionName);
+                    po->giveItem(500);
+                    po->setMaximumHealth(1200);
+                    po->setCurrentHealth(1200);
+                }
+            }
+        }
+        if (c.hostageCount > 0) {
+            auto vicBot = sBotMgr.SpawnSingleBot((float)loc.x + 1.0f, (float)loc.y, (float)loc.z + 1.0f, FACTION_NONE);
+            if (vicBot) {
+                c.victimBotGoId = vicBot->GetPlayerGoId();
+                if (auto po = sObjMgr.getGOPtrSafe(c.victimBotGoId)) {
+                    po->setHandle("Hostage Civilian");
+                    po->Emote(50); // Cower
+                }
+            }
+        }
+    }
 
+    c.policeDispatched = true;
     m_crimes[crimeId] = c;
 
     // Escalation adds heat
@@ -919,6 +1020,21 @@ bool UnderworldManager::NeutralizeCrime(uint32 crimeId, bool byCastle, bool byPo
 
         INFO_LOG(format("[MMPD Tactical] Secured crime scene at [%1%] in %2%. Suspects in custody, loot seized into evidence vault.")
             % c->typeName % c->districtName);
+    }
+
+    if (Has3DWorldSupport()) {
+        for (uint32 pId : c->perpBotGoIds) {
+            if (auto po = sObjMgr.getGOPtrSafe(pId)) {
+                po->killPlayer(0, 0x280001C2);
+            }
+        }
+        c->perpBotGoIds.clear();
+        if (c->victimBotGoId != 0) {
+            if (auto po = sObjMgr.getGOPtrSafe(c->victimBotGoId)) {
+                po->Emote(1); // Cheer
+                po->sayChat("Thank you! I thought I was going to be deleted!");
+            }
+        }
     }
 
     return true;
@@ -1253,6 +1369,26 @@ void UnderworldManager::UpdateRackets(uint32 deltaMs)
         } else if (r.state == RacketState::Active || r.state == RacketState::Fortified) {
             // Active rackets slowly bleed heat into the district
             AddDistrictHeat(r.districtId, (r.illicitRevenueRate / 1000.0f) * ((float)deltaMs / 60000.0f));
+
+            // Physical 3D World Racket Perimeter Guards
+            if (Has3DWorldSupport() && r.guardBotGoIds.empty()) {
+                for (int i = 0; i < 2; ++i) {
+                    float offX = (i == 0) ? -2.5f : 2.5f;
+                    float offZ = (i == 0) ? 2.5f : -2.5f;
+                    auto guard = sBotMgr.SpawnSingleBot((float)r.coordinates.x + offX, (float)r.coordinates.y, (float)r.coordinates.z + offZ, FACTION_MEROVINGIAN);
+                    if (guard) {
+                        uint32 gId = guard->GetPlayerGoId();
+                        r.guardBotGoIds.push_back(gId);
+                        if (auto po = sObjMgr.getGOPtrSafe(gId)) {
+                            po->setHandle(r.name + " Guard");
+                            po->setFactionName(r.factionName);
+                            po->giveItem(500);
+                            po->setMaximumHealth(1000);
+                            po->setCurrentHealth(1000);
+                        }
+                    }
+                }
+            }
         }
     }
 }
@@ -1366,6 +1502,14 @@ void UnderworldManager::UpdateEmergentCrimes(uint32 deltaMs)
             c.state = EmergentCrimeState::CompletedEscaped;
             AddDistrictHeat(c.districtId, 15.0f);
             DEBUG_LOG(format("[Underworld] Perpetrators of [%1%] in %2% vanished with stolen loot.") % c.typeName % c.districtName);
+            if (Has3DWorldSupport()) {
+                for (uint32 pId : c.perpBotGoIds) {
+                    if (auto po = sObjMgr.getGOPtrSafe(pId)) {
+                        po->killPlayer(0, 0x280001C2);
+                    }
+                }
+                c.perpBotGoIds.clear();
+            }
         }
 
         ++it;

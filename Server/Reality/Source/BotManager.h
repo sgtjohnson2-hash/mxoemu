@@ -33,6 +33,7 @@ public:
     LocationVector GetNearestHardline(float x, float z);
     
     std::shared_ptr<BotClient> GetBotByGOID(uint32 goid);
+    std::shared_ptr<BotClient> GetBotByPlayerGoId(uint32 goid) { return GetBotByGOID(goid); }
 
     void EnableBotAggro(bool enabled) { m_aggroEnabled = enabled; }
     bool IsAggroEnabled() const { return m_aggroEnabled; }

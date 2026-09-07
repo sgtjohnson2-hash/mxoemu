@@ -6,6 +6,10 @@
 #include "NPCSocialLifeEngine.h"
 #include "NPCFamilyDreamsEngine.h"
 #include "NPCEmergentLifeEngine.h"
+#include "BotManager.h"
+#include "ObjectMgr.h"
+#include "PlayerObject.h"
+#include "GameServer.h"
 #include "Log.h"
 #include "Timer.h"
 #include <iostream>
@@ -14,6 +18,10 @@
 #include <iomanip>
 #include <algorithm>
 #include <cassert>
+
+static inline bool Has3DWorldSupport() {
+    return GameServer::getSingletonPtr() != nullptr && BotManager::getSingletonPtr() != nullptr;
+}
 
 createFileSingleton(CityLifeManager);
 
@@ -140,8 +148,49 @@ void CityLifeManager::Initialize()
     InitializeDefaultRumors();
     sEmergentAIMgr.Initialize();
 
+    if (Has3DWorldSupport()) {
+        SpawnPhysicalCitizens();
+    }
+
     INFO_LOG(format("CityLifeManager: Initialized with %1% Citizens, %2% Workplaces, %3% Shops, %4% Subway Stations, %5% Trains, %6% Vehicles.")
         % m_citizens.size() % m_workplaces.size() % m_shops.size() % m_stations.size() % m_trains.size() % m_vehicles.size());
+}
+
+void CityLifeManager::SpawnPhysicalCitizens()
+{
+    if (!Has3DWorldSupport()) return;
+
+    for (auto& pair : m_citizens) {
+        BluepillCitizen& c = pair.second;
+        if (c.botGoId == 0) {
+            auto bot = sBotMgr.SpawnSingleBot((float)c.homeLocation.x, (float)c.homeLocation.y, (float)c.homeLocation.z, FACTION_NONE);
+            if (bot) {
+                c.botGoId = bot->GetPlayerGoId();
+                c.currentLocation = c.homeLocation;
+                if (auto po = sObjMgr.getGOPtrSafe(c.botGoId)) {
+                    po->setHandle(c.name);
+                    po->setFactionName("Civilian");
+                    po->giveItem(1001 + (c.id % 20));
+                }
+            }
+        }
+    }
+    m_physicalSpawnsActive = true;
+    DEBUG_LOG(format("CityLifeManager: Spawned %1% physical civilian bots in 3D world.") % m_citizens.size());
+}
+
+void CityLifeManager::DespawnPhysicalCitizens()
+{
+    if (!Has3DWorldSupport()) return;
+
+    for (auto& pair : m_citizens) {
+        BluepillCitizen& c = pair.second;
+        if (c.botGoId != 0) {
+            sObjMgr.QueueDeletion(c.botGoId);
+            c.botGoId = 0;
+        }
+    }
+    m_physicalSpawnsActive = false;
 }
 
 void CityLifeManager::InitializeDefaultWorkplaces()
@@ -929,6 +978,38 @@ void CityLifeManager::UpdateCitizens(uint32 deltaMs)
             }
         }
 
+        // Weather umbrella reactivity
+        if (WeatherSystem::getSingletonPtr() && sWeatherSys.IsRaining()) {
+            c.isUsingUmbrella = true;
+        } else {
+            c.isUsingUmbrella = false;
+        }
+
+        // Physical 3D World Manifestation Sync
+        if (c.botGoId != 0 && Has3DWorldSupport()) {
+            if (auto bot = sBotMgr.GetBotByGOID(c.botGoId)) {
+                if (c.currentRoutine == RoutineScheduleState::Panicking) {
+                    bot->SetPanicking(true);
+                    bot->Emote(50); // Cower
+                    bot->MoveTo((float)c.destinationLocation.x, (float)c.destinationLocation.y, (float)c.destinationLocation.z);
+                } else {
+                    bot->SetPanicking(false);
+                    if (c.currentRoutine == RoutineScheduleState::CommuteToWork || 
+                        c.currentRoutine == RoutineScheduleState::CommuteHome ||
+                        c.currentRoutine == RoutineScheduleState::Shopping ||
+                        c.currentRoutine == RoutineScheduleState::Leisure) {
+                        bot->MoveTo((float)c.destinationLocation.x, (float)c.destinationLocation.y, (float)c.destinationLocation.z);
+                    } else if (c.currentRoutine == RoutineScheduleState::Breakfast || 
+                               c.currentRoutine == RoutineScheduleState::LunchBreak || 
+                               c.currentRoutine == RoutineScheduleState::Dining) {
+                        bot->Emote(10); // Dine
+                    } else if (c.currentRoutine == RoutineScheduleState::Nightclubbing) {
+                        bot->Emote(20); // Dance
+                    }
+                }
+            }
+        }
+
         // Reached destination: execute local activities
         if (c.currentRoutine == RoutineScheduleState::Breakfast || c.currentRoutine == RoutineScheduleState::LunchBreak || c.currentRoutine == RoutineScheduleState::Dining) {
             if (c.drives.hunger > 0.4f && c.preferredShopId != 0) {
@@ -1433,6 +1514,18 @@ void CityLifeManager::BroadcastStreetRumor(RumorTopic topic, const std::string& 
         if (m_rumors.size() > 30) {
             m_rumors.pop_back();
         }
+
+        // 3D Spatial Audio/Chat speech
+        if (Has3DWorldSupport()) {
+            for (auto& pair : m_citizens) {
+                if (pair.second.districtId == districtId && pair.second.botGoId != 0) {
+                    if (auto bot = sBotMgr.GetBotByGOID(pair.second.botGoId)) {
+                        bot->Say(headline + ": " + content);
+                        break;
+                    }
+                }
+            }
+        }
     }
 
     if (EmergentAIEngine::getSingletonPtr()) {
@@ -1511,6 +1604,15 @@ void CityLifeManager::TriggerAreaPanic(float x, float z, float radius, const std
                     // Calm shelter in nearby structure
                     c.isSheltered = true;
                 }
+
+                if (c.botGoId != 0 && Has3DWorldSupport()) {
+                    if (auto bot = sBotMgr.GetBotByGOID(c.botGoId)) {
+                        bot->SetPanicking(true);
+                        bot->Emote(50); // Cower
+                        bot->Say("Look out! Shots fired!");
+                        bot->MoveTo((float)c.destinationLocation.x, (float)c.destinationLocation.y, (float)c.destinationLocation.z);
+                    }
+                }
             }
         }
 
@@ -1533,6 +1635,11 @@ void CityLifeManager::ClearAllPanic()
                 pair.second.panicTimerMs = 0;
                 pair.second.isSheltered = false;
                 pair.second.drives.stress = 0.1f;
+                if (pair.second.botGoId != 0 && Has3DWorldSupport()) {
+                    if (auto bot = sBotMgr.GetBotByGOID(pair.second.botGoId)) {
+                        bot->SetPanicking(false);
+                    }
+                }
             }
         }
         LiftShopLockdowns();

@@ -4,6 +4,10 @@
 #include "EmergentAIEngine.h"
 #include "FrankCastleManager.h"
 #include "RadioDispatchSystem.h"
+#include "BotManager.h"
+#include "ObjectMgr.h"
+#include "PlayerObject.h"
+#include "GameServer.h"
 #include "Log.h"
 #include "Timer.h"
 #include <algorithm>
@@ -13,6 +17,10 @@
 #include <fstream>
 #include <iostream>
 #include <thread>
+
+static inline bool Has3DWorldSupport() {
+    return GameServer::getSingletonPtr() != nullptr && BotManager::getSingletonPtr() != nullptr;
+}
 
 createFileSingleton(EmergentPoliceManager);
 
@@ -332,6 +340,25 @@ uint32 EmergentPoliceManager::DeploySWATSquad(uint32 districtId, const std::stri
         squad.officers.push_back(o);
     }
 
+    if (Has3DWorldSupport()) {
+        for (int i = 0; i < 6; ++i) {
+            float offX = (float)(i * 2.0f);
+            float offZ = (float)(i * 1.5f);
+            auto swatBot = sBotMgr.SpawnSingleBot((float)stagingPos.x + offX, (float)stagingPos.y, (float)stagingPos.z + offZ, FACTION_MACHINES);
+            if (swatBot) {
+                uint32 bId = swatBot->GetPlayerGoId();
+                squad.officerBotGoIds.push_back(bId);
+                if (auto po = sObjMgr.getGOPtrSafe(bId)) {
+                    po->setHandle("MMPD SWAT " + squad.officers[i].roleName);
+                    po->setFactionName("MMPD Sierra SWAT");
+                    po->giveItem(500);
+                    po->setMaximumHealth(2000);
+                    po->setCurrentHealth(2000);
+                }
+            }
+        }
+    }
+
     squad.operationalLog.push_back((format("SWAT Squad [%1%] deployed to %2% staging area.") % callsign % squad.districtName).str());
     m_squads[squad.squadId] = squad;
 
@@ -358,6 +385,14 @@ bool EmergentPoliceManager::OrderStackAndBreach(uint32 squadId, const LocationVe
     // Reposition officers in stack
     for (size_t i = 0; i < s->officers.size(); ++i) {
         s->officers[i].position = stackPos;
+    }
+
+    if (Has3DWorldSupport()) {
+        for (uint32 bId : s->officerBotGoIds) {
+            if (auto bot = sBotMgr.GetBotByPlayerGoId(bId)) {
+                bot->MoveTo((float)stackPos.x, (float)stackPos.y, (float)stackPos.z);
+            }
+        }
     }
 
     s->operationalLog.push_back((format("Stacked at threshold (%1%, %2%). Preparing dynamic breach.")
@@ -586,6 +621,14 @@ bool EmergentPoliceManager::ExecuteRoomEntry(uint32 squadId, std::vector<std::st
         o.position = s->breachTargetLocation;
     }
 
+    if (Has3DWorldSupport()) {
+        for (uint32 bId : s->officerBotGoIds) {
+            if (auto bot = sBotMgr.GetBotByPlayerGoId(bId)) {
+                bot->MoveTo((float)s->breachTargetLocation.x, (float)s->breachTargetLocation.y, (float)s->breachTargetLocation.z);
+            }
+        }
+    }
+
     outCallouts.push_back((format("[%1% Pointman] Shield leading through threshold! Covering fatal funnel!") % s->callsign).str());
     outCallouts.push_back((format("[%1% Assaulter 1] Pieing left corner! One armed suspect neutralized!") % s->callsign).str());
     outCallouts.push_back((format("[%1% Assaulter 2] Clear right! Covering second barricade! Drop your weapon!") % s->callsign).str());
@@ -677,6 +720,15 @@ bool EmergentPoliceManager::DeclareCode4(uint32 squadId)
 
     Transmit10Code(MMPD10Code::CODE_10_4, s->callsign, s->districtId, s->breachTargetLocation,
                    "All units: Scene is Code 4 - All threats neutralized. Hostages secured.", true);
+
+    if (Has3DWorldSupport()) {
+        if (!s->officerBotGoIds.empty()) {
+            if (auto leader = sObjMgr.getGOPtrSafe(s->officerBotGoIds[0])) {
+                leader->sayChat("Code 4: Scene secure. Suspects detained, hostages clear.");
+                leader->Emote(1); // cheer / thumbs up
+            }
+        }
+    }
 
     // Suppress district heat
     if (UnderworldManager::getSingletonPtr()) {
@@ -1525,6 +1577,22 @@ void EmergentPoliceManager::UpdateSniperOverwatch(uint32 deltaMs)
 {
     for (auto& pair : m_sniperPerches) {
         SniperOverwatchPerch& p = pair.second;
+
+        // Physical 3D Sniper Overwatch Bot Spawning
+        if (Has3DWorldSupport() && p.sniperBotGoId == 0) {
+            auto sBot = sBotMgr.SpawnSingleBot((float)p.vantageCoordinates.x, (float)p.vantageCoordinates.y, (float)p.vantageCoordinates.z, FACTION_MACHINES);
+            if (sBot) {
+                p.sniperBotGoId = sBot->GetPlayerGoId();
+                if (auto po = sObjMgr.getGOPtrSafe(p.sniperBotGoId)) {
+                    po->setHandle("MMPD Sniper " + p.assignedSniper.officerName);
+                    po->setFactionName("MMPD Tactical Sniper");
+                    po->giveItem(500);
+                    po->setMaximumHealth(1500);
+                    po->setCurrentHealth(1500);
+                }
+            }
+        }
+
         if (p.state == SniperOverwatchState::AUTHORIZED_LETHAL_FIRE) {
             float dmg = 0.0f;
             ExecuteSniperTakedown(p.perchId, dmg);
@@ -1542,6 +1610,28 @@ void EmergentPoliceManager::UpdateSniperOverwatch(uint32 deltaMs)
 
 void EmergentPoliceManager::UpdateRoadblocks(uint32 deltaMs)
 {
+    // Physical 3D World Roadblock Officers
+    if (Has3DWorldSupport()) {
+        for (auto& pair : m_roadblocks) {
+            VehicularRoadblock& r = pair.second;
+            if (r.roadblockOfficerGoIds.empty() && r.isActive) {
+                for (int i = 0; i < 2; ++i) {
+                    float offX = (i == 0) ? -3.0f : 3.0f;
+                    auto rBot = sBotMgr.SpawnSingleBot((float)r.location.x + offX, (float)r.location.y, (float)r.location.z, FACTION_MACHINES);
+                    if (rBot) {
+                        uint32 rbId = rBot->GetPlayerGoId();
+                        r.roadblockOfficerGoIds.push_back(rbId);
+                        if (auto po = sObjMgr.getGOPtrSafe(rbId)) {
+                            po->setHandle("MMPD Roadblock Officer");
+                            po->setFactionName("MMPD Highway Patrol");
+                            po->giveItem(500);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     // Auto-check for active convoys in UnderworldManager
     if (!UnderworldManager::getSingletonPtr()) return;
 
