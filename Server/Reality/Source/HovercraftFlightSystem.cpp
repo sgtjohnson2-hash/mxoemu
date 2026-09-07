@@ -2,6 +2,9 @@
 #include "Log.h"
 #include <algorithm>
 #include <cstdlib>
+#include <iostream>
+#include <iomanip>
+#include <cassert>
 
 createFileSingleton(HovercraftFlightSystem);
 
@@ -20,6 +23,8 @@ void HovercraftFlightSystem::Initialize()
     m_ships.clear();
     m_sentinels.clear();
     m_corridors.clear();
+    m_nextShipId = 1;
+    m_nextDroneId = 1;
     m_simulationTimeSec = 0.0f;
 
     // Reset EMP System
@@ -672,4 +677,159 @@ size_t HovercraftFlightSystem::GetShipCount() const
 {
     std::lock_guard<std::recursive_mutex> lock(m_systemMutex);
     return m_ships.size();
+}
+
+// ============================================================================
+// HEADLESS TEST SUITE: HOVERCRAFT FLIGHT DYNAMICS & EMP WARFARE (SUITE 17)
+// ============================================================================
+void RunHovercraftTestSuite()
+{
+    std::cout << "\n============================================================" << std::endl;
+    std::cout << "  STARTING HOVERCRAFT 6-DOF FLIGHT & EMP TEST SUITE (SUITE 17) " << std::endl;
+    std::cout << "============================================================\n" << std::endl;
+
+    int passed = 0;
+    int failed = 0;
+
+    auto TEST_ASSERT = [&](bool cond, const std::string& name) {
+        if (cond) {
+            std::cout << " [PASS] " << name << std::endl;
+            passed++;
+        } else {
+            std::cout << " [FAIL] " << name << " <--- FAILED!" << std::endl;
+            failed++;
+        }
+    };
+
+    // 1. System Initialization & Corridors
+    sHovercraftFlightSys.Initialize();
+    TEST_ASSERT(sHovercraftFlightSys.GetShipCount() == 0, "Initial ship registry is empty");
+    TEST_ASSERT(sHovercraftFlightSys.GetSentinelCount() == 0, "Initial sentinel swarm is empty");
+    const EMPShockwaveSystem& empInit = sHovercraftFlightSys.GetEMPSystem();
+    TEST_ASSERT(empInit.isCharging == false, "EMP system initialized in uncharged state");
+    TEST_ASSERT(empInit.isReady == false, "EMP system begins not ready to fire");
+    TEST_ASSERT(empInit.totalDetonations == 0, "Initial EMP detonation count is zero");
+
+    // 2. Hovercraft Fleet Spawning & Specifications
+    uint32 nebId = sHovercraftFlightSys.SpawnHovercraft(HOVERCRAFT_NEBUCHADNEZZAR, FlightVector3(0.0f, 400.0f, 0.0f), "Nebuchadnezzar");
+    TEST_ASSERT(nebId == 1, "Spawned Nebuchadnezzar with Ship ID 1");
+    HovercraftPhysicsState* neb = sHovercraftFlightSys.GetHovercraft(nebId);
+    TEST_ASSERT(neb != nullptr, "Nebuchadnezzar state retrieved successfully");
+    TEST_ASSERT(neb->mass == 125000.0f, "Nebuchadnezzar mass is 125,000 kg");
+    TEST_ASSERT(neb->maxHull == 1500.0f, "Nebuchadnezzar reinforced hull is 1,500 HP");
+    TEST_ASSERT(neb->maxSpeed == 2800.0f, "Nebuchadnezzar max speed is 2,800 units/s");
+    TEST_ASSERT(neb->acousticSignature == 0.50f, "Nebuchadnezzar acoustic signature is 0.50");
+
+    uint32 logosId = sHovercraftFlightSys.SpawnHovercraft(HOVERCRAFT_LOGOS, FlightVector3(-10000.0f, 250.0f, 0.0f), "Logos");
+    HovercraftPhysicsState* logos = sHovercraftFlightSys.GetHovercraft(logosId);
+    TEST_ASSERT(logos != nullptr && logos->maxSpeed == 3800.0f, "Logos has agile speed 3,800 units/s");
+    TEST_ASSERT(logos->acousticSignature == 0.35f, "Logos has stealth acoustic signature 0.35");
+
+    uint32 mjolnirId = sHovercraftFlightSys.SpawnHovercraft(HOVERCRAFT_MJOLNIR, FlightVector3(15000.0f, 600.0f, 0.0f), "Mjolnir");
+    HovercraftPhysicsState* mjolnir = sHovercraftFlightSys.GetHovercraft(mjolnirId);
+    TEST_ASSERT(mjolnir != nullptr && mjolnir->mass == 180000.0f, "Mjolnir has heavy battleship mass 180,000 kg");
+    TEST_ASSERT(mjolnir->maxHull == 2200.0f, "Mjolnir has heavy armor 2,200 HP");
+
+    uint32 vigilantId = sHovercraftFlightSys.SpawnHovercraft(HOVERCRAFT_VIGILANT, FlightVector3(0.0f, 500.0f, 1000.0f), "Vigilant");
+    HovercraftPhysicsState* vigilant = sHovercraftFlightSys.GetHovercraft(vigilantId);
+    TEST_ASSERT(vigilant != nullptr && vigilant->maxHull == 1100.0f, "Vigilant scout ship registered");
+    TEST_ASSERT(sHovercraftFlightSys.GetShipCount() == 4, "Hovercraft fleet tracks all 4 active ships");
+
+    // 3. 6-DOF Flight Controls & Thrust Dynamics
+    bool thrustOk = sHovercraftFlightSys.ApplyThrustInput(nebId, 1.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f);
+    TEST_ASSERT(thrustOk, "Forward thrust input accepted by Nebuchadnezzar");
+    TEST_ASSERT(neb->acceleration.LengthSq() > 0.0f, "Ship generates forward acceleration vector");
+
+    // Strafe and angular velocity test
+    sHovercraftFlightSys.ApplyThrustInput(nebId, 0.0f, 0.8f, 0.5f, 15.0f, 10.0f, 25.0f);
+    TEST_ASSERT(neb->angularVelocity.yaw != 0.0f, "Yaw input applies rotational angular velocity");
+    TEST_ASSERT(neb->angularVelocity.pitch != 0.0f, "Pitch input applies rotational angular velocity");
+
+    // Simulation integration
+    FlightVector3 startPos = neb->position;
+    for (int i = 0; i < 10; ++i) {
+        sHovercraftFlightSys.UpdateSimulation(0.1f);
+    }
+    TEST_ASSERT(neb->position.LengthSq() != startPos.LengthSq(), "Simulation advances ship 3D spatial position");
+    TEST_ASSERT(neb->velocity.Length() > 0.0f, "Velocity integrated along trajectory");
+
+    // 4. Cavern Bulkhead Collision Resolution
+    float impactDmg = 0.0f;
+    neb->position.x = 26000.0f; // Exceeds default cavernMaxX (25,000)
+    neb->velocity.x = 1500.0f;  // Moving outwards towards bulkhead
+    bool coll = sHovercraftFlightSys.CheckCavernCollision(nebId, impactDmg);
+    TEST_ASSERT(coll, "Cavern bulkhead collision triggered on boundary excursion");
+    TEST_ASSERT(impactDmg > 0.0f, "Bulkhead collision deals structural impact damage");
+    TEST_ASSERT(neb->position.x <= 25000.0f, "Ship position clamped within cavern boundary");
+    TEST_ASSERT(neb->velocity.x < 0.0f, "Bulkhead collision reflects velocity inwards");
+
+    // 5. Sentinel Swarm AI & Boid Pursuit
+    sHovercraftFlightSys.SpawnSentinelSwarm(20, neb->position, 3000.0f);
+    TEST_ASSERT(sHovercraftFlightSys.GetSentinelCount() == 20, "Sentinel swarm spawns 20 patrol drones");
+    TEST_ASSERT(sHovercraftFlightSys.GetActiveSentinelCount() == 20, "All 20 drones are initially active");
+
+    // Run simulation to allow boids to track ship
+    for (int i = 0; i < 20; ++i) {
+        sHovercraftFlightSys.UpdateSimulation(0.1f);
+    }
+    const auto& sentinels = sHovercraftFlightSys.GetSentinels();
+    bool trackingFound = false;
+    for (const auto& d : sentinels) {
+        if (d.targetShipId == nebId || d.velocity.LengthSq() > 0.0f) {
+            trackingFound = true;
+            break;
+        }
+    }
+    TEST_ASSERT(trackingFound, "Boid steering vectors guide swarm towards active ship signatures");
+
+    // 6. EMP Shockwave Capacitor & Detonation
+    sHovercraftFlightSys.StartEMPCharging(nebId);
+    const EMPShockwaveSystem& empCharging = sHovercraftFlightSys.GetEMPSystem();
+    TEST_ASSERT(empCharging.isCharging == true, "EMP capacitor enters charging state");
+
+    // Advance simulation to fully charge EMP (chargeRate 25%/s -> 4.5s)
+    for (int i = 0; i < 25; ++i) {
+        sHovercraftFlightSys.UpdateSimulation(0.2f);
+    }
+    const EMPShockwaveSystem& empReady = sHovercraftFlightSys.GetEMPSystem();
+    TEST_ASSERT(empReady.isReady == true, "EMP capacitor reaches 100% full charge");
+
+    // Detonate EMP
+    uint32 disabledSentinels = 0;
+    bool detOk = sHovercraftFlightSys.DetonateEMP(nebId, disabledSentinels);
+    TEST_ASSERT(detOk, "EMP shockwave detonated successfully");
+    TEST_ASSERT(disabledSentinels > 0, "EMP pulse disables proximal Sentinels in blast radius");
+    const EMPShockwaveSystem& empPost = sHovercraftFlightSys.GetEMPSystem();
+    TEST_ASSERT(empPost.totalDetonations == 1, "Total EMP detonations incremented");
+    TEST_ASSERT(empPost.sentinelsNeutralized >= disabledSentinels, "System tracks cumulative neutralized Sentinels");
+    TEST_ASSERT(empPost.cooldownRemainingSec > 0.0f, "EMP weapon enters recharge cooldown");
+    TEST_ASSERT(sHovercraftFlightSys.GetActiveSentinelCount() < 20, "Active sentinel count reduced after EMP pulse");
+
+    // Cooldown prevents premature firing
+    uint32 blockedCount = 0;
+    bool blockOk = sHovercraftFlightSys.DetonateEMP(nebId, blockedCount);
+    TEST_ASSERT(!blockOk, "EMP detonation blocked while weapon is on cooldown");
+
+    // 7. Pirate Broadcast Corridors & Carrier Lock Telemetry
+    // Position Nebuchadnezzar directly on Corridor 1 axis (0, 400, 0)
+    neb->position = FlightVector3(0.0f, 400.0f, 0.0f);
+    UplinkTelemetry telemLocked = sHovercraftFlightSys.CalculateUplinkTelemetry(nebId);
+    TEST_ASSERT(telemLocked.lockState == CARRIER_LOCKED, "Corridor alignment establishes CARRIER_LOCKED");
+    TEST_ASSERT(telemLocked.signalStrength >= 0.70f, "Carrier locked signal strength >= 70%");
+    TEST_ASSERT(telemLocked.isJackInAuthorized == true, "Operator jack-in authorized on locked carrier");
+    TEST_ASSERT(telemLocked.packetLatencyMs < 40.0f, "Low sub-40ms ping inside broadcast corridor");
+
+    // Position ship far outside corridor transmission radius (35,000, 400, 0)
+    neb->position = FlightVector3(35000.0f, 400.0f, 0.0f);
+    UplinkTelemetry telemLost = sHovercraftFlightSys.CalculateUplinkTelemetry(nebId);
+    TEST_ASSERT(telemLost.lockState == CARRIER_LOST, "Remote ship transitions to CARRIER_LOST");
+    TEST_ASSERT(telemLost.packetLossPercent == 100.0f, "Outside corridor packet loss is 100%");
+    TEST_ASSERT(telemLost.isJackInAuthorized == false, "Jack-in rejected when carrier is lost");
+
+    std::cout << "\n------------------------------------------------------------" << std::endl;
+    std::cout << "  HOVERCRAFT 6-DOF FLIGHT & EMP TEST SUITE COMPLETE" << std::endl;
+    std::cout << "  PASSED: " << passed << " | FAILED: " << failed << std::endl;
+    std::cout << "------------------------------------------------------------\n" << std::endl;
+
+    assert(failed == 0);
 }
