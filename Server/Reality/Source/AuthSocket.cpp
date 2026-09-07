@@ -463,7 +463,11 @@ void AuthSocket::HandleAuthRequest( ByteBuffer &packet )
 		currWorld.worldId = field[0].GetUInt16();
 		string worldNameStr = field[1].GetString();
 		uint8 status = field[3].GetUInt8();
-		currWorld.status = (status != 0) ? status : 0x31;
+		// In client matrix.exe:0x0040C34C, GetWorldStatus() is checked:
+		// test eax, eax -> je 0x40c35b (0 = Normal/Open)
+		// cmp eax, 6    -> je 0x40c35b (6 = Open)
+		// Any other value (e.g. 1 = 'Char In Transit') causes character selection to fail!
+		currWorld.status = (status == 6) ? 6 : 0;
 		currWorld.nameStrOffset = (numWorlds - i) * sizeof(WorldData) + worldStrings.wpos();
 
 		worldDatas.append((const byte*)&currWorld, sizeof(currWorld));
@@ -498,7 +502,7 @@ void AuthSocket::HandleAuthRequest( ByteBuffer &packet )
 			uint16 worldId;          // 0x01..0x02: worldId
 			char handle[19];         // 0x03..0x15: character handle
 			uint8 nullTerm;          // 0x16: 0
-			uint8 discipline;        // 0x17: 1 = Martial Artist, 2 = Spy, 3 = Hacker
+			uint8 status;            // 0x17: Character access status: 1 = Open, 2 = Admins Only (client.dll:0x0040CA29)
 			uint8 pad[4];            // 0x18..0x1B: 0
 			uint8 faction;           // 0x1C: 1 = Zion, 2 = Machine, 3 = Merovingian
 			uint8 pad2;              // 0x1D: 0
@@ -515,8 +519,10 @@ void AuthSocket::HandleAuthRequest( ByteBuffer &packet )
 			string handleStr = field[3].GetString();
 			strncpy(currCharacter.handle, handleStr.c_str(), sizeof(currCharacter.handle) - 1);
 			currCharacter.nullTerm = 0;
-			uint32 prof = field[4].GetUInt32();
-			currCharacter.discipline = (prof > 0 && prof <= 255) ? (uint8)prof : 1;
+			// Byte 0x17 was previously confused with discipline/profession.
+			// In matrix.exe:0x0040C324: GetCharacterStatus() must be 1 ('Open').
+			// If 2 ('Admins Only'), it rejects normal users and fails character selection.
+			currCharacter.status = 1;
 			uint8 align = field[5].GetUInt8();
 			currCharacter.faction = (align > 0) ? align : 1;
 
