@@ -69,6 +69,10 @@
 #include "EmergentAIEngine.h"
 #include "EmergentPoliceManager.h"
 #include "CorruptCopManager.h"
+#include "OperatorBridge.h"
+#include "CyberdeckHackingSystem.h"
+#include "MegacityDestructionEngine.h"
+#include "MatrixRebootEngine.h"
 #include "OracleVisionSimulacra.h"
 #include "AI/SensoryPerceptionSystem.h"
 #include "AI/SentientMajorCharacters.h"
@@ -246,6 +250,9 @@ void GameServer::SimulationLoop()
 			try { sMafiaMgr.Update(aiDeltaMs); } catch (const std::exception& e) { ERROR_LOG(format("SimulationLoop: sMafiaMgr caught %1%") % e.what()); }
 			try { sExileMgr.Update(aiDeltaMs); } catch (const std::exception& e) { ERROR_LOG(format("SimulationLoop: sExileMgr caught %1%") % e.what()); }
 			try { sCorruptCopMgr.Update(aiDeltaMs); } catch (const std::exception& e) { ERROR_LOG(format("SimulationLoop: sCorruptCopMgr caught %1%") % e.what()); }
+			try { sCyberdeckHackingSystem.UpdateSimulation(aiDeltaMs / 1000.0f); } catch (const std::exception& e) { ERROR_LOG(format("SimulationLoop: sCyberdeckHackingSystem caught %1%") % e.what()); }
+			try { sMegacityDestructionEngine.UpdateSimulation(aiDeltaMs / 1000.0f); } catch (const std::exception& e) { ERROR_LOG(format("SimulationLoop: sMegacityDestructionEngine caught %1%") % e.what()); }
+			try { sMatrixRebootEngine.UpdateSimulation(aiDeltaMs / 1000.0f); } catch (const std::exception& e) { ERROR_LOG(format("SimulationLoop: sMatrixRebootEngine caught %1%") % e.what()); }
 
 			static uint32 lastMetricLogMs = 0;
 			static uint32 tickCount = 0;

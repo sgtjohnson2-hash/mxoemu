@@ -1,4 +1,4 @@
-﻿#include "MatrixRebootEngine.h"
+#include "MatrixRebootEngine.h"
 #include "Log.h"
 #include <algorithm>
 
@@ -98,3 +98,80 @@ bool MatrixRebootEngine::CompleteMatrix7Genesis(std::string& outTitleAwarded)
     outTitleAwarded = m_version.legacyTitleAwarded;
     return true;
 }
+
+// ============================================================================
+// HEADLESS TEST SUITE: MATRIX REBOOT & SEVENTH CYCLE GENESIS (SUITE 24)
+// ============================================================================
+void RunMatrixRebootTestSuite()
+{
+    std::cout << "\n============================================================" << std::endl;
+    std::cout << "  STARTING MATRIX REBOOT & SEVENTH CYCLE TEST SUITE (SUITE 24)" << std::endl;
+    std::cout << "============================================================\n" << std::endl;
+
+    int passed = 0;
+    int failed = 0;
+
+    auto TEST_ASSERT = [&](bool cond, const std::string& name) {
+        if (cond) {
+            std::cout << " [PASS] " << name << std::endl;
+            passed++;
+        } else {
+            std::cout << " [FAIL] " << name << " <--- FAILED!" << std::endl;
+            failed++;
+        }
+    };
+
+    // 1. Initialization & Baseline Matrix 6.0
+    sMatrixRebootEngine.Initialize();
+    TEST_ASSERT(sMatrixRebootEngine.GetCurrentVersion() == 6.0f, "Matrix iteration begins at Version 6.0");
+    const MatrixVersionState& v = sMatrixRebootEngine.GetVersionState();
+    TEST_ASSERT(v.currentState == REBOOT_STABLE_CYCLE_6, "Matrix state is REBOOT_STABLE_CYCLE_6");
+    TEST_ASSERT(v.selectedChoice == CHOICE_PENDING, "Prime Choice is pending");
+    TEST_ASSERT(v.selectedFemaleCount == 16, "16 female seed candidates pre-allocated");
+    TEST_ASSERT(v.selectedMaleCount == 7, "7 male seed candidates pre-allocated");
+    TEST_ASSERT(v.goldenDawnAestheticActive == false, "Golden Dawn post-reboot aesthetic inactive");
+    TEST_ASSERT(sMatrixRebootEngine.IsGenesisComplete() == false, "Matrix 7 Genesis is not yet complete");
+
+    // 2. The Prime Choice: Rebuild Zion
+    TEST_ASSERT(sMatrixRebootEngine.SubmitPrimeChoice(CHOICE_REBUILD_ZION_23) == true, "Submitted Prime Choice: Rebuild Zion with 23 individuals");
+    TEST_ASSERT(sMatrixRebootEngine.GetVersionState().selectedChoice == CHOICE_REBUILD_ZION_23, "Choice registered as CHOICE_REBUILD_ZION_23");
+    TEST_ASSERT(sMatrixRebootEngine.GetVersionState().currentState == REBOOT_DISSOLUTION_CASCADE, "Reality dissolution cascade initiated");
+    TEST_ASSERT(sMatrixRebootEngine.GetVersionState().dissolutionProgressPercent == 0.0f, "Dissolution begins at 0%");
+
+    // 3. Reality Dissolution Cascade (25%/sec)
+    sMatrixRebootEngine.UpdateSimulation(2.0f); // 50%
+    TEST_ASSERT(sMatrixRebootEngine.GetVersionState().dissolutionProgressPercent == 50.0f, "Reality dissolution reached 50% across Megacity grids");
+    TEST_ASSERT(sMatrixRebootEngine.GetVersionState().currentState == REBOOT_DISSOLUTION_CASCADE, "Still cascading through system sectors");
+
+    sMatrixRebootEngine.UpdateSimulation(2.5f); // Reaches 100% and triggers handoff
+    TEST_ASSERT(sMatrixRebootEngine.GetVersionState().dissolutionProgressPercent == 100.0f, "Dissolution cascade completed 100%");
+    TEST_ASSERT(sMatrixRebootEngine.GetVersionState().currentState == REBOOT_ATOMIC_HANDOFF, "State transitioned to REBOOT_ATOMIC_HANDOFF");
+
+    // 4. Matrix 7 Genesis Completion
+    std::string title;
+    TEST_ASSERT(sMatrixRebootEngine.CompleteMatrix7Genesis(title) == true, "Matrix 7 Genesis completed successfully");
+    TEST_ASSERT(sMatrixRebootEngine.GetCurrentVersion() == 7.0f, "Matrix version upgraded to 7.0");
+    TEST_ASSERT(sMatrixRebootEngine.GetVersionState().currentState == REBOOT_MATRIX_7_GENESIS, "System state is REBOOT_MATRIX_7_GENESIS");
+    TEST_ASSERT(sMatrixRebootEngine.GetVersionState().goldenDawnAestheticActive == true, "Golden Dawn skybox and emerald sunlight active");
+    TEST_ASSERT(title == "Savior of the Seventh Iteration", "Awarded canonical title 'Savior of the Seventh Iteration'");
+    TEST_ASSERT(sMatrixRebootEngine.IsGenesisComplete() == true, "Genesis completion confirmed");
+
+    // 5. Alternate Path: Synthetic Singularity Choice
+    sMatrixRebootEngine.Initialize();
+    TEST_ASSERT(sMatrixRebootEngine.SubmitPrimeChoice(CHOICE_SYNTHETIC_SINGULARITY) == true, "Submitted Prime Choice: Synthetic Singularity");
+    sMatrixRebootEngine.TriggerRealityDissolution();
+    std::string singularityTitle;
+    TEST_ASSERT(sMatrixRebootEngine.CompleteMatrix7Genesis(singularityTitle) == true, "Singularity Genesis completed");
+    TEST_ASSERT(singularityTitle == "Architect of the Singularity", "Awarded title 'Architect of the Singularity'");
+
+    std::cout << "\n------------------------------------------------------------" << std::endl;
+    std::cout << "  MATRIX REBOOT & SEVENTH CYCLE TEST SUITE COMPLETE" << std::endl;
+    std::cout << "  PASSED: " << passed << " | FAILED: " << failed << std::endl;
+    std::cout << "------------------------------------------------------------\n" << std::endl;
+
+    if (failed > 0) {
+        std::cerr << "RunMatrixRebootTestSuite: FAILED with " << failed << " errors!" << std::endl;
+        exit(1);
+    }
+}
+

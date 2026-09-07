@@ -55,4 +55,6 @@ private:
 
 #define sOperatorBridge OperatorBridge::getSingleton()
 
+void RunOperatorBridgeTestSuite();
+
 #endif // MXOEMU_OPERATOR_BRIDGE_H

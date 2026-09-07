@@ -1,4 +1,4 @@
-﻿#include "MegacityDestructionEngine.h"
+#include "MegacityDestructionEngine.h"
 #include "Log.h"
 #include <algorithm>
 
@@ -15,6 +15,9 @@ void MegacityDestructionEngine::Initialize()
     m_buildings.clear();
     m_helicopters.clear();
     m_glassParticles.clear();
+    m_nextBuildingId = 1;
+    m_nextChopperId = 1;
+    m_simTimeSec = 0.0f;
 
     // 1. Register Iconic Megacity Skyscrapers
     RegisterSkyscraper("MetaCortex Tower", 2, DestructionVector3(39216.0f, 0.0f, -21475.0f), 45);
@@ -291,3 +294,111 @@ size_t MegacityDestructionEngine::GetHelicopterCount() const
     std::lock_guard<std::recursive_mutex> lock(m_destructionMutex);
     return m_helicopters.size();
 }
+
+// ============================================================================
+// HEADLESS TEST SUITE: MEGACITY DESTRUCTION & HELICOPTER GUNSHIP (SUITE 23)
+// ============================================================================
+void RunMegacityDestructionTestSuite()
+{
+    std::cout << "\n============================================================" << std::endl;
+    std::cout << "  STARTING MEGACITY DESTRUCTION & GUNSHIP TEST SUITE (SUITE 23)" << std::endl;
+    std::cout << "============================================================\n" << std::endl;
+
+    int passed = 0;
+    int failed = 0;
+
+    auto TEST_ASSERT = [&](bool cond, const std::string& name) {
+        if (cond) {
+            std::cout << " [PASS] " << name << std::endl;
+            passed++;
+        } else {
+            std::cout << " [FAIL] " << name << " <--- FAILED!" << std::endl;
+            failed++;
+        }
+    };
+
+    // 1. Initialization & Skyscraper Registration
+    sMegacityDestructionEngine.Initialize();
+    TEST_ASSERT(sMegacityDestructionEngine.GetBuildingCount() == 4, "Initialized 4 iconic Megacity skyscrapers");
+    TEST_ASSERT(sMegacityDestructionEngine.GetHelicopterCount() == 1, "Default Zion Air-1 gunship spawned");
+
+    const SkyscraperBlock* b1 = sMegacityDestructionEngine.GetSkyscraper(1);
+    TEST_ASSERT(b1 != nullptr, "MetaCortex Tower retrieved");
+    TEST_ASSERT(b1->buildingName == "MetaCortex Tower", "Building name is MetaCortex Tower");
+    TEST_ASSERT(b1->floorCount == 45, "MetaCortex Tower has 45 floors");
+    TEST_ASSERT(b1->totalGlassPanels == 1800, "Tower features 1800 exterior glass panels");
+    TEST_ASSERT(b1->pillars.size() == 270, "Tower supported by 270 structural pillars (6/floor)");
+    TEST_ASSERT(b1->overallStructuralIntegrity == 100.0f, "Initial structural integrity is 100%");
+
+    // 2. Structural Pillar Damage & Stress Redistribution
+    TEST_ASSERT(sMegacityDestructionEngine.ApplyDamageToPillar(1, 1, 50.0f) == true, "Applied 50% damage to ground floor corner pillar");
+    b1 = sMegacityDestructionEngine.GetSkyscraper(1);
+    TEST_ASSERT(b1->pillars[0].integrityPercent == 50.0f, "Pillar 1 integrity reduced to 50%");
+    TEST_ASSERT(b1->pillars[0].isCollapsed == false, "Pillar remains standing at 50% integrity");
+
+    TEST_ASSERT(sMegacityDestructionEngine.ApplyDamageToPillar(1, 1, 60.0f) == true, "Applied additional 60% damage to pillar 1");
+    b1 = sMegacityDestructionEngine.GetSkyscraper(1);
+    TEST_ASSERT(b1->pillars[0].integrityPercent == 0.0f, "Pillar 1 destroyed (0% integrity)");
+    TEST_ASSERT(b1->pillars[0].isCollapsed == true, "Pillar 1 marked as collapsed");
+    TEST_ASSERT(b1->overallStructuralIntegrity < 100.0f, "Stress redistribution calculated building integrity reduction");
+
+    // 3. Exterior Glass Facade Voronoi Shatter & Particles
+    uint32 panelsShattered = sMegacityDestructionEngine.ShatterGlassFacade(1, 15, DestructionVector3(39216.0f, 6000.0f, -21475.0f), 600.0f);
+    TEST_ASSERT(panelsShattered == 4, "High kinetic impact shattered 4 glass curtain panels");
+    b1 = sMegacityDestructionEngine.GetSkyscraper(1);
+    TEST_ASSERT(b1->shatteredGlassPanels == 4, "Building tracks 4 shattered panels");
+    TEST_ASSERT(sMegacityDestructionEngine.GetActiveGlassParticleCount() == 32, "Spawned 32 physical glass shard particles (8/panel)");
+
+    // Glass particle physics update
+    sMegacityDestructionEngine.UpdateSimulation(1.0f);
+    TEST_ASSERT(sMegacityDestructionEngine.GetActiveGlassParticleCount() == 32, "Particles active and falling under gravity");
+    sMegacityDestructionEngine.UpdateSimulation(3.0f); // Advance past 3.5s particle life
+    TEST_ASSERT(sMegacityDestructionEngine.GetActiveGlassParticleCount() == 0, "Expired glass particles recycled cleanly");
+
+    // 4. Bell 212 Helicopter Gunship Flight Dynamics
+    uint32 chopperId = sMegacityDestructionEngine.SpawnHelicopter("Zion Gunship-2", DestructionVector3(0.0f, 3000.0f, 0.0f));
+    TEST_ASSERT(chopperId > 0, "Second gunship spawned");
+    const HelicopterState* c = sMegacityDestructionEngine.GetHelicopter(chopperId);
+    TEST_ASSERT(c != nullptr, "Gunship profile retrieved");
+    TEST_ASSERT(c->callsign == "Zion Gunship-2", "Callsign is Zion Gunship-2");
+    TEST_ASSERT(c->minigunAmmo == 6000, "Door-mounted M134 Minigun loaded with 6000 rounds");
+
+    // Flight controls & Collective pitch
+    TEST_ASSERT(sMegacityDestructionEngine.UpdateHelicopterFlightControls(chopperId, 0.8f, 0.4f, 0.2f, 0.5f, 0.1f) == true, "Applied flight control inputs");
+    c = sMegacityDestructionEngine.GetHelicopter(chopperId);
+    TEST_ASSERT(c->collectivePitch == 0.8f, "Collective pitch set to 0.8");
+    TEST_ASSERT(c->pitchDeg == 8.0f, "Pitch attitude set by cyclic forward");
+
+    sMegacityDestructionEngine.UpdateSimulation(0.5f);
+    c = sMegacityDestructionEngine.GetHelicopter(chopperId);
+    TEST_ASSERT(c->position.y > 3000.0f, "Gunship gained altitude from collective lift");
+
+    // 5. Door Minigun Strafe & Barrel Overheat
+    uint32 firedRounds = 0;
+    TEST_ASSERT(sMegacityDestructionEngine.FireDoorMinigun(chopperId, firedRounds, 0.2f) == true, "Door minigun strafe burst initiated");
+    TEST_ASSERT(firedRounds > 0, "Minigun fired high-velocity 7.62mm rounds");
+    c = sMegacityDestructionEngine.GetHelicopter(chopperId);
+    TEST_ASSERT(c->minigunAmmo == 6000 - firedRounds, "Minigun ammo depleted accurately");
+    TEST_ASSERT(c->barrelTempCelsius > 20.0f, "Barrel temperature rose from rapid firing");
+
+    // 6. Fast-Rope Tactical Rappel
+    TEST_ASSERT(sMegacityDestructionEngine.DeployFastRope(chopperId) == true, "Fast-rope rappel rig deployed from gunship bay");
+    c = sMegacityDestructionEngine.GetHelicopter(chopperId);
+    TEST_ASSERT(c->fastRopeDeployed == true, "Fast-rope deployed flag is true");
+    TEST_ASSERT(c->operativeRappelProgress == 0.0f, "Operatives begin descent at 0% progress");
+
+    sMegacityDestructionEngine.UpdateSimulation(2.0f);
+    c = sMegacityDestructionEngine.GetHelicopter(chopperId);
+    TEST_ASSERT(c->operativeRappelProgress > 0.0f, "Operatives descending fast-rope toward rooftop target");
+
+    std::cout << "\n------------------------------------------------------------" << std::endl;
+    std::cout << "  MEGACITY DESTRUCTION & GUNSHIP TEST SUITE COMPLETE" << std::endl;
+    std::cout << "  PASSED: " << passed << " | FAILED: " << failed << std::endl;
+    std::cout << "------------------------------------------------------------\n" << std::endl;
+
+    if (failed > 0) {
+        std::cerr << "RunMegacityDestructionTestSuite: FAILED with " << failed << " errors!" << std::endl;
+        exit(1);
+    }
+}
+

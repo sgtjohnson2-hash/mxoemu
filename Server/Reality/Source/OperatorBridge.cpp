@@ -172,3 +172,105 @@ std::string OperatorBridge::ProcessGraphQLQuery(const std::string& query) const
        << "}}";
     return ss.str();
 }
+
+// ============================================================================
+// HEADLESS TEST SUITE: OPERATOR BRIDGE & TELEMETRY (SUITE 21)
+// ============================================================================
+void RunOperatorBridgeTestSuite()
+{
+    std::cout << "\n============================================================" << std::endl;
+    std::cout << "  STARTING OPERATOR BRIDGE & TELEMETRY TEST SUITE (SUITE 21)" << std::endl;
+    std::cout << "============================================================\n" << std::endl;
+
+    int passed = 0;
+    int failed = 0;
+
+    auto TEST_ASSERT = [&](bool cond, const std::string& name) {
+        if (cond) {
+            std::cout << " [PASS] " << name << std::endl;
+            passed++;
+        } else {
+            std::cout << " [FAIL] " << name << " <--- FAILED!" << std::endl;
+            failed++;
+        }
+    };
+
+    // 1. System Initialization
+    sOperatorBridge.Initialize();
+    TEST_ASSERT(true, "OperatorBridge initialized successfully");
+
+    // 2. Surveillance Camera Hacking
+    OperatorActionResult camRes = sOperatorBridge.HackSurveillanceCamera(1, 401);
+    TEST_ASSERT(camRes.success == true, "Camera hack executed successfully");
+    TEST_ASSERT(camRes.message.find("Sector Node 401") != std::string::npos, "Camera hack message confirms Node 401");
+    TEST_ASSERT(camRes.detailsJson.find("\"districtId\":1") != std::string::npos, "Camera telemetry JSON contains districtId 1");
+    TEST_ASSERT(camRes.detailsJson.find("\"feedStatus\":\"ACTIVE\"") != std::string::npos, "Camera feed status is ACTIVE");
+    TEST_ASSERT(camRes.detailsJson.find("\"detectedThreats\":3") != std::string::npos, "Camera optical threat telemetry reported");
+
+    // 3. Tactical Buff Upload
+    OperatorActionResult buffRes = sOperatorBridge.UploadTacticalBuff("Morpheus", "TACTICAL_HYPER_REFLEXES");
+    TEST_ASSERT(buffRes.success == true, "Tactical buff upload executed successfully");
+    TEST_ASSERT(buffRes.message.find("TACTICAL_HYPER_REFLEXES") != std::string::npos, "Buff upload message confirms buffer injection");
+    TEST_ASSERT(buffRes.detailsJson.find("\"targetHandle\":\"Morpheus\"") != std::string::npos, "Buff telemetry targets Morpheus");
+    TEST_ASSERT(buffRes.detailsJson.find("\"applied\":true") != std::string::npos, "Buff applied flag is true");
+    TEST_ASSERT(buffRes.detailsJson.find("\"duration\":120") != std::string::npos, "Buff duration set to 120 seconds");
+
+    // 4. Hardline Escape Route Tracing
+    OperatorActionResult traceRes = sOperatorBridge.TraceNearestHardline("Trinity");
+    TEST_ASSERT(traceRes.success == true, "Nearest hardline escape trace computed successfully");
+    TEST_ASSERT(traceRes.message.find("Morrell Station") != std::string::npos, "Trace identifies Morrell Station");
+    TEST_ASSERT(traceRes.detailsJson.find("\"hardlineId\":101") != std::string::npos, "Hardline ID 101 confirmed");
+    TEST_ASSERT(traceRes.detailsJson.find("\"waypointBeacon\":true") != std::string::npos, "Waypoint beacon illuminated");
+
+    // 5. Emergency Hardline Extraction
+    OperatorActionResult extractRes = sOperatorBridge.EmergencyHardlineExtract("Neo");
+    TEST_ASSERT(extractRes.success == true, "Emergency hardline extraction initiated successfully");
+    TEST_ASSERT(extractRes.message.find("Jacking out...") != std::string::npos, "Emergency extraction message confirms jack-out");
+    TEST_ASSERT(extractRes.detailsJson.find("\"extracted\":true") != std::string::npos, "Extraction flag is true");
+    TEST_ASSERT(extractRes.detailsJson.find("Zion Mainframe Hovercraft") != std::string::npos, "Extraction destination is Zion Hovercraft");
+
+    // 6. Shard Telemetry JSON Export
+    std::string telemetryJson = sOperatorBridge.ExportShardTelemetryJson();
+    TEST_ASSERT(!telemetryJson.empty(), "Shard telemetry JSON exported");
+    TEST_ASSERT(telemetryJson.find("\"shardName\":\"Reality-Definitive\"") != std::string::npos, "Telemetry reports shard Reality-Definitive");
+    TEST_ASSERT(telemetryJson.find("\"tps\":") != std::string::npos, "Telemetry contains TPS metric");
+    TEST_ASSERT(telemetryJson.find("\"activeBots\":") != std::string::npos, "Telemetry contains active bots count");
+    TEST_ASSERT(telemetryJson.find("\"totalHardlines\":") != std::string::npos, "Telemetry contains total hardlines count");
+
+    // 7. Faction Control Nodes JSON Export
+    std::string nodesJson = sOperatorBridge.ExportFactionNodesJson();
+    TEST_ASSERT(!nodesJson.empty(), "Faction control nodes JSON exported");
+    TEST_ASSERT(nodesJson.find("\"totalNodes\":") != std::string::npos, "Nodes JSON contains totalNodes key");
+    TEST_ASSERT(nodesJson.find("\"nodes\":[") != std::string::npos, "Nodes JSON contains nodes array");
+
+    // 8. Economy Status JSON Export
+    std::string econJson = sOperatorBridge.ExportEconomyStatusJson();
+    TEST_ASSERT(!econJson.empty(), "Economy status JSON exported");
+    TEST_ASSERT(econJson.find("\"activeListingsCount\":") != std::string::npos, "Economy JSON contains active listings count");
+    TEST_ASSERT(econJson.find("\"listings\":[") != std::string::npos, "Economy JSON contains listings array");
+
+    // 9. Smith Contagion Status JSON Export
+    std::string contagionJson = sOperatorBridge.ExportContagionStatusJson();
+    TEST_ASSERT(!contagionJson.empty(), "Contagion status JSON exported");
+    TEST_ASSERT(contagionJson.find("\"infectionPercentage\":") != std::string::npos, "Contagion JSON contains infection percentage");
+    TEST_ASSERT(contagionJson.find("\"stage\":") != std::string::npos, "Contagion JSON contains viral stage");
+    TEST_ASSERT(contagionJson.find("\"activeInfections\":") != std::string::npos, "Contagion JSON contains active infections");
+
+    // 10. GraphQL Query Resolution
+    std::string gqlResp = sOperatorBridge.ProcessGraphQLQuery("{ shard { tps } factions { totalNodes } }");
+    TEST_ASSERT(!gqlResp.empty(), "GraphQL query returned response");
+    TEST_ASSERT(gqlResp.find("\"data\":{") != std::string::npos, "GraphQL response formatted under data object");
+    TEST_ASSERT(gqlResp.find("\"online\":true") != std::string::npos, "GraphQL confirms shard is online");
+    TEST_ASSERT(gqlResp.find("\"totalNodes\":114") != std::string::npos, "GraphQL confirms total faction nodes count");
+
+    std::cout << "\n------------------------------------------------------------" << std::endl;
+    std::cout << "  OPERATOR BRIDGE & TELEMETRY TEST SUITE COMPLETE" << std::endl;
+    std::cout << "  PASSED: " << passed << " | FAILED: " << failed << std::endl;
+    std::cout << "------------------------------------------------------------\n" << std::endl;
+
+    if (failed > 0) {
+        std::cerr << "RunOperatorBridgeTestSuite: FAILED with " << failed << " errors!" << std::endl;
+        exit(1);
+    }
+}
+

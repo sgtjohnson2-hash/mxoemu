@@ -1,4 +1,4 @@
-﻿#ifndef MXOEMU_CYBERDECK_HACKING_SYSTEM_H
+#ifndef MXOEMU_CYBERDECK_HACKING_SYSTEM_H
 #define MXOEMU_CYBERDECK_HACKING_SYSTEM_H
 
 #include "Common.h"
@@ -109,5 +109,7 @@ private:
 };
 
 #define sCyberdeckHackingSystem CyberdeckHackingSystem::getSingleton()
+
+void RunCyberdeckHackingTestSuite();
 
 #endif // MXOEMU_CYBERDECK_HACKING_SYSTEM_H

@@ -1,4 +1,4 @@
-﻿#ifndef MXOEMU_MATRIX_REBOOT_ENGINE_H
+#ifndef MXOEMU_MATRIX_REBOOT_ENGINE_H
 #define MXOEMU_MATRIX_REBOOT_ENGINE_H
 
 #include "Common.h"
@@ -71,5 +71,7 @@ private:
 };
 
 #define sMatrixRebootEngine MatrixRebootEngine::getSingleton()
+
+void RunMatrixRebootTestSuite();
 
 #endif // MXOEMU_MATRIX_REBOOT_ENGINE_H

@@ -86,6 +86,10 @@ void RunHovercraftTestSuite();
 void RunBackdoorTestSuite();
 void RunMobilAveTestSuite();
 void RunCorruptCopTestSuite();
+void RunOperatorBridgeTestSuite();
+void RunCyberdeckHackingTestSuite();
+void RunMegacityDestructionTestSuite();
+void RunMatrixRebootTestSuite();
 
 static bool g_testUnderworld = false;
 static bool g_testSimulation = false;
@@ -106,6 +110,10 @@ static bool g_testHovercraft = false;
 static bool g_testBackdoor = false;
 static bool g_testMobilAve = false;
 static bool g_testCorruptCops = false;
+static bool g_testOperatorBridge = false;
+static bool g_testCyberdeck = false;
+static bool g_testMegacityDestruction = false;
+static bool g_testMatrixReboot = false;
 
 int main(int argc, char* argv[])
 {
@@ -161,6 +169,14 @@ int main(int argc, char* argv[])
             g_testMobilAve = true;
         } else if (arg == "--test-corrupt-cops" || arg == "--test-corrupt" || arg == "--test-iab" || arg == "--test-dirtycops") {
             g_testCorruptCops = true;
+        } else if (arg == "--test-operator-bridge" || arg == "--test-operator") {
+            g_testOperatorBridge = true;
+        } else if (arg == "--test-cyberdeck" || arg == "--test-hacking") {
+            g_testCyberdeck = true;
+        } else if (arg == "--test-destruction" || arg == "--test-megacity-destruction") {
+            g_testMegacityDestruction = true;
+        } else if (arg == "--test-reboot" || arg == "--test-cycle7") {
+            g_testMatrixReboot = true;
         } else if (arg == "--test-all") {
             g_testFrank = true;
             g_testUnderworld = true;
@@ -182,13 +198,17 @@ int main(int argc, char* argv[])
             g_testBackdoor = true;
             g_testMobilAve = true;
             g_testCorruptCops = true;
+            g_testOperatorBridge = true;
+            g_testCyberdeck = true;
+            g_testMegacityDestruction = true;
+            g_testMatrixReboot = true;
         }
     }
 
 #ifndef UNITTEST
-    if (g_testFrank && g_testUnderworld && g_testSimulation && g_testEmergentAI && g_testPolice && g_testBiography && g_testSocial && g_testFamily && g_testEmergentLife && g_testSLM && g_testMafia && g_testExiles && g_testPossession && g_testFreeway && g_testConstruct && g_testAPU && g_testHovercraft && g_testBackdoor && g_testMobilAve && g_testCorruptCops) {
+    if (g_testFrank && g_testUnderworld && g_testSimulation && g_testEmergentAI && g_testPolice && g_testBiography && g_testSocial && g_testFamily && g_testEmergentLife && g_testSLM && g_testMafia && g_testExiles && g_testPossession && g_testFreeway && g_testConstruct && g_testAPU && g_testHovercraft && g_testBackdoor && g_testMobilAve && g_testCorruptCops && g_testOperatorBridge && g_testCyberdeck && g_testMegacityDestruction && g_testMatrixReboot) {
         std::cout << "\n============================================================" << std::endl;
-        std::cout << "  RUNNING COMPLETE MEGACITY & TACTICAL TEST SUITE (20 SUITES)" << std::endl;
+        std::cout << "  RUNNING COMPLETE MEGACITY & TACTICAL TEST SUITE (24 SUITES)" << std::endl;
         std::cout << "============================================================\n" << std::endl;
         RunFrankCastleTestSuite();
         RunUnderworldTestSuite();
@@ -210,9 +230,21 @@ int main(int argc, char* argv[])
         RunBackdoorTestSuite();
         RunMobilAveTestSuite();
         RunCorruptCopTestSuite();
+        RunOperatorBridgeTestSuite();
+        RunCyberdeckHackingTestSuite();
+        RunMegacityDestructionTestSuite();
+        RunMatrixRebootTestSuite();
         std::cout << "\n============================================================" << std::endl;
-        std::cout << "  ALL 20 MEGACITY EMERGENCE & TACTICAL SUITES PASSED 100%!  " << std::endl;
+        std::cout << "  ALL 24 MEGACITY EMERGENCE & TACTICAL SUITES PASSED 100%!  " << std::endl;
         std::cout << "============================================================\n" << std::endl;
+    } else if (g_testMatrixReboot) {
+        RunMatrixRebootTestSuite();
+    } else if (g_testMegacityDestruction) {
+        RunMegacityDestructionTestSuite();
+    } else if (g_testCyberdeck) {
+        RunCyberdeckHackingTestSuite();
+    } else if (g_testOperatorBridge) {
+        RunOperatorBridgeTestSuite();
     } else if (g_testCorruptCops) {
         RunCorruptCopTestSuite();
     } else if (g_testMobilAve) {

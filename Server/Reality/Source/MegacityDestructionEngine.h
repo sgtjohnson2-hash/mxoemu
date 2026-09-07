@@ -1,4 +1,4 @@
-﻿#ifndef MXOEMU_MEGACITY_DESTRUCTION_ENGINE_H
+#ifndef MXOEMU_MEGACITY_DESTRUCTION_ENGINE_H
 #define MXOEMU_MEGACITY_DESTRUCTION_ENGINE_H
 
 #include "Common.h"
@@ -145,5 +145,7 @@ private:
 };
 
 #define sMegacityDestructionEngine MegacityDestructionEngine::getSingleton()
+
+void RunMegacityDestructionTestSuite();
 
 #endif // MXOEMU_MEGACITY_DESTRUCTION_ENGINE_H

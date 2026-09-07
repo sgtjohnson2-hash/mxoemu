@@ -1,4 +1,4 @@
-﻿#include "CyberdeckHackingSystem.h"
+#include "CyberdeckHackingSystem.h"
 #include "Log.h"
 #include <algorithm>
 
@@ -237,3 +237,119 @@ bool CyberdeckHackingSystem::GetTerminal(uint32 terminalId, GridTerminal& outTer
     }
     return false;
 }
+
+// ============================================================================
+// HEADLESS TEST SUITE: CYBERDECK HARDWARE & TERMINAL SLICING (SUITE 22)
+// ============================================================================
+void RunCyberdeckHackingTestSuite()
+{
+    std::cout << "\n============================================================" << std::endl;
+    std::cout << "  STARTING CYBERDECK HARDWARE & SLICING TEST SUITE (SUITE 22)" << std::endl;
+    std::cout << "============================================================\n" << std::endl;
+
+    int passed = 0;
+    int failed = 0;
+
+    auto TEST_ASSERT = [&](bool cond, const std::string& name) {
+        if (cond) {
+            std::cout << " [PASS] " << name << std::endl;
+            passed++;
+        } else {
+            std::cout << " [FAIL] " << name << " <--- FAILED!" << std::endl;
+            failed++;
+        }
+    };
+
+    // 1. Initialization & Default Terminals
+    sCyberdeckHackingSystem.Initialize();
+    TEST_ASSERT(sCyberdeckHackingSystem.GetTerminalCount() == 4, "Initialized 4 municipal grid terminals");
+    TEST_ASSERT(sCyberdeckHackingSystem.GetCompromisedTerminalCount() == 0, "Zero terminals compromised initially");
+
+    GridTerminal t1;
+    TEST_ASSERT(sCyberdeckHackingSystem.GetTerminal(1, t1) == true, "Terminal 1 (Richland ATM) retrieved");
+    TEST_ASSERT(t1.type == TERMINAL_ATM_VAULT, "Terminal 1 is ATM Vault");
+    TEST_ASSERT(t1.cashVaultInfo == 35000, "ATM vault contains 35,000 Info");
+
+    // 2. Green Code Vision
+    float rainVel = 0.0f;
+    sCyberdeckHackingSystem.ToggleCodeVision(true, 2.0f, rainVel);
+    const CodeVisionConfig& cv = sCyberdeckHackingSystem.GetCodeVisionConfig();
+    TEST_ASSERT(cv.isEnabled == true, "Code Vision successfully enabled");
+    TEST_ASSERT(cv.glyphDensity == 2.0f, "Glyph density set to 2.0x");
+    TEST_ASSERT(rainVel == 50.0f, "Rain velocity scales to 50 units/sec");
+
+    sCyberdeckHackingSystem.ToggleCodeVision(false, 1.0f, rainVel);
+    TEST_ASSERT(sCyberdeckHackingSystem.GetCodeVisionConfig().isEnabled == false, "Code Vision toggled off");
+
+    // 3. Cyberdeck Equipment & Overclocking
+    uint32 deckId = sCyberdeckHackingSystem.EquipCyberdeck(2002, "Onyx DeepDive v3", DECK_ONYX_DEEPDIVE, 4096, 5.0f, 4);
+    TEST_ASSERT(deckId > 0, "Onyx DeepDive cyberdeck equipped");
+
+    CyberdeckHardware deck;
+    TEST_ASSERT(sCyberdeckHackingSystem.GetDeck(deckId, deck) == true, "Cyberdeck hardware profile retrieved");
+    TEST_ASSERT(deck.tier == DECK_ONYX_DEEPDIVE, "Cyberdeck tier is ONYX_DEEPDIVE");
+    TEST_ASSERT(deck.installedRamMb == 4096, "Deck has 4096MB RAM");
+    TEST_ASSERT(deck.busSpeedGhz == 5.0f, "Deck base bus speed is 5.0 GHz");
+    TEST_ASSERT(deck.iceBreakerLevel == 4, "Deck ICE breaker level is 4");
+    TEST_ASSERT(deck.isOverclocked == false, "Deck starts in stock frequency mode");
+
+    // Overclocking
+    TEST_ASSERT(sCyberdeckHackingSystem.OverclockCyberdeck(deckId, true) == true, "Overclocking engaged");
+    sCyberdeckHackingSystem.GetDeck(deckId, deck);
+    TEST_ASSERT(deck.isOverclocked == true, "Deck marked as overclocked");
+    TEST_ASSERT(deck.busSpeedGhz == 6.25f, "Overclocked bus speed boosted by 25% (6.25 GHz)");
+
+    TEST_ASSERT(sCyberdeckHackingSystem.OverclockCyberdeck(deckId, false) == true, "Overclocking disengaged");
+    sCyberdeckHackingSystem.GetDeck(deckId, deck);
+    TEST_ASSERT(deck.isOverclocked == false, "Deck returned to stock clock");
+    TEST_ASSERT(deck.busSpeedGhz == 5.0f, "Bus speed restored to 5.0 GHz");
+
+    // 4. Municipal Terminal Slicing & Harvest
+    uint32 puzzleId = sCyberdeckHackingSystem.InitiateTerminalSlicing(2002, 1);
+    TEST_ASSERT(puzzleId > 0, "Slicing puzzle initiated on ATM terminal 1");
+
+    bool solveSuccess = false;
+    uint32 cashHarvested = 0;
+    bool submitted = sCyberdeckHackingSystem.SubmitSlicingSolution(puzzleId, "0xDEADBEEF7F", solveSuccess, cashHarvested);
+    TEST_ASSERT(submitted == true, "Parity solution accepted by terminal ICE");
+    TEST_ASSERT(solveSuccess == true, "Slicing puzzle solved successfully");
+    TEST_ASSERT(cashHarvested == 35000, "ATM cash vault harvested (35,000 Info)");
+
+    sCyberdeckHackingSystem.GetTerminal(1, t1);
+    TEST_ASSERT(t1.isCompromised == true, "ATM terminal marked as compromised");
+    TEST_ASSERT(t1.cashVaultInfo == 0, "ATM vault emptied post-slice");
+    TEST_ASSERT(sCyberdeckHackingSystem.GetCompromisedTerminalCount() == 1, "Compromised terminal count is 1");
+
+    // Re-submission should fail on already solved puzzle
+    bool secondSolve = false;
+    uint32 secondCash = 0;
+    TEST_ASSERT(sCyberdeckHackingSystem.SubmitSlicingSolution(puzzleId, "0x7F", secondSolve, secondCash) == false, "Cannot re-submit to solved puzzle");
+
+    // 5. Traffic Grid Remote Override
+    TEST_ASSERT(sCyberdeckHackingSystem.OverrideTrafficGrid(2, true) == true, "Traffic grid terminal 2 green override activated");
+    GridTerminal t2;
+    sCyberdeckHackingSystem.GetTerminal(2, t2);
+    TEST_ASSERT(t2.trafficGreenOverride == true, "Green light wave confirmed on Downtown grid");
+    TEST_ASSERT(t2.isCompromised == true, "Traffic terminal marked compromised");
+    TEST_ASSERT(sCyberdeckHackingSystem.OverrideTrafficGrid(1, true) == false, "Cannot override traffic on ATM terminal");
+
+    // 6. Puzzle Countdown & Intrusion Alarm
+    uint32 p2 = sCyberdeckHackingSystem.InitiateTerminalSlicing(2002, 3);
+    TEST_ASSERT(p2 > 0, "Slicing puzzle initiated on Power Substation 3");
+    sCyberdeckHackingSystem.UpdateSimulation(35.0f); // Advance past 30.0s limit
+
+    bool p2Success = false;
+    uint32 p2Cash = 0;
+    TEST_ASSERT(sCyberdeckHackingSystem.SubmitSlicingSolution(p2, "0x7F", p2Success, p2Cash) == false, "Expired puzzle rejected submission due to alarm");
+
+    std::cout << "\n------------------------------------------------------------" << std::endl;
+    std::cout << "  CYBERDECK HARDWARE & SLICING TEST SUITE COMPLETE" << std::endl;
+    std::cout << "  PASSED: " << passed << " | FAILED: " << failed << std::endl;
+    std::cout << "------------------------------------------------------------\n" << std::endl;
+
+    if (failed > 0) {
+        std::cerr << "RunCyberdeckHackingTestSuite: FAILED with " << failed << " errors!" << std::endl;
+        exit(1);
+    }
+}
+
