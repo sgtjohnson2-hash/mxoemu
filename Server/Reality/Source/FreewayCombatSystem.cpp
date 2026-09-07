@@ -1,6 +1,17 @@
-﻿#include "FreewayCombatSystem.h"
+#include "FreewayCombatSystem.h"
+#include "GameServer.h"
+#include "BotManager.h"
+#include "ObjectMgr.h"
+#include "PlayerObject.h"
+#include "AgentPossessionManager.h"
+#include "MessageTypes.h"
 #include "Log.h"
 #include <algorithm>
+#include <iostream>
+
+static inline bool Has3DWorldSupport() {
+    return GameServer::getSingletonPtr() != nullptr && BotManager::getSingletonPtr() != nullptr;
+}
 
 createFileSingleton(FreewayCombatSystem);
 
@@ -278,3 +289,241 @@ bool FreewayCombatSystem::GetVehicle(uint32 vehicleId, FreewayVehicle& outVehicl
     }
     return false;
 }
+
+bool FreewayCombatSystem::ExecuteVehicleRam(uint32 attackerVehicleId, uint32 targetVehicleId)
+{
+    std::lock_guard<std::recursive_mutex> lock(m_freewayMutex);
+    auto itAttacker = m_vehicles.find(attackerVehicleId);
+    auto itTarget = m_vehicles.find(targetVehicleId);
+    if (itAttacker == m_vehicles.end() || itTarget == m_vehicles.end()) return false;
+    if (itAttacker->second.isWrecked || itTarget->second.isWrecked) return false;
+
+    FreewayVehicle& attacker = itAttacker->second;
+    FreewayVehicle& target = itTarget->second;
+
+    float relSpeed = std::abs(attacker.speedMph - target.speedMph);
+    float impactDamage = std::max(250.0f, relSpeed * 15.0f);
+
+    if (attacker.type == VEHICLE_SEMI_TRAILER) {
+        impactDamage *= 2.5f;
+    }
+
+    target.health = std::max(0.0f, target.health - impactDamage);
+    if (target.health <= 0.0f) {
+        target.isWrecked = true;
+        target.speedMph = 0.0f;
+    } else if (relSpeed > 20.0f) {
+        target.isTireBlown = true;
+    }
+
+    attacker.health = std::max(0.0f, attacker.health - (impactDamage * 0.35f));
+    if (attacker.health <= 0.0f) {
+        attacker.isWrecked = true;
+        attacker.speedMph = 0.0f;
+    }
+
+    if (Has3DWorldSupport()) {
+        DEBUG_LOG(format("FreewayCombatSystem: Vehicle %1% rammed %2% for %3% damage!")
+                  % attackerVehicleId % targetVehicleId % impactDamage);
+    }
+
+    return true;
+}
+
+bool FreewayCombatSystem::HandleRooftopFalloff(uint32 duelId, uint32 participantId)
+{
+    std::lock_guard<std::recursive_mutex> lock(m_freewayMutex);
+    auto it = m_duels.find(duelId);
+    if (it == m_duels.end()) return false;
+
+    RoofWireFuDuel& duel = it->second;
+    if (duel.participant1Id != participantId && duel.participant2Id != participantId) return false;
+
+    if (Has3DWorldSupport()) {
+        if (auto po = sObjMgr.getGOPtrSafe(participantId)) {
+            po->takeDamage(0, 1500, 0x280001C2);
+            po->sayChat("Lost footing! Falling onto the 101 tarmac!");
+            po->Emote(50);
+        }
+    }
+
+    if (duel.participant1Id == participantId) {
+        duel.p1BalanceMeter = 0.0f;
+    } else {
+        duel.p2BalanceMeter = 0.0f;
+    }
+
+    if (duel.p1BalanceMeter <= 0.0f && duel.p2BalanceMeter <= 0.0f) {
+        auto vIt = m_vehicles.find(duel.vehicleId);
+        if (vIt != m_vehicles.end()) {
+            vIt->second.hasRoofCombatant = false;
+            vIt->second.roofDuelId = 0;
+        }
+        m_duels.erase(it);
+    }
+
+    return true;
+}
+
+bool FreewayCombatSystem::AgentJumpOntoVehicle(uint32 vehicleId, const std::string& agentName)
+{
+    std::lock_guard<std::recursive_mutex> lock(m_freewayMutex);
+    auto it = m_vehicles.find(vehicleId);
+    if (it == m_vehicles.end() || it->second.isWrecked) return false;
+
+    FreewayVehicle& v = it->second;
+    v.hasRoofCombatant = true;
+    v.speedMph += 20.0f;
+
+    if (Has3DWorldSupport()) {
+        DEBUG_LOG(format("FreewayCombatSystem: %1% landed on hood of vehicle %2%!")
+                  % agentName % vehicleId);
+    }
+
+    return true;
+}
+
+void RunFreewayCombatTestSuite()
+{
+    std::cout << "\n============================================================" << std::endl;
+    std::cout << "  STARTING MATRIX RELOADED 101 FREEWAY PURSUIT TEST SUITE   " << std::endl;
+    std::cout << "============================================================\n" << std::endl;
+
+    FreewayCombatSystem& freeway = sFreewayCombatSystem;
+    freeway.Initialize();
+
+    int passedCount = 0;
+    int failedCount = 0;
+
+    auto TEST_ASSERT = [&](bool condition, const std::string& testName) {
+        if (condition) {
+            std::cout << " [PASS] " << testName << std::endl;
+            passedCount++;
+        } else {
+            std::cout << " [FAIL] " << testName << std::endl;
+            failedCount++;
+        }
+    };
+
+    // 1. Highway Loop Traffic Spawning & Initial State
+    {
+        size_t initialCount = freeway.GetVehicleCount();
+        TEST_ASSERT(initialCount >= 4, "Default 101 Freeway loop spawns Cadillac, Ducati, Semi, and Cruiser");
+
+        FreewayVehicle semi;
+        bool foundSemi = freeway.GetVehicle(3, semi);
+        TEST_ASSERT(foundSemi && semi.type == VEHICLE_SEMI_TRAILER, "Semi-Trailer freight truck registered");
+        TEST_ASSERT(semi.health == 10000.0f, "Semi-Trailer has 10,000 HP heavy armor");
+        TEST_ASSERT(semi.lane == LANE_OUTER, "Semi-Trailer drives in outer freight lane");
+
+        FreewayVehicle ducati;
+        bool foundDucati = freeway.GetVehicle(2, ducati);
+        TEST_ASSERT(foundDucati && ducati.type == VEHICLE_DUCATI_996, "Trinity's Ducati 996 motorcycle registered");
+        TEST_ASSERT(ducati.lane == LANE_HOV, "Ducati utilizes high-speed HOV lane");
+    }
+
+    // 2. Tire Blowout & Top Speed Penalty
+    {
+        FreewayVehicle caddy;
+        freeway.GetVehicle(1, caddy);
+        float initSpeed = caddy.speedMph;
+
+        bool blowout = freeway.TriggerTireBlowout(1);
+        TEST_ASSERT(blowout, "TriggerTireBlowout punctures Cadillac tire");
+
+        freeway.UpdateSimulation(2.0f);
+        freeway.GetVehicle(1, caddy);
+        TEST_ASSERT(caddy.isTireBlown, "Vehicle tracks blown tire status");
+        TEST_ASSERT(caddy.speedMph < initSpeed, "Blown tire causes decelerative friction drag");
+    }
+
+    // 3. High-Speed Vehicle Ramming Mechanics
+    {
+        uint32 chaserId = freeway.SpawnVehicle(VEHICLE_POLICE_CRUISER, LANE_INNER, 90.0f);
+        uint32 targetId = freeway.SpawnVehicle(VEHICLE_CADILLAC_CTS, LANE_INNER, 65.0f);
+
+        FreewayVehicle targetBefore;
+        freeway.GetVehicle(targetId, targetBefore);
+
+        bool ramResult = freeway.ExecuteVehicleRam(chaserId, targetId);
+        TEST_ASSERT(ramResult, "ExecuteVehicleRam executes high-speed highway collision");
+
+        FreewayVehicle targetAfter;
+        freeway.GetVehicle(targetId, targetAfter);
+        TEST_ASSERT(targetAfter.health < targetBefore.health, "Ramming collision inflicts damage scaled to relative momentum");
+        TEST_ASSERT(targetAfter.isTireBlown, "High relative-speed collision triggers tire blowout");
+
+        // Semi-trailer heavy ramming bonus
+        bool semiRam = freeway.ExecuteVehicleRam(3, targetId);
+        TEST_ASSERT(semiRam, "Semi-Trailer crushes lighter vehicle");
+    }
+
+    // 4. Rooftop Wire-Fu Duels on Speeding Freight
+    {
+        uint32 morpheusGoId = 9101;
+        uint32 agentJohnsonGoId = 9102;
+
+        uint32 duelId = freeway.BoardVehicleRoof(3, morpheusGoId);
+        TEST_ASSERT(duelId != 0, "BoardVehicleRoof initiates rooftop duel on Semi-Trailer");
+
+        uint32 joinedDuelId = freeway.BoardVehicleRoof(3, agentJohnsonGoId);
+        TEST_ASSERT(joinedDuelId == duelId, "Second combatant boards same roof duel");
+        TEST_ASSERT(freeway.GetActiveRoofDuelCount() >= 1, "Active roof duel count tracked");
+
+        bool balanceUpdate = freeway.UpdateRoofDuel(duelId, morpheusGoId, -10.0f, true);
+        TEST_ASSERT(balanceUpdate, "UpdateRoofDuel adjusts balance and airborne wire-fu jump state");
+    }
+
+    // 5. Rooftop Falloff Trauma Mechanics
+    {
+        bool falloffResult = freeway.HandleRooftopFalloff(1, 9102);
+        TEST_ASSERT(falloffResult, "HandleRooftopFalloff triggers fall damage and balance collapse");
+    }
+
+    // 6. Agent Twins Phasing Mechanics
+    {
+        TEST_ASSERT(!freeway.IsTwinPhased(1), "Twin starts in solid physical state");
+
+        bool phased = freeway.TriggerTwinPhaseShift(1, true);
+        TEST_ASSERT(phased && freeway.IsTwinPhased(1), "Twin phase shift transitions to ethereal TWIN_PHASING state");
+
+        bool solidified = freeway.TriggerTwinPhaseShift(1, false);
+        TEST_ASSERT(solidified && !freeway.IsTwinPhased(1), "Twin solidifies to take physical damage");
+    }
+
+    // 7. Keymaker Escort Mission & Ambush Escalation
+    {
+        freeway.StartKeymakerEscort();
+        const KeymakerEscortState& escort = freeway.GetEscortState();
+        TEST_ASSERT(escort.isAmbushed, "StartKeymakerEscort flags mission as ambushed");
+        TEST_ASSERT(escort.escortHealth == 5000.0f, "Escort sedan has 5,000 baseline durability");
+
+        bool damaged = freeway.DamageEscortSedan(500.0f);
+        TEST_ASSERT(!damaged, "Escort sedan survives partial ambush damage");
+        TEST_ASSERT(freeway.GetEscortState().escortHealth == 4500.0f, "Escort sedan health accurately decremented");
+
+        freeway.UpdateSimulation(5.0f);
+        TEST_ASSERT(freeway.GetEscortState().progressPercent > 0.0f, "Escort vehicle advances along 101 Freeway loop");
+    }
+
+    // 8. Agent Hood Jump & Overwrite
+    {
+        bool agentJump = freeway.AgentJumpOntoVehicle(4, "Agent Jackson");
+        TEST_ASSERT(agentJump, "AgentJumpOntoVehicle executes hood latch and ramming speed boost");
+        FreewayVehicle cruiser;
+        freeway.GetVehicle(4, cruiser);
+        TEST_ASSERT(cruiser.hasRoofCombatant, "Vehicle tracks roof combatant presence");
+        TEST_ASSERT(cruiser.speedMph >= 100.0f, "Vehicle gains ramming speed acceleration");
+    }
+
+    std::cout << "\n------------------------------------------------------------" << std::endl;
+    std::cout << "  101 FREEWAY PURSUIT & ROOFTOP DUELS TEST SUITE COMPLETE   " << std::endl;
+    std::cout << "  PASSED: " << passedCount << " | FAILED: " << failedCount << std::endl;
+    std::cout << "------------------------------------------------------------\n" << std::endl;
+
+    if (failedCount > 0) {
+        std::cerr << "Freeway Combat test suite encountered failures!" << std::endl;
+        exit(1);
+    }
+}
+

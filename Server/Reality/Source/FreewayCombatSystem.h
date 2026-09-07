@@ -1,4 +1,4 @@
-﻿#ifndef MXOEMU_FREEWAY_COMBAT_SYSTEM_H
+#ifndef MXOEMU_FREEWAY_COMBAT_SYSTEM_H
 #define MXOEMU_FREEWAY_COMBAT_SYSTEM_H
 
 #include "Common.h"
@@ -122,6 +122,15 @@ public:
     void StartKeymakerEscort();
     bool DamageEscortSedan(float damage);
 
+    // High-Speed Ramming & Collisions
+    bool ExecuteVehicleRam(uint32 attackerVehicleId, uint32 targetVehicleId);
+
+    // Rooftop Duels & Falloffs
+    bool HandleRooftopFalloff(uint32 duelId, uint32 participantId);
+
+    // Agent Infiltration & Hood Overwrites
+    bool AgentJumpOntoVehicle(uint32 vehicleId, const std::string& agentName = "Agent Johnson");
+
     // Telemetry & Getters
     size_t GetVehicleCount() const;
     size_t GetActiveRoofDuelCount() const;
@@ -142,5 +151,7 @@ private:
 };
 
 #define sFreewayCombatSystem FreewayCombatSystem::getSingleton()
+
+void RunFreewayCombatTestSuite();
 
 #endif // MXOEMU_FREEWAY_COMBAT_SYSTEM_H
