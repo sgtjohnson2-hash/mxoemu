@@ -1700,8 +1700,8 @@ void EmergentAIEngine::OnPolice10CodeDispatched(uint32 precinctId, const std::st
     std::lock_guard<std::recursive_mutex> lock(m_mutex);
     m_crossSystemEventsTriggered++;
 
-    sLog.outString("EmergentAIEngine: Dispatching MMPD Code [%s] to sector (%d, %d).",
-                   tenCode.c_str(), static_cast<int>(targetPos.x), static_cast<int>(targetPos.z));
+    DEBUG_LOG(format("EmergentAIEngine: Dispatching MMPD Code [%1%] to sector (%2%, %3%)")
+              % tenCode % static_cast<int>(targetPos.x) % static_cast<int>(targetPos.z));
 
     // Update observer focus point for police response
     m_lodManager.UpdateObserverPosition(3, targetPos);

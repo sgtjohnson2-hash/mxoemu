@@ -49,14 +49,11 @@ MarginSocket::MarginSocket(ISocketHandler& h) : TCPVarLenSocket(h)
 	worldCharId = 0;
 	numCharacterReplies = 0;
 	readyForUdp = false;
-//	this->SetWillBeHalfClosed(true);
-
-	DEBUG_LOG("Margin socket constructed");
+	m_connState = MARGIN_STATE_WAIT_CONNECT_REQ;
 }
 
 MarginSocket::~MarginSocket()
 {
-	DEBUG_LOG("Margin socket deconstructed");
 }
 
 void MarginSocket::OnDisconnect( short info, int code )
@@ -66,9 +63,8 @@ void MarginSocket::OnDisconnect( short info, int code )
 		std::shared_ptr<GameClient> udpClient = sGame.GetClientWithSessionId(sessionId);
 		if (udpClient)
 			udpClient->Invalidate();
+		DEBUG_LOG(format("Margin socket with %1% disconnected (session %2%)") % GetRemoteSocketAddress()->Convert(true) % sessionId);
 	}
-
-	DEBUG_LOG(format("Margin socket with %1% disconnected") % GetRemoteSocketAddress()->Convert(true));
 }
 
 void MarginSocket::SendCrypted( TwofishEncryptedPacket &cryptedPacket )
@@ -115,61 +111,75 @@ enum MarginOpcode
 
 void MarginSocket::ProcessData( const byte *buf,size_t len )
 {
-	ByteBuffer packetContents(buf,len);
+	if (len == 0 || buf == nullptr)
+		return;
 
-	DEBUG_LOG(format("Margin Receieved |%1%|") % Bin2Hex(packetContents) );
-
-	bool encrypted = true;
-
-	byte firstByte;
-	packetContents >> firstByte;
-	if (firstByte == CERT_ConnectRequest && packetContents.remaining() >= 2)
+	try
 	{
-		uint16 firstShort;
-		packetContents >> firstShort;
+		ByteBuffer packetContents(buf,len);
 
-		if (firstShort == 3)
+		DEBUG_LOG(format("Margin Receieved |%1%|") % Bin2Hex(packetContents) );
+
+		bool encrypted = true;
+
+		byte firstByte = 0;
+		if (packetContents.remaining() >= 1)
 		{
-			encrypted = false;
+			packetContents >> firstByte;
+			if (firstByte == CERT_ConnectRequest && packetContents.remaining() >= 2)
+			{
+				uint16 firstShort;
+				packetContents >> firstShort;
+
+				if (firstShort == 3)
+				{
+					encrypted = false;
+				}
+			}
+			else if (firstByte == CERT_ChallengeResponse && len == 17)
+			{
+				encrypted = false;
+			}
+			else if (!m_tfEngine.IsValid())
+			{
+				encrypted = false;
+			}
 		}
-	}
-	else if (firstByte == CERT_ChallengeResponse && len == 17)
-	{
-		encrypted = false;
-	}
-	else if (!m_tfEngine.IsValid())
-	{
-		encrypted = false;
-	}
-	//reset position
-	packetContents.rpos(0);
+		//reset position
+		packetContents.rpos(0);
 
-	ByteBuffer packetData;
+		ByteBuffer packetData;
 
-	if (encrypted == true && m_tfEngine.IsValid())
-	{
-		try
+		if (encrypted == true && m_tfEngine.IsValid())
 		{
-			TwofishEncryptedPacket packetTodecrypt(packetContents,m_tfEngine);
-			packetData = packetTodecrypt;
+			try
+			{
+				TwofishEncryptedPacket packetTodecrypt(packetContents,m_tfEngine);
+				packetData = packetTodecrypt;
 
-			DEBUG_LOG(format("Margin Decrypted |%1%|") % Bin2Hex(packetData) );
+				DEBUG_LOG(format("Margin Decrypted |%1%|") % Bin2Hex(packetData) );
+			}
+			catch (std::exception &e)
+			{
+				ERROR_LOG(format("Margin Decrypt failed: %1%") % e.what());
+				SetCloseAndDelete(true);
+				return;
+			}
 		}
-		catch (std::exception &e)
+		else
 		{
-			ERROR_LOG(format("Margin Decrypt failed: %1%") % e.what());
+			packetData = packetContents;
+		}
+
+		if (packetData.remaining() < 1)
+		{
 			SetCloseAndDelete(true);
 			return;
 		}
-	}
-	else
-	{
-		packetData = packetContents;
-	}
 
-	byte packetOpcode;
-	packetData >> packetOpcode;
-	MarginOpcode opcode = MarginOpcode(packetOpcode);
+		byte packetOpcode;
+		packetData >> packetOpcode;
+		MarginOpcode opcode = MarginOpcode(packetOpcode);
 
 	switch (opcode)
 	{
@@ -309,10 +319,18 @@ void MarginSocket::ProcessData( const byte *buf,size_t len )
 			SendPacket(response);
 			
 			DEBUG_LOG(format("Sending CERT_Challenge: |%1%|") % Bin2Hex(response) );
+			m_connState = MARGIN_STATE_WAIT_CHALLENGE_RESP;
 			break;
 		}
 	case CERT_ChallengeResponse:
 		{
+			if (m_connState != MARGIN_STATE_WAIT_CHALLENGE_RESP)
+			{
+				DEBUG_LOG("CERT_ChallengeResponse received out of order or without prior CERT_ConnectRequest, disconnecting");
+				SetCloseAndDelete(true);
+				return;
+			}
+
 			byte clientsChallenge[16];
 			if (packetData.remaining() < sizeof(clientsChallenge))
 			{
@@ -324,6 +342,7 @@ void MarginSocket::ProcessData( const byte *buf,size_t len )
 			if (!memcmp(clientsChallenge,challenge,sizeof(challenge)))
 			{
 				DEBUG_LOG("CERT_ChallengeResponse from client correct!");
+				m_connState = MARGIN_STATE_AUTHENTICATED;
 			}
 			else
 			{
@@ -452,29 +471,8 @@ void MarginSocket::ProcessData( const byte *buf,size_t len )
 			{
 				PreparedStatement stmt("SELECT `charId`, `userId`, `handle`, `firstName`, `lastName`, `background` FROM `characters` WHERE `userId` = ?0 AND `charId` = ?1 LIMIT 1");
 				stmt.SetUInt32(0, m_userId);
-				stmt.SetUInt32(1, (uint32)charId);
+				stmt.SetUInt32(1, charId);
 				scoped_ptr<QueryResult> result(sDatabase.QueryPrepared(&stmt));
-				if (result == NULL && charId != 0)
-				{
-					// Fallback 1: Lookup by charId alone (e.g. if userId was reassigned or slightly offset)
-					PreparedStatement stmtById("SELECT `charId`, `userId`, `handle`, `firstName`, `lastName`, `background` FROM `characters` WHERE `charId` = ?0 LIMIT 1");
-					stmtById.SetUInt64(0, charId);
-					result.reset(sDatabase.QueryPrepared(&stmtById));
-				}
-				if (result == NULL && !m_username.empty())
-				{
-					// Fallback 2: Lookup by handle matching account username
-					PreparedStatement stmtByHandle("SELECT `charId`, `userId`, `handle`, `firstName`, `lastName`, `background` FROM `characters` WHERE LOWER(`handle`) = LOWER(?0) LIMIT 1");
-					stmtByHandle.SetString(0, m_username);
-					result.reset(sDatabase.QueryPrepared(&stmtByHandle));
-				}
-				if (result == NULL)
-				{
-					// Fallback 3: Lookup any character owned by this userId
-					PreparedStatement stmtAny("SELECT `charId`, `userId`, `handle`, `firstName`, `lastName`, `background` FROM `characters` WHERE `userId` = ?0 ORDER BY `charId` ASC LIMIT 1");
-					stmtAny.SetUInt32(0, m_userId);
-					result.reset(sDatabase.QueryPrepared(&stmtAny));
-				}
 				if (result == NULL)
 				{
 					ERROR_LOG(format("MS_LoadCharacterRequest: Character doesn't exist or username %1% doesn't own it") % m_username );
@@ -483,8 +481,7 @@ void MarginSocket::ProcessData( const byte *buf,size_t len )
 				}
 
 				Field *field = result->Fetch();
-				charId = field[0].GetUInt64();
-				m_userId = field[1].GetUInt32();
+
 				m_charName = field[2].GetString();
 				m_firstName = field[3].GetString();
 				m_lastName = field[4].GetString();
@@ -567,7 +564,22 @@ void MarginSocket::ProcessData( const byte *buf,size_t len )
 			SendLoadCharacterReplies();
 			break;
 		}
-
+	}
+	}
+	catch (const ByteBuffer::out_of_range& e)
+	{
+		ERROR_LOG(format("MarginSocket::ProcessData ByteBuffer::out_of_range: %1%") % e.what());
+		SetCloseAndDelete(true);
+	}
+	catch (const std::exception& e)
+	{
+		ERROR_LOG(format("MarginSocket::ProcessData exception: %1%") % e.what());
+		SetCloseAndDelete(true);
+	}
+	catch (...)
+	{
+		ERROR_LOG("MarginSocket::ProcessData unknown exception");
+		SetCloseAndDelete(true);
 	}
 }
 
@@ -1102,16 +1114,9 @@ void MarginSocket::HandleClaimCharacterNameRequest(ByteBuffer &packetData)
 			Field* f = res->Fetch();
 			uint64 cId = f[0].GetUInt64();
 			uint32 uId = f[1].GetUInt32();
-			if (uId == m_userId || strcasecmp(handleStr.c_str(), m_username.c_str()) == 0)
+			if (uId == m_userId)
 			{
 				existingCharId = cId;
-				if (uId != m_userId)
-				{
-					PreparedStatement updStmt("UPDATE `characters` SET `userId` = ?0 WHERE `charId` = ?1");
-					updStmt.SetUInt32(0, m_userId);
-					updStmt.SetUInt64(1, cId);
-					sDatabase.ExecutePrepared(&updStmt);
-				}
 			}
 			else
 			{
@@ -1331,35 +1336,14 @@ void MarginSocket::HandleCreateCharacterRequest(ByteBuffer &packetData)
 
 	if (charId == 0)
 	{
-		PreparedStatement checkOther("SELECT `charId`, `userId` FROM `characters` WHERE LOWER(`handle`) = LOWER(?0) LIMIT 1");
+		PreparedStatement checkOther("SELECT `charId` FROM `characters` WHERE `handle` = ?0 LIMIT 1");
 		checkOther.SetString(0, handleToUse);
 		scoped_ptr<QueryResult> otherRes(sDatabase.QueryPrepared(&checkOther));
 		if (otherRes)
 		{
-			Field* f = otherRes->Fetch();
-			uint64 cId = f[0].GetUInt64();
-			uint32 uId = f[1].GetUInt32();
-			if (uId == m_userId || strcasecmp(handleToUse.c_str(), m_username.c_str()) == 0)
-			{
-				charId = cId;
-				if (uId != m_userId)
-				{
-					PreparedStatement upd("UPDATE `characters` SET `userId` = ?0 WHERE `charId` = ?1");
-					upd.SetUInt32(0, m_userId);
-					upd.SetUInt64(1, cId);
-					sDatabase.ExecutePrepared(&upd);
-				}
-			}
-			else
-			{
-				handleToUse = handleToUse + "_" + std::to_string(m_userId);
-				m_charName = handleToUse;
-			}
+			handleToUse = handleToUse + "_" + std::to_string(m_userId);
+			m_charName = handleToUse;
 		}
-	}
-
-	if (charId == 0)
-	{
 
 		uint32 profId = (profession > 0) ? profession : 2;
 		PreparedStatement insStmt("INSERT INTO `characters` (`userId`, `worldId`, `status`, `handle`, `firstName`, `lastName`, `background`, `x`, `y`, `z`, `rot`, `healthC`, `healthM`, `innerStrC`, `innerStrM`, `level`, `profession`, `alignment`, `pvpflag`, `exp`, `cash`, `district`, `adminFlags`) "

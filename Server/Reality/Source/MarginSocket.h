@@ -89,6 +89,19 @@ private:
 	uint32 worldCharId;
 
 	bool readyForUdp;
+
+public:
+	enum MarginConnectionState
+	{
+		MARGIN_STATE_WAIT_CONNECT_REQ = 0,
+		MARGIN_STATE_WAIT_CHALLENGE_RESP = 1,
+		MARGIN_STATE_AUTHENTICATED = 2,
+		MARGIN_STATE_IN_GAME = 3
+	};
+	MarginConnectionState GetConnectionState() const { return m_connState; }
+
+private:
+	MarginConnectionState m_connState{MARGIN_STATE_WAIT_CONNECT_REQ};
 };
 
 

@@ -420,9 +420,10 @@ void LogisticsManager::UpdateCouriers(uint32 deltaMs)
                 }
             }
 
-            if (now - courier.lastCalloutTime > 25000) {
+            if (now - courier.lastCalloutTime > 180000) {
                 courier.lastCalloutTime = now;
-                if (bot) bot->Say((format("Courier passing checkpoint en route with [%1%].") % courier.cargoDescription).str());
+                DEBUG_LOG(format("LogisticsManager: Courier %1% passing checkpoint en route with [%2%]") 
+                          % courier.courierGoId % courier.cargoDescription);
             }
         }
 
