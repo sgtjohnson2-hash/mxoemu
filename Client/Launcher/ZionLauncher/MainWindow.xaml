@@ -121,10 +121,19 @@
                 <!-- Login View -->
                 <StackPanel x:Name="LoginPanel" Visibility="Visible">
                     <TextBlock Text="OPERATOR HANDLE / LOGIN:" Margin="0,0,0,4"/>
-                    <TextBox x:Name="txtLoginUser" Margin="0,0,0,12" FontSize="15" KeyDown="txtLogin_KeyDown"/>
+                    <TextBox x:Name="txtLoginUser" Margin="0,0,0,12" FontSize="15" KeyDown="txtLogin_KeyDown" TextChanged="txtLogin_TextChanged"/>
 
                     <TextBlock Text="PASSCODE:" Margin="0,0,0,4"/>
-                    <PasswordBox x:Name="txtLoginPass" Margin="0,0,0,15" FontSize="15" KeyDown="txtLogin_KeyDown"/>
+                    <PasswordBox x:Name="txtLoginPass" Margin="0,0,0,15" FontSize="15" KeyDown="txtLogin_KeyDown" PasswordChanged="txtLogin_PasswordChanged"/>
+
+                    <!-- Operative Selection -->
+                    <StackPanel x:Name="OperativeSelectPanel" Margin="0,0,0,12" Visibility="Collapsed">
+                        <Grid Margin="0,0,0,4">
+                            <TextBlock Text="OPERATIVE TO LOAD:" FontWeight="Bold" Foreground="#39FF14"/>
+                            <TextBlock x:Name="lblOperativeCount" Text="[Detected]" HorizontalAlignment="Right" Foreground="#00AA33" FontSize="11"/>
+                        </Grid>
+                        <ComboBox x:Name="cmbOperatives" FontSize="14" Height="32" SelectionChanged="cmbOperatives_SelectionChanged"/>
+                    </StackPanel>
 
                     <CheckBox x:Name="chkAutoSyncHosts" Content="Automatically sync Windows DNS/hosts redirection to active server" IsChecked="True" Margin="0,0,0,12"/>
 

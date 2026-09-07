@@ -24,7 +24,7 @@ namespace ZionLauncher
 {
     public partial class MainWindow : Window
     {
-        public static readonly Version CurrentLauncherVersion = new("1.2.0");
+        public static readonly Version CurrentLauncherVersion = new("1.2.1");
         private static readonly HttpClient _httpClient = new() { Timeout = TimeSpan.FromSeconds(5) };
         private readonly Random _random = new();
         private DispatcherTimer? _diagTimer;
@@ -1058,6 +1058,46 @@ namespace ZionLauncher
             }
         }
 
+        private void txtLogin_TextChanged(object sender, TextChangedEventArgs e)
+        {
+            ResetOperativeSelector();
+        }
+
+        private void txtLogin_PasswordChanged(object sender, RoutedEventArgs e)
+        {
+            ResetOperativeSelector();
+        }
+
+        private void ResetOperativeSelector()
+        {
+            if (OperativeSelectPanel != null && OperativeSelectPanel.Visibility == Visibility.Visible)
+            {
+                OperativeSelectPanel.Visibility = Visibility.Collapsed;
+                cmbOperatives.Items.Clear();
+                btnJackIn.Content = "JACK IN";
+            }
+        }
+
+        private void cmbOperatives_SelectionChanged(object sender, SelectionChangedEventArgs e)
+        {
+            if (cmbOperatives.SelectedItem is ComboBoxItem item)
+            {
+                string tag = item.Tag as string ?? "";
+                if (string.IsNullOrEmpty(tag))
+                {
+                    btnJackIn.Content = "ENTER CHARACTER CREATION";
+                    txtStatus.Foreground = Brushes.Orange;
+                    txtStatus.Text = "Creating New Operative: Handle MUST NOT contain spaces (e.g. 'TheOne', not 'The One').";
+                }
+                else
+                {
+                    btnJackIn.Content = "JACK IN AS OPERATIVE";
+                    txtStatus.Foreground = Brushes.Lime;
+                    txtStatus.Text = $"Ready to jack in as operative '{tag}'. Press JACK IN to enter MegaCity.";
+                }
+            }
+        }
+
         private void txtReg_KeyDown(object sender, KeyEventArgs e)
         {
             if (e.Key == Key.Enter && btnRegister.IsEnabled)
@@ -1095,11 +1135,37 @@ namespace ZionLauncher
                 return;
             }
 
+            // If operative selector is already displayed and populated, proceed directly to launch
+            if (OperativeSelectPanel.Visibility == Visibility.Visible && cmbOperatives.Items.Count > 0)
+            {
+                string chosenChar = "";
+                if (cmbOperatives.SelectedItem is ComboBoxItem selectedItem && selectedItem.Tag is string tag)
+                {
+                    chosenChar = tag;
+                }
+
+                btnJackIn.IsEnabled = false;
+                if (string.IsNullOrEmpty(chosenChar))
+                {
+                    txtStatus.Foreground = Brushes.Lime;
+                    txtStatus.Text = "ACCESS GRANTED. Entering Character Creation... (NOTE: Operative handle must not contain spaces, e.g. 'TheOne')";
+                }
+                else
+                {
+                    txtStatus.Foreground = Brushes.Lime;
+                    txtStatus.Text = $"ACCESS GRANTED. Jacking in as operative '{chosenChar}'...";
+                }
+
+                JackIn(username, password, chosenChar);
+                btnJackIn.IsEnabled = true;
+                return;
+            }
+
             btnJackIn.IsEnabled = false;
             txtStatus.Foreground = Brushes.Lime;
             txtStatus.Text = $"Verifying credentials with Zion mainframe ({_currentServerIp})...";
 
-            var (authOk, authMsg) = await ValidateCredentialsAsync(username, password);
+            var (authOk, authMsg, operatives) = await ValidateCredentialsAsync(username, password);
             if (!authOk)
             {
                 txtStatus.Foreground = Brushes.Red;
@@ -1108,14 +1174,45 @@ namespace ZionLauncher
                 return;
             }
 
+            if (operatives != null && operatives.Count > 0)
+            {
+                cmbOperatives.Items.Clear();
+                foreach (var op in operatives)
+                {
+                    var item = new ComboBoxItem
+                    {
+                        Content = $"{op.Handle} (Level {op.Level}{(op.Profession > 0 ? $", Prof {op.Profession}" : "")})",
+                        Tag = op.Handle
+                    };
+                    cmbOperatives.Items.Add(item);
+                }
+
+                var createNewItem = new ComboBoxItem
+                {
+                    Content = "[+ Create New Operative]",
+                    Tag = ""
+                };
+                cmbOperatives.Items.Add(createNewItem);
+
+                cmbOperatives.SelectedIndex = 0;
+                OperativeSelectPanel.Visibility = Visibility.Visible;
+                lblOperativeCount.Text = $"[{operatives.Count} Found]";
+                btnJackIn.Content = "JACK IN AS OPERATIVE";
+                txtStatus.Foreground = Brushes.Lime;
+                txtStatus.Text = $"Operative(s) found. Select operative and click JACK IN (or choose [+ Create New Operative]).";
+                btnJackIn.IsEnabled = true;
+                return;
+            }
+
             txtStatus.Foreground = Brushes.Lime;
-            txtStatus.Text = "ACCESS GRANTED. Jacking in...";
-            JackIn(username, password);
+            txtStatus.Text = "ACCESS GRANTED. No operatives detected. Entering Character Creation... (NOTE: Operative handle must not contain spaces, e.g. 'TheOne')";
+            JackIn(username, password, null);
             btnJackIn.IsEnabled = true;
         }
 
-        private async Task<(bool Success, string Message)> ValidateCredentialsAsync(string username, string password)
+        private async Task<(bool Success, string Message, System.Collections.Generic.List<OperativeProfile> Operatives)> ValidateCredentialsAsync(string username, string password)
         {
+            var operatives = new System.Collections.Generic.List<OperativeProfile>();
             try
             {
                 var payload = new { username = username, password = password };
@@ -1127,7 +1224,35 @@ namespace ZionLauncher
 
                 if (response.IsSuccessStatusCode)
                 {
-                    return (true, "Authentication verified.");
+                    try
+                    {
+                        using var doc = JsonDocument.Parse(respBody);
+                        if (doc.RootElement.TryGetProperty("characters", out var charsProp) && charsProp.ValueKind == JsonValueKind.Array)
+                        {
+                            foreach (var c in charsProp.EnumerateArray())
+                            {
+                                var op = new OperativeProfile();
+                                if (c.TryGetProperty("charId", out var idProp)) op.Id = idProp.GetInt64();
+                                if (c.TryGetProperty("handle", out var handleProp)) op.Handle = handleProp.GetString() ?? "";
+                                if (c.TryGetProperty("firstName", out var fnProp)) op.FirstName = fnProp.GetString() ?? "";
+                                if (c.TryGetProperty("lastName", out var lnProp)) op.LastName = lnProp.GetString() ?? "";
+                                if (c.TryGetProperty("level", out var lvlProp)) op.Level = lvlProp.GetInt32();
+                                if (c.TryGetProperty("profession", out var profProp)) op.Profession = profProp.GetInt32();
+                                if (c.TryGetProperty("district", out var distProp)) op.District = distProp.GetString() ?? "";
+
+                                if (!string.IsNullOrWhiteSpace(op.Handle))
+                                {
+                                    operatives.Add(op);
+                                }
+                            }
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        Debug.WriteLine("Characters parse error: " + ex.Message);
+                    }
+
+                    return (true, "Authentication verified.", operatives);
                 }
 
                 if (response.StatusCode == HttpStatusCode.Unauthorized || response.StatusCode == HttpStatusCode.BadRequest)
@@ -1140,16 +1265,16 @@ namespace ZionLauncher
                             string msg = msgProp.GetString() ?? "";
                             if (!string.IsNullOrWhiteSpace(msg))
                             {
-                                return (false, $"ACCESS DENIED: {msg}");
+                                return (false, $"ACCESS DENIED: {msg}", operatives);
                             }
                         }
                     }
                     catch { }
 
-                    return (false, "ACCESS DENIED: Invalid passcode or operative not found.");
+                    return (false, "ACCESS DENIED: Invalid passcode or operative not found.", operatives);
                 }
 
-                return (false, $"MAINFRAME REJECTED ({response.StatusCode}): {respBody}");
+                return (false, $"MAINFRAME REJECTED ({response.StatusCode}): {respBody}", operatives);
             }
             catch (Exception ex)
             {
@@ -1168,29 +1293,55 @@ namespace ZionLauncher
                         await using var reader = await cmd.ExecuteReaderAsync();
                         if (!await reader.ReadAsync())
                         {
-                            return (false, "ACCESS DENIED: Operative not found. Register first.");
+                            return (false, "ACCESS DENIED: Operative not found. Register first.", operatives);
                         }
 
                         string salt = reader["passwordSalt"]?.ToString() ?? "";
                         string currentHash = reader["passwordHash"]?.ToString() ?? "";
                         string expectedHash = HashPassword(salt, password);
+                        long userId = Convert.ToInt64(reader["userId"]);
 
                         if (string.Equals(currentHash, expectedHash, StringComparison.OrdinalIgnoreCase))
                         {
-                            return (true, "Authentication verified.");
+                            await reader.CloseAsync();
+                            try
+                            {
+                                await using var charCmd = new MySqlCommand("SELECT charId, handle, firstName, lastName, level, profession, district FROM characters WHERE userId = @uid ORDER BY charId DESC", conn);
+                                charCmd.Parameters.AddWithValue("@uid", userId);
+                                await using var charReader = await charCmd.ExecuteReaderAsync();
+                                while (await charReader.ReadAsync())
+                                {
+                                    operatives.Add(new OperativeProfile
+                                    {
+                                        Id = Convert.ToInt64(charReader["charId"]),
+                                        Handle = charReader["handle"]?.ToString() ?? "",
+                                        FirstName = charReader["firstName"]?.ToString() ?? "",
+                                        LastName = charReader["lastName"]?.ToString() ?? "",
+                                        Level = charReader["level"] != DBNull.Value ? Convert.ToInt32(charReader["level"]) : 1,
+                                        Profession = charReader["profession"] != DBNull.Value ? Convert.ToInt32(charReader["profession"]) : 0,
+                                        District = charReader["district"]?.ToString() ?? ""
+                                    });
+                                }
+                            }
+                            catch (Exception cEx)
+                            {
+                                Debug.WriteLine("Local char query notice: " + cEx.Message);
+                            }
+
+                            return (true, "Authentication verified.", operatives);
                         }
                         else
                         {
-                            return (false, "ACCESS DENIED: Invalid passcode.");
+                            return (false, "ACCESS DENIED: Invalid passcode.", operatives);
                         }
                     }
                     catch (Exception dbEx)
                     {
-                        return (false, $"DATABASE ERROR: Unable to verify credentials ({dbEx.Message}).");
+                        return (false, $"DATABASE ERROR: Unable to verify credentials ({dbEx.Message}).", operatives);
                     }
                 }
 
-                return (false, $"NETWORK ERROR: Cannot reach Zion mainframe at {_currentServerIp}. Check connection.");
+                return (false, $"NETWORK ERROR: Cannot reach Zion mainframe at {_currentServerIp}. Check connection.", operatives);
             }
         }
 
@@ -1237,7 +1388,7 @@ namespace ZionLauncher
                 {
                     txtStatus.Foreground = Brushes.Lime;
                     txtStatus.Text = "SUCCESS: Operator created. Jacking in...";
-                    JackIn(username, password);
+                    JackIn(username, password, null);
                     btnRegister.IsEnabled = true;
                     return;
                 }
@@ -1307,7 +1458,7 @@ namespace ZionLauncher
 
                     txtStatus.Foreground = Brushes.Lime;
                     txtStatus.Text = "SUCCESS: Operator created. Jacking in...";
-                    JackIn(username, password);
+                    JackIn(username, password, null);
                     btnRegister.IsEnabled = true;
                     return;
                 }
@@ -1413,7 +1564,7 @@ namespace ZionLauncher
             return false;
         }
 
-        private async void JackIn(string username, string password)
+        private async void JackIn(string username, string password, string? operativeHandle = null)
         {
             txtStatus.Foreground = Brushes.Lime;
             txtStatus.Text = $"Synchronizing Zion mainframe ({_currentServerIp})...";
@@ -1490,7 +1641,8 @@ namespace ZionLauncher
                 }
                 catch { }
 
-                string launchArgs = $"-clone -LocalTest -nopatch -configsection HighDetail -user \"{username}\" -pwd \"{password}\"";
+                string charArg = !string.IsNullOrWhiteSpace(operativeHandle) ? $" -char \"{operativeHandle}\"" : "";
+                string launchArgs = $"-clone -LocalTest -nopatch -configsection HighDetail -user \"{username}\" -pwd \"{password}\"{charArg}";
                 var proc = Process.Start(new ProcessStartInfo
                 {
                     FileName = clientExe,
@@ -1880,5 +2032,16 @@ namespace ZionLauncher
                 throw new ArgumentOutOfRangeException(nameof(index));
             return _visual;
         }
+    }
+
+    public class OperativeProfile
+    {
+        public long Id { get; set; }
+        public string Handle { get; set; } = "";
+        public string FirstName { get; set; } = "";
+        public string LastName { get; set; } = "";
+        public int Level { get; set; } = 1;
+        public int Profession { get; set; }
+        public string District { get; set; } = "";
     }
 }

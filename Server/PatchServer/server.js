@@ -275,17 +275,82 @@ const server = http.createServer(async (req, res) => {
                 return;
             }
 
+            // Query existing operatives for this user
+            let characters = [];
+            try {
+                const [chars] = await pool.execute(
+                    'SELECT charId, handle, firstName, lastName, level, profession, district FROM characters WHERE userId = ? ORDER BY charId DESC',
+                    [user.userId]
+                );
+                characters = chars;
+            } catch (cErr) {
+                console.error('[PatchServer] Failed to load characters for user:', cErr.message);
+            }
+
             res.writeHead(200);
             res.end(JSON.stringify({
                 success: true,
                 userId: user.userId,
                 username: user.username,
+                characters: characters,
                 message: 'Authentication verified.'
             }));
         } catch (err) {
             console.error('[PatchServer] Login error:', err.message);
             res.writeHead(500);
             res.end(JSON.stringify({ success: false, message: 'Internal server error during authentication.' }));
+        }
+        return;
+    }
+
+    // 3b. REST API: Get Operatives
+    if (pathname === '/api/characters' && (req.method === 'GET' || req.method === 'POST')) {
+        res.setHeader('Content-Type', 'application/json');
+        try {
+            let username = '';
+            if (req.method === 'GET') {
+                const urlObj = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
+                username = (urlObj.searchParams.get('username') || '').trim();
+            } else {
+                const data = await parseJsonBody(req);
+                username = (data.username || '').trim();
+            }
+
+            if (!username) {
+                res.writeHead(400);
+                res.end(JSON.stringify({ success: false, message: 'Username required.' }));
+                return;
+            }
+
+            if (!pool) {
+                res.writeHead(503);
+                res.end(JSON.stringify({ success: false, message: 'Database service unavailable.' }));
+                return;
+            }
+
+            const [users] = await pool.execute('SELECT userId FROM users WHERE LOWER(username) = LOWER(?) LIMIT 1', [username]);
+            if (users.length === 0) {
+                res.writeHead(404);
+                res.end(JSON.stringify({ success: false, message: 'Operative account not found.' }));
+                return;
+            }
+
+            const userId = users[0].userId;
+            const [characters] = await pool.execute(
+                'SELECT charId, handle, firstName, lastName, level, profession, district FROM characters WHERE userId = ? ORDER BY charId DESC',
+                [userId]
+            );
+
+            res.writeHead(200);
+            res.end(JSON.stringify({
+                success: true,
+                username: username,
+                characters: characters
+            }));
+        } catch (err) {
+            console.error('[PatchServer] Characters error:', err.message);
+            res.writeHead(500);
+            res.end(JSON.stringify({ success: false, message: err.message }));
         }
         return;
     }
