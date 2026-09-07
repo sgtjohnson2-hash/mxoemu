@@ -298,13 +298,6 @@ void BotManager::Update()
         m_lastPlayerCacheTickMS = now;
     }
 
-    std::vector<PlayerObject*> activePlayers;
-    for (uint32 id : m_activePlayerIds)
-    {
-        PlayerObject* p = sObjMgr.getGOPtr(id);
-        if (p) activePlayers.push_back(p);
-    }
-
     std::shared_ptr<const std::vector<std::shared_ptr<BotClient>>> botsSnapshot;
     {
         std::lock_guard<std::recursive_mutex> lock(m_botMutex);
@@ -319,74 +312,92 @@ void BotManager::Update()
         return;
     }
 
-    //INFO_LOG("DEBUG_TRACER: Starting std::for_each execution::par");
-    std::for_each(std::execution::par, botsSnapshot->begin(), botsSnapshot->end(), [&](const std::shared_ptr<BotClient>& bot)
+    // Fast-path: When no human players are connected, assign background LOD without thread pool overhead
+    if (m_activePlayerIds.empty())
     {
-        try {
-            double minDistSq = 999999999999.0;
-            
-            if (activePlayers.empty())
+        for (const auto& bot : *botsSnapshot)
+        {
+            if (bot->IsInCombat() || bot->IsPanicking())
+                bot->SetLOD(ExecutionLOD::APPROACH_AREA);
+            else
+                bot->SetLOD(ExecutionLOD::BACKGROUND_AREA);
+        }
+    }
+    else
+    {
+        // Cache human player positions to eliminate per-bot heap allocations and lock contention
+        struct HumanPos { double x, y, z; };
+        std::vector<HumanPos> humanPositions;
+        humanPositions.reserve(m_activePlayerIds.size());
+        for (uint32 id : m_activePlayerIds)
+        {
+            PlayerObject* p = sObjMgr.getGOPtrSafe(id);
+            if (p) {
+                LocationVector pos = p->getPosition();
+                humanPositions.push_back({pos.x, pos.y, pos.z});
+            }
+        }
+
+        if (humanPositions.empty())
+        {
+            for (const auto& bot : *botsSnapshot)
             {
-                // In unpopulated sectors, keep bots alive in persistent macro-simulation
                 if (bot->IsInCombat() || bot->IsPanicking())
                     bot->SetLOD(ExecutionLOD::APPROACH_AREA);
                 else
                     bot->SetLOD(ExecutionLOD::BACKGROUND_AREA);
-                return;
             }
-
-            float botX = bot->GetSpawnX();
-            float botY = bot->GetSpawnY();
-            float botZ = bot->GetSpawnZ();
-            PlayerObject* botPo = BotGetPlayer(bot->GetPlayerGoId());
-            if (botPo) {
-                botX = botPo->getPosition().x;
-                botY = botPo->getPosition().y;
-                botZ = botPo->getPosition().z;
-            }
-
-            // Use SpatialGrid for O(1) nearby client lookup
-            auto nearbyClients = sSpatialGrid.GetClientsInRadius(botX, botZ);
-            for (GameClient* gc : nearbyClients)
-            {
-                if (!gc) continue;
-                uint32 goId = gc->GetPlayerGoId();
-                if (goId == 0 || goId >= 9000000) continue; // Skip bots
-                
-                PlayerObject* p = sObjMgr.getGOPtrSafe(goId);
-                if (p)
-                {
-                    double distSq = p->getPosition().DistanceSq(botX, botY, botZ);
-                    if (distSq < minDistSq)
-                        minDistSq = distSq;
-                }
-            }
-
-            // Apply Spatial LOD in world units (1m = 100 units)
-            // ACTIVE_VIEWPORT: < 50m (5,000 units) -> 4Hz Tick (250ms)
-            // APPROACH_AREA:  50m - 200m (20,000 units) -> 1Hz Tick (1000ms)
-            // BACKGROUND_AREA: > 200m -> 0.28Hz Macro-Tick (3500ms) - continuous world persistence
-            ExecutionLOD targetLOD = ExecutionLOD::BACKGROUND_AREA;
-            
+        }
+        else
+        {
             const double activeRadiusSq = 5000.0 * 5000.0;     // 50m
             const double approachRadiusSq = 20000.0 * 20000.0; // 200m
 
-            if (bot->IsInCombat() || bot->IsPanicking())
+            std::for_each(std::execution::par, botsSnapshot->begin(), botsSnapshot->end(), [&](const std::shared_ptr<BotClient>& bot)
             {
-                targetLOD = ExecutionLOD::ACTIVE_VIEWPORT;
-            }
-            else if (minDistSq <= activeRadiusSq)
-            {
-                targetLOD = ExecutionLOD::ACTIVE_VIEWPORT;
-            }
-            else if (minDistSq <= approachRadiusSq)
-            {
-                targetLOD = ExecutionLOD::APPROACH_AREA;
-            }
+                try {
+                    if (bot->IsInCombat() || bot->IsPanicking())
+                    {
+                        bot->SetLOD(ExecutionLOD::ACTIVE_VIEWPORT);
+                        return;
+                    }
 
-            bot->SetLOD(targetLOD);
-        } catch (...) {}
-    });
+                    double botX = (double)bot->GetSpawnX();
+                    double botY = (double)bot->GetSpawnY();
+                    double botZ = (double)bot->GetSpawnZ();
+                    PlayerObject* botPo = BotGetPlayer(bot->GetPlayerGoId());
+                    if (botPo) {
+                        botX = botPo->getPosition().x;
+                        botY = botPo->getPosition().y;
+                        botZ = botPo->getPosition().z;
+                    }
+
+                    double minDistSq = 999999999999.0;
+                    for (const auto& hp : humanPositions)
+                    {
+                        double dx = hp.x - botX;
+                        double dy = hp.y - botY;
+                        double dz = hp.z - botZ;
+                        double distSq = dx * dx + dy * dy + dz * dz;
+                        if (distSq < minDistSq)
+                        {
+                            minDistSq = distSq;
+                            if (minDistSq <= activeRadiusSq)
+                                break;
+                        }
+                    }
+
+                    ExecutionLOD targetLOD = ExecutionLOD::BACKGROUND_AREA;
+                    if (minDistSq <= activeRadiusSq)
+                        targetLOD = ExecutionLOD::ACTIVE_VIEWPORT;
+                    else if (minDistSq <= approachRadiusSq)
+                        targetLOD = ExecutionLOD::APPROACH_AREA;
+
+                    bot->SetLOD(targetLOD);
+                } catch (...) {}
+            });
+        }
+    }
 
     // Sequential bot update execution
     for (size_t i = 0; i < botsSnapshot->size(); i++)

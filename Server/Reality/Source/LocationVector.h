@@ -41,14 +41,14 @@ public:
 	LocationVector(double X, double Y, double Z) : x(X), y(Y), z(Z), rot(0) {}
 	LocationVector() : x(0), y(0), z(0), rot(0) {}
 private:
-	inline double MxoToDoubleRot(uint8 mxoRot)
+	inline double MxoToDoubleRot(uint8 mxoRot) const
 	{
 		double normalizedRot = (double(mxoRot)/double(256)); //range from 0 to 1
 		normalizedRot-=0.5f; //range from -0.5 to 0.5
 		normalizedRot*=2*M_PI; //range from -pi to +pi
 		return normalizedRot;
 	}
-	inline uint8 DoubleToMxoRot(double rot)
+	inline uint8 DoubleToMxoRot(double rot) const
 	{
 		//start range in -pi to +pi
 		double normalizedRot = rot/(2*M_PI); //range from -0.5 to 0.5
@@ -58,7 +58,7 @@ private:
 	}
 public:
 	// (dx * dx + dy * dy + dz * dz)
-	double DistanceSq(const LocationVector & comp)
+	double DistanceSq(const LocationVector & comp) const
 	{
 		double delta_x = comp.x - x;
 		double delta_y = comp.y - y;
@@ -67,7 +67,7 @@ public:
 		return (delta_x*delta_x + delta_y*delta_y + delta_z*delta_z);
 	}
 
-	double DistanceSq(const double &X, const double &Y, const double &Z)
+	double DistanceSq(const double &X, const double &Y, const double &Z) const
 	{
 		double delta_x = X - x;
 		double delta_y = Y - y;
@@ -77,7 +77,7 @@ public:
 	}
 
 	// sqrt(dx * dx + dy * dy + dz * dz)
-	double Distance(const LocationVector & comp)
+	double Distance(const LocationVector & comp) const
 	{
 		double delta_x = comp.x - x;
 		double delta_y = comp.y - y;
@@ -86,7 +86,7 @@ public:
 		return sqrt(delta_x*delta_x + delta_y*delta_y + delta_z*delta_z);
 	}
 
-	double Distance(double &X, const double &Y, const double &Z)
+	double Distance(const double &X, const double &Y, const double &Z) const
 	{
 		double delta_x = X - x;
 		double delta_y = Y - y;
@@ -95,35 +95,35 @@ public:
 		return sqrt(delta_x*delta_x + delta_y*delta_y + delta_z*delta_z);
 	}
 
-	double Distance2DSq(const LocationVector & comp)
+	double Distance2DSq(const LocationVector & comp) const
 	{
 		double delta_x = comp.x - x;
 		double delta_z = comp.z - z;
 		return (delta_x*delta_x + delta_z*delta_z);
 	}
 
-	double Distance2DSq(const double & X, const double & Z)
+	double Distance2DSq(const double & X, const double & Z) const
 	{
 		double delta_x = X - x;
 		double delta_z = Z - z;
 		return (delta_x*delta_x + delta_z*delta_z);
 	}
 
-	double Distance2D(LocationVector & comp)
+	double Distance2D(const LocationVector & comp) const
 	{
 		double delta_x = comp.x - x;
-		double delta_z = comp.y - z;
+		double delta_z = comp.z - z;
 		return sqrt(delta_x*delta_x + delta_z*delta_z);
 	}
 
-	double Distance2D(const double & X, const double & Z)
+	double Distance2D(const double & X, const double & Z) const
 	{
 		double delta_x = X - x;
 		double delta_z = Z - z;
 		return sqrt(delta_x*delta_x + delta_z*delta_z);
 	}
 	// atan2(dx / dz)
-	double CalcAngTo(const LocationVector & dest)
+	double CalcAngTo(const LocationVector & dest) const
 	{
 		double dx = dest.x - x;
 		double dz = dest.z - z;
@@ -132,11 +132,11 @@ public:
 		else 
 			return 0.0f;
 	}
-	inline uint8 CalcAngToMxo(const LocationVector & dest)
+	inline uint8 CalcAngToMxo(const LocationVector & dest) const
 	{
 		return DoubleToMxoRot(CalcAngTo(dest));
 	}
-	double CalcAngFrom(const LocationVector & src)
+	double CalcAngFrom(const LocationVector & src) const
 	{
 		double dx = x - src.x;
 		double dz = z-  src.z;
@@ -145,7 +145,7 @@ public:
 		else
 			return 0.0f;
 	}
-	inline uint8 CalcAngFromMxo(const LocationVector & dest)
+	inline uint8 CalcAngFromMxo(const LocationVector & dest) const
 	{
 		return DoubleToMxoRot(CalcAngFrom(dest));
 	}

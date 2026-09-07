@@ -35,6 +35,11 @@ void SLMDialogueContextEngine::Reset()
     m_initialized = true;
 }
 
+void SLMDialogueContextEngine::Update(uint32 deltaMs)
+{
+    (void)deltaMs;
+}
+
 void SLMDialogueContextEngine::InitializeForbiddenDictionaries()
 {
     // Bluepill Sleeper: Zero awareness of simulation, Zion, pods, agents

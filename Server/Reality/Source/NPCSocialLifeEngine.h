@@ -169,6 +169,7 @@ public:
     std::string TriggerLocationReminiscence(uint32 entityId, const std::string& currentLocation);
 
     // Periodic Update (Circadian tick integration)
+    void Update(uint32 deltaMs);
     void UpdateCircadianSocialCycle(uint32 currentSimMinutes);
 
     // Telemetry & Reporting
@@ -185,6 +186,8 @@ private:
     bool m_initialized{false};
     mutable std::mutex m_socialMutex;
     uint64 m_nextMemoryId{10001};
+    uint32 m_accumulatedTimeMs{0};
+    uint32 m_simulatedMinutes{0};
 
     // Profiles indexed by entity ID (GoId or Citizen ID)
     std::unordered_map<uint32, SocialProfile> m_profiles;

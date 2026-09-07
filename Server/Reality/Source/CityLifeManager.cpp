@@ -740,6 +740,9 @@ void CityLifeManager::Update(uint32 deltaMs)
         UpdateSubwayTransit(deltaMs);
         UpdateRoadTraffic(deltaMs);
         UpdateRumorPool(deltaMs);
+    }
+
+    if (NPCSocialLifeEngine::getSingletonPtr()) {
         sSocialEngine.UpdateCircadianSocialCycle(static_cast<uint32>(m_simulatedHour * 60.0f));
     }
 
@@ -1415,19 +1418,21 @@ uint32 CityLifeManager::SpawnAmbientVehicle(VehicleClassification type, uint32 d
 
 void CityLifeManager::BroadcastStreetRumor(RumorTopic topic, const std::string& headline, const std::string& content, uint32 districtId)
 {
-    std::lock_guard<std::recursive_mutex> lock(m_mutex);
-    AmbientRumor r;
-    r.id = m_nextRumorId++;
-    r.topic = topic;
-    r.headline = headline;
-    r.content = content;
-    r.originDistrictId = districtId;
-    r.timestampMs = getMSTime();
-    r.spreadCount = 1;
+    {
+        std::lock_guard<std::recursive_mutex> lock(m_mutex);
+        AmbientRumor r;
+        r.id = m_nextRumorId++;
+        r.topic = topic;
+        r.headline = headline;
+        r.content = content;
+        r.originDistrictId = districtId;
+        r.timestampMs = getMSTime();
+        r.spreadCount = 1;
 
-    m_rumors.insert(m_rumors.begin(), r);
-    if (m_rumors.size() > 30) {
-        m_rumors.pop_back();
+        m_rumors.insert(m_rumors.begin(), r);
+        if (m_rumors.size() > 30) {
+            m_rumors.pop_back();
+        }
     }
 
     if (EmergentAIEngine::getSingletonPtr()) {
@@ -1520,24 +1525,26 @@ void CityLifeManager::TriggerAreaPanic(float x, float z, float radius, const std
 
 void CityLifeManager::ClearAllPanic()
 {
-    std::lock_guard<std::recursive_mutex> lock(m_mutex);
+    {
+        std::lock_guard<std::recursive_mutex> lock(m_mutex);
+        for (auto& pair : m_citizens) {
+            if (pair.second.currentRoutine == RoutineScheduleState::Panicking) {
+                pair.second.currentRoutine = RoutineScheduleState::Leisure;
+                pair.second.panicTimerMs = 0;
+                pair.second.isSheltered = false;
+                pair.second.drives.stress = 0.1f;
+            }
+        }
+        LiftShopLockdowns();
+    }
+
     if (EmergentAIEngine::getSingletonPtr()) {
         sEmergentAIMgr.GetContagionEngine().ClearPanic();
     }
-    for (auto& pair : m_citizens) {
-        if (pair.second.currentRoutine == RoutineScheduleState::Panicking) {
-            pair.second.currentRoutine = RoutineScheduleState::Leisure;
-            pair.second.panicTimerMs = 0;
-            pair.second.isSheltered = false;
-            pair.second.drives.stress = 0.1f;
-        }
-    }
-    LiftShopLockdowns();
 }
 
 void CityLifeManager::NotifyUnderworldIncident(uint32 districtId, float x, float z, const std::string& incidentDesc)
 {
-    std::lock_guard<std::recursive_mutex> lock(m_mutex);
     TriggerAreaPanic(x, z, 25000.0f, incidentDesc, 45000);
     BroadcastStreetRumor(RumorTopic::RUMOR_SYNDICATE_TURF_WAR, "Violent Incident Reported", incidentDesc, districtId);
 }

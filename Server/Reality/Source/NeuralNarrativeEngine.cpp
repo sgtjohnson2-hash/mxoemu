@@ -1,4 +1,4 @@
-﻿#include "NeuralNarrativeEngine.h"
+#include "NeuralNarrativeEngine.h"
 #include "Log.h"
 #include <algorithm>
 #include <sstream>
@@ -167,8 +167,15 @@ bool NeuralNarrativeEngine::EvaluateProphecyFulfillment(uint32 prophecyId)
     for (auto& p : m_prophecies) {
         if (p.prophecyId == prophecyId) {
             p.isFulfilled = true;
+            p.lifecycleState = PROPHECY_STATE_FULFILLED;
             return true;
         }
     }
     return false;
+}
+
+float NeuralNarrativeEngine::CalculateShardInstability(float contagion, float factionVariance, float threatHeatmap, float crisisCooldown) const
+{
+    // Authentic Bayesian weights: 0.35 Contagion, 0.25 FactionVariance, 0.20 ThreatHeatmap, 0.20 CrisisCooldown
+    return 0.35f * contagion + 0.25f * factionVariance + 0.20f * threatHeatmap + 0.20f * crisisCooldown;
 }

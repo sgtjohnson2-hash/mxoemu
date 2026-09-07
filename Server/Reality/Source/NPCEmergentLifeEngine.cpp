@@ -84,9 +84,24 @@ void NPCEmergentLifeEngine::Reset()
         m_nextMilestoneId = 1001;
         m_nextCircleId = 201;
         m_nextRumorId = 3001;
+        m_accumulatedTimeMs = 0;
         m_initialized = false;
     }
     Initialize();
+}
+
+void NPCEmergentLifeEngine::Update(uint32 deltaMs)
+{
+    m_accumulatedTimeMs += deltaMs;
+    if (m_accumulatedTimeMs >= 20000) {
+        m_accumulatedTimeMs = 0;
+        std::lock_guard<std::mutex> lock(m_engineMutex);
+        for (auto& pair : m_rumors) {
+            if (pair.second.credibilityScore > 0.1f) {
+                pair.second.credibilityScore -= 0.01f;
+            }
+        }
+    }
 }
 
 EmergentActivityRecord NPCEmergentLifeEngine::GetActivityDefinition(EmergentActivityType type) const

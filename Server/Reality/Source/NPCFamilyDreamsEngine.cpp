@@ -40,7 +40,22 @@ void NPCFamilyDreamsEngine::Reset()
     m_careers.clear();
     m_nextHouseholdId = 101;
     m_nextAspirationId = 5001;
+    m_accumulatedTimeMs = 0;
     m_initialized = true;
+}
+
+void NPCFamilyDreamsEngine::Update(uint32 deltaMs)
+{
+    m_accumulatedTimeMs += deltaMs;
+    if (m_accumulatedTimeMs >= 15000) {
+        m_accumulatedTimeMs = 0;
+        std::lock_guard<std::mutex> lock(m_familyMutex);
+        for (auto& pair : m_careers) {
+            if (pair.second.burnoutIndex > 0.05f) {
+                pair.second.burnoutIndex = std::max(0.0f, pair.second.burnoutIndex - 0.01f);
+            }
+        }
+    }
 }
 
 // ============================================================================

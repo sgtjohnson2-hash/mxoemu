@@ -1,4 +1,4 @@
-﻿#ifndef MXOEMU_NEURAL_NARRATIVE_ENGINE_H
+#ifndef MXOEMU_NEURAL_NARRATIVE_ENGINE_H
 #define MXOEMU_NEURAL_NARRATIVE_ENGINE_H
 
 #include "Common.h"
@@ -45,12 +45,21 @@ struct MegacityNewspaperEdition
     uint32 publicationDate{20050415};
 };
 
+enum ProphecyLifecycle
+{
+    PROPHECY_STATE_REGISTERED = 0,
+    PROPHECY_STATE_CIRCULATING = 1,
+    PROPHECY_STATE_CONVERGING = 2,
+    PROPHECY_STATE_FULFILLED = 3
+};
+
 struct ShardProphecy
 {
     uint32 prophecyId{1};
     std::string propheticText{"When the three streams converge upon the central node, the mirror will fracture."};
     float probabilityPercent{87.5f};
     std::string triggerCondition{"Faction balance variance exceeds 40%"};
+    ProphecyLifecycle lifecycleState{PROPHECY_STATE_REGISTERED};
     bool isFulfilled{false};
 };
 
@@ -76,6 +85,7 @@ public:
     uint32 RegisterShardProphecy(const std::string& text, float prob, const std::string& condition);
     std::vector<ShardProphecy> GetActiveProphecies() const;
     bool EvaluateProphecyFulfillment(uint32 prophecyId);
+    float CalculateShardInstability(float contagion, float factionVariance, float threatHeatmap, float crisisCooldown) const;
 
     // Performance Metrics
     float GetAverageInferenceLatencyMs() const { return m_avgLatencyMs; }

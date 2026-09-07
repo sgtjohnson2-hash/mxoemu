@@ -237,6 +237,11 @@ void GameServer::SimulationLoop()
 			try { sEmergentAIMgr.Update(aiDeltaMs); } catch (const std::exception& e) { ERROR_LOG(format("SimulationLoop: sEmergentAIMgr caught %1%") % e.what()); }
 			try { sEmergentPoliceMgr.Update(aiDeltaMs); } catch (const std::exception& e) { ERROR_LOG(format("SimulationLoop: sEmergentPoliceMgr caught %1%") % e.what()); }
 			try { sOracleVision.Update(aiDeltaMs / 1000.0f); } catch (const std::exception& e) { ERROR_LOG(format("SimulationLoop: sOracleVision caught %1%") % e.what()); }
+			try { sBioEngine.Update(aiDeltaMs); } catch (const std::exception& e) { ERROR_LOG(format("SimulationLoop: sBioEngine caught %1%") % e.what()); }
+			try { sSocialEngine.Update(aiDeltaMs); } catch (const std::exception& e) { ERROR_LOG(format("SimulationLoop: sSocialEngine caught %1%") % e.what()); }
+			try { sFamilyDreamsEngine.Update(aiDeltaMs); } catch (const std::exception& e) { ERROR_LOG(format("SimulationLoop: sFamilyDreamsEngine caught %1%") % e.what()); }
+			try { sEmergentLifeEngine.Update(aiDeltaMs); } catch (const std::exception& e) { ERROR_LOG(format("SimulationLoop: sEmergentLifeEngine caught %1%") % e.what()); }
+			try { sSLMDialogueEngine.Update(aiDeltaMs); } catch (const std::exception& e) { ERROR_LOG(format("SimulationLoop: sSLMDialogueEngine caught %1%") % e.what()); }
 			try { sMafiaMgr.Update(aiDeltaMs); } catch (const std::exception& e) { ERROR_LOG(format("SimulationLoop: sMafiaMgr caught %1%") % e.what()); }
 			try { sExileMgr.Update(aiDeltaMs); } catch (const std::exception& e) { ERROR_LOG(format("SimulationLoop: sExileMgr caught %1%") % e.what()); }
 

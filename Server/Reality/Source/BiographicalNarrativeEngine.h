@@ -134,6 +134,7 @@ public:
 
     void Initialize();
     bool IsInitialized() const { return m_initialized; }
+    void Update(uint32 deltaMs);
 
     // On-demand profile generation
     BiographicalProfile GenerateProfile(uint64_t seed, BioFaction factionHint = BioFaction::ZionRedpill) const;

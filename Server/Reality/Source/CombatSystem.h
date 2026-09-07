@@ -166,8 +166,22 @@ public:
 
 	bool IsInterlocked(uint32 goId) const;
 	bool IsFreeFiring(uint32 goId) const;
+	// Raw pointer session access (callers must hold m_combatMutex if mutating). Prefer GetInterlockSessionCopy or WithInterlockSession.
 	InterlockSession* GetInterlockSession(uint32 goId);
 	bool GetInterlockSessionCopy(uint32 goId, InterlockSession& outSession) const;
+
+	template<typename Fn>
+	bool WithInterlockSession(uint32 goId, Fn&& fn)
+	{
+		std::lock_guard<std::recursive_mutex> lock(m_combatMutex);
+		for (auto& session : m_interlocks) {
+			if (session.goIdA == goId || session.goIdB == goId) {
+				fn(session);
+				return true;
+			}
+		}
+		return false;
+	}
 
 	//client ability activation (0x80b9) - resolves DataLoader templates for
 	//cast time / FX / IS cost, then routes into interlock or free-fire

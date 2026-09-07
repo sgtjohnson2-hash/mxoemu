@@ -242,6 +242,9 @@ void WorldDirector::TriggerCrisis(WorldCrisisType type)
         case CRISIS_ANOMALY_CASCADE:
             StartAnomalyCascadeCrisis();
             break;
+        case CRISIS_ORACLE_PROPHECY_CONVERGENCE:
+            StartOracleProphecyConvergenceCrisis();
+            break;
         default:
             break;
     }
@@ -441,3 +444,34 @@ void WorldDirector::ResolveCrisis()
     INFO_LOG(format("WorldDirector: Crisis [%1%] resolved.") % title);
     m_activeCrisis.reset();
 }
+
+void WorldDirector::StartOracleProphecyConvergenceCrisis()
+{
+    LocationVector hl = sBotMgr.GetRandomHardline();
+
+    ActiveCrisis crisis;
+    crisis.type = CRISIS_ORACLE_PROPHECY_CONVERGENCE;
+    crisis.title = "Oracle Prophecy Convergence";
+    crisis.description = "Prophetic threads have converged upon a critical sector, shattering causal continuity!";
+    crisis.targetDistrictId = 1;
+    crisis.location = hl;
+    crisis.startTimeMs = getMSTime();
+    crisis.durationMs = 300000;
+    crisis.resolved = false;
+
+    m_activeCrisis = crisis;
+
+    // The Oracle speaks
+    std::string broadcastMsg = (format("{c:00FF00}[The Oracle] The thread has broken in Sector %1%. Operatives, converge before reality unravels!{/c}") 
+                                % crisis.targetDistrictId).str();
+    auto players = sObjMgr.getAllGOIds();
+    for (auto goId : players) {
+        PlayerObject* p = sObjMgr.getGOPtrSafe(goId);
+        if (p && !p->getClient().isBot()) {
+            p->getClient().QueueCommand(std::make_shared<SystemChatMsg>(broadcastMsg));
+        }
+    }
+
+    INFO_LOG(format("WorldDirector: Started Crisis [Oracle Prophecy Convergence] in Sector %1%") % crisis.targetDistrictId);
+}
+

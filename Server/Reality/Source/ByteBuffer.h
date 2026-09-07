@@ -313,8 +313,9 @@ public:
 
 	inline char *contents() const
 	{
+		static char emptyByte = 0;
 		if (_storage.empty())
-			return nullptr;
+			return &emptyByte;
 		return (char*)_storage.data();
 	}
 

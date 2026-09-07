@@ -592,7 +592,27 @@ void MissionSystem::InitializeContactQuests()
     q5.rewardItemTemplateId = 10106; // Mirrored Shades
     m_contactQuests.push_back(q5);
 
-    INFO_LOG(format("MissionSystem: Initialized %1% Contact Quests (Morpheus, Ghost, Trinity, Niobe, Merovingian).")
+    // 6. The Oracle (Exiles / Zion)
+    ContactQuest q6;
+    q6.questId = 1006;
+    q6.contact = CONTACT_ORACLE;
+    q6.contactName = "The Oracle";
+    q6.title = "Visions of the Unwritten";
+    q6.dialogGreeting = "You didn't come here to make the choice, darling. You've already made it. You're here to understand why you made it.";
+    q6.dialogCompletion = "Everything that has a beginning has an end. But the unwritten path is yours to walk.";
+    q6.objectives = {
+        "Consult the Oracle in Chinatown Sanctuary",
+        "Investigate Prophetic Glitch Nodes across Megacity",
+        "Commune with Seraph at the Temple Steps",
+        "Synthesize the Seraphic Vision Ability"
+    };
+    q6.requiredFaction = 1; // Zion
+    q6.rewardInfo = 15000;
+    q6.rewardExp = 20000;
+    q6.rewardItemTemplateId = 47078; // Oracle Anniversary Cookie / Vision Token
+    m_contactQuests.push_back(q6);
+
+    INFO_LOG(format("MissionSystem: Initialized %1% Contact Quests (Morpheus, Ghost, Trinity, Niobe, Merovingian, Oracle).")
              % m_contactQuests.size());
 }
 

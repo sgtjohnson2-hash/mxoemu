@@ -144,6 +144,7 @@ public:
 
     void Initialize();
     void Reset();
+    void Update(uint32 deltaMs);
 
     // Activities & Hobbies
     EmergentActivityRecord GetActivityDefinition(EmergentActivityType type) const;
@@ -204,7 +205,7 @@ public:
 private:
     bool m_initialized{false};
     mutable std::mutex m_engineMutex;
-
+    uint32 m_accumulatedTimeMs{0};
     uint32 m_nextMilestoneId{1001};
     uint32 m_nextCircleId{201};
     uint32 m_nextRumorId{3001};

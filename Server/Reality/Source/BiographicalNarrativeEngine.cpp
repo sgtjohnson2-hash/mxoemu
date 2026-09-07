@@ -731,6 +731,14 @@ void BiographicalNarrativeEngine::Initialize() {
     std::cout << "  -> Theoretical State Space: > " << GetTotalTheoreticalCombinations() << " unique profiles" << std::endl;
 }
 
+void BiographicalNarrativeEngine::Update(uint32 deltaMs) {
+    (void)deltaMs;
+    std::lock_guard<std::mutex> lock(m_engineMutex);
+    if (m_activeProfileCache.size() > 50000) {
+        m_activeProfileCache.clear();
+    }
+}
+
 void BiographicalNarrativeEngine::InitializeLexicons() {
     // Dynamic initialization or index validation
 }

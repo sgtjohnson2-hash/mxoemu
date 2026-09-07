@@ -15,7 +15,8 @@ enum WorldCrisisType {
     CRISIS_HARDLINE_COLLAPSE = 1,
     CRISIS_SUBWAY_AMBUSH = 2,
     CRISIS_EXILE_TURF_WAR = 3,
-    CRISIS_ANOMALY_CASCADE = 4
+    CRISIS_ANOMALY_CASCADE = 4,
+    CRISIS_ORACLE_PROPHECY_CONVERGENCE = 5
 };
 
 struct ActiveCrisis {
@@ -71,6 +72,7 @@ private:
     void StartSubwayAmbushCrisis();
     void StartExileTurfWarCrisis();
     void StartAnomalyCascadeCrisis();
+    void StartOracleProphecyConvergenceCrisis();
 
     std::optional<ActiveCrisis> m_activeCrisis;
     std::map<uint64, CharacterReputation> m_reputations;

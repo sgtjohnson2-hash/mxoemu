@@ -188,6 +188,7 @@ public:
     void Initialize();
     bool IsInitialized() const { return m_initialized; }
     void Reset(); // For tests and re-initialization
+    void Update(uint32 deltaMs);
 
     // Household Management
     uint32 CreateHousehold(uint32 headId, const std::string& headName, const std::string& householdName,
@@ -247,6 +248,7 @@ public:
 private:
     bool m_initialized{false};
     mutable std::mutex m_familyMutex;
+    uint32 m_accumulatedTimeMs{0};
     uint32 m_nextHouseholdId{101};
     uint32 m_nextAspirationId{5001};
 

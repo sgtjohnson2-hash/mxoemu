@@ -93,7 +93,8 @@ enum ContactId : uint32
     CONTACT_GHOST       = 102,
     CONTACT_TRINITY     = 103,
     CONTACT_NIOBE       = 104,
-    CONTACT_MEROVINGIAN = 105
+    CONTACT_MEROVINGIAN = 105,
+    CONTACT_ORACLE      = 106
 };
 
 struct ContactQuest

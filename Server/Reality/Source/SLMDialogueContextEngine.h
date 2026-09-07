@@ -144,6 +144,7 @@ public:
 
     void Initialize();
     void Reset();
+    void Update(uint32 deltaMs);
 
     // Epistemic Classification
     EpistemicHorizon DetermineEpistemicHorizon(uint32 entityId, mxoFaction faction = FACTION_NONE);

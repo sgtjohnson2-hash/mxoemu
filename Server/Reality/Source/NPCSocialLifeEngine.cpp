@@ -559,6 +559,16 @@ std::string NPCSocialLifeEngine::TriggerLocationReminiscence(uint32 entityId, co
     return "";
 }
 
+void NPCSocialLifeEngine::Update(uint32 deltaMs)
+{
+    m_accumulatedTimeMs += deltaMs;
+    if (m_accumulatedTimeMs >= 10000) {
+        m_accumulatedTimeMs = 0;
+        m_simulatedMinutes = (m_simulatedMinutes + 60) % 1440;
+        UpdateCircadianSocialCycle(m_simulatedMinutes);
+    }
+}
+
 void NPCSocialLifeEngine::UpdateCircadianSocialCycle(uint32 currentSimMinutes)
 {
     std::lock_guard<std::mutex> lock(m_socialMutex);
