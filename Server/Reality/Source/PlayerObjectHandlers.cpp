@@ -85,6 +85,7 @@
 #include "NPCEmergentLifeEngine.h"
 #include "SLMDialogueContextEngine.h"
 #include "MafiaEcosystemManager.h"
+#include "ExileChateauManager.h"
 
 #include <boost/algorithm/string.hpp>
 using boost::iequals;
@@ -1037,6 +1038,23 @@ void PlayerObject::ParseAdminCommand( string theCmd )
             m_parent.QueueCommand(make_shared<SystemChatMsg>(sMafiaMgr.GenerateFamilyDossier(MafiaFamilyId::PetrovBratva)));
         } else {
             m_parent.QueueCommand(make_shared<SystemChatMsg>(sMafiaMgr.GenerateMafiaWorldReport()));
+        }
+        return;
+    }
+    else if (iequals(command, "exile") || iequals(command, "chateau") || iequals(command, "clubhel") || iequals(command, "backdoor"))
+    {
+        string subCmd;
+        cmdStream >> subCmd;
+        if (iequals(subCmd, "clubhel") || iequals(subCmd, "hel")) {
+            m_parent.QueueCommand(make_shared<SystemChatMsg>(sExileMgr.GenerateClubHelStatusReport()));
+        } else if (iequals(subCmd, "backdoor") || iequals(subCmd, "doors") || iequals(subCmd, "portals")) {
+            m_parent.QueueCommand(make_shared<SystemChatMsg>(sExileMgr.GenerateBackdoorCorridorsReport()));
+        } else if (iequals(subCmd, "mobil") || iequals(subCmd, "train") || iequals(subCmd, "limbo")) {
+            m_parent.QueueCommand(make_shared<SystemChatMsg>(sExileMgr.GenerateMobilAveLimboReport()));
+        } else if (iequals(subCmd, "bestiary") || iequals(subCmd, "vampires") || iequals(subCmd, "monsters")) {
+            m_parent.QueueCommand(make_shared<SystemChatMsg>(sExileMgr.GenerateSupernaturalBestiaryReport()));
+        } else {
+            m_parent.QueueCommand(make_shared<SystemChatMsg>(sExileMgr.GenerateExileCourtReport()));
         }
         return;
     }

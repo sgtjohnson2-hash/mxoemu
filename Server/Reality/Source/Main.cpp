@@ -77,6 +77,7 @@ void RunNPCFamilyDreamsTestSuite();
 void RunNPCEmergentLifeTestSuite();
 void RunSLMDialogueTestSuite();
 void RunMafiaEcosystemTestSuite();
+void RunExileChateauTestSuite();
 
 static bool g_testUnderworld = false;
 static bool g_testSimulation = false;
@@ -88,6 +89,7 @@ static bool g_testFamily = false;
 static bool g_testEmergentLife = false;
 static bool g_testSLM = false;
 static bool g_testMafia = false;
+static bool g_testExiles = false;
 
 int main(int argc, char* argv[])
 {
@@ -125,6 +127,8 @@ int main(int argc, char* argv[])
             g_testSLM = true;
         } else if (arg == "--test-mafia" || arg == "--test-commission" || arg == "--test-pizzo") {
             g_testMafia = true;
+        } else if (arg == "--test-exiles" || arg == "--test-clubhel" || arg == "--test-chateau") {
+            g_testExiles = true;
         } else if (arg == "--test-all") {
             g_testFrank = true;
             g_testUnderworld = true;
@@ -137,13 +141,14 @@ int main(int argc, char* argv[])
             g_testEmergentLife = true;
             g_testSLM = true;
             g_testMafia = true;
+            g_testExiles = true;
         }
     }
 
 #ifndef UNITTEST
-    if (g_testFrank && g_testUnderworld && g_testSimulation && g_testEmergentAI && g_testPolice && g_testBiography && g_testSocial && g_testFamily && g_testEmergentLife && g_testSLM && g_testMafia) {
+    if (g_testFrank && g_testUnderworld && g_testSimulation && g_testEmergentAI && g_testPolice && g_testBiography && g_testSocial && g_testFamily && g_testEmergentLife && g_testSLM && g_testMafia && g_testExiles) {
         std::cout << "\n============================================================" << std::endl;
-        std::cout << "  RUNNING COMPLETE MEGACITY & TACTICAL TEST SUITE (11 SUITES)" << std::endl;
+        std::cout << "  RUNNING COMPLETE MEGACITY & TACTICAL TEST SUITE (12 SUITES)" << std::endl;
         std::cout << "============================================================\n" << std::endl;
         RunFrankCastleTestSuite();
         RunUnderworldTestSuite();
@@ -156,9 +161,12 @@ int main(int argc, char* argv[])
         RunNPCEmergentLifeTestSuite();
         RunSLMDialogueTestSuite();
         RunMafiaEcosystemTestSuite();
+        RunExileChateauTestSuite();
         std::cout << "\n============================================================" << std::endl;
-        std::cout << "  ALL 11 MEGACITY EMERGENCE & TACTICAL SUITES PASSED 100%!  " << std::endl;
+        std::cout << "  ALL 12 MEGACITY EMERGENCE & TACTICAL SUITES PASSED 100%!  " << std::endl;
         std::cout << "============================================================\n" << std::endl;
+    } else if (g_testExiles) {
+        RunExileChateauTestSuite();
     } else if (g_testMafia) {
         RunMafiaEcosystemTestSuite();
     } else if (g_testSLM) {
