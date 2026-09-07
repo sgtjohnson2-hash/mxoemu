@@ -86,11 +86,13 @@ GameClient::~GameClient()
 
 void GameClient::HandlePacket( const char *pData, size_t nLength )
 {
-	if (nLength < 1 || !IsValid())
-		return;
+	try
+	{
+		if (nLength < 1 || !IsValid())
+			return;
 
-	m_lastActivity = getTime();
-	m_lastPacketReceivedMS = getMSTime();
+		m_lastActivity = getTime();
+		m_lastPacketReceivedMS = getMSTime();
 
 	if (pData[0] == 0 && nLength == 43)
 	{
@@ -218,7 +220,22 @@ void GameClient::HandlePacket( const char *pData, size_t nLength )
 	{
 		if (pData[0] == 0x01 && m_encryptionInitialized==true)
 		{
-			SequencedPacket packetData=Decrypt(&pData[1],nLength-1);
+			SequencedPacket packetData;
+			try
+			{
+				packetData = Decrypt(&pData[1],nLength-1);
+			}
+			catch (const InvalidCRCException&)
+			{
+				WARNING_LOG(format("GameClient(%1%): Dropped UDP packet with invalid CRC") % Address());
+				return;
+			}
+			catch (const std::exception& e)
+			{
+				WARNING_LOG(format("GameClient(%1%): Dropped malformed encrypted UDP packet: %2%") % Address() % e.what());
+				return;
+			}
+
 			ByteBuffer dataToParse;
 
 			uint32 pktsAcked = AcknowledgePacket(packetData.getRemoteSeq(), packetData.getAckBits());
@@ -232,6 +249,12 @@ void GameClient::HandlePacket( const char *pData, size_t nLength )
 					%packetData.getRemoteSeq()
 					%packetData.getLocalSeq()
 					%Bin2Hex(packetData));
+			}
+
+			if (packetData.size() == 0)
+			{
+				WARNING_LOG(format("(%1%) Empty decrypted packet received!") % Address());
+				return;
 			}
 
 			uint8 firstByte = packetData.contents()[0];
@@ -271,11 +294,31 @@ void GameClient::HandlePacket( const char *pData, size_t nLength )
 
 			if (dataToParse.size() > 0)
 			{
-				HandleEncrypted(dataToParse);
+				try
+				{
+					HandleEncrypted(dataToParse);
+				}
+				catch (const std::exception& e)
+				{
+					WARNING_LOG(format("GameClient(%1%): Exception in HandleEncrypted: %2%") % Address() % e.what());
+				}
 			}
 
 			FlushQueue();
 		}
+	}
+	}
+	catch (const InvalidCRCException&)
+	{
+		WARNING_LOG(format("GameClient(%1%): Dropped malformed UDP packet due to CRC failure") % Address());
+	}
+	catch (const std::exception& e)
+	{
+		WARNING_LOG(format("GameClient(%1%): Dropped malformed UDP packet: %2%") % Address() % e.what());
+	}
+	catch (...)
+	{
+		WARNING_LOG(format("GameClient(%1%): Dropped malformed UDP packet due to unexpected exception") % Address());
 	}
 }
 
@@ -403,9 +446,20 @@ void GameClient::HandleOrdered( ByteBuffer &orderedData )
 
 SequencedPacket GameClient::Decrypt( const char *pData, size_t nLength )
 {
-	ByteBuffer tempBuf(pData,nLength);
-	TwofishEncryptedPacket decryptedData(tempBuf,m_tfEngine);
-	return SequencedPacket(decryptedData);
+	try
+	{
+		ByteBuffer tempBuf(pData,nLength);
+		TwofishEncryptedPacket decryptedData(tempBuf,m_tfEngine);
+		return SequencedPacket(decryptedData);
+	}
+	catch (const InvalidCRCException&)
+	{
+		throw;
+	}
+	catch (const std::exception&)
+	{
+		throw;
+	}
 }
 
 void GameClient::SendEncrypted(SequencedPacket withSequences)

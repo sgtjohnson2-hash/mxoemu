@@ -98,6 +98,7 @@ void ObjectMgr::destroyObject( uint32 goId )
 
 class PlayerObject* ObjectMgr::getGOPtr( uint32 goId )
 {
+	if (goId == 0) return nullptr;
 	std::shared_lock<std::shared_mutex> lock(m_objMutex);
 	objectsMap::iterator it=m_objects.find(goId);
 	if (it!=m_objects.end())
@@ -109,6 +110,17 @@ class PlayerObject* ObjectMgr::getGOPtr( uint32 goId )
 class PlayerObject* ObjectMgr::getGOPtrSafe( uint32 goId )
 {
 	return getGOPtr(goId);
+}
+
+std::shared_ptr<class PlayerObject> ObjectMgr::getGOSharedPtr( uint32 goId )
+{
+	if (goId == 0) return nullptr;
+	std::shared_lock<std::shared_mutex> lock(m_objMutex);
+	objectsMap::iterator it=m_objects.find(goId);
+	if (it!=m_objects.end())
+		return it->second;
+
+	return nullptr;
 }
 
 uint32 ObjectMgr::getGOId( class PlayerObject* forWhichObj )

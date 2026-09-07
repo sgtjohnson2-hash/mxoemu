@@ -728,18 +728,25 @@ void CityLifeManager::InitializeDefaultRumors()
 
 void CityLifeManager::Update(uint32 deltaMs)
 {
-    std::lock_guard<std::recursive_mutex> lock(m_mutex);
+    ProcessPendingAsyncEvents();
 
-    UpdateCircadianSchedule(deltaMs);
-    UpdateCitizens(deltaMs);
-    UpdateWorkplaces(deltaMs);
-    UpdateShops(deltaMs);
-    UpdateSubwayTransit(deltaMs);
-    UpdateRoadTraffic(deltaMs);
-    UpdateRumorPool(deltaMs);
-    sEmergentAIMgr.Update(deltaMs);
-    sEmergentAIMgr.UpdateManagedCitizens(deltaMs);
-    sSocialEngine.UpdateCircadianSocialCycle(static_cast<uint32>(m_simulatedHour * 60.0f));
+    {
+        std::lock_guard<std::recursive_mutex> lock(m_mutex);
+
+        UpdateCircadianSchedule(deltaMs);
+        UpdateCitizens(deltaMs);
+        UpdateWorkplaces(deltaMs);
+        UpdateShops(deltaMs);
+        UpdateSubwayTransit(deltaMs);
+        UpdateRoadTraffic(deltaMs);
+        UpdateRumorPool(deltaMs);
+        sSocialEngine.UpdateCircadianSocialCycle(static_cast<uint32>(m_simulatedHour * 60.0f));
+    }
+
+    // Call EmergentAI updates OUTSIDE CityLifeManager mutex to prevent cross-engine deadlock
+    if (EmergentAIEngine::getSingletonPtr()) {
+        sEmergentAIMgr.UpdateManagedCitizens(deltaMs);
+    }
 }
 
 void CityLifeManager::SetSimulatedHour(float hour)
@@ -1439,54 +1446,76 @@ void CityLifeManager::UpdateRumorPool(uint32 deltaMs)
     }
 }
 
-void CityLifeManager::TriggerAreaPanic(float x, float z, float radius, const std::string& cause, uint32 durationMs)
+void CityLifeManager::QueueAreaPanic(float x, float z, float radius, const std::string& cause, uint32 durationMs)
 {
-    std::lock_guard<std::recursive_mutex> lock(m_mutex);
-    float rSq = radius * radius;
-    m_totalPanicEvents++;
+    std::lock_guard<std::mutex> lock(m_asyncEventQueueMutex);
+    m_pendingPanicEvents.push_back({x, z, radius, cause, durationMs});
+}
 
-    if (EmergentAIEngine::getSingletonPtr()) {
-        sEmergentAIMgr.GetContagionEngine().EmitPanicWave(LocationVector(x, 95.0, z), radius, 0.85f, cause, durationMs);
+void CityLifeManager::ProcessPendingAsyncEvents()
+{
+    std::vector<PendingPanicEvent> events;
+    {
+        std::lock_guard<std::mutex> lock(m_asyncEventQueueMutex);
+        if (m_pendingPanicEvents.empty()) return;
+        events.swap(m_pendingPanicEvents);
     }
 
-    for (auto& pair : m_citizens) {
-        BluepillCitizen& c = pair.second;
-        float dx = c.currentLocation.x - x;
-        float dz = c.currentLocation.z - z;
-        if (dx * dx + dz * dz <= rSq) {
-            c.currentRoutine = RoutineScheduleState::Panicking;
-            c.panicTimerMs = durationMs;
-            c.panicReason = cause;
-            c.drives.stress = std::min(1.0f, c.drives.stress + (0.5f * (1.0f + c.traits.neuroticism)));
+    for (const auto& ev : events) {
+        TriggerAreaPanic(ev.x, ev.z, ev.radius, ev.cause, ev.durationMs, false);
+    }
+}
 
-            // Emergent Life: Witnessing traumatic Matrix conflict induces cognitive dissonance & awakening
-            sEmergentLifeEngine.ProcessWitnessedAnomaly(c.id, cause, 0.45f);
+void CityLifeManager::TriggerAreaPanic(float x, float z, float radius, const std::string& cause, uint32 durationMs, bool notifyEmergentAI)
+{
+    {
+        std::lock_guard<std::recursive_mutex> lock(m_mutex);
+        float rSq = radius * radius;
+        m_totalPanicEvents++;
 
-            // High Neuroticism flees frantically towards nearest subway station
-            if (c.traits.neuroticism > 0.45f) {
-                // Find nearest subway station
-                float bestDistSq = 1e12f;
-                LocationVector bestStLoc = c.homeLocation;
-                for (const auto& sPair : m_stations) {
-                    float sdx = sPair.second.platformLocation.x - c.currentLocation.x;
-                    float sdz = sPair.second.platformLocation.z - c.currentLocation.z;
-                    float sDist = sdx * sdx + sdz * sdz;
-                    if (sDist < bestDistSq) {
-                        bestDistSq = sDist;
-                        bestStLoc = sPair.second.platformLocation;
+        for (auto& pair : m_citizens) {
+            BluepillCitizen& c = pair.second;
+            float dx = c.currentLocation.x - x;
+            float dz = c.currentLocation.z - z;
+            if (dx * dx + dz * dz <= rSq) {
+                c.currentRoutine = RoutineScheduleState::Panicking;
+                c.panicTimerMs = durationMs;
+                c.panicReason = cause;
+                c.drives.stress = std::min(1.0f, c.drives.stress + (0.5f * (1.0f + c.traits.neuroticism)));
+
+                // Emergent Life: Witnessing traumatic Matrix conflict induces cognitive dissonance & awakening
+                sEmergentLifeEngine.ProcessWitnessedAnomaly(c.id, cause, 0.45f);
+
+                // High Neuroticism flees frantically towards nearest subway station
+                if (c.traits.neuroticism > 0.45f) {
+                    // Find nearest subway station
+                    float bestDistSq = 1e12f;
+                    LocationVector bestStLoc = c.homeLocation;
+                    for (const auto& sPair : m_stations) {
+                        float sdx = sPair.second.platformLocation.x - c.currentLocation.x;
+                        float sdz = sPair.second.platformLocation.z - c.currentLocation.z;
+                        float sDist = sdx * sdx + sdz * sdz;
+                        if (sDist < bestDistSq) {
+                            bestDistSq = sDist;
+                            bestStLoc = sPair.second.platformLocation;
+                        }
                     }
+                    c.destinationLocation = bestStLoc;
+                    c.movementSpeed = 6.5f; // Sprinting
+                } else {
+                    // Calm shelter in nearby structure
+                    c.isSheltered = true;
                 }
-                c.destinationLocation = bestStLoc;
-                c.movementSpeed = 6.5f; // Sprinting
-            } else {
-                // Calm shelter in nearby structure
-                c.isSheltered = true;
             }
         }
+
+        // Also close local shops in danger zone
+        LockdownShopsInRadius(x, z, radius, cause);
     }
 
-    // Also close local shops in danger zone
-    LockdownShopsInRadius(x, z, radius, cause);
+    if (notifyEmergentAI && EmergentAIEngine::getSingletonPtr()) {
+        sEmergentAIMgr.GetContagionEngine().EmitPanicWave(LocationVector(x, 95.0, z), radius, 0.85f, cause, durationMs);
+    }
 }
 
 void CityLifeManager::ClearAllPanic()

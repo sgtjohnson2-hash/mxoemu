@@ -30,12 +30,15 @@ BotManager::BotManager()
     m_lastPlayerCacheTickMS = 0;
     m_aggroEnabled = true;
     m_combatLogging = true;
+    m_botsDirty = true;
 }
 
 BotManager::~BotManager()
 {
     std::lock_guard<std::recursive_mutex> lock(m_botMutex);
     m_bots.clear();
+    m_botsSnapshot.reset();
+    m_botsDirty = true;
 }
 
 void BotManager::LoadHardlines()
@@ -131,6 +134,7 @@ std::shared_ptr<BotClient> BotManager::SpawnSingleBot(float x, float y, float z,
     {
         std::lock_guard<std::recursive_mutex> lock(m_botMutex);
         m_bots.push_back(bot);
+        m_botsDirty = true;
     }
     DEBUG_LOG(format("BotManager: Spawned bot UID %1% (Faction %5%) at %2%, %3%, %4%") % uid % x % y % z % faction);
     return bot;
@@ -172,6 +176,7 @@ uint32 BotManager::SpawnMissionBot(const MissionNpc& npcInfo, uint32 instanceId)
     {
         std::lock_guard<std::recursive_mutex> lock(m_botMutex);
         m_bots.push_back(bot);
+        m_botsDirty = true;
     }
     INFO_LOG(format("BotManager: Spawned Mission NPC %1% (Instance %2%) at %3%, %4%, %5%") % npcInfo.handle % instanceId % npcInfo.x % npcInfo.y % npcInfo.z);
     return bot->GetPlayerGoId();
@@ -200,17 +205,23 @@ void BotManager::CommandBotAttack(const std::string& targetName)
     }
 
     // Command all bots to attack
-    std::vector<std::shared_ptr<BotClient>> botsCopy;
+    std::shared_ptr<const std::vector<std::shared_ptr<BotClient>>> botsSnapshot;
     {
         std::lock_guard<std::recursive_mutex> lock(m_botMutex);
-        botsCopy = m_bots;
+        if (m_botsDirty || !m_botsSnapshot) {
+            m_botsSnapshot = std::make_shared<const std::vector<std::shared_ptr<BotClient>>>(m_bots);
+            m_botsDirty = false;
+        }
+        botsSnapshot = m_botsSnapshot;
     }
     
-    for (size_t i = 0; i < botsCopy.size(); i++)
-    {
-        botsCopy[i]->AttackTarget(targetGoId);
+    if (botsSnapshot) {
+        for (size_t i = 0; i < botsSnapshot->size(); i++)
+        {
+            (*botsSnapshot)[i]->AttackTarget(targetGoId);
+        }
+        DEBUG_LOG(format("BotManager: Commanded %1% bots to attack %2%") % botsSnapshot->size() % targetName);
     }
-    DEBUG_LOG(format("BotManager: Commanded %1% bots to attack %2%") % botsCopy.size() % targetName);
 }
 
 void BotManager::BotStressTest(int count)
@@ -294,14 +305,22 @@ void BotManager::Update()
         if (p) activePlayers.push_back(p);
     }
 
-    std::vector<std::shared_ptr<BotClient>> botsCopy;
+    std::shared_ptr<const std::vector<std::shared_ptr<BotClient>>> botsSnapshot;
     {
         std::lock_guard<std::recursive_mutex> lock(m_botMutex);
-        botsCopy = m_bots;
+        if (m_botsDirty || !m_botsSnapshot) {
+            m_botsSnapshot = std::make_shared<const std::vector<std::shared_ptr<BotClient>>>(m_bots);
+            m_botsDirty = false;
+        }
+        botsSnapshot = m_botsSnapshot;
+    }
+
+    if (!botsSnapshot || botsSnapshot->empty()) {
+        return;
     }
 
     //INFO_LOG("DEBUG_TRACER: Starting std::for_each execution::par");
-    std::for_each(std::execution::par, botsCopy.begin(), botsCopy.end(), [&](auto bot)
+    std::for_each(std::execution::par, botsSnapshot->begin(), botsSnapshot->end(), [&](const std::shared_ptr<BotClient>& bot)
     {
         try {
             double minDistSq = 999999999999.0;
@@ -370,9 +389,9 @@ void BotManager::Update()
     });
 
     // Sequential bot update execution
-    for (size_t i = 0; i < botsCopy.size(); i++)
+    for (size_t i = 0; i < botsSnapshot->size(); i++)
     {
-        auto bot = botsCopy[i];
+        auto bot = (*botsSnapshot)[i];
         ExecutionLOD targetLOD = bot->GetLOD();
         uint32 tickRate = 0;
         if (targetLOD == ExecutionLOD::ACTIVE_VIEWPORT)
@@ -494,6 +513,7 @@ void BotManager::PopulateWorld()
         std::lock_guard<std::recursive_mutex> lock(m_botMutex);
         m_bots.reserve(m_bots.size() + newBots.size());
         m_bots.insert(m_bots.end(), newBots.begin(), newBots.end());
+        m_botsDirty = true;
     }
 
     INFO_LOG(format("BotManager: Successfully populated world with %1% authentic bots.") % spawnCount);

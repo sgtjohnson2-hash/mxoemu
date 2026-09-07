@@ -557,7 +557,7 @@ bool EmergentPoliceManager::DeployTearGas(uint32 squadId, const LocationVector& 
 
     // Disperse nearby bluepill civilians and broadcast gas alert
     if (CityLifeManager::getSingletonPtr()) {
-        sCityLifeMgr.TriggerAreaPanic(static_cast<float>(targetPos.x), static_cast<float>(targetPos.z), 35.0f, "CS Tear Gas Dispersion", 25000);
+        sCityLifeMgr.QueueAreaPanic(static_cast<float>(targetPos.x), static_cast<float>(targetPos.z), 35.0f, "CS Tear Gas Dispersion", 25000);
         sCityLifeMgr.BroadcastStreetRumor(RumorTopic::RUMOR_POLICE_CRACKDOWN,
                                           "CS Chemical Gas Deployed by SWAT",
                                           "Tactical officers deployed riot control gas in " + s->districtName,

@@ -353,8 +353,9 @@ public:
 
     // Ambient Life, Rumors & Reactive Panic
     void BroadcastStreetRumor(RumorTopic topic, const std::string& headline, const std::string& content, uint32 districtId);
-    const std::vector<AmbientRumor>& GetActiveRumors() const { return m_rumors; }
-    void TriggerAreaPanic(float x, float z, float radius, const std::string& cause, uint32 durationMs = 30000);
+    void TriggerAreaPanic(float x, float z, float radius, const std::string& cause, uint32 durationMs = 30000, bool notifyEmergentAI = true);
+    void QueueAreaPanic(float x, float z, float radius, const std::string& cause, uint32 durationMs = 30000);
+    void ProcessPendingAsyncEvents();
     void ClearAllPanic();
     void NotifyUnderworldIncident(uint32 districtId, float x, float z, const std::string& incidentDesc);
 
@@ -416,6 +417,17 @@ private:
     uint32 m_totalTransitRidership{0};
     uint32 m_totalCommerceTransactions{0};
     uint32 m_totalPanicEvents{0};
+
+    struct PendingPanicEvent {
+        float x;
+        float z;
+        float radius;
+        std::string cause;
+        uint32 durationMs;
+    };
+
+    mutable std::mutex m_asyncEventQueueMutex;
+    std::vector<PendingPanicEvent> m_pendingPanicEvents;
 
     mutable std::recursive_mutex m_mutex;
 };

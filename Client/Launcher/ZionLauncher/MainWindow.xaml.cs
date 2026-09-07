@@ -1047,7 +1047,9 @@ namespace ZionLauncher
 
         private string GetConnectionString()
         {
-            return $"Server={_currentServerIp};Port={DatabasePort};User ID=reality;Password=reality;Database=reality;Connection Timeout=6;";
+            // Direct raw MySQL connections are restricted strictly to localhost (127.0.0.1).
+            // Remote environments communicate exclusively via authenticated HTTP REST API gateway (/api/login, /api/register).
+            return $"Server=127.0.0.1;Port={DatabasePort};User ID=reality;Password=reality;Database=reality;Connection Timeout=6;";
         }
 
         private void txtLogin_KeyDown(object sender, KeyEventArgs e)

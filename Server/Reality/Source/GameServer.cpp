@@ -63,12 +63,25 @@
 #include "AI/MatrixThreatHeatmap.h"
 #include "LogisticsManager.h"
 #include "WorldDirector.h"
+#include "FrankCastleManager.h"
+#include "UnderworldManager.h"
+#include "CityLifeManager.h"
+#include "EmergentAIEngine.h"
+#include "EmergentPoliceManager.h"
+#include "OracleVisionSimulacra.h"
 #include "AI/SensoryPerceptionSystem.h"
 #include "AI/SentientMajorCharacters.h"
 #include "AI/CoverSystem.h"
 #include "RadioDispatchSystem.h"
 #include "SmithVirusCascade.h"
 #include "BackdoorNetwork.h"
+#include "BiographicalNarrativeEngine.h"
+#include "NPCSocialLifeEngine.h"
+#include "NPCFamilyDreamsEngine.h"
+#include "NPCEmergentLifeEngine.h"
+#include "SLMDialogueContextEngine.h"
+#include "MafiaEcosystemManager.h"
+#include "ExileChateauManager.h"
 // removed duplicate include
 #include <boost/bind.hpp>
 
@@ -119,6 +132,18 @@ bool GameServer::Start()
 	sCoverSystem.Initialize();
 	sRadioDispatchSystem.Initialize();
 	sSmithCascade.Initialize();
+	sFrankCastleMgr.Initialize();
+	sUnderworldMgr.Initialize();
+	sCityLifeMgr.Initialize();
+	sEmergentAIMgr.Initialize();
+	sEmergentPoliceMgr.Initialize();
+	sBioEngine.Initialize();
+	sSocialEngine.Initialize();
+	sFamilyDreamsEngine.Initialize();
+	sEmergentLifeEngine.Initialize();
+	sSLMDialogueEngine.Initialize();
+	sMafiaMgr.Initialize();
+	sExileMgr.Initialize();
 
 	string Interface = sConfig.GetStringDefault("GameServer.IP", "0.0.0.0");
 	int Port = sConfig.GetIntDefault("GameServer.Port", 10000);
@@ -206,6 +231,14 @@ void GameServer::SimulationLoop()
 			try { sRadioDispatchSystem.Update(aiDeltaMs); } catch (const std::exception& e) { ERROR_LOG(format("SimulationLoop: sRadioDispatchSystem caught %1%") % e.what()); }
 			try { sSmithCascade.Update(aiDeltaMs); } catch (const std::exception& e) { ERROR_LOG(format("SimulationLoop: sSmithCascade caught %1%") % e.what()); }
 			try { sBackdoorNetwork.Update(aiDeltaMs); } catch (const std::exception& e) { ERROR_LOG(format("SimulationLoop: sBackdoorNetwork caught %1%") % e.what()); }
+			try { sFrankCastleMgr.Update(aiDeltaMs); } catch (const std::exception& e) { ERROR_LOG(format("SimulationLoop: sFrankCastleMgr caught %1%") % e.what()); }
+			try { sUnderworldMgr.Update(aiDeltaMs); } catch (const std::exception& e) { ERROR_LOG(format("SimulationLoop: sUnderworldMgr caught %1%") % e.what()); }
+			try { sCityLifeMgr.Update(aiDeltaMs); } catch (const std::exception& e) { ERROR_LOG(format("SimulationLoop: sCityLifeMgr caught %1%") % e.what()); }
+			try { sEmergentAIMgr.Update(aiDeltaMs); } catch (const std::exception& e) { ERROR_LOG(format("SimulationLoop: sEmergentAIMgr caught %1%") % e.what()); }
+			try { sEmergentPoliceMgr.Update(aiDeltaMs); } catch (const std::exception& e) { ERROR_LOG(format("SimulationLoop: sEmergentPoliceMgr caught %1%") % e.what()); }
+			try { sOracleVision.Update(aiDeltaMs / 1000.0f); } catch (const std::exception& e) { ERROR_LOG(format("SimulationLoop: sOracleVision caught %1%") % e.what()); }
+			try { sMafiaMgr.Update(aiDeltaMs); } catch (const std::exception& e) { ERROR_LOG(format("SimulationLoop: sMafiaMgr caught %1%") % e.what()); }
+			try { sExileMgr.Update(aiDeltaMs); } catch (const std::exception& e) { ERROR_LOG(format("SimulationLoop: sExileMgr caught %1%") % e.what()); }
 
 			static uint32 lastMetricLogMs = 0;
 			static uint32 tickCount = 0;

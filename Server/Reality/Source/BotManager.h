@@ -58,6 +58,8 @@ private:
     uint64 findOrCreateBotCharacter(int botNumber, float x, float y, float z, int faction);
 
     std::vector<std::shared_ptr<BotClient>> m_bots;
+    std::shared_ptr<const std::vector<std::shared_ptr<BotClient>>> m_botsSnapshot;
+    bool m_botsDirty{true};
     std::vector<LocationVector> m_hardlines;
     std::atomic<uint64> m_nextBotId;
     std::atomic<uint32> m_nextCrewId;

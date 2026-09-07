@@ -1660,7 +1660,7 @@ void EmergentAIEngine::OnEmergentCrimeDetected(uint32 crimeId, uint32 districtId
 
     // 1. Emit panic wave into the crowd
     m_contagionEngine.EmitPanicWave(crimePos, 70.0f, 0.85f, "Crime In Progress: " + crimeDesc, 30000);
-    sCityLifeMgr.TriggerAreaPanic(static_cast<float>(crimePos.x), static_cast<float>(crimePos.z), 70.0f, "Crime: " + crimeDesc, 30000);
+    sCityLifeMgr.QueueAreaPanic(static_cast<float>(crimePos.x), static_cast<float>(crimePos.z), 70.0f, "Crime: " + crimeDesc, 30000);
 
     // 2. Seed rumor into the social rumor engine
     m_contagionEngine.SeedRumor(0, "Shootout in " + CityLifeManager::GetDistrictName(districtId),
@@ -1724,7 +1724,7 @@ void EmergentAIEngine::OnGunfireEcho(const LocationVector& originPos, float loud
 {
     std::lock_guard<std::recursive_mutex> lock(m_mutex);
     m_contagionEngine.EmitPanicWave(originPos, loudnessRadius, 0.90f, sourceDesc, 25000);
-    sCityLifeMgr.TriggerAreaPanic(static_cast<float>(originPos.x), static_cast<float>(originPos.z), loudnessRadius, sourceDesc, 25000);
+    sCityLifeMgr.QueueAreaPanic(static_cast<float>(originPos.x), static_cast<float>(originPos.z), loudnessRadius, sourceDesc, 25000);
 }
 
 AgentUtilityState* EmergentAIEngine::GetOrCreateUtilityState(uint32 entityId)

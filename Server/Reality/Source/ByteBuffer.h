@@ -313,17 +313,19 @@ public:
 
 	inline char *contents() const
 	{
-		return (char*)&_storage[0];
+		if (_storage.empty())
+			return nullptr;
+		return (char*)_storage.data();
 	}
 
 	inline size_t count() const
 	{
-		return (uint16)_storage.size();
+		return _storage.size();
 	}
 
-	inline uint16 size() const
+	inline uint32_t size() const
 	{
-		return (uint16)count();
+		return static_cast<uint32_t>(count());
 	}
 
 	inline size_t remaining() const

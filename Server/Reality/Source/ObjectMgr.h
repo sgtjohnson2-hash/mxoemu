@@ -49,6 +49,7 @@ public:
 	void destroyObject(uint32 goId);
 	class PlayerObject* getGOPtr(uint32 goId);
 	class PlayerObject* getGOPtrSafe(uint32 goId); //returns NULL instead of throwing
+	std::shared_ptr<class PlayerObject> getGOSharedPtr(uint32 goId);
 	uint32 getGOId(class PlayerObject* forWhichObj);
 	uint16 getViewForGO(class GameClient *requester, uint32 goId);
 	uint32 getGOForView(class GameClient *requester, uint16 viewId); //returns 0 if the view is not a player object

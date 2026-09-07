@@ -167,6 +167,7 @@ public:
 	bool IsInterlocked(uint32 goId) const;
 	bool IsFreeFiring(uint32 goId) const;
 	InterlockSession* GetInterlockSession(uint32 goId);
+	bool GetInterlockSessionCopy(uint32 goId, InterlockSession& outSession) const;
 
 	//client ability activation (0x80b9) - resolves DataLoader templates for
 	//cast time / FX / IS cost, then routes into interlock or free-fire

@@ -217,6 +217,18 @@ InterlockSession* CombatSystem::GetInterlockSession(uint32 goId)
 	return nullptr;
 }
 
+bool CombatSystem::GetInterlockSessionCopy(uint32 goId, InterlockSession& outSession) const
+{
+	std::lock_guard<std::recursive_mutex> lock(m_combatMutex);
+	for (const auto& session : m_interlocks) {
+		if (session.goIdA == goId || session.goIdB == goId) {
+			outSession = session;
+			return true;
+		}
+	}
+	return false;
+}
+
 bool CombatSystem::RequestInterlock(uint32 attackerGoId, uint32 targetGoId)
 {
 	std::lock_guard<std::recursive_mutex> lock(m_combatMutex);
