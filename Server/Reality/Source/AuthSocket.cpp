@@ -389,15 +389,15 @@ void AuthSocket::HandleAuthRequest( ByteBuffer &packet )
 	{
 		uint8 opcode;              // 0x00: AS_AuthReply (0x09)
 		uint32 status;             // 0x01..0x04: 0 = Success
-		uint16 unknown1;           // 0x05..0x06: 0
+		uint16 offsetUsername;     // 0x05..0x06: offset to username string
 		uint32 userId;             // 0x07..0x0A: m_userId
-		uint16 offsetAuthData;      // 0x0B..0x0C: offset to auth ticket
-		uint16 offsetEncryptedData; // 0x0D..0x0E: offset to encrypted private key
+		uint16 offsetAuthData;      // 0x0B..0x0C: offset to auth ticket (306 bytes)
+		uint16 offsetEncryptedData; // 0x0D..0x0E: offset to encrypted private key (96 bytes)
 		uint16 unknown2;           // 0x0F..0x10: 0
 		uint16 unknown3;           // 0x11..0x12: 0
-		uint16 offsetCharData;     // 0x13..0x14: offset to character data
-		uint16 offsetWorldData;    // 0x15..0x16: offset to world data
-		uint16 offsetUsername;     // 0x17..0x18: offset to username string
+		uint16 offsetWorldData;    // 0x13..0x14: offset to world data (14 bytes per world + string table)
+		uint16 offsetCharData;     // 0x15..0x16: offset to character data (30 bytes per character)
+		uint16 unknown4;           // 0x17..0x18: 0
 	} AuthReplyHeader;
 #pragma pack(pop)
 
@@ -410,16 +410,82 @@ void AuthSocket::HandleAuthRequest( ByteBuffer &packet )
 	// Placeholder header (will be rewritten at offset 0 after offsets are computed)
 	worldPacket.append((const byte*)&packetHeader, sizeof(packetHeader));
 
-	// 1. Characters Section (offset 0x13 in header)
-	packetHeader.offsetCharData = worldPacket.wpos();
+	// 1. Username Section (offset 0x05 in header)
+	packetHeader.offsetUsername = (uint16)worldPacket.wpos();
+	worldPacket.writeString(m_username);
 
-	PreparedStatement stmt("SELECT `charId`, `worldId`, `status`, `handle` FROM `characters` WHERE `userId` = ?0");
+	// 2. Auth Ticket Section (offset 0x0B in header)
+	packetHeader.offsetAuthData = (uint16)worldPacket.wpos();
+	worldPacket << uint16(signature.size() + sizeof(signedData)); // 306 = 0x132
+	worldPacket.append(signature);
+	worldPacket.append((const byte*)&signedData, sizeof(signedData));
+
+	// 3. Encrypted Private Key Section (offset 0x0D in header)
+	packetHeader.offsetEncryptedData = (uint16)worldPacket.wpos();
+	worldPacket << uint16(encryptedPrivateExponent.size()); // 96
+	worldPacket.append(encryptedPrivateExponent.contents(), encryptedPrivateExponent.size());
+
+	// 4. Worlds Section (offset 0x13 in header)
+	packetHeader.offsetWorldData = (uint16)worldPacket.wpos();
+
+	PreparedStatement stmt2("SELECT `worldId`, `name`, `type`, `status`, `numPlayers` FROM `worlds`");
+	scoped_ptr<QueryResult> result(sDatabase.QueryPrepared(&stmt2));
+	if (result == NULL || result->GetRowCount() < 1)
+	{
+		ERROR_LOG("No worlds in db, disconnecting.");
+		SetCloseAndDelete(true);
+		return;
+	}
+
+	uint16 numWorlds = (uint16)result->GetRowCount();
+	worldPacket << uint16(numWorlds);
+
+#pragma pack(push,1)
+	typedef struct  
+	{
+		uint8 unknown1;          // 0x00: 0
+		uint16 nameStrOffset;    // 0x01..0x02: relative offset from &WorldData[i] to (uint16 len + worldName)
+		uint8 pad[8];            // 0x03..0x0A: 0
+		uint8 status;            // 0x0B: 0x31..0x33
+		uint16 worldId;          // 0x0C..0x0D: worldId
+	} WorldData;
+#pragma pack(pop)
+
+	ByteBuffer worldDatas;
+	ByteBuffer worldStrings;
+
+	for (uint i = 0; i < numWorlds; i++)
+	{
+		Field *field = result->Fetch();
+		WorldData currWorld;
+		memset(&currWorld, 0, sizeof(currWorld));
+		currWorld.unknown1 = 0;
+		currWorld.worldId = field[0].GetUInt16();
+		string worldNameStr = field[1].GetString();
+		uint8 status = field[3].GetUInt8();
+		currWorld.status = (status != 0) ? status : 0x31;
+		currWorld.nameStrOffset = (numWorlds - i) * sizeof(WorldData) + worldStrings.wpos();
+
+		worldDatas.append((const byte*)&currWorld, sizeof(currWorld));
+		worldStrings.writeString(worldNameStr);
+
+		if (!result->NextRow())
+			break;
+	}
+
+	worldPacket.append(worldDatas);
+	worldPacket.append(worldStrings);
+
+	// 5. Characters Section (offset 0x15 in header)
+	packetHeader.offsetCharData = (uint16)worldPacket.wpos();
+
+	PreparedStatement stmt("SELECT `charId`, `worldId`, `status`, `handle`, `profession`, `alignment` FROM `characters` WHERE `userId` = ?0 ORDER BY `charId` ASC");
 	stmt.SetUInt32(0, m_userId);
-	scoped_ptr<QueryResult> result(sDatabase.QueryPrepared(&stmt));
-	uint16 numCharacters = (result == NULL) ? 0 : result->GetRowCount();
-
-	// In-game character creation: do not auto-create on login
-	
+	result.reset(sDatabase.QueryPrepared(&stmt));
+	uint16 numCharacters = (result == NULL) ? 0 : (uint16)result->GetRowCount();
+	// Client supports up to 20 characters (0x14)
+	if (numCharacters > 20)
+		numCharacters = 20;
 
 	worldPacket << uint16(numCharacters);
 
@@ -428,108 +494,40 @@ void AuthSocket::HandleAuthRequest( ByteBuffer &packet )
 #pragma pack(push,1)
 		typedef struct  
 		{
-			uint8 unknown1;         // 0
-			uint16 handleStrOffset; // offset to character name
-			uint64 charId;          // 64-bit character GUID
-			uint8 status;           // status byte
-			uint16 worldId;         // worldId
+			uint8 unknown1;          // 0x00: 0
+			uint16 worldId;          // 0x01..0x02: worldId
+			char handle[19];         // 0x03..0x15: character handle
+			uint8 nullTerm;          // 0x16: 0
+			uint8 discipline;        // 0x17: 1 = Martial Artist, 2 = Spy, 3 = Hacker
+			uint8 pad[4];            // 0x18..0x1B: 0
+			uint8 faction;           // 0x1C: 1 = Zion, 2 = Machine, 3 = Merovingian
+			uint8 pad2;              // 0x1D: 0
 		} CharacterData;
 #pragma pack(pop)
 
-		ByteBuffer characterDatas;
-		ByteBuffer characterStrings;
-
-		for (uint i=0; i<numCharacters; i++)
+		for (uint i = 0; i < numCharacters; i++)
 		{
 			Field *field = result->Fetch();
 			CharacterData currCharacter;
+			memset(&currCharacter, 0, sizeof(currCharacter));
 			currCharacter.unknown1 = 0;
-			currCharacter.charId = field[0].GetUInt64();
 			currCharacter.worldId = field[1].GetUInt16();
-			currCharacter.status = field[2].GetUInt8();
-			currCharacter.handleStrOffset = (numCharacters - i) * sizeof(CharacterData) + characterStrings.wpos();
+			string handleStr = field[3].GetString();
+			strncpy(currCharacter.handle, handleStr.c_str(), sizeof(currCharacter.handle) - 1);
+			currCharacter.nullTerm = 0;
+			uint32 prof = field[4].GetUInt32();
+			currCharacter.discipline = (prof > 0 && prof <= 255) ? (uint8)prof : 1;
+			uint8 align = field[5].GetUInt8();
+			currCharacter.faction = (align > 0) ? align : 1;
 
-			characterDatas.append((const byte*)&currCharacter, sizeof(currCharacter));
-
-			string characterString = field[3].GetString();
-			characterStrings.writeString(characterString);
+			worldPacket.append((const byte*)&currCharacter, sizeof(currCharacter));
 
 			if (!result->NextRow())
 				break;
 		}
-
-		worldPacket.append(characterDatas);
-		worldPacket.append(characterStrings);
 	}
 
-	// 2. Worlds Section (offset 0x15 in header)
-	packetHeader.offsetWorldData = worldPacket.wpos();
-
-	PreparedStatement stmt2("SELECT `worldId`, `name`, `type`, `status`, `numPlayers` FROM `worlds`");
-	result.reset(sDatabase.QueryPrepared(&stmt2));
-	if (result == NULL || result->GetRowCount() < 1)
-	{
-		ERROR_LOG("No worlds in db, disconnecting.");
-		SetCloseAndDelete(true);
-		return;
-	}
-
-	uint16 numWorlds = result->GetRowCount();
-	worldPacket << uint16(numWorlds);
-
-#pragma pack(push,1)
-	typedef struct  
-	{
-		uint8 unknown1;          // 0
-		uint16 worldId;          // world ID
-		char worldName[20];      // 20-byte world name string
-		uint8 status;            // status
-		uint32 clientVersion;    // matrixVersion
-		uint8 serverLanguage;    // 0
-		uint8 load;              // 0x31..0x33
-	} WorldData;
-#pragma pack(pop)
-
-	do 
-	{
-		Field *field = result->Fetch();
-		WorldData currWorld;
-		memset(&currWorld, 0, sizeof(currWorld));
-		currWorld.unknown1 = 0;
-		currWorld.worldId = field[0].GetUInt16();
-		string worldNameStr = field[1].GetString();
-		strncpy(currWorld.worldName, worldNameStr.c_str(), sizeof(currWorld.worldName)-1);
-		currWorld.status = field[3].GetUInt8();
-		currWorld.clientVersion = matrixVersion;
-		currWorld.serverLanguage = 0;
-
-		uint32 numPlayers = field[4].GetUInt32();
-		if (numPlayers < 50)
-			currWorld.load = 0x31;
-		else if (numPlayers < 100)
-			currWorld.load = 0x32;
-		else 
-			currWorld.load = 0x33;
-
-		worldPacket.append((const byte*)&currWorld, sizeof(currWorld));
-	} while(result->NextRow());
-
-	// 3. Auth Ticket Section (offset 0x0B in header)
-	packetHeader.offsetAuthData = worldPacket.wpos();
-	worldPacket << uint16(signature.size() + sizeof(signedData)); // 306 = 0x132
-	worldPacket.append(signature);
-	worldPacket.append((const byte*)&signedData, sizeof(signedData));
-
-	// 4. Encrypted Private Key Section (offset 0x0D in header)
-	packetHeader.offsetEncryptedData = worldPacket.wpos();
-	worldPacket << uint16(encryptedPrivateExponent.size()); // 96
-	worldPacket.append(encryptedPrivateExponent.contents(), encryptedPrivateExponent.size());
-
-	// 5. Username Section (offset 0x17 in header)
-	packetHeader.offsetUsername = worldPacket.wpos();
-	worldPacket.writeString(m_username);
-
-	// Rewrite header at offset 0
+	// Rewrite finalized header at offset 0
 	worldPacket.put(0, (const byte*)&packetHeader, sizeof(packetHeader));
 
 	DEBUG_LOG(format("Sending AS_AuthReply (Opcode 0x09): |%1%|") % Bin2Hex(worldPacket));

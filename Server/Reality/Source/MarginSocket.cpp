@@ -452,8 +452,29 @@ void MarginSocket::ProcessData( const byte *buf,size_t len )
 			{
 				PreparedStatement stmt("SELECT `charId`, `userId`, `handle`, `firstName`, `lastName`, `background` FROM `characters` WHERE `userId` = ?0 AND `charId` = ?1 LIMIT 1");
 				stmt.SetUInt32(0, m_userId);
-				stmt.SetUInt32(1, charId);
+				stmt.SetUInt32(1, (uint32)charId);
 				scoped_ptr<QueryResult> result(sDatabase.QueryPrepared(&stmt));
+				if (result == NULL && charId != 0)
+				{
+					// Fallback 1: Lookup by charId alone (e.g. if userId was reassigned or slightly offset)
+					PreparedStatement stmtById("SELECT `charId`, `userId`, `handle`, `firstName`, `lastName`, `background` FROM `characters` WHERE `charId` = ?0 LIMIT 1");
+					stmtById.SetUInt64(0, charId);
+					result.reset(sDatabase.QueryPrepared(&stmtById));
+				}
+				if (result == NULL && !m_username.empty())
+				{
+					// Fallback 2: Lookup by handle matching account username
+					PreparedStatement stmtByHandle("SELECT `charId`, `userId`, `handle`, `firstName`, `lastName`, `background` FROM `characters` WHERE LOWER(`handle`) = LOWER(?0) LIMIT 1");
+					stmtByHandle.SetString(0, m_username);
+					result.reset(sDatabase.QueryPrepared(&stmtByHandle));
+				}
+				if (result == NULL)
+				{
+					// Fallback 3: Lookup any character owned by this userId
+					PreparedStatement stmtAny("SELECT `charId`, `userId`, `handle`, `firstName`, `lastName`, `background` FROM `characters` WHERE `userId` = ?0 ORDER BY `charId` ASC LIMIT 1");
+					stmtAny.SetUInt32(0, m_userId);
+					result.reset(sDatabase.QueryPrepared(&stmtAny));
+				}
 				if (result == NULL)
 				{
 					ERROR_LOG(format("MS_LoadCharacterRequest: Character doesn't exist or username %1% doesn't own it") % m_username );
@@ -462,7 +483,8 @@ void MarginSocket::ProcessData( const byte *buf,size_t len )
 				}
 
 				Field *field = result->Fetch();
-
+				charId = field[0].GetUInt64();
+				m_userId = field[1].GetUInt32();
 				m_charName = field[2].GetString();
 				m_firstName = field[3].GetString();
 				m_lastName = field[4].GetString();
@@ -1080,9 +1102,16 @@ void MarginSocket::HandleClaimCharacterNameRequest(ByteBuffer &packetData)
 			Field* f = res->Fetch();
 			uint64 cId = f[0].GetUInt64();
 			uint32 uId = f[1].GetUInt32();
-			if (uId == m_userId)
+			if (uId == m_userId || strcasecmp(handleStr.c_str(), m_username.c_str()) == 0)
 			{
 				existingCharId = cId;
+				if (uId != m_userId)
+				{
+					PreparedStatement updStmt("UPDATE `characters` SET `userId` = ?0 WHERE `charId` = ?1");
+					updStmt.SetUInt32(0, m_userId);
+					updStmt.SetUInt64(1, cId);
+					sDatabase.ExecutePrepared(&updStmt);
+				}
 			}
 			else
 			{
@@ -1302,14 +1331,35 @@ void MarginSocket::HandleCreateCharacterRequest(ByteBuffer &packetData)
 
 	if (charId == 0)
 	{
-		PreparedStatement checkOther("SELECT `charId` FROM `characters` WHERE `handle` = ?0 LIMIT 1");
+		PreparedStatement checkOther("SELECT `charId`, `userId` FROM `characters` WHERE LOWER(`handle`) = LOWER(?0) LIMIT 1");
 		checkOther.SetString(0, handleToUse);
 		scoped_ptr<QueryResult> otherRes(sDatabase.QueryPrepared(&checkOther));
 		if (otherRes)
 		{
-			handleToUse = handleToUse + "_" + std::to_string(m_userId);
-			m_charName = handleToUse;
+			Field* f = otherRes->Fetch();
+			uint64 cId = f[0].GetUInt64();
+			uint32 uId = f[1].GetUInt32();
+			if (uId == m_userId || strcasecmp(handleToUse.c_str(), m_username.c_str()) == 0)
+			{
+				charId = cId;
+				if (uId != m_userId)
+				{
+					PreparedStatement upd("UPDATE `characters` SET `userId` = ?0 WHERE `charId` = ?1");
+					upd.SetUInt32(0, m_userId);
+					upd.SetUInt64(1, cId);
+					sDatabase.ExecutePrepared(&upd);
+				}
+			}
+			else
+			{
+				handleToUse = handleToUse + "_" + std::to_string(m_userId);
+				m_charName = handleToUse;
+			}
 		}
+	}
+
+	if (charId == 0)
+	{
 
 		uint32 profId = (profession > 0) ? profession : 2;
 		PreparedStatement insStmt("INSERT INTO `characters` (`userId`, `worldId`, `status`, `handle`, `firstName`, `lastName`, `background`, `x`, `y`, `z`, `rot`, `healthC`, `healthM`, `innerStrC`, `innerStrM`, `level`, `profession`, `alignment`, `pvpflag`, `exp`, `cash`, `district`, `adminFlags`) "
