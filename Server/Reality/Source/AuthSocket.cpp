@@ -516,8 +516,8 @@ void AuthSocket::HandleAuthRequest( ByteBuffer &packet )
 
 	PreparedStatement stmt("SELECT `charId`, `worldId`, `status`, `handle`, `profession`, `alignment` FROM `characters` WHERE `userId` = ?0 ORDER BY `charId` ASC");
 	stmt.SetUInt32(0, m_userId);
-	scoped_ptr<QueryResult> result(sDatabase.QueryPrepared(&stmt));
-	uint16 numCharacters = (result == NULL) ? 0 : result->GetRowCount();
+	scoped_ptr<QueryResult> charResult(sDatabase.QueryPrepared(&stmt));
+	uint16 numCharacters = (charResult == NULL) ? 0 : charResult->GetRowCount();
 
 	// In-game character creation: do not auto-create on login
 	
@@ -543,12 +543,12 @@ void AuthSocket::HandleAuthRequest( ByteBuffer &packet )
 		ByteBuffer characterDatas;
 		ByteBuffer characterStrings;
 
-		for (uint i=0; i<numCharacters; i++)
+		for (uint i = 0; i < numCharacters; i++)
 		{
-			Field *field = result->Fetch();
+			Field *field = charResult->Fetch();
 			CharacterData currCharacter;
+			memset(&currCharacter, 0, sizeof(currCharacter));
 			currCharacter.unknown1 = 0;
-			currCharacter.charId = field[0].GetUInt64();
 			currCharacter.worldId = field[1].GetUInt16();
 			string handleStr = field[3].GetString();
 			strncpy(currCharacter.handle, handleStr.c_str(), sizeof(currCharacter.handle) - 1);
@@ -560,87 +560,14 @@ void AuthSocket::HandleAuthRequest( ByteBuffer &packet )
 			uint8 align = field[5].GetUInt8();
 			currCharacter.faction = (align > 0) ? align : 1;
 
-			characterDatas.append((const byte*)&currCharacter, sizeof(currCharacter));
+			worldPacket.append((const byte*)&currCharacter, sizeof(currCharacter));
 
-			string characterString = field[3].GetString();
-			characterStrings.writeString(characterString);
-
-			if (!result->NextRow())
+			if (!charResult->NextRow())
 				break;
 		}
-
-		worldPacket.append(characterDatas);
-		worldPacket.append(characterStrings);
 	}
 
-	// 2. Worlds Section (offset 0x15 in header)
-	packetHeader.offsetWorldData = worldPacket.wpos();
-
-	PreparedStatement stmt2("SELECT `worldId`, `name`, `type`, `status`, `numPlayers` FROM `worlds`");
-	result.reset(sDatabase.QueryPrepared(&stmt2));
-	if (result == NULL || result->GetRowCount() < 1)
-	{
-		ERROR_LOG("No worlds in db, disconnecting.");
-		SetCloseAndDelete(true);
-		return;
-	}
-
-	uint16 numWorlds = result->GetRowCount();
-	worldPacket << uint16(numWorlds);
-
-#pragma pack(push,1)
-	typedef struct  
-	{
-		uint8 unknown1;          // 0
-		uint16 worldId;          // world ID
-		char worldName[20];      // 20-byte world name string
-		uint8 status;            // status
-		uint32 clientVersion;    // matrixVersion
-		uint8 serverLanguage;    // 0
-		uint8 load;              // 0x31..0x33
-	} WorldData;
-#pragma pack(pop)
-
-	do 
-	{
-		Field *field = result->Fetch();
-		WorldData currWorld;
-		memset(&currWorld, 0, sizeof(currWorld));
-		currWorld.unknown1 = 0;
-		currWorld.worldId = field[0].GetUInt16();
-		string worldNameStr = field[1].GetString();
-		strncpy(currWorld.worldName, worldNameStr.c_str(), sizeof(currWorld.worldName)-1);
-		currWorld.status = field[3].GetUInt8();
-		currWorld.clientVersion = matrixVersion;
-		currWorld.serverLanguage = 0;
-
-		uint32 numPlayers = field[4].GetUInt32();
-		if (numPlayers < 50)
-			currWorld.load = 0x31;
-		else if (numPlayers < 100)
-			currWorld.load = 0x32;
-		else 
-			currWorld.load = 0x33;
-
-		worldPacket.append((const byte*)&currWorld, sizeof(currWorld));
-	} while(result->NextRow());
-
-	// 3. Auth Ticket Section (offset 0x0B in header)
-	packetHeader.offsetAuthData = worldPacket.wpos();
-	worldPacket << uint16(signature.size() + sizeof(signedData)); // 306 = 0x132
-	worldPacket.append(signature);
-	worldPacket.append((const byte*)&signedData, sizeof(signedData));
-
-	// 4. Encrypted Private Key Section (offset 0x0D in header)
-	packetHeader.offsetEncryptedData = worldPacket.wpos();
-	worldPacket << uint16(encryptedPrivateExponent.size()); // 96
-	worldPacket.append(encryptedPrivateExponent.contents(), encryptedPrivateExponent.size());
-
-	// 5. Username Section (offset 0x17 in header)
-	packetHeader.offsetUsername = worldPacket.wpos();
-	worldPacket.writeString(m_username);
-
-	// Rewrite header at offset 0
+	// Rewrite finalized header at offset 0
 	worldPacket.put(0, (const byte*)&packetHeader, sizeof(packetHeader));
 
 	DEBUG_LOG(format("Sending AS_AuthReply (Opcode 0x09): |%1%|") % Bin2Hex(worldPacket));
