@@ -111,6 +111,9 @@ namespace ZionLauncher
         [return: System.Runtime.InteropServices.MarshalAs(System.Runtime.InteropServices.UnmanagedType.Bool)]
         static extern bool CloseHandle(IntPtr hObject);
 
+        [System.Runtime.InteropServices.DllImport("kernel32.dll", SetLastError = true)]
+        static extern uint WaitForSingleObject(IntPtr hHandle, uint dwMilliseconds);
+
         const uint PROCESS_ALL_ACCESS = 0x1F0FFF;
         const uint MEM_COMMIT = 0x00001000;
         const uint MEM_RESERVE = 0x00002000;
@@ -1200,6 +1203,17 @@ namespace ZionLauncher
                 OperativeSelectPanel.Visibility = Visibility.Visible;
                 lblOperativeCount.Text = $"[{operatives.Count} Found]";
                 btnJackIn.Content = "JACK IN AS OPERATIVE";
+
+                if (operatives.Count == 1)
+                {
+                    string singleHandle = operatives[0].Handle;
+                    txtStatus.Foreground = Brushes.Lime;
+                    txtStatus.Text = $"ACCESS GRANTED. Jacking in as operative '{singleHandle}'...";
+                    JackIn(username, password, singleHandle);
+                    btnJackIn.IsEnabled = true;
+                    return;
+                }
+
                 txtStatus.Foreground = Brushes.Lime;
                 txtStatus.Text = $"Operative(s) found. Select operative and click JACK IN (or choose [+ Create New Operative]).";
                 btnJackIn.IsEnabled = true;
@@ -1601,8 +1615,12 @@ namespace ZionLauncher
             string clientPubkey = Path.Combine(GameRoot, "Client", "pubkey.dat");
             if (File.Exists(srvPubkey))
             {
-                if (!File.Exists(rootPubkey)) try { File.Copy(srvPubkey, rootPubkey, true); } catch { }
-                if (!File.Exists(clientPubkey)) try { File.Copy(srvPubkey, clientPubkey, true); } catch { }
+                try { File.Copy(srvPubkey, rootPubkey, true); } catch { }
+                try { File.Copy(srvPubkey, clientPubkey, true); } catch { }
+            }
+            else if (File.Exists(clientPubkey))
+            {
+                try { File.Copy(clientPubkey, rootPubkey, true); } catch { }
             }
 
             // 5. Resolve authentic matrix.exe
@@ -1655,7 +1673,7 @@ namespace ZionLauncher
 
                 if (File.Exists(HookDll))
                 {
-                    _ = Task.Run(() => InjectWhenClientLoaded());
+                    _ = Task.Run(() => InjectImmediatelyAndWatch(proc));
                 }
 
                 await Task.Delay(2000);
@@ -1667,14 +1685,16 @@ namespace ZionLauncher
             }
         }
 
-        private void InjectWhenClientLoaded()
+        private void InjectImmediatelyAndWatch(Process? targetProc)
         {
+            if (targetProc == null) return;
+            var targetPid = targetProc.Id;
             var alreadyDone = new System.Collections.Generic.HashSet<int>();
             try
             {
-                for (int attempt = 0; attempt < 200; attempt++)
+                for (int attempt = 0; attempt < 100; attempt++)
                 {
-                    Thread.Sleep(100);
+                    Thread.Sleep(attempt == 0 ? 50 : 150);
                     var procs = Process.GetProcessesByName("matrix")
                         .Concat(Process.GetProcessesByName("launcher"))
                         .ToArray();
@@ -1684,58 +1704,72 @@ namespace ZionLauncher
                         if (alreadyDone.Contains(proc.Id)) continue;
                         try
                         {
-                            bool hasClientDll = false;
-                            foreach (ProcessModule mod in proc.Modules)
+                            if (InjectDll(proc, HookDll))
                             {
-                                if (string.Equals(mod.ModuleName, "client.dll", StringComparison.OrdinalIgnoreCase))
-                                {
-                                    hasClientDll = true;
-                                    break;
-                                }
-                            }
-
-                            if (hasClientDll)
-                            {
-                                InjectDll(proc, HookDll);
                                 alreadyDone.Add(proc.Id);
-                                return;
+                                Dispatcher.Invoke(() =>
+                                {
+                                    txtStatus.Foreground = Brushes.Lime;
+                                    txtStatus.Text = $"[Injected] mxohax hook active in matrix.exe (PID {proc.Id}). RSA & socket hooks online.";
+                                });
                             }
                         }
                         catch { }
+                    }
+
+                    if (alreadyDone.Count > 0 && targetProc.HasExited) break;
+                    if (alreadyDone.Contains(targetPid))
+                    {
+                        // Successfully injected into target matrix.exe
+                        return;
                     }
                 }
             }
             catch { }
         }
 
-        private void InjectDll(Process proc, string dllPath)
+        private bool InjectDll(Process proc, string dllPath)
         {
+            if (!File.Exists(dllPath)) return false;
             try
             {
                 IntPtr hProcess = OpenProcess(PROCESS_ALL_ACCESS, false, proc.Id);
-                if (hProcess == IntPtr.Zero) return;
+                if (hProcess == IntPtr.Zero) return false;
 
                 byte[] dllBytes = Encoding.ASCII.GetBytes(dllPath + "\0");
                 IntPtr allocMem = VirtualAllocEx(hProcess, IntPtr.Zero, (uint)dllBytes.Length, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
                 if (allocMem == IntPtr.Zero)
                 {
                     CloseHandle(hProcess);
-                    return;
+                    return false;
                 }
 
-                WriteProcessMemory(hProcess, allocMem, dllBytes, (uint)dllBytes.Length, out _);
+                if (!WriteProcessMemory(hProcess, allocMem, dllBytes, (uint)dllBytes.Length, out _))
+                {
+                    CloseHandle(hProcess);
+                    return false;
+                }
 
                 IntPtr kernel32 = GetModuleHandle("kernel32.dll");
                 IntPtr loadLibrary = GetProcAddress(kernel32, "LoadLibraryA");
+                if (loadLibrary == IntPtr.Zero)
+                {
+                    CloseHandle(hProcess);
+                    return false;
+                }
 
                 IntPtr hThread = CreateRemoteThread(hProcess, IntPtr.Zero, 0, loadLibrary, allocMem, 0, out _);
                 if (hThread != IntPtr.Zero)
                 {
+                    WaitForSingleObject(hThread, 3000);
                     CloseHandle(hThread);
+                    CloseHandle(hProcess);
+                    return true;
                 }
                 CloseHandle(hProcess);
             }
             catch { }
+            return false;
         }
 
         private async void btnStartPatch_Click(object sender, RoutedEventArgs e)
