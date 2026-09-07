@@ -427,8 +427,8 @@ void AuthSocket::HandleAuthRequest( ByteBuffer &packet )
 		uint16 offsetEncryptedData; // 0x0D..0x0E: offset to encrypted private key
 		uint16 unknown2;           // 0x0F..0x10: 0
 		uint16 unknown3;           // 0x11..0x12: 0
-		uint16 offsetCharData;     // 0x13..0x14: offset to character data
-		uint16 offsetWorldData;    // 0x15..0x16: offset to world data
+		uint16 offsetWorldData;    // 0x13..0x14: offset to world data (starts at world count)
+		uint16 offsetCharData;     // 0x15..0x16: offset to character data (starts at char count)
 		uint16 offsetUsername;     // 0x17..0x18: offset to username string
 	} AuthReplyHeader;
 #pragma pack(pop)
@@ -442,10 +442,7 @@ void AuthSocket::HandleAuthRequest( ByteBuffer &packet )
 	// Placeholder header (will be rewritten at offset 0 after offsets are computed)
 	worldPacket.append((const byte*)&packetHeader, sizeof(packetHeader));
 
-	// 1. Characters Section (offset 0x13 in header)
-	packetHeader.offsetCharData = worldPacket.wpos();
-
-	// 2. Auth Ticket Section (offset 0x0B in header)
+	// 1. Auth Ticket Section (offset 0x0B in header)
 	packetHeader.offsetAuthData = (uint16)worldPacket.wpos();
 	worldPacket << uint16(signature.size() + sizeof(signedData)); // 306 = 0x132
 	worldPacket.append(signature);
@@ -534,9 +531,8 @@ void AuthSocket::HandleAuthRequest( ByteBuffer &packet )
 			char handle[19];         // 0x03..0x15: character handle
 			uint8 nullTerm;          // 0x16: 0
 			uint8 status;            // 0x17: Character access status: 1 = Open, 2 = Admins Only (client.dll:0x0040CA29)
-			uint8 pad[4];            // 0x18..0x1B: 0
-			uint8 faction;           // 0x1C: 1 = Zion, 2 = Machine, 3 = Merovingian
-			uint8 pad2;              // 0x1D: 0
+			uint8 pad[5];            // 0x18..0x1C: 0
+			uint8 faction;           // 0x1D: 1 = Zion, 2 = Machine, 3 = Merovingian (matrix.exe:0x00428F65)
 		} CharacterData;
 #pragma pack(pop)
 
@@ -566,6 +562,11 @@ void AuthSocket::HandleAuthRequest( ByteBuffer &packet )
 				break;
 		}
 	}
+
+	// 6. Username Section (offset 0x17 in header)
+	packetHeader.offsetUsername = (uint16)worldPacket.wpos();
+	worldPacket << uint16(m_username.length() + 1);
+	worldPacket.append((const byte*)m_username.c_str(), m_username.length() + 1);
 
 	// Rewrite finalized header at offset 0
 	worldPacket.put(0, (const byte*)&packetHeader, sizeof(packetHeader));
