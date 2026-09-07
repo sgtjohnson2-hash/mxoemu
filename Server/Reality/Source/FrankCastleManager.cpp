@@ -88,7 +88,7 @@ FrankCastleManager::FrankCastleManager()
       m_lastOutbreakCheckMs(0),
       m_lastHitListEvalMs(0),
       m_lastSiegeCheckMs(0),
-      m_lastRadioBroadcastMs(0),
+      m_lastPublicBroadcastMs(0),
       m_lastArmoryAccessMs(0),
       m_cleanSweepDistrictId(0),
       m_cleanSweepActive(false),
@@ -476,7 +476,7 @@ void FrankCastleManager::Update(uint32 deltaMs)
         m_currentState != FRANK_STATE_FIELD_TRIAGE) {
         m_currentState = FRANK_STATE_TACTICAL_RETREAT;
         m_stateTimerMs = 0;
-        BroadcastRadioNet("Tactical smoke deployed. Vitals compromised. Falling back to safehouse for surgery and re-arm.", false);
+        DEBUG_LOG("FrankCastle: Tactical smoke deployed. Vitals compromised. Falling back to safehouse for surgery and re-arm.");
         AddWarJournalEntry(JOURNAL_TACTICAL_RETREAT, "Multiple Hostiles", "Emergency Smoke Extraction", "Fell back to fortified perimeter under heavy fire.", 1, m_currentPos);
     }
 
@@ -498,21 +498,6 @@ void FrankCastleManager::Update(uint32 deltaMs)
     if (m_lastArmoryAccessMs >= 60000) {
         m_lastArmoryAccessMs = 0;
         AccessConstructArmory();
-    }
-
-    // Periodic Radio Broadcaster (every 45s)
-    m_lastRadioBroadcastMs += deltaMs;
-    if (m_lastRadioBroadcastMs >= 45000) {
-        m_lastRadioBroadcastMs = 0;
-        const char* philosophicalBroadcasts[] = {
-            "They call it a war. A war has rules. This is punishment.",
-            "FM 88.3 live across Megacity. The Agents think they own the wire. Every street corner is a killbox.",
-            "To the redpills bleeding in the alleys: hold your ground. Help is on the frequency.",
-            "Merovingian trash in the subway: pack your bags or pick your casket. I'm coming for the ledger.",
-            "Machines calculate odds. I calculate calibers. Keep computing."
-        };
-        int pick = rand() % 5;
-        BroadcastRadioNet(philosophicalBroadcasts[pick], true);
     }
 
     // Visual RSI condition sync
@@ -548,7 +533,7 @@ void FrankCastleManager::UpdateStateAI(uint32 deltaMs)
         m_currentState != FRANK_STATE_FIELD_TRIAGE && m_currentState != FRANK_STATE_RESUPPLY_RUN) {
         m_currentState = FRANK_STATE_RESUPPLY_RUN;
         m_stateTimerMs = 0;
-        BroadcastRadioNet("Ammunition low. Routing stealth approach to field cache.", false);
+        DEBUG_LOG("FrankCastle: Ammunition low. Routing stealth approach to field cache.");
         return;
     }
 
@@ -571,11 +556,8 @@ void FrankCastleManager::UpdateStateAI(uint32 deltaMs)
                     if (kv.second.status == SAFEHOUSE_HOSTILE) {
                         m_targetSafehouseId = kv.second.id;
                         m_currentState = FRANK_STATE_ASSAULT_SAFEHOUSE;
-                        BroadcastRadioNet(
-                            (format("Moving on hostile stronghold [%1%] in %2%. Cleared hot.")
-                             % kv.second.name % kv.second.districtName).str(),
-                            false
-                        );
+                        DEBUG_LOG(format("FrankCastle: Moving on hostile stronghold [%1%] in %2%.")
+                            % kv.second.name % kv.second.districtName);
                         break;
                     } else if (kv.second.status == SAFEHOUSE_UNCLAIMED) {
                         m_targetSafehouseId = kv.second.id;
@@ -622,7 +604,7 @@ void FrankCastleManager::UpdateStateAI(uint32 deltaMs)
             if (!IsSmithOutbreakActive() && m_currentTargetGoId == 0) {
                 m_currentState = FRANK_STATE_IDLE_PATROL;
                 m_targetIsSmith = false;
-                BroadcastRadioNet("Sector purged of viral signatures. Smith outbreak suppressed. Resuming tactical patrol.", true);
+                DEBUG_LOG("FrankCastle: Sector purged of viral signatures. Smith outbreak suppressed. Resuming tactical patrol.");
                 break;
             }
 
@@ -659,7 +641,7 @@ void FrankCastleManager::UpdateStateAI(uint32 deltaMs)
         case FRANK_STATE_CONTAINMENT_PROTOCOL: {
             if (sSmithCascade.GetStage() < CONTAGION_STAGE_CASCADE) {
                 m_currentState = FRANK_STATE_PURGE_SMITH_OUTBREAK;
-                BroadcastRadioNet("Viral cascade broken. Shard lockdown downgraded. Sweeping remaining replicas.", true);
+                DEBUG_LOG("FrankCastle: Viral cascade broken. Shard lockdown downgraded. Sweeping remaining replicas.");
                 break;
             }
 
@@ -723,11 +705,8 @@ void FrankCastleManager::UpdateStateAI(uint32 deltaMs)
                     m_currentState = FRANK_STATE_FIELD_TRIAGE;
                     m_triageTimerMs = 0;
                     m_stateTimerMs = 0;
-                    BroadcastRadioNet(
-                        (format("Inside [%1%]. Initiating field surgery and munitions reload.")
-                         % safehouse->name).str(),
-                        false
-                    );
+                    DEBUG_LOG(format("FrankCastle: Inside [%1%]. Initiating field surgery and munitions reload.")
+                        % safehouse->name);
                 }
             }
             break;
@@ -793,11 +772,8 @@ void FrankCastleManager::PerformStalkingRecon(uint32 deltaMs)
             m_currentPos
         );
 
-        BroadcastRadioNet(
-            (format("Target locked: %1%. Flanking claymore planted. Engaging with extreme prejudice.")
-             % target->getHandle()).str(),
-            false
-        );
+        DEBUG_LOG(format("FrankCastle: Target locked: %1%. Flanking claymore planted. Engaging.")
+            % target->getHandle());
     }
 }
 
@@ -825,11 +801,8 @@ void FrankCastleManager::PerformResupplyRun(uint32 deltaMs)
         RestockFromFieldCache(cache->cacheId);
         m_currentState = FRANK_STATE_IDLE_PATROL;
         m_stateTimerMs = 0;
-        BroadcastRadioNet(
-            (format("Field cache [%1%] accessed. Ammunition and Microchip hardware restocked.")
-             % cache->codename).str(),
-            false
-        );
+        DEBUG_LOG(format("FrankCastle: Field cache [%1%] accessed. Ammunition and Microchip hardware restocked.")
+            % cache->codename);
     }
 }
 
@@ -884,11 +857,8 @@ void FrankCastleManager::PerformSafehouseDefense(uint32 deltaMs)
                     m_microchipTech.whitePhosphorusSatchels = (m_microchipTech.whitePhosphorusSatchels > 0) ? m_microchipTech.whitePhosphorusSatchels - 1 : 0;
                 }
 
-                BroadcastRadioNet(
-                    (format("Repelling %1% siege on [%2%]. Hostile neutralized. %3% remaining in wave.")
-                     % siege->factionName % sh->name % siege->enemiesRemaining).str(),
-                    false
-                );
+                DEBUG_LOG(format("FrankCastle: Repelling %1% siege on [%2%]. Hostile neutralized. %3% remaining in wave.")
+                    % siege->factionName % sh->name % siege->enemiesRemaining);
             }
         }
     }
@@ -1114,11 +1084,8 @@ void FrankCastleManager::PerformSafehouseAssault(uint32 deltaMs)
                 s->hostileGuardsCount--;
                 AwardExperience(300);
                 ScavengeSupplies(30, 1, 1, 1);
-                BroadcastRadioNet(
-                    (format("Breached [%1%]. Hostile guard neutralized. %2% remaining.")
-                     % s->name % s->hostileGuardsCount).str(),
-                    false
-                );
+                DEBUG_LOG(format("FrankCastle: Breached [%1%]. Hostile guard neutralized. %2% remaining.")
+                    % s->name % s->hostileGuardsCount);
             }
         } else {
             CaptureSafehouse(s->id);
@@ -1166,7 +1133,7 @@ void FrankCastleManager::PerformFieldTriage(uint32 deltaMs)
     if (m_currentHealth >= maxHp || m_triageTimerMs > 10000) {
         m_currentState = FRANK_STATE_IDLE_PATROL;
         m_triageTimerMs = 0;
-        BroadcastRadioNet("Triage complete. Vitals optimal. Weapons re-primed. Moving back to patrol.", false);
+        DEBUG_LOG("FrankCastle: Triage complete. Vitals optimal. Weapons re-primed. Moving back to patrol.");
     }
 }
 
@@ -1587,11 +1554,8 @@ bool FrankCastleManager::TriggerSafehouseSiege(uint32 safehouseId, SiegeFaction 
     m_targetSafehouseId = safehouseId;
     m_currentState = FRANK_STATE_DEFEND_SAFEHOUSE;
 
-    BroadcastRadioNet(
-        (format("{c:FF0000}[ALERT - SIEGE IN PROGRESS]{/c} %1% assaulting safehouse [%2%] in %3%! All guns hot!")
-         % siege.factionName % sh->name % sh->districtName).str(),
-        true
-    );
+    DEBUG_LOG(format("FrankCastle: Safehouse [%1%] in %2% under assault by %3%.")
+        % sh->name % sh->districtName % siege.factionName);
 
     AddWarJournalEntry(JOURNAL_SIEGE_DEFENSE, siege.factionName, "Safehouse Under Siege", "Assault waves detected. Deploying CIWS turrets and EMP tripwires.", sh->districtId, sh->location);
     return true;
@@ -1627,11 +1591,8 @@ void FrankCastleManager::UpdateSafehouseSieges(uint32 deltaMs)
             if (siege.currentWave < siege.totalWaves) {
                 siege.currentWave++;
                 siege.enemiesRemaining = 5 + siege.currentWave * 2;
-                BroadcastRadioNet(
-                    (format("Siege wave %1% inbound on safehouse #%2%! Reinforcements detected.")
-                     % siege.currentWave % siege.safehouseId).str(),
-                    false
-                );
+                DEBUG_LOG(format("FrankCastle: Siege wave %1% inbound on safehouse #%2%.")
+                    % siege.currentWave % siege.safehouseId);
             } else {
                 // Siege successfully repelled!
                 ResolveSiegeDefense(siege.safehouseId, true);
@@ -1671,11 +1632,7 @@ void FrankCastleManager::ResolveSiegeDefense(uint32 safehouseId, bool defendedSu
         AwardExperience(3000);
         ScavengeSupplies(100, 5, 4, 3, 2);
 
-        BroadcastRadioNet(
-            (format("Siege broken at [%1%]! The line held. Faction assault repelled with extreme prejudice.")
-             % sh->name).str(),
-            true
-        );
+        INFO_LOG(format("FrankCastle Safehouse: Siege broken at [%1%]. Perimeter held.") % sh->name);
 
         AddWarJournalEntry(JOURNAL_SIEGE_DEFENSE, "Assault Waves", "Siege Repelled", "Defended safehouse perimeter. All hostile breach teams neutralized.", sh->districtId, sh->location);
     } else {
@@ -1686,11 +1643,7 @@ void FrankCastleManager::ResolveSiegeDefense(uint32 safehouseId, bool defendedSu
         sh->hostileGuardsCount = 6;
         sh->antiviralScrubberActive = false;
 
-        BroadcastRadioNet(
-            (format("{c:FF0000}[DEFENSE BREACHED]{/c} Safehouse [%1%] overrun! Perimeter compromised.")
-             % sh->name).str(),
-            true
-        );
+        INFO_LOG(format("FrankCastle Safehouse: [%1%] overrun! Perimeter compromised.") % sh->name);
         AddWarJournalEntry(JOURNAL_TACTICAL_RETREAT, "Overrun", "Safehouse Lost", "Perimeter collapsed. Falling back to secondary cache.", sh->districtId, sh->location);
     }
 
@@ -1726,11 +1679,8 @@ bool FrankCastleManager::TriggerTripwireTrap(uint32 safehouseId, uint32 targetGo
     }
     TriggerSpatialBallisticAudio(sh->location.x, sh->location.y, sh->location.z, "TRIPWIRE_DETONATION");
 
-    BroadcastRadioNet(
-        (format("Tripwire mine triggered at [%1%]. Intruder damaged: %2%.")
-         % sh->name % handle).str(),
-        false
-    );
+    DEBUG_LOG(format("FrankCastle Safehouse: Tripwire mine triggered at [%1%]. Intruder damaged: %2%.")
+        % sh->name % handle);
     return true;
 }
 
@@ -1852,11 +1802,7 @@ bool FrankCastleManager::TriggerDistrictCleanSweep(uint32 districtId)
         }
     }
 
-    BroadcastRadioNet(
-        (format("{c:FF3333}[CLEAN SWEEP PROTOCOL INITIATED]{/c} Decapitating underworld syndicates across %1%. Clear the streets.")
-         % dName).str(),
-        true
-    );
+    DEBUG_LOG(format("FrankCastle: Clean Sweep protocol initiated across %1%.") % dName);
 
     AddWarJournalEntry(JOURNAL_SYNDICATE_HIT, "District Syndicate", "Clean Sweep Operation Initiated", "Beginning district-wide decapitation raid in " + dName + ".", districtId, m_currentPos);
     return true;
@@ -1906,7 +1852,7 @@ void FrankCastleManager::UpdateCleanSweep(uint32 deltaMs)
         m_cleanSweepTimerMs = 0;
         m_cleanSweepTargetRacketId = 0;
         m_currentState = FRANK_STATE_IDLE_PATROL;
-        BroadcastRadioNet("Clean Sweep operation concluded. Syndicate infrastructure fractured. Withdrawing to patrol.", true);
+        DEBUG_LOG("FrankCastle: Clean Sweep operation concluded. Syndicate infrastructure fractured. Withdrawing to patrol.");
     }
 }
 
@@ -1916,11 +1862,7 @@ void FrankCastleManager::OnSyndicateLieutenantEliminated(uint32 targetGoId, cons
     AwardExperience(1800);
     ScavengeSupplies(50, 2, 2, 2);
 
-    BroadcastRadioNet(
-        (format("Syndicate boss [%1%] decapitated. Your empire ends on this pavement.")
-         % handle).str(),
-        true
-    );
+    INFO_LOG(format("FrankCastle: Syndicate boss [%1%] neutralized.") % handle);
 
     AddWarJournalEntry(JOURNAL_SYNDICATE_HIT, handle, "Syndicate Boss Eliminated", "Extortion syndicate lieutenant neutralized during clean sweep raid.", 2, m_currentPos);
 }
@@ -1975,7 +1917,7 @@ void FrankCastleManager::BroadcastRadioNet(const std::string& message, bool play
         m_radioTransmissions.pop_front();
     }
 
-    BroadcastPirateTransmission(message, true);
+    DEBUG_LOG(format("FrankCastleRadioNet: %1%") % message);
 }
 
 std::vector<RadioBroadcastRecord> FrankCastleManager::GetRecentRadioTransmissions(size_t limit) const
@@ -2480,11 +2422,7 @@ bool FrankCastleManager::CaptureSafehouse(uint32 safehouseId)
 
     AwardExperience(1000);
 
-    BroadcastRadioNet(
-        (format("Safehouse [%1%] in %2% secured. System signals severed. This ground is ours.")
-         % s->name % s->districtName).str(),
-        true
-    );
+    DEBUG_LOG(format("FrankCastle: Safehouse [%1%] in %2% secured.") % s->name % s->districtName);
 
     AddWarJournalEntry(JOURNAL_SAFEHOUSE_CLAIMED, s->name, "Safehouse Secured", "Secured bunker from hostile elements.", s->districtId, s->location);
     return true;
@@ -2510,11 +2448,8 @@ bool FrankCastleManager::FortifySafehouse(uint32 safehouseId)
 
     DepositSuppliesToSafehouse(safehouseId);
 
-    BroadcastRadioNet(
-        (format("Safehouse [%1%] fortified to Level %2%. Perimeter CIWS and EMP tripwires armed.")
-         % s->name % (uint32)s->fortificationLevel).str(),
-        true
-    );
+    DEBUG_LOG(format("FrankCastle: Safehouse [%1%] fortified to Level %2%. Perimeter CIWS and EMP tripwires armed.")
+        % s->name % (uint32)s->fortificationLevel);
 
     AddWarJournalEntry(JOURNAL_SAFEHOUSE_FORTIFIED, s->name, "Safehouse Fortified", "Automated CIWS and tripwires armed.", s->districtId, s->location);
     return true;
@@ -2620,11 +2555,7 @@ void FrankCastleManager::HuntTargetAgent(uint32 agentGoId)
     PlayerObject* po = sObjMgr.getGOPtrSafe(agentGoId);
     std::string name = po ? po->getHandle() : "Agent";
 
-    BroadcastRadioNet(
-        (format("Target acquired: %1%. Engaging with extreme prejudice. No surrender.")
-         % name).str(),
-        false
-    );
+    DEBUG_LOG(format("FrankCastle: Target acquired: %1%. Engaging.") % name);
 }
 
 void FrankCastleManager::OnAgentDefeated(uint32 agentGoId, const std::string& agentName)
@@ -2635,22 +2566,26 @@ void FrankCastleManager::OnAgentDefeated(uint32 agentGoId, const std::string& ag
     AwardExperience(1500);
     ScavengeSupplies(60, 3, 2, 2, 1);
 
-    BroadcastRadioNet(
-        (format("Agent %1% neutralized. One batch, two batch, penny and dime. You're just code. I'm the executioner.")
-         % agentName).str(),
-        true
-    );
+    DEBUG_LOG(format("FrankCastle: Agent %1% neutralized.") % agentName);
 
     AddWarJournalEntry(JOURNAL_KILL, agentName, "System Agent Neutralized", "Machine agent terminated in direct kinetic engagement.", 2, m_currentPos);
 }
 
 void FrankCastleManager::BroadcastPirateTransmission(const std::string& message, bool shardWide)
 {
+    uint32 now = getMSTime();
+    // 15-minute cooldown on shard-wide pirate broadcasts (900,000 ms)
+    if (shardWide && m_lastPublicBroadcastMs != 0 && (now - m_lastPublicBroadcastMs < 900000)) {
+        DEBUG_LOG(format("FrankCastle: Shard-wide pirate broadcast suppressed by cooldown: %1%") % message);
+        return;
+    }
+
     std::string formatted = (format("{c:FF2222}[PIRATE TRANSMISSION - FM 88.3 - FRANK CASTLE]{/c} {c:FFFFFF}%1%{/c}") % message).str();
 
     if (GameServer::getSingletonPtr()) {
         if (shardWide) {
             sGame.Broadcast(std::make_shared<SystemChatMsg>(formatted)->toBuf(), false);
+            m_lastPublicBroadcastMs = now;
         } else {
             sGame.BroadcastNear(m_currentPos.x, m_currentPos.z, 20000.0f, std::make_shared<SystemChatMsg>(formatted)->toBuf(), false);
         }
@@ -2695,18 +2630,15 @@ void FrankCastleManager::RespondToSmithOutbreak()
     ContagionStage stage = sSmithCascade.GetStage();
     if (stage >= CONTAGION_STAGE_CASCADE) {
         m_currentState = FRANK_STATE_CONTAINMENT_PROTOCOL;
-        BroadcastRadioNet(
+        BroadcastPirateTransmission(
             (format("OMEGA CONTAINMENT AUTHORIZED: Smith viral cascade critical at %1%%%. Shard quarantine in effect. No infected code survives.")
              % (int)sSmithCascade.GetInfectionPercentage()).str(),
             true
         );
     } else {
         m_currentState = FRANK_STATE_PURGE_SMITH_OUTBREAK;
-        BroadcastRadioNet(
-            (format("Smith outbreak detected (Active infections: %1%). You're not inevitable, Smith. You're a virus, and I'm the deletion key. Moving in.")
-             % sSmithCascade.GetInfectedCount()).str(),
-            true
-        );
+        DEBUG_LOG(format("FrankCastle: Smith outbreak detected (Active infections: %1%). Moving in.")
+            % sSmithCascade.GetInfectedCount());
     }
 
     for (auto& kv : m_safehouses) {
@@ -2732,11 +2664,8 @@ void FrankCastleManager::InterceptSmithThreat(uint32 smithGoId)
     PlayerObject* po = sObjMgr.getGOPtrSafe(smithGoId);
     std::string name = po ? po->getHandle() : "Smith Replica";
 
-    BroadcastRadioNet(
-        (format("Target acquired: %1% [ID: %2%]. Deploying antiviral AP rounds and incendiaries. Guns hot.")
-         % name % smithGoId).str(),
-        false
-    );
+    DEBUG_LOG(format("FrankCastle: Target acquired: %1% [ID: %2%]. Deploying antiviral AP rounds and incendiaries.")
+        % name % smithGoId);
 }
 
 void FrankCastleManager::OnSmithCloneEliminated(uint32 smithGoId, const std::string& handle)
@@ -2749,7 +2678,7 @@ void FrankCastleManager::OnSmithCloneEliminated(uint32 smithGoId, const std::str
     ScavengeSupplies(80, 3, 2, 2, 2);
     m_microchipTech.antiviralIncendiaryRounds = std::min(50U, m_microchipTech.antiviralIncendiaryRounds + 10);
 
-    BroadcastRadioNet("Smith replica neutralized. You're not inevitable, Smith. You're just code, and I'm the deletion key.", true);
+    DEBUG_LOG("FrankCastle: Smith replica neutralized.");
 
     AddWarJournalEntry(JOURNAL_KILL, handle, "Smith Replica Purged", "Viral clone eliminated with antiviral incendiary AP volley.", 1, m_currentPos);
 }
@@ -2800,11 +2729,7 @@ bool FrankCastleManager::DeployAntiviralScrubber(uint32 safehouseId)
     s->antiviralScrubberActive = true;
     s->lastScrubberPulseMs = 0;
 
-    BroadcastRadioNet(
-        (format("Hardline antiviral scrubber deployed at [%1%]. Neutralizing airborne viral replication in %2%.")
-         % s->name % s->districtName).str(),
-        true
-    );
+    DEBUG_LOG(format("FrankCastle: Hardline antiviral scrubber deployed at [%1%].") % s->name);
 
     return true;
 }
@@ -2837,11 +2762,8 @@ void FrankCastleManager::UpdateSafehouseScrubbers(uint32 deltaMs)
 
             if (cleansedInPulse > 0) {
                 AwardExperience(cleansedInPulse * 500);
-                BroadcastRadioNet(
-                    (format("Safehouse [%1%] hardline scrubber purged %2% viral entities from sector.")
-                     % sh.name % cleansedInPulse).str(),
-                    false
-                );
+                DEBUG_LOG(format("FrankCastle Safehouse: [%1%] hardline scrubber purged %2% viral entities.")
+                    % sh.name % cleansedInPulse);
             }
         }
     }
@@ -2894,7 +2816,7 @@ void FrankCastleManager::TriggerFieldSurgeryAndRespawn()
 
     m_currentState = FRANK_STATE_FIELD_TRIAGE;
     m_triageTimerMs = 0;
-    BroadcastRadioNet("Field surgery complete. Munitions restocked. Frank Castle is back in the field. One batch, two batch, penny and dime.", true);
+    DEBUG_LOG("FrankCastle: Field surgery complete. Munitions restocked.");
 }
 
 // ============================================================================

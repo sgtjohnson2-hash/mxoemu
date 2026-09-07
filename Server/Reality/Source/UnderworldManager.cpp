@@ -472,11 +472,7 @@ bool UnderworldManager::RaidRacket(uint32 racketId, bool byCastle)
     r->lastAttackedTimestamp = getMSTime();
 
     if (byCastle) {
-        sFrankCastleMgr.BroadcastRadioNet(
-            (format("{c:FF2222}[UNDERWORLD BREACH]{/c} Breaching syndicate racket [%1%] in %2%. Neutralizing guards.")
-             % r->name % r->districtName).str(),
-            true
-        );
+        DEBUG_LOG(format("[FrankCastle] Breaching syndicate racket [%1%] in %2%. Neutralizing guards.") % r->name % r->districtName);
     }
     return true;
 }
@@ -522,11 +518,7 @@ bool UnderworldManager::DecapitateRacket(uint32 racketId, bool byCastle)
         sFrankCastleMgr.AwardExperience(2500);
         sFrankCastleMgr.ScavengeSupplies(150, 4, 3, 2, 2);
 
-        sFrankCastleMgr.BroadcastRadioNet(
-            (format("{c:00FF00}[RACKET DECAPITATED]{/c} Stronghold [%1%] dismantled! Contraband burned. White skull painted at perimeter.")
-             % r->name).str(),
-            true
-        );
+        INFO_LOG(format("[FrankCastle] Stronghold [%1%] dismantled! Contraband burned. White skull painted at perimeter.") % r->name);
 
         sFrankCastleMgr.AddWarJournalEntry(
             JOURNAL_SYNDICATE_HIT,
@@ -589,11 +581,8 @@ uint32 UnderworldManager::SpawnConvoy(SyndicateFaction faction, uint32 startDist
     AddDistrictHeat(startDistrictId, 10.0f);
     AddDistrictHeat(destDistrictId, 8.0f);
 
-    sFrankCastleMgr.BroadcastRadioNet(
-        (format("{c:FFFF00}[CONVOY DETECTED]{/c} %1% smuggling convoy rolling from %2% to %3%. Cargo: %4%. Intercept solution calculating.")
-         % c.factionName % GetDistrictName(startDistrictId) % GetDistrictName(destDistrictId) % c.cargoDescription).str(),
-        false
-    );
+    DEBUG_LOG(format("[Underworld] %1% smuggling convoy rolling from %2% to %3%. Cargo: %4%.")
+        % c.factionName % GetDistrictName(startDistrictId) % GetDistrictName(destDistrictId) % c.cargoDescription);
 
     return cId;
 }
@@ -613,11 +602,7 @@ bool UnderworldManager::InterceptConvoy(uint32 convoyId, bool byCastle)
         sFrankCastleMgr.AwardExperience(1800);
         sFrankCastleMgr.ScavengeSupplies(120, 3, 2, 2, 1);
 
-        sFrankCastleMgr.BroadcastRadioNet(
-            (format("{c:FF3333}[CONVOY AMBUSHED]{/c} %1% smuggling shipment intercepted and neutralized! Explosive spike strips effective.")
-             % c.factionName).str(),
-            true
-        );
+        INFO_LOG(format("[FrankCastle] %1% smuggling shipment intercepted and neutralized via explosive ambush.") % c.factionName);
 
         sFrankCastleMgr.AddWarJournalEntry(
             JOURNAL_SYNDICATE_HIT,
@@ -717,11 +702,8 @@ bool UnderworldManager::TriggerTurfWar(uint32 sectorId, SyndicateFaction attacke
 
     AddDistrictHeat(s->districtId, 15.0f);
 
-    sFrankCastleMgr.BroadcastRadioNet(
-        (format("{c:FF9900}[TURF WAR INITIATED]{/c} %1% launched an aggressive turf incursion against %2% in [%3%]!")
-         % GetFactionName(attackerFaction) % GetFactionName(s->controllingFaction) % s->name).str(),
-        false
-    );
+    DEBUG_LOG(format("[Underworld] Turf war: %1% launched incursion against %2% in [%3%].")
+        % GetFactionName(attackerFaction) % GetFactionName(s->controllingFaction) % s->name);
 
     // Dispatch police to the turf war
     DispatchPoliceResponse(s->districtId, 3, s->centerCoordinates, "Gang Turf Skirmish in " + s->name);
@@ -748,11 +730,8 @@ bool UnderworldManager::ResolveTurfWar(uint32 sectorId, SyndicateFaction victorF
     SyndicateFaction newDominant = s->GetDominantFaction();
     if (newDominant != s->controllingFaction) {
         s->controllingFaction = newDominant;
-        sFrankCastleMgr.BroadcastRadioNet(
-            (format("{c:33CCFF}[TURF CONTROL SHIFT]{/c} [%1%] is now under the authoritative control of %2%!")
-             % s->name % GetFactionName(newDominant)).str(),
-            false
-        );
+        DEBUG_LOG(format("[Underworld] Turf control shift: [%1%] is now under the authoritative control of %2%.")
+            % s->name % GetFactionName(newDominant));
     }
 
     return true;
@@ -850,11 +829,8 @@ uint32 UnderworldManager::SpawnEmergentCrime(EmergentCrimeType type, uint32 dist
     // Escalation adds heat
     AddDistrictHeat(districtId, 6.0f);
 
-    sFrankCastleMgr.BroadcastRadioNet(
-        (format("{c:FF5555}[CRIME IN PROGRESS]{/c} %1% [%2%] detected in %3%! Perps: %4% (%5% enforcers).")
-         % c.typeName % c.perpDescription % c.districtName % c.perpFactionName % c.perpCount).str(),
-        false
-    );
+    DEBUG_LOG(format("[Underworld] Emergent crime detected: %1% [%2%] in %3%. Perps: %4% (%5% enforcers).")
+        % c.typeName % c.perpDescription % c.districtName % c.perpFactionName % c.perpCount);
 
     sEmergentAIMgr.OnEmergentCrimeDetected(crimeId, districtId, loc, c.perpDescription);
 
@@ -882,11 +858,7 @@ bool UnderworldManager::EscalateCrime(uint32 crimeId)
     AddDistrictHeat(c->districtId, 12.0f);
     SetDistrictWantedLevel(c->districtId, std::min(5u, GetDistrictWantedLevel(c->districtId) + 1));
 
-    sFrankCastleMgr.BroadcastRadioNet(
-        (format("{c:FF0000}[CRIME ESCALATED]{/c} Shootout escalated at [%1%] in %2%! Hostages at risk.")
-         % c->typeName % c->districtName).str(),
-        true
-    );
+    DEBUG_LOG(format("[Underworld] Shootout escalated at [%1%] in %2%! Hostages at risk.") % c->typeName % c->districtName);
 
     // Call in heavier police tactical unit
     DispatchPoliceResponse(c->districtId, 4, c->location, "ESCALATION: " + c->typeName, crimeId);
@@ -927,11 +899,8 @@ bool UnderworldManager::NeutralizeCrime(uint32 crimeId, bool byCastle, bool byPo
             );
         }
 
-        sFrankCastleMgr.BroadcastRadioNet(
-            (format("{c:00FF00}[CRIME NEUTRALIZED]{/c} Frank Castle wiped out all perpetrators at [%1%] in %2%! %3% hostages secured.")
-             % c->typeName % c->districtName % c->hostageCount).str(),
-            true
-        );
+        INFO_LOG(format("[FrankCastle] Neutralized all perpetrators at [%1%] in %2%! %3% hostages secured.")
+            % c->typeName % c->districtName % c->hostageCount);
 
         // Subside heat
         m_districtHeat[c->districtId] = std::max(5.0f, m_districtHeat[c->districtId] - 15.0f);
@@ -948,11 +917,8 @@ bool UnderworldManager::NeutralizeCrime(uint32 crimeId, bool byCastle, bool byPo
         // Subside heat
         m_districtHeat[c->districtId] = std::max(5.0f, m_districtHeat[c->districtId] - 10.0f);
 
-        sFrankCastleMgr.BroadcastRadioNet(
-            (format("{c:3399FF}[POLICE SECURED]{/c} MMPD Tactical secured the crime scene at [%1%] in %2%. Suspects in custody, loot seized into evidence vault.")
-             % c->typeName % c->districtName).str(),
-            false
-        );
+        INFO_LOG(format("[MMPD Tactical] Secured crime scene at [%1%] in %2%. Suspects in custody, loot seized into evidence vault.")
+            % c->typeName % c->districtName);
     }
 
     return true;
@@ -1087,11 +1053,7 @@ bool UnderworldManager::InvestigatePrecinctCorruption(uint32 precinctId, bool by
     if (!p) return false;
 
     if (byCastle) {
-        sFrankCastleMgr.BroadcastRadioNet(
-            (format("{c:FFFF00}[CORRUPTION PROBE]{/c} Interrogating crooked bagman in %1%. Evidence confirms %2% receiving cartel kickbacks.")
-             % p->name % p->precinctCaptainName).str(),
-            false
-        );
+        DEBUG_LOG(format("[InternalAffairs] Investigating corruption in %1% (%2%).") % p->name % p->precinctCaptainName);
     }
 
     if (EmergentPoliceManager::getSingletonPtr()) {
@@ -1133,11 +1095,7 @@ bool UnderworldManager::ExposePrecinctCorruption(uint32 precinctId, bool byCastl
         sFrankCastleMgr.AwardExperience(3500);
         sFrankCastleMgr.ScavengeSupplies(200, 5, 4, 3, 2);
 
-        sFrankCastleMgr.BroadcastRadioNet(
-            (format("{c:00FFCC}[PRECINCT PURGED]{/c} Frank Castle leaked dirty ledgers of %1% to Internal Affairs and pirate radio FM 88.3! Captain sacked.")
-             % p->name).str(),
-            true
-        );
+        INFO_LOG(format("[InternalAffairs] Corrupt leadership purged in %1%. Clean leadership installed.") % p->name);
 
         sFrankCastleMgr.AddWarJournalEntry(
             JOURNAL_VIGILANTE_JUDGMENT,
@@ -1289,11 +1247,8 @@ void UnderworldManager::UpdateRackets(uint32 deltaMs)
                     if (l) l->isAlive = true;
                 }
 
-                sFrankCastleMgr.BroadcastRadioNet(
-                    (format("Underworld intel: New gang elements moving into [%1%] in %2%. Racket operational again.")
-                     % r.name % r.districtName).str(),
-                    false
-                );
+                DEBUG_LOG(format("[Underworld] New gang elements moving into [%1%] in %2%. Racket operational again.")
+                    % r.name % r.districtName);
             }
         } else if (r.state == RacketState::Active || r.state == RacketState::Fortified) {
             // Active rackets slowly bleed heat into the district
@@ -1342,11 +1297,8 @@ void UnderworldManager::UpdateShardHeat(uint32 deltaMs)
             m_threeWayWarTriggered[d] = true;
             std::string dName = GetDistrictName(d);
 
-            sFrankCastleMgr.BroadcastRadioNet(
-                (format("{c:FF0000}[3-WAY FACTION WAR ACTIVE]{/c} Shard Heat critical (%1%%%) in %2%! System Agents deployed to terminate syndicates and vigilantes alike!")
-                 % (int)m_districtHeat[d] % dName).str(),
-                true
-            );
+            INFO_LOG(format("[WorldDirector] Shard Heat critical (%1%%%) in %2%! System Agents deployed.")
+                % (int)m_districtHeat[d] % dName);
 
             sFrankCastleMgr.AddHitListTarget(
                 88000 + d,
@@ -1362,11 +1314,8 @@ void UnderworldManager::UpdateShardHeat(uint32 deltaMs)
 
             if (m_districtWantedStars[d] >= 4 && !m_fourWayWarTriggered[d]) {
                 m_fourWayWarTriggered[d] = true;
-                sFrankCastleMgr.BroadcastRadioNet(
-                    (format("{c:FF3300}[4-WAY TOTAL URBAN WAR]{/c} %1% has exploded into a 4-way battle: Syndicates vs MMPD SWAT vs Frank Castle vs System Agents!")
-                     % dName).str(),
-                    true
-                );
+                INFO_LOG(format("[WorldDirector] %1% urban battle escalated: Syndicates vs MMPD SWAT vs Vigilante vs System Agents.")
+                    % dName);
             }
         } else if (m_districtHeat[d] < 70.0f) {
             m_threeWayWarTriggered[d] = false;
@@ -1416,11 +1365,7 @@ void UnderworldManager::UpdateEmergentCrimes(uint32 deltaMs)
         if (c.durationMs >= c.timeLimitMs) {
             c.state = EmergentCrimeState::CompletedEscaped;
             AddDistrictHeat(c.districtId, 15.0f);
-            sFrankCastleMgr.BroadcastRadioNet(
-                (format("{c:777777}[CRIME ESCAPED]{/c} Perpetrators of [%1%] in %2% vanished into the underworld with stolen loot.")
-                 % c.typeName % c.districtName).str(),
-                false
-            );
+            DEBUG_LOG(format("[Underworld] Perpetrators of [%1%] in %2% vanished with stolen loot.") % c.typeName % c.districtName);
         }
 
         ++it;
@@ -1451,11 +1396,8 @@ void UnderworldManager::UpdatePoliceDispatches(uint32 deltaMs)
                                 p->confiscatedContrabandValue += (c->lootValue * 0.15f);
                             }
 
-                            sFrankCastleMgr.BroadcastRadioNet(
-                                (format("{c:FF9900}[CORRUPT POLICE STAND-DOWN]{/c} Crooked officers stood down at [%1%] in %2%. Syndicate perps escaped!")
-                                 % c->typeName % c->districtName).str(),
-                                false
-                            );
+                            DEBUG_LOG(format("[Underworld] Crooked officers stood down at [%1%] in %2%. Syndicate perps escaped.")
+                                % c->typeName % c->districtName);
                         } else {
                             // Clean officers intervene!
                             if (d.respondingUnitType >= PoliceUnitType::SWATBreachTeam ||
