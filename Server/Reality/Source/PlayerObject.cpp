@@ -41,10 +41,8 @@
 
 PlayerObject::PlayerObject( GameClient &parent,uint64 charUID, bool isBot ) :m_parent(parent),m_characterUID(charUID),m_spawnedInWorld(false),m_worldPopulated(false)
 {
-	m_inventorySystem = std::make_shared<InventorySystem>(this);
 	if (!isBot) {
 		loadFromDB(true);
-		m_inventorySystem->loadFromDB();
 	} else {
 		m_handle = "Bot_" + std::to_string(charUID);
 		m_firstName = "Bot";
@@ -234,20 +232,6 @@ uint8 PlayerObject::getRsiData( byte* outputBuf, size_t maxBufLen ) const
 		return 0;
 
 	return m_rsi->ToBytes(outputBuf,maxBufLen);
-}
-
-std::string PlayerObject::getRsiHex() const
-{
-	if (!m_rsi) return "";
-	byte buf[64];
-	uint8 len = m_rsi->ToBytes(buf, sizeof(buf));
-	std::string hex;
-	char hexChar[3];
-	for (uint8 i = 0; i < len; ++i) {
-		snprintf(hexChar, sizeof(hexChar), "%02x", buf[i]);
-		hex += hexChar;
-	}
-	return hex;
 }
 
 void PlayerObject::setRsiHex(const std::string& hexStr)
@@ -877,17 +861,10 @@ bool PlayerObject::giveItem(unsigned int templateId)
     uint32 newGoId = sObjMgr.getNewObjectId();
     shared_ptr<Item> newItem(new Item(newGoId, templateId));
     if (m_inventorySystem->addItemAuto(newItem)) {
-        if (!getClient().isBot()) {
-            m_inventorySystem->saveToDB();
-        }
+        m_inventorySystem->saveToDB();
         return true;
     }
     return false;
-}
-
-bool PlayerObject::addItemByTemplateId(unsigned int templateId)
-{
-    return giveItem(templateId);
 }
 
 void PlayerObject::SendWaypoint(float x, float y, float z, const std::string& name) { }
@@ -927,7 +904,6 @@ void PlayerObject::ApplyTimeDilation(float amount, unsigned int durationMs) {
 
 unsigned short PlayerObject::getEvasion() const {
     unsigned short evasion = 10 + (m_lvl * 2); // Base evasion
-    if (!m_inventorySystem) return evasion;
     auto items = m_inventorySystem->getAllItems();
     for (auto item : items) {
         const ItemTemplate* tpl = sDataLoader.GetItemTemplate(item->getTemplateId());
@@ -936,6 +912,11 @@ unsigned short PlayerObject::getEvasion() const {
         }
     }
     return evasion;
+}
+
+unsigned short PlayerObject::getPerception() const {
+    unsigned short perception = 15 + (m_lvl * 2); // Base perception
+    return perception;
 }
 
 bool PlayerObject::isDualWielding() const {

@@ -85,9 +85,9 @@ public:
 
 	void PerformRebirth(void);
 	bool giveItem(unsigned int templateId);
-	bool addItemByTemplateId(unsigned int templateId);
 	bool isDualWielding(void) const;
 	unsigned short getEvasion(void) const;
+	unsigned short getPerception(void) const;
 	void ApplyTimeDilation(float amount, unsigned int durationMs);
 	void SendWaypoint(float x, float y, float z, const std::string& name);
 
@@ -113,16 +113,11 @@ public:
         void recordAttack(uint16 moveId) {
             attackTypeCount[moveId]++;
         }
-        uint32 getSpamCount(uint16 moveId) const {
-            auto it = attackTypeCount.find(moveId);
-            return (it != attackTypeCount.end()) ? it->second : 0;
-        }
         float getMitigationModifier(uint16 moveId) const {
             auto it = attackTypeCount.find(moveId);
             if (it != attackTypeCount.end() && it->second > 3) {
-                // Roadmap Phase 48 adaptive learning mitigation: 0.5 * (1.0 - 0.15 * (SpamCount - 3))
-                float mitigation = 0.5f * (1.0f - 0.15f * float(it->second - 3));
-                return std::clamp(mitigation, 0.15f, 0.50f);
+                // Diminishing returns: reduce damage by 50% if the same attack is spammed > 3 times
+                return 0.5f; 
             }
             return 1.0f;
         }
@@ -132,17 +127,7 @@ public:
     bool isStunned() const; //ms-expiry check, in PlayerObjectCombat.cpp
     
     // Organizations and Factions
-    int getFaction() const {
-        if (m_factionName == "Civilian") return FACTION_NONE;
-        if (m_factionName == "Zion") return FACTION_ZION;
-        if (m_factionName == "Machines") return FACTION_MACHINES;
-        if (m_factionName == "Merovingian") return FACTION_MEROVINGIAN;
-        if (m_factionName == "Exile") return FACTION_EXILE;
-        if (m_alignment == 1) return FACTION_MACHINES;
-        if (m_alignment == 2) return FACTION_MEROVINGIAN;
-        if (m_alignment == 0 && m_factionName.empty()) return FACTION_ZION;
-        return FACTION_NONE;
-    }
+    int getFaction() const { return int(m_alignment); } //organization: 0 Zion / 1 Machine / 2 Merovingian
     void setFactionName(const std::string& name) { m_factionName = name; }
     std::string getFactionName() const { return m_factionName; }
     void setCrewName(const std::string& name) { m_crewName = name; }
@@ -176,11 +161,9 @@ public:
     void setCurrentHealth(uint16 hp) { m_healthC = hp; }
     void setMaximumHealth(uint16 hp) { m_healthM = hp; }
     void setInnerStrength(uint16 cur, uint16 max) { m_innerStrC = cur; m_innerStrM = max; }
-    void setCurrentIS(uint16 cur) { m_innerStrC = cur; }
     void setLevel(uint8 lvl) { m_lvl = lvl; }
     void setHandle(const std::string& handle) { m_handle = handle; }
     void setRsiHex(const std::string& hexStr);
-    std::string getRsiHex() const;
     
     // Combat
     

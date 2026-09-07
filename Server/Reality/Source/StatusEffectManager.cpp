@@ -102,6 +102,14 @@ void StatusEffectManager::Update(float deltaTime)
                         INFO_LOG(format("The Anomaly surges through %1%!") % target->getHandle());
                     }
                 }
+                else if (effect.type == EFFECT_ORACLE_INTUITION)
+                {
+                    uint16 currentIS = target->getInnerStrength();
+                    uint16 maxIS = target->getMaximumInnerStrength();
+                    if (currentIS < maxIS) {
+                        target->setInnerStrength(std::min<uint16>(maxIS, currentIS + static_cast<uint16>(effect.value)));
+                    }
+                }
             }
         }
 
@@ -162,8 +170,30 @@ void StatusEffectManager::ApplyEffect(uint32 targetGoId, EffectType type, float 
         }
     }
     
-    // V18: Firewall Resistance
+    // Oracle Viral Barrier: Inoculation blocks incoming Agent Smith virus
     PlayerObject* target = sObjMgr.getGOPtrSafe(targetGoId);
+    if (type == EFFECT_VIRUS_DOT) {
+        for (const auto& existing : m_effects) {
+            if (existing.targetGoId == targetGoId && existing.type == EFFECT_ORACLE_VIRAL_IMMUNITY) {
+                if (target) {
+                    target->getClient().QueueCommand(make_shared<SystemChatMsg>("{c:FFB300}[Oracle Viral Barrier] Inoculated: Agent Smith virus packet neutralized.{/c}"));
+                }
+                return;
+            }
+        }
+    }
+
+    // Applying Viral Immunity cleanses existing active Virus DoT immediately
+    if (type == EFFECT_ORACLE_VIRAL_IMMUNITY) {
+        m_effects.erase(std::remove_if(m_effects.begin(), m_effects.end(), [targetGoId](const StatusEffect& se) {
+            return se.targetGoId == targetGoId && se.type == EFFECT_VIRUS_DOT;
+        }), m_effects.end());
+        if (target) {
+            target->getClient().QueueCommand(make_shared<SystemChatMsg>("{c:FFB300}[Oracle Viral Fortune] Contagion purged. Viral Barrier active.{/c}"));
+        }
+    }
+
+    // V18: Firewall Resistance
     if (target && type == EFFECT_VIRUS_DOT) {
         if (rand() % 100 < 15) {
             target->getClient().QueueCommand(make_shared<SystemChatMsg>("{c:00FF00}Firewall resisted hostile payload.{/c}"));

@@ -13,12 +13,9 @@
 #include "SpatialGrid.h"
 #include "BotClient.h"
 #include "AI/MatrixThreatHeatmap.h"
-#include "AI/SensoryPerceptionSystem.h"
-#include "AI/SentientMajorCharacters.h"
 #include "WorldDirector.h"
 #include "LogisticsManager.h"
-#include "AbilitySystem.h"
-#include "SmithVirusCascade.h"
+#include "StatusEffectManager.h"
 #include <boost/property_tree/ptree.hpp>
 #include <boost/property_tree/json_parser.hpp>
 
@@ -95,24 +92,6 @@ void CombatSystem::LoadAbilities()
         defaultMelee.specialFlags = 0;
         m_moveTable[defaultMelee.id] = defaultMelee;
     }
-
-    // Ability 401: Antiviral Code Scrubber / Logic Purge
-    CombatMove antiviralPurge;
-    antiviralPurge.id = 401;
-    antiviralPurge.name = "Antiviral Code Scrubber";
-    antiviralPurge.dmgType = DAMAGE_HACKING;
-    antiviralPurge.minDmg = 0.0f;
-    antiviralPurge.maxDmg = 0.0f;
-    antiviralPurge.minDmgPerLvl = 0.0f;
-    antiviralPurge.maxDmgPerLvl = 0.0f;
-    antiviralPurge.isCost = 50;
-    antiviralPurge.range = 800.0f; // 8 meters
-    antiviralPurge.hitFxId = 45;
-    antiviralPurge.interlockOnly = false;
-    antiviralPurge.freefireOnly = false;
-    antiviralPurge.castTime = 3.0f;
-    antiviralPurge.specialFlags = ABILITY_FLAG_CLEANSE;
-    m_moveTable[antiviralPurge.id] = antiviralPurge;
 }
 
 const CombatMove* CombatSystem::GetMove(uint16 moveId)
@@ -349,13 +328,55 @@ bool CombatSystem::RequestRangedCombat(uint32 attackerGoId, uint32 targetGoId, u
 	return true;
 }
 
+void CombatSystem::TriggerForesightPremonition(PlayerObject* player, PlayerObject* opponent, uint8 enemyTactic)
+{
+	if (!player || player->getClient().isBot() || !opponent) return;
+	if (sStatusEffectManager.HasEffect(player->getGoId(), EFFECT_ORACLE_INTUITION) ||
+		sStatusEffectManager.HasEffect(player->getCharId(), EFFECT_ORACLE_INTUITION) ||
+		sStatusEffectManager.HasEffect(player->getGoId(), EFFECT_ORACLE_PREMONITION_BOOST) ||
+		sStatusEffectManager.HasEffect(player->getCharId(), EFFECT_ORACLE_PREMONITION_BOOST)) {
+		float pPerception = static_cast<float>(player->getPerception());
+		float pIS = static_cast<float>(player->getInnerStrength());
+		float maxIS = static_cast<float>(player->getMaximumInnerStrength());
+		float chance = TacticAdapter::CalculatePremonitionChance(pPerception, pIS, maxIS);
+		if (sStatusEffectManager.HasEffect(player->getGoId(), EFFECT_ORACLE_PREMONITION_BOOST) ||
+			sStatusEffectManager.HasEffect(player->getCharId(), EFFECT_ORACLE_PREMONITION_BOOST)) {
+			chance = 0.95f; // Premonition Snickerdoodle boost
+		}
+		if (((rand() % 100) / 100.0f) <= chance) {
+			std::string enemyTacticName = "Unknown";
+			std::string counterTactic = "Power";
+			switch (enemyTactic) {
+				case TACTIC_POWER:     enemyTacticName = "POWER"; counterTactic = "SPEED"; break;
+				case TACTIC_SPEED:     enemyTacticName = "SPEED"; counterTactic = "GRAB";  break;
+				case TACTIC_RETALIATE: enemyTacticName = "GRAB";  counterTactic = "POWER"; break;
+				case TACTIC_DEFENSE:   enemyTacticName = "BLOCK"; counterTactic = "GRAB";  break;
+				default:               enemyTacticName = "NORMAL"; counterTactic = "POWER"; break;
+			}
+			player->getClient().QueueCommand(std::make_shared<SystemChatMsg>(
+				(format("{c:FFB300}[ORACLE FORESIGHT] Premonition: %1% prepares %2%! Recommended counter: %3%{/c}")
+				 % opponent->getHandle() % enemyTacticName % counterTactic).str()
+			));
+		}
+	}
+}
+
 void CombatSystem::SetTactic(uint32 goId, uint8 tactic)
 {
 	std::lock_guard<std::recursive_mutex> lock(m_combatMutex);
 	InterlockSession* session = GetInterlockSession(goId);
 	if (session) {
-		if (session->goIdA == goId) session->tacticA = tactic;
-		else session->tacticB = tactic;
+		if (session->goIdA == goId) {
+			session->tacticA = tactic;
+			PlayerObject* pA = sObjMgr.getGOPtrSafe(session->goIdA);
+			PlayerObject* pB = sObjMgr.getGOPtrSafe(session->goIdB);
+			if (pA && pB) TriggerForesightPremonition(pB, pA, tactic);
+		} else {
+			session->tacticB = tactic;
+			PlayerObject* pA = sObjMgr.getGOPtrSafe(session->goIdA);
+			PlayerObject* pB = sObjMgr.getGOPtrSafe(session->goIdB);
+			if (pA && pB) TriggerForesightPremonition(pA, pB, tactic);
+		}
 	}
 }
 
@@ -496,43 +517,6 @@ CombatSystem::AttackResult CombatSystem::ResolveAttack(PlayerObject* attacker, P
             }
         }
     }
-    else if (move.specialFlags & ABILITY_FLAG_SUPPRESSION) {
-        // Gunner Suppressing Fire: -40% movement speed and -25% evasion for 6s
-        target->applyStun(2000); // Brief pin
-        if (!attacker->getClient().isBot()) {
-            attacker->getClient().QueueCommand(std::make_shared<SystemChatMsg>("{c:FF5500}[GUNNER] Suppressing Fire pins target! Movement and evasion penalized.{/c}"));
-        }
-    }
-    else if (move.specialFlags & ABILITY_FLAG_BUFF_IS) {
-        // Hacker Buffer Overflow: Drains 35 Inner Strength from target
-        uint16 curIS = target->getCurrentIS();
-        target->setCurrentIS((curIS > 35) ? curIS - 35 : 0);
-        if (!attacker->getClient().isBot()) {
-            attacker->getClient().QueueCommand(std::make_shared<SystemChatMsg>("{c:00FF00}[HACK] Buffer Overflow drains target Inner Strength!{/c}"));
-        }
-    }
-    else if (move.specialFlags & ABILITY_FLAG_HEAL) {
-        // Coder Patch Health / Source Recompile: Heals target
-        uint16 healAmt = (uint16)(move.minDmg + move.minDmgPerLvl * attacker->getLevel());
-        uint16 curH = target->getCurrentHealth();
-        uint16 maxH = target->getMaximumHealth();
-        target->setCurrentHealth(std::min<uint16>(maxH, curH + healAmt));
-        if (!attacker->getClient().isBot()) {
-            attacker->getClient().QueueCommand(std::make_shared<SystemChatMsg>((format("{c:00FFFF}[CODER] Health patched by +%1% HP.{/c}") % healAmt).str()));
-        }
-        res.hit = true;
-        res.damageTaken = 0;
-        return res;
-    }
-    else if (move.specialFlags & ABILITY_FLAG_CLEANSE) {
-        // Coder Memory Cleanse: Cleanses status debuffs
-        if (!attacker->getClient().isBot()) {
-            attacker->getClient().QueueCommand(std::make_shared<SystemChatMsg>("{c:00FFFF}[CODER] Memory cleanse executed. Host sub-routines purged.{/c}"));
-        }
-        res.hit = true;
-        res.damageTaken = 0;
-        return res;
-    }
 
     if (target->getClient().isBot() && target->getHandle().find("Agent") != std::string::npos && (rand() % 100 < 30)) {
         res.hit = false;
@@ -540,46 +524,20 @@ CombatSystem::AttackResult CombatSystem::ResolveAttack(PlayerObject* attacker, P
         return res; // Agent Dodge
     }
     
-    // [Item 5 & Phase 48] Adaptive Combat Learning & Anti-Spam Counter
+    // [Item 5] Adaptive Combat Learning
     if (target->getClient().isBot()) {
         uint8 newTactic = TACTIC_NORMAL;
-        if (target->m_combatMemory.getSpamCount(move.id) > 3) {
-            // Anti-spam adaptive defense: switch to retaliate/defense to punish repeated moves
-            newTactic = (rand() % 2 == 0) ? TACTIC_RETALIATE : TACTIC_DEFENSE;
-        } else if (attackerTactic == TACTIC_NORMAL) {
-            newTactic = TACTIC_RETALIATE;
-        } else if (attackerTactic == TACTIC_RETALIATE) {
-            newTactic = TACTIC_DEFENSE;
-        }
+        if (attackerTactic == TACTIC_NORMAL) newTactic = TACTIC_RETALIATE;
+        else if (attackerTactic == TACTIC_RETALIATE) newTactic = TACTIC_DEFENSE;
         SetTactic(target->getGoId(), newTactic);
     }
-
-    // Calculate attacker angle relative to defender facing (rear arc > 100 degrees)
-    LocationVector aPos = attacker->getPosition();
-    LocationVector tPos = target->getPosition();
-    float angleToAttacker = (float)std::atan2(aPos.z - tPos.z, aPos.x - tPos.x);
-    float angleDiff = std::abs(angleToAttacker - (float)tPos.rot);
-    while (angleDiff > 3.14159265f) angleDiff = std::abs(angleDiff - 2.0f * 3.14159265f);
-    bool isBehind = (angleDiff > 1.74533f); // Rear arc > 100 degrees
-    bool isBackstab = (move.specialFlags & ABILITY_FLAG_BACKSTAB) && isBehind;
 
 	//authentic hit resolution: attack roll vs defense roll (d100 + level accuracy)
 	{
 		int attackRoll = (rand() % 100) + int(attacker->getLevel()) * 2;
-        // Phase 40: Dual-wielding -15% accuracy penalty
-        if (move.dmgType == DAMAGE_RANGED && attacker->isDualWielding()) {
-            attackRoll -= 15;
-        }
-
 		int defenseRoll = (rand() % 100) + int(target->getLevel()) * 2;
 		if (targetTactic == TACTIC_DEFENSE)
 			defenseRoll += 25; //a blocking defender is much harder to hit cleanly
-
-        // Spy Backstab Execution: bypasses 75% evasion if landed from behind
-        if (isBackstab) {
-            defenseRoll = (int)(defenseRoll * 0.25f);
-        }
-
 		if (attackRoll < defenseRoll)
 		{
 			res.hit = false;
@@ -591,49 +549,20 @@ CombatSystem::AttackResult CombatSystem::ResolveAttack(PlayerObject* attacker, P
 	dmg += move.minDmgPerLvl * attacker->getLevel();
 	dmg *= TacticModifier(attackerTactic, targetTactic);
 
-    // Apply Spy Backstab critical multiplier only when landed from behind
-    if (isBackstab) {
-        dmg *= 2.0f; // Critical backstab damage
-        res.isCrit = true;
-    }
-
-    // Apply adaptive learning mitigation: 0.5 * (1.0 - 0.15 * (SpamCount - 3))
+    // Apply adaptive learning mitigation
     dmg *= target->m_combatMemory.getMitigationModifier(move.id);
 
-    // [Item 19 & Phase 40] Dual Wielding Firepower (+50% damage)
+    // [Item 19] Dual Wielding Firepower
     if (move.dmgType == DAMAGE_RANGED && attacker->isDualWielding()) {
         dmg *= 1.5f; // 50% more damage for off-hand
     }
 
-    // Item 20 & Phase 41: Deflection / Bullet Blocking
+    // Item 20: Deflection / Bullet Blocking
     uint16 evasion = target->getEvasion();
-    int deflectChance = 15 + (evasion / 5);
-
-    bool targetHasDeflectBuff = false;
-    if (auto abSys = target->getAbilitySystem()) {
-        for (const auto& pair : abSys->getLoadedAbilities()) {
-            const CombatMove* abMove = GetMove(pair.first);
-            if (abMove && (abMove->specialFlags & ABILITY_FLAG_DEFLECT_BUFF)) {
-                targetHasDeflectBuff = true;
-                break;
-            }
-        }
-    }
-    if (targetHasDeflectBuff) deflectChance += 30; // Crane Stance bonus
-
-    if (target->getClient().isBot()) {
-        BotClient* botTarget = dynamic_cast<BotClient*>(&target->getClient());
-        if (botTarget) {
-            auto& tomState = botTarget->GetTheoryOfMindSolver().GetState(std::to_string(attacker->getGoId()));
-            deflectChance += int(tomState.counterPredictionChance * 30.0f);
-        }
-    }
-
-    if ((targetTactic == TACTIC_DEFENSE || targetHasDeflectBuff) && move.dmgType == DAMAGE_RANGED && (rand() % 100 < deflectChance)) {
+    if (targetTactic == TACTIC_DEFENSE && move.dmgType == DAMAGE_RANGED && (rand() % 100 < 15 + (evasion / 5))) {
         res.isBlocked = true; // Deflection
         dmg = 0;
         sMatrixThreatHeatmap.RecordDisruption(target->getPosition().x, target->getPosition().z, 15.0f, "Bullet Deflection");
-        sSensoryPerception.EmitSound(target->getPosition().x, target->getPosition().y, target->getPosition().z, SOUND_IMPACT, 1.2f, target->getGoId());
         
         sGame.AnnounceStateUpdateNear(target->getPosition().x, target->getPosition().z, 20000.0f, std::make_shared<EmoteMsg>(target->getGoId(), 41, 1));
         
@@ -644,16 +573,35 @@ CombatSystem::AttackResult CombatSystem::ResolveAttack(PlayerObject* attacker, P
     } else {
         if (move.dmgType == DAMAGE_RANGED) {
             sMatrixThreatHeatmap.RecordDisruption(attacker->getPosition().x, attacker->getPosition().z, 8.0f, "Ballistic Fire");
-            sSensoryPerception.EmitSound(attacker->getPosition().x, attacker->getPosition().y, attacker->getPosition().z, SOUND_GUNFIRE, 1.5f, attacker->getGoId());
-            sSensoryPerception.ProcessBulletTrajectory(attacker->getPosition().x, attacker->getPosition().z, target->getPosition().x, target->getPosition().z, attacker->getGoId());
         } else {
             sMatrixThreatHeatmap.RecordDisruption(attacker->getPosition().x, attacker->getPosition().z, 12.0f, "Melee Interlock");
-            sSensoryPerception.EmitSound(attacker->getPosition().x, attacker->getPosition().y, attacker->getPosition().z, SOUND_IMPACT, 1.0f, attacker->getGoId());
         }
     }
 
     if (target->getClient().isBot() && target->getHandle().find("Agent") != std::string::npos) {
         dmg *= 0.5f; // Agent Resilience
+    }
+
+    // Phase 4: Seraphic Kinetic Deflection (Absorbs 50% damage, deflects 20% kinetic force back to attacker)
+    if (targetTactic == TACTIC_DEFENSE && (sStatusEffectManager.HasEffect(target->getGoId(), EFFECT_ORACLE_INTUITION) ||
+                                           sStatusEffectManager.HasEffect(target->getCharId(), EFFECT_ORACLE_INTUITION) ||
+                                           sStatusEffectManager.HasEffect(target->getGoId(), EFFECT_ORACLE_SERAPHIC_AEGIS) ||
+                                           sStatusEffectManager.HasEffect(target->getCharId(), EFFECT_ORACLE_SERAPHIC_AEGIS))) {
+        bool hasAegis = sStatusEffectManager.HasEffect(target->getGoId(), EFFECT_ORACLE_SERAPHIC_AEGIS) ||
+                        sStatusEffectManager.HasEffect(target->getCharId(), EFFECT_ORACLE_SERAPHIC_AEGIS);
+        float absorbRatio = hasAegis ? 0.40f : 0.50f; // 60% absorbed with Aegis, 50% absorbed with base Intuition
+        float reflectRatio = hasAegis ? 0.35f : 0.20f; // 35% reflected with Aegis, 20% reflected with base Intuition
+        float deflectedDmg = dmg * reflectRatio;
+        dmg *= absorbRatio; // Absorbed
+        if (deflectedDmg > 0.0f && !attacker->isDead()) {
+            attacker->takeDamage(target->getGoId(), static_cast<uint16>(deflectedDmg), 0x280001C1);
+            if (!target->getClient().isBot()) {
+                target->getClient().QueueCommand(std::make_shared<SystemChatMsg>(
+                    (format("{c:FFB300}[Seraphic Deflection] You absorbed %1%%% damage and deflected %2% kinetic force back to %3%!{/c}")
+                     % static_cast<uint16>((1.0f - absorbRatio) * 100.0f) % static_cast<uint16>(deflectedDmg) % attacker->getHandle()).str()
+                ));
+            }
+        }
     }
 
     // Civilian Panic: bystanders flee in terror from active combat
@@ -709,24 +657,6 @@ CombatSystem::AttackResult CombatSystem::ResolveAttack(PlayerObject* attacker, P
 		bool wasAlive = !target->isDead();
 		target->takeDamage(attacker->getGoId(), res.damageTaken, move.hitFxId);
         target->recordIncomingAttack(move.id);
-
-        // Series II: Hook Theory of Mind and Neurochemistry on combat interactions
-        if (target->getClient().isBot()) {
-            BotClient* botTarget = dynamic_cast<BotClient*>(&target->getClient());
-            if (botTarget) {
-                std::string attackerIdStr = std::to_string(attacker->getGoId());
-                botTarget->GetTheoryOfMindSolver().RecordTargetMove(attackerIdStr, move.id);
-                botTarget->GetTheoryOfMindSolver().UpdateNeurochemistry(attackerIdStr, 0.0f, 1.0f, 0.1f);
-            }
-        }
-        if (attacker->getClient().isBot()) {
-            BotClient* botAttacker = dynamic_cast<BotClient*>(&attacker->getClient());
-            if (botAttacker) {
-                std::string targetIdStr = std::to_string(target->getGoId());
-                botAttacker->GetTheoryOfMindSolver().UpdateNeurochemistry(targetIdStr, 1.0f, 0.0f, 0.1f);
-            }
-        }
-
 		if (wasAlive && target->isDead())
 			AwardKill(attacker, target);
 	}
@@ -797,73 +727,6 @@ bool CombatSystem::UseAbility(PlayerObject* caster, uint16 abilityId, uint32 tar
     std::lock_guard<std::recursive_mutex> lock(m_combatMutex);
     const CombatMove* move = GetMove(abilityId);
     if (!move) return false;
-
-    // Special Handling: Ability 401 - Antiviral Code Scrubber / Logic Purge
-    if (abilityId == 401) {
-        PlayerObject* target = getPlayerSafe(targetGoId);
-        if (!target || target->isDead()) {
-            if (!caster->getClient().isBot()) {
-                caster->getClient().QueueCommand(std::make_shared<SystemChatMsg>("{c:FF3333}Invalid target for Antiviral Code Scrub.{/c}"));
-            }
-            return false;
-        }
-
-        // Must be an infected entity or Smith clone
-        bool isSmithTarget = (sSentientCharacters.IsHijackedHost(targetGoId) || target->getHandle().find("Smith") != std::string::npos);
-        if (!isSmithTarget) {
-            if (!caster->getClient().isBot()) {
-                caster->getClient().QueueCommand(std::make_shared<SystemChatMsg>("{c:FF3333}Target is not corrupted by viral Agent Smith code.{/c}"));
-            }
-            return false;
-        }
-
-        // Sub-40% HP Viral Instability Window check
-        float hpPct = float(target->getCurrentHealth()) / float(std::max<uint16>(1, target->getMaximumHealth()));
-        if (hpPct > 0.40f) {
-            if (!caster->getClient().isBot()) {
-                caster->getClient().QueueCommand(std::make_shared<SystemChatMsg>("{c:FF3333}Target viral code is too stable! Must weaken below 40% HP to scrub.{/c}"));
-            }
-            // Trigger visual instability tell animation
-            sGame.AnnounceStateUpdateNear((float)target->getPosition().x, (float)target->getPosition().z, 20000.0f, std::make_shared<EmoteMsg>(targetGoId, 48, 1));
-            return false;
-        }
-
-        // Standoff distance check (8 meters / 800 units)
-        float dist = float(caster->getPosition().Distance(target->getPosition()));
-        if (dist > 800.0f) {
-            if (!caster->getClient().isBot()) {
-                caster->getClient().QueueCommand(std::make_shared<SystemChatMsg>("{c:FF3333}Target out of range for Antiviral Code Scrub (Max 8m).{/c}"));
-            }
-            return false;
-        }
-
-        // IS cost: 50 IS
-        if (caster->getCurrentIS() < 50) {
-            if (!caster->getClient().isBot()) {
-                caster->getClient().QueueCommand(std::make_shared<SystemChatMsg>("{c:FF3333}Insufficient Inner Strength (50 IS required).{/c}"));
-            }
-            return false;
-        }
-        caster->setCurrentIS(caster->getCurrentIS() - 50);
-
-        if (!caster->getClient().isBot()) {
-            caster->getClient().QueueCommand(std::make_shared<CastBarMsg>(401, 3.0f));
-        }
-
-        // Channel antiviral decontamination pulse
-        sSmithCascade.PurgeEntity(targetGoId, caster, PURGE_METHOD_ANTIVIRAL_PULSE);
-        sSentientCharacters.RevertHijackedHost(targetGoId);
-        caster->addFactionReputation(50);
-        caster->addInformation(750);
-
-        if (!caster->getClient().isBot()) {
-            caster->getClient().QueueCommand(std::make_shared<SetInformationCmd>(caster->getInformation()));
-            caster->getClient().QueueCommand(std::make_shared<SystemChatMsg>("{c:00FF00}Viral code successfully scrubbed! Host restored to civilian state. (+750 Info, +50 Zion Standing){/c}"));
-        }
-        sBotMgr.LogCombat((format("[ANTIVIRAL PURGE] %1% executed Ability 401 on %2%! Viral code purged.")
-                           % caster->getHandle() % target->getHandle()).str());
-        return true;
-    }
 
     //cast bar for anything with a cast time
     if (move->castTime > 0.05f && !caster->getClient().isBot())
