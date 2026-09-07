@@ -1643,8 +1643,8 @@ namespace ZionLauncher
                 }
                 catch { }
 
-                string charArg = !string.IsNullOrWhiteSpace(operativeHandle) ? $" -char \"{operativeHandle}\"" : "";
-                string launchArgs = $"-clone -LocalTest -nopatch -configsection HighDetail -user \"{username}\" -pwd \"{password}\"{charArg}";
+                string charArg = !string.IsNullOrWhiteSpace(operativeHandle) ? operativeHandle : username;
+                string launchArgs = $"-clone -nopatch -configsection HighDetail -user \"{username}\" -pwd \"{password}\" -char \"{charArg}\"";
                 var proc = Process.Start(new ProcessStartInfo
                 {
                     FileName = clientExe,
