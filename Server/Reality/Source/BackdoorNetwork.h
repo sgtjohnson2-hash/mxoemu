@@ -127,4 +127,6 @@ private:
 
 #define sBackdoorNetwork BackdoorNetwork::getSingleton()
 
+void RunBackdoorTestSuite();
+
 #endif // MXOEMU_BACKDOOR_NETWORK_H

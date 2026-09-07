@@ -10,6 +10,8 @@
 #include "SpatialGrid.h"
 #include "MessageTypes.h"
 #include <algorithm>
+#include <iostream>
+#include <cassert>
 
 createFileSingleton(BackdoorNetwork);
 
@@ -28,6 +30,8 @@ void BackdoorNetwork::Initialize()
     m_portals.clear();
     m_craftedKeys.clear();
     m_firewallAnchors.clear();
+    m_nextKeyId = 1001;
+    m_nextPuzzleId = 1;
     m_totalTransits = 0;
 
     // Register Default Backdoor Corridor Doors
@@ -397,4 +401,169 @@ bool BackdoorNetwork::ExecuteCivilianJackout(uint32 entityGoId, uint32 hardlineI
     sFactionWarMgr.registerPvPKill(FACTION_ZION, FACTION_MACHINES); // Zion score reward
     INFO_LOG(format("BackdoorNetwork: Civilian %1% successfully jacked out to Zion via Hardline %2%!") % entityGoId % hardlineId);
     return true;
+}
+
+// ============================================================================
+// HEADLESS TEST SUITE: BACKDOOR NETWORK & KEYMAKER CIPHERS (SUITE 18)
+// ============================================================================
+void RunBackdoorTestSuite()
+{
+    std::cout << "\n============================================================" << std::endl;
+    std::cout << "  STARTING BACKDOOR NETWORK & CIPHERS TEST SUITE (SUITE 18)  " << std::endl;
+    std::cout << "============================================================\n" << std::endl;
+
+    int passed = 0;
+    int failed = 0;
+
+    auto TEST_ASSERT = [&](bool cond, const std::string& name) {
+        if (cond) {
+            std::cout << " [PASS] " << name << std::endl;
+            passed++;
+        } else {
+            std::cout << " [FAIL] " << name << " <--- FAILED!" << std::endl;
+            failed++;
+        }
+    };
+
+    // 1. System Initialization & Non-Euclidean Portal Registry
+    sBackdoorNetwork.Initialize();
+    TEST_ASSERT(sBackdoorNetwork.GetPortalCount() == 6, "Registered 6 default backdoor portals");
+    TEST_ASSERT(sBackdoorNetwork.GetTotalTransits() == 0, "Initial portal transits count is zero");
+
+    const BackdoorPortal* p101 = sBackdoorNetwork.GetPortal(101);
+    TEST_ASSERT(p101 != nullptr, "Portal 101 (Slums Warehouse) retrieved");
+    TEST_ASSERT(p101 && p101->destinationDistrict == "The Slums", "Portal 101 links to The Slums district");
+    TEST_ASSERT(p101 && p101->requiredKey == KEY_DISTRICT_MASTER, "Portal 101 requires KEY_DISTRICT_MASTER");
+    TEST_ASSERT(p101 && p101->lockStatus == DOOR_LOCKED, "Portal 101 begins in locked state");
+
+    const BackdoorPortal* p204 = sBackdoorNetwork.GetPortal(204);
+    TEST_ASSERT(p204 != nullptr, "Portal 204 (Downtown Helipad) retrieved");
+    TEST_ASSERT(p204 && p204->requiredKey == KEY_ROOFTOP_BYPASS, "Portal 204 requires KEY_ROOFTOP_BYPASS");
+
+    const BackdoorPortal* p315 = sBackdoorNetwork.GetPortal(315);
+    TEST_ASSERT(p315 != nullptr, "Portal 315 (Club Hel Tunnel) retrieved");
+    TEST_ASSERT(p315 && p315->destinationDistrict == "International", "Portal 315 links to International district");
+
+    const BackdoorPortal* p408 = sBackdoorNetwork.GetPortal(408);
+    TEST_ASSERT(p408 != nullptr, "Portal 408 (Richland Vault) retrieved");
+    TEST_ASSERT(p408 && p408->requiredKey == KEY_VAULT_BREAKER, "Portal 408 requires KEY_VAULT_BREAKER");
+
+    const BackdoorPortal* p777 = sBackdoorNetwork.GetPortal(777);
+    TEST_ASSERT(p777 != nullptr, "Portal 777 (Keymaker Workshop) retrieved");
+    TEST_ASSERT(p777 && p777->isSourceDoor == false, "Portal 777 is standard workshop portal");
+
+    const BackdoorPortal* p999 = sBackdoorNetwork.GetPortal(999);
+    TEST_ASSERT(p999 != nullptr, "Portal 999 (The Source Gate) retrieved");
+    TEST_ASSERT(p999 && p999->isSourceDoor == true, "Portal 999 is designated Source Gate");
+    TEST_ASSERT(p999 && p999->requiredKey == KEY_SOURCE_KEY, "Portal 999 requires KEY_SOURCE_KEY");
+
+    // 2. Keymaker Cryptographic Ciphers & Master Key Forging
+    CryptographicCipherPuzzle puz1 = sBackdoorNetwork.GenerateCipherPuzzle(KEY_DISTRICT_MASTER);
+    TEST_ASSERT(puz1.seedMask == 0x5A5A3C3C, "District Master cipher seed mask verified");
+    TEST_ASSERT(puz1.tumblerPinParity == 0x0F0F, "District Master cipher tumbler parity verified");
+    uint32 exp1 = (0x5A5A3C3C ^ 0xDEADBEEF) + 0x0F0F;
+    TEST_ASSERT(puz1.expectedSolution == exp1, "Cryptographic cipher hash formula matches");
+
+    // Invalid cipher attempt fails
+    KeymakerMasterKey badKey;
+    bool craftBad = sBackdoorNetwork.CraftMasterKey(101, KEY_DISTRICT_MASTER, 0x12345678, badKey);
+    TEST_ASSERT(!craftBad, "CraftMasterKey fails on corrupted tumbler solution");
+
+    // Valid District Master key forging
+    KeymakerMasterKey masterKey1;
+    bool craftOk1 = sBackdoorNetwork.CraftMasterKey(101, KEY_DISTRICT_MASTER, puz1.expectedSolution, masterKey1);
+    TEST_ASSERT(craftOk1, "Keymaker forged District Master Key successfully");
+    TEST_ASSERT(masterKey1.keyId == 1001, "First crafted key assigned ID 1001");
+    TEST_ASSERT(masterKey1.durabilityUses == 10, "District Master Key has 10 uses");
+    TEST_ASSERT(masterKey1.isForged == true, "Key is flagged as forged");
+
+    // Craft other key tiers
+    CryptographicCipherPuzzle puzRooftop = sBackdoorNetwork.GenerateCipherPuzzle(KEY_ROOFTOP_BYPASS);
+    KeymakerMasterKey rooftopKey;
+    bool craftRoof = sBackdoorNetwork.CraftMasterKey(101, KEY_ROOFTOP_BYPASS, puzRooftop.expectedSolution, rooftopKey);
+    TEST_ASSERT(craftRoof && rooftopKey.durabilityUses == 8, "Rooftop Bypass Key forged with 8 uses");
+
+    CryptographicCipherPuzzle puzVault = sBackdoorNetwork.GenerateCipherPuzzle(KEY_VAULT_BREAKER);
+    KeymakerMasterKey vaultKey;
+    bool craftVault = sBackdoorNetwork.CraftMasterKey(101, KEY_VAULT_BREAKER, puzVault.expectedSolution, vaultKey);
+    TEST_ASSERT(craftVault && vaultKey.durabilityUses == 3, "Vault Breaker Key forged with 3 uses");
+
+    CryptographicCipherPuzzle puzSource = sBackdoorNetwork.GenerateCipherPuzzle(KEY_SOURCE_KEY);
+    KeymakerMasterKey sourceKey;
+    bool craftSource = sBackdoorNetwork.CraftMasterKey(101, KEY_SOURCE_KEY, puzSource.expectedSolution, sourceKey);
+    TEST_ASSERT(craftSource && sourceKey.durabilityUses == 999, "The Source Master Key forged with permanent durability");
+
+    // 3. Key Compatibility & Door Unlocking
+    TEST_ASSERT(sBackdoorNetwork.VerifyKeyForDoor(masterKey1, 101) == true, "District Master Key fits Door 101");
+    TEST_ASSERT(sBackdoorNetwork.VerifyKeyForDoor(masterKey1, 204) == false, "District Master Key cannot unlock Rooftop Door 204");
+    TEST_ASSERT(sBackdoorNetwork.VerifyKeyForDoor(rooftopKey, 204) == true, "Rooftop Bypass Key fits Door 204");
+    TEST_ASSERT(sBackdoorNetwork.VerifyKeyForDoor(vaultKey, 408) == true, "Vault Breaker Key fits Door 408");
+
+    // Source Key universal privilege
+    TEST_ASSERT(sBackdoorNetwork.VerifyKeyForDoor(sourceKey, 101) == true, "Source Key unlocks Door 101");
+    TEST_ASSERT(sBackdoorNetwork.VerifyKeyForDoor(sourceKey, 204) == true, "Source Key unlocks Door 204");
+    TEST_ASSERT(sBackdoorNetwork.VerifyKeyForDoor(sourceKey, 408) == true, "Source Key unlocks Door 408");
+    TEST_ASSERT(sBackdoorNetwork.VerifyKeyForDoor(sourceKey, 999) == true, "Source Key unlocks Door 999");
+
+    // Unlock Door 101 with masterKey1
+    bool unlock101 = sBackdoorNetwork.UnlockDoorWithKey(101, masterKey1);
+    TEST_ASSERT(unlock101, "Door 101 unlocked successfully");
+    TEST_ASSERT(masterKey1.durabilityUses == 9, "Key durability decremented after door unlock");
+    TEST_ASSERT(p101->lockStatus == DOOR_UNLOCKED, "Door 101 status is now DOOR_UNLOCKED");
+
+    // Source Key does not lose durability
+    bool unlock408 = sBackdoorNetwork.UnlockDoorWithKey(408, sourceKey);
+    TEST_ASSERT(unlock408, "Source Key unlocks Door 408");
+    TEST_ASSERT(sourceKey.durabilityUses == 999, "Source Key maintains infinite durability");
+
+    // 4. Non-Euclidean Traversal Mathematics
+    float outX = 0.0f, outY = 0.0f, outZ = 0.0f, outHeading = 0.0f;
+
+    // Traversing locked door without key fails
+    bool travLocked = sBackdoorNetwork.TraverseBackdoor(204, 100.0f, 0.0f, 2000.0f, 90.0f, outX, outY, outZ, outHeading, nullptr);
+    TEST_ASSERT(!travLocked, "Traversal through locked Door 204 without key denied");
+
+    // Traversal through unlocked Door 101
+    // Entrance: (100.0, 0.0, 1000.0, 90°), Exit: (99640.0, 500.0, 8350.0, 180°)
+    // Test input with relative offset: (110.0, 5.0, 1000.0, 45°) -> relX=10, relY=5, relZ=0
+    // DeltaHeading = 180° - 90° = +90°
+    // rotX = 10 * cos(90°) - 0 * sin(90°) = 0
+    // rotZ = 10 * sin(90°) + 0 * cos(90°) = 10
+    // outX = 99640 + 0 = 99640, outY = 500 + 5 = 505, outZ = 8350 + 10 = 8360
+    // outHeading = 45° + 90° = 135°
+    bool trav101 = sBackdoorNetwork.TraverseBackdoor(101, 110.0f, 5.0f, 1000.0f, 45.0f, outX, outY, outZ, outHeading);
+    TEST_ASSERT(trav101, "Traversal through Door 101 succeeded");
+    TEST_ASSERT(std::fabs(outX - 99640.0f) < 0.1f, "Non-Euclidean X coordinate transformation accurate");
+    TEST_ASSERT(std::fabs(outY - 505.0f) < 0.1f, "Non-Euclidean Y coordinate transformation accurate");
+    TEST_ASSERT(std::fabs(outZ - 8360.0f) < 0.1f, "Non-Euclidean Z coordinate transformation accurate");
+    TEST_ASSERT(std::fabs(outHeading - 135.0f) < 0.1f, "Destination heading transformation accurate");
+    TEST_ASSERT(p101->transitCount == 1, "Door 101 transit counter incremented");
+    TEST_ASSERT(sBackdoorNetwork.GetTotalTransits() == 1, "Total network transits incremented");
+
+    // Traversing locked door by presenting valid key directly
+    bool trav204 = sBackdoorNetwork.TraverseBackdoor(204, 100.0f, 0.0f, 2000.0f, 90.0f, outX, outY, outZ, outHeading, &rooftopKey);
+    TEST_ASSERT(trav204, "Traversal through locked Door 204 granted with Rooftop Bypass Key");
+    TEST_ASSERT(sBackdoorNetwork.GetTotalTransits() == 2, "Total network transits updated to 2");
+
+    // 5. Hardline Firewall Anchors & Agent Door Sealing
+    sBackdoorNetwork.DeployFirewallAnchor(101, 180000, 7);
+    TEST_ASSERT(sBackdoorNetwork.HasFirewallAnchor(101) == true, "Hardline Firewall Anchor active on Door 101");
+    TEST_ASSERT(sBackdoorNetwork.HasFirewallAnchor(315) == false, "Door 315 has no firewall anchor");
+
+    // Agents attempt to seal anchored door -> REPELLED
+    bool seal101 = sBackdoorNetwork.SealDoorByAgents(101);
+    TEST_ASSERT(!seal101, "Agent door sealing REPELLED by active Zion Firewall Anchor");
+    TEST_ASSERT(p101->lockStatus != DOOR_SEALED_BY_AGENTS, "Door 101 remains unsealed");
+
+    // Agents seal unprotected door
+    bool seal315 = sBackdoorNetwork.SealDoorByAgents(315);
+    TEST_ASSERT(seal315, "Door 315 sealed by Machine System Agents");
+    TEST_ASSERT(p315->lockStatus == DOOR_SEALED_BY_AGENTS, "Door 315 status is DOOR_SEALED_BY_AGENTS");
+
+    std::cout << "\n------------------------------------------------------------" << std::endl;
+    std::cout << "  BACKDOOR NETWORK & CIPHERS TEST SUITE COMPLETE" << std::endl;
+    std::cout << "  PASSED: " << passed << " | FAILED: " << failed << std::endl;
+    std::cout << "------------------------------------------------------------\n" << std::endl;
+
+    assert(failed == 0);
 }

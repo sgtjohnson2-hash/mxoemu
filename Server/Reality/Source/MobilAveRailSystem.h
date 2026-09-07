@@ -1,4 +1,4 @@
-﻿#ifndef MXOEMU_MOBIL_AVE_RAIL_SYSTEM_H
+#ifndef MXOEMU_MOBIL_AVE_RAIL_SYSTEM_H
 #define MXOEMU_MOBIL_AVE_RAIL_SYSTEM_H
 
 #include "Common.h"
@@ -99,5 +99,7 @@ private:
 };
 
 #define sMobilAveRailSystem MobilAveRailSystem::getSingleton()
+
+void RunMobilAveTestSuite();
 
 #endif // MXOEMU_MOBIL_AVE_RAIL_SYSTEM_H
