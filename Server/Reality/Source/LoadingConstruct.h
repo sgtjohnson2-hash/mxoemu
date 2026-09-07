@@ -50,6 +50,24 @@ enum WeaponRackCategory
     RACK_VEHICLES = 6
 };
 
+enum MartialArtProgram
+{
+    MARTIAL_ART_NONE = 0,
+    MARTIAL_ART_WING_CHUN = 1,
+    MARTIAL_ART_JIU_JITSU = 2,
+    MARTIAL_ART_SAVATE = 3,
+    MARTIAL_ART_DRUNKEN_FIST = 4,
+    MARTIAL_ART_KENJUTSU = 5
+};
+
+struct DisketteUploadState
+{
+    uint32 playerId{0};
+    MartialArtProgram program{MARTIAL_ART_NONE};
+    float uploadProgressPercent{0.0f};
+    bool isComplete{false};
+};
+
 struct SparringDummy
 {
     uint32 dummyId{0};
@@ -152,6 +170,11 @@ public:
     void UpdateTimeDilation(float deltaTimeSec);
     bool IsWireFuSlowMoActive() const { return m_wireFuSlowMoActive; }
 
+    // "I Know Kung Fu" Diskette Loader
+    bool LoadMartialArtsDiskette(uint32 playerId, MartialArtProgram program);
+    MartialArtProgram GetPlayerMasteredArt(uint32 playerId) const;
+    float GetDisketteUploadProgress(uint32 playerId) const;
+
 private:
     mutable std::recursive_mutex m_constructMutex;
     ConstructMode m_currentMode{CONSTRUCT_MODE_WHITE_VOID};
@@ -178,8 +201,13 @@ private:
     float m_slowMoDurationSec{0.0f};
     float m_originalDilation{1.0f};
     float m_activeSlowMoMultiplier{0.10f};
+
+    // Skill Uploads
+    std::map<uint32, DisketteUploadState> m_playerSkillUploads;
 };
 
 #define sLoadingConstruct LoadingConstruct::getSingleton()
+
+void RunConstructTestSuite();
 
 #endif // MXOEMU_LOADING_CONSTRUCT_H

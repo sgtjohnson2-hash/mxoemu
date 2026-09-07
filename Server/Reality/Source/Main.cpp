@@ -80,6 +80,7 @@ void RunMafiaEcosystemTestSuite();
 void RunExileChateauTestSuite();
 void RunAgentPossessionTestSuite();
 void RunFreewayCombatTestSuite();
+void RunConstructTestSuite();
 
 static bool g_testUnderworld = false;
 static bool g_testSimulation = false;
@@ -94,6 +95,7 @@ static bool g_testMafia = false;
 static bool g_testExiles = false;
 static bool g_testPossession = false;
 static bool g_testFreeway = false;
+static bool g_testConstruct = false;
 
 int main(int argc, char* argv[])
 {
@@ -137,6 +139,8 @@ int main(int argc, char* argv[])
             g_testPossession = true;
         } else if (arg == "--test-freeway" || arg == "--test-highway" || arg == "--test-101") {
             g_testFreeway = true;
+        } else if (arg == "--test-construct" || arg == "--test-dojo" || arg == "--test-kata") {
+            g_testConstruct = true;
         } else if (arg == "--test-all") {
             g_testFrank = true;
             g_testUnderworld = true;
@@ -152,13 +156,14 @@ int main(int argc, char* argv[])
             g_testExiles = true;
             g_testPossession = true;
             g_testFreeway = true;
+            g_testConstruct = true;
         }
     }
 
 #ifndef UNITTEST
-    if (g_testFrank && g_testUnderworld && g_testSimulation && g_testEmergentAI && g_testPolice && g_testBiography && g_testSocial && g_testFamily && g_testEmergentLife && g_testSLM && g_testMafia && g_testExiles && g_testPossession && g_testFreeway) {
+    if (g_testFrank && g_testUnderworld && g_testSimulation && g_testEmergentAI && g_testPolice && g_testBiography && g_testSocial && g_testFamily && g_testEmergentLife && g_testSLM && g_testMafia && g_testExiles && g_testPossession && g_testFreeway && g_testConstruct) {
         std::cout << "\n============================================================" << std::endl;
-        std::cout << "  RUNNING COMPLETE MEGACITY & TACTICAL TEST SUITE (14 SUITES)" << std::endl;
+        std::cout << "  RUNNING COMPLETE MEGACITY & TACTICAL TEST SUITE (15 SUITES)" << std::endl;
         std::cout << "============================================================\n" << std::endl;
         RunFrankCastleTestSuite();
         RunUnderworldTestSuite();
@@ -174,9 +179,12 @@ int main(int argc, char* argv[])
         RunExileChateauTestSuite();
         RunAgentPossessionTestSuite();
         RunFreewayCombatTestSuite();
+        RunConstructTestSuite();
         std::cout << "\n============================================================" << std::endl;
-        std::cout << "  ALL 14 MEGACITY EMERGENCE & TACTICAL SUITES PASSED 100%!  " << std::endl;
+        std::cout << "  ALL 15 MEGACITY EMERGENCE & TACTICAL SUITES PASSED 100%!  " << std::endl;
         std::cout << "============================================================\n" << std::endl;
+    } else if (g_testConstruct) {
+        RunConstructTestSuite();
     } else if (g_testFreeway) {
         RunFreewayCombatTestSuite();
     } else if (g_testPossession) {

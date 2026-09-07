@@ -1,6 +1,16 @@
 #include "LoadingConstruct.h"
+#include "GameServer.h"
+#include "BotManager.h"
+#include "ObjectMgr.h"
+#include "PlayerObject.h"
+#include "MessageTypes.h"
 #include "Log.h"
 #include <algorithm>
+#include <iostream>
+
+static inline bool Has3DWorldSupport() {
+    return GameServer::getSingletonPtr() != nullptr && BotManager::getSingletonPtr() != nullptr;
+}
 
 createFileSingleton(LoadingConstruct);
 
@@ -468,5 +478,176 @@ void LoadingConstruct::UpdateTimeDilation(float deltaTimeSec)
                 m_timeDilation = m_activeSlowMoMultiplier + (m_originalDilation - m_activeSlowMoMultiplier) * ease;
             }
         }
+    }
+}
+
+bool LoadingConstruct::LoadMartialArtsDiskette(uint32 playerId, MartialArtProgram program)
+{
+    std::lock_guard<std::recursive_mutex> lock(m_constructMutex);
+    DisketteUploadState state;
+    state.playerId = playerId;
+    state.program = program;
+    state.uploadProgressPercent = 100.0f;
+    state.isComplete = true;
+    m_playerSkillUploads[playerId] = state;
+
+    if (Has3DWorldSupport()) {
+        if (auto po = sObjMgr.getGOPtrSafe(playerId)) {
+            po->sayChat("I know Kung Fu.");
+            po->Emote(1);
+        }
+    }
+
+    sLog.outString("[LoadingConstruct] Loaded Martial Arts Diskette (Program %u) for Player %u",
+                   (uint32)program, playerId);
+    return true;
+}
+
+MartialArtProgram LoadingConstruct::GetPlayerMasteredArt(uint32 playerId) const
+{
+    std::lock_guard<std::recursive_mutex> lock(m_constructMutex);
+    auto it = m_playerSkillUploads.find(playerId);
+    if (it != m_playerSkillUploads.end() && it->second.isComplete) {
+        return it->second.program;
+    }
+    return MARTIAL_ART_NONE;
+}
+
+float LoadingConstruct::GetDisketteUploadProgress(uint32 playerId) const
+{
+    std::lock_guard<std::recursive_mutex> lock(m_constructMutex);
+    auto it = m_playerSkillUploads.find(playerId);
+    if (it != m_playerSkillUploads.end()) {
+        return it->second.uploadProgressPercent;
+    }
+    return 0.0f;
+}
+
+void RunConstructTestSuite()
+{
+    std::cout << "\n============================================================" << std::endl;
+    std::cout << "  STARTING LOADING CONSTRUCT & KATA DOJO TEST SUITE         " << std::endl;
+    std::cout << "============================================================\n" << std::endl;
+
+    LoadingConstruct& construct = sLoadingConstruct;
+    construct.Reset();
+
+    int passedCount = 0;
+    int failedCount = 0;
+
+    auto TEST_ASSERT = [&](bool condition, const std::string& testName) {
+        if (condition) {
+            std::cout << " [PASS] " << testName << std::endl;
+            passedCount++;
+        } else {
+            std::cout << " [FAIL] " << testName << std::endl;
+            failedCount++;
+        }
+    };
+
+    // 1. Construct Mode Switching & White Void
+    {
+        TEST_ASSERT(construct.GetConstructMode() == CONSTRUCT_MODE_WHITE_VOID, "Default mode is CONSTRUCT_MODE_WHITE_VOID");
+        construct.SetConstructMode(CONSTRUCT_MODE_ORIENTAL_DOJO);
+        TEST_ASSERT(construct.GetConstructMode() == CONSTRUCT_MODE_ORIENTAL_DOJO, "SetConstructMode transitions to ORIENTAL_DOJO");
+        construct.SetConstructMode(CONSTRUCT_MODE_TARGET_RANGE);
+        TEST_ASSERT(construct.GetConstructMode() == CONSTRUCT_MODE_TARGET_RANGE, "SetConstructMode transitions to TARGET_RANGE");
+    }
+
+    // 2. Weapon Racks ("Guns. Lots of guns.")
+    {
+        size_t totalWeapons = construct.GetTotalAvailableWeapons();
+        TEST_ASSERT(totalWeapons >= 14, "Weapon racks contain 14+ authentic Matrix firearms");
+
+        auto handguns = construct.GetRackItems(RACK_HANDGUNS);
+        TEST_ASSERT(!handguns.empty(), "Handgun rack populated");
+        TEST_ASSERT(handguns[0].name.find("Beretta") != std::string::npos, "Dual Berettas available on rack");
+
+        auto snipers = construct.GetRackItems(RACK_SNIPER_RIFLES);
+        TEST_ASSERT(!snipers.empty(), "Sniper rifle rack populated");
+        TEST_ASSERT(snipers[0].baseDamage >= 300.0f, "Barrett .50 BMG has heavy anti-material damage");
+    }
+
+    // 3. Sparring Dummy & Posture Break Mechanics
+    {
+        uint32 dummyId = construct.SpawnSparringDummy(DUMMY_AGGRESSIVE, 0.0f, 0.0f, 0.0f, "Morpheus Avatar");
+        TEST_ASSERT(dummyId != 0, "SpawnSparringDummy creates valid dummy instance");
+        TEST_ASSERT(construct.GetDummyCount() == 1, "Dummy count tracked");
+
+        bool postureBroken = false;
+        bool damaged = construct.DamageDummy(dummyId, 100.0f, 40.0f, postureBroken);
+        TEST_ASSERT(damaged && !postureBroken, "Partial posture damage applied without breaking");
+
+        // Inflict remaining posture damage to trigger posture break
+        construct.DamageDummy(dummyId, 100.0f, 70.0f, postureBroken);
+        TEST_ASSERT(postureBroken, "Cumulative posture damage triggers posture break state");
+    }
+
+    // 4. Ballistic Target Range
+    {
+        construct.SetupTargetRange();
+        const auto& targets = construct.GetTargets();
+        TEST_ASSERT(targets.size() == 4, "Target range contains 4 distance target silhouettes");
+
+        // Record a bullseye headshot
+        bool hitRecorded = construct.RecordBallisticShot(1, 0.01f, 0.01f, true);
+        TEST_ASSERT(hitRecorded, "RecordBallisticShot records precision impact");
+        TEST_ASSERT(construct.GetTargetAccuracyPercent(1) == 100.0f, "Target accuracy calculates 100% on direct hit");
+    }
+
+    // 5. Oriental Dojo Structural Destruction & Shoji Screens
+    {
+        construct.SetupOrientalDojo();
+        TEST_ASSERT(construct.GetPillarCount() == 8, "Oriental Dojo spawns 8 structural cedar pillars");
+        TEST_ASSERT(construct.GetDestroyedShojiCount() == 0, "Initial shoji screens are all intact");
+        TEST_ASSERT(construct.GetDojoStructuralIntegrityPercent() == 100.0f, "Dojo structural integrity begins at 100%");
+
+        uint32 pillarsDamaged = 0;
+        uint32 shojiTorn = 0;
+        // Body throw impact directly against perimeter pillar (radius 2000) and shoji partition
+        bool impactResult = construct.ApplyInterlockImpact(2000.0f, 0.0f, 0.0f, 800.0f, true, pillarsDamaged, shojiTorn);
+        TEST_ASSERT(impactResult, "ApplyInterlockImpact processes martial arts body throw");
+        TEST_ASSERT(pillarsDamaged > 0, "Body throw shatters structural cedar pillars");
+        TEST_ASSERT(shojiTorn > 0, "Body throw tears paper shoji screens");
+        TEST_ASSERT(construct.GetDojoStructuralIntegrityPercent() < 100.0f, "Dojo structural integrity degrades upon pillar damage");
+    }
+
+    // 6. Time Dilation & Wire-Fu Slow-Mo (0.10x Dilation)
+    {
+        construct.SetTimeDilation(1.0f);
+        TEST_ASSERT(construct.GetTimeDilation() == 1.0f, "Default time dilation is 1.0x");
+
+        construct.TriggerWireFuSlowMo(3.5f, 0.10f);
+        TEST_ASSERT(construct.IsWireFuSlowMoActive(), "Wire-Fu slow-mo is actively engaged");
+        TEST_ASSERT(construct.GetTimeDilation() <= 0.10f, "Time dilation decelerated to 0.10x bullet-time");
+
+        construct.UpdateTimeDilation(3.6f); // Advance past slow-mo duration
+        TEST_ASSERT(!construct.IsWireFuSlowMoActive(), "Wire-Fu slow-mo concludes when duration expires");
+        TEST_ASSERT(construct.GetTimeDilation() == 1.0f, "Time dilation restored smoothly to 1.0x");
+    }
+
+    // 7. "I Know Kung Fu" Diskette Loader
+    {
+        uint32 testPlayerId = 9901;
+        TEST_ASSERT(construct.GetPlayerMasteredArt(testPlayerId) == MARTIAL_ART_NONE, "Player initially has no mastered martial art");
+
+        bool loaded = construct.LoadMartialArtsDiskette(testPlayerId, MARTIAL_ART_WING_CHUN);
+        TEST_ASSERT(loaded, "LoadMartialArtsDiskette successfully uploads program");
+        TEST_ASSERT(construct.GetPlayerMasteredArt(testPlayerId) == MARTIAL_ART_WING_CHUN, "Player mastered Wing Chun martial arts");
+        TEST_ASSERT(construct.GetDisketteUploadProgress(testPlayerId) == 100.0f, "Upload progress reaches 100%");
+
+        // Load advanced Drunken Fist
+        construct.LoadMartialArtsDiskette(testPlayerId, MARTIAL_ART_DRUNKEN_FIST);
+        TEST_ASSERT(construct.GetPlayerMasteredArt(testPlayerId) == MARTIAL_ART_DRUNKEN_FIST, "Player dynamically updates mastered art to Drunken Fist");
+    }
+
+    std::cout << "\n------------------------------------------------------------" << std::endl;
+    std::cout << "  LOADING CONSTRUCT & KATA DOJO TEST SUITE COMPLETE         " << std::endl;
+    std::cout << "  PASSED: " << passedCount << " | FAILED: " << failedCount << std::endl;
+    std::cout << "------------------------------------------------------------\n" << std::endl;
+
+    if (failedCount > 0) {
+        std::cerr << "Loading Construct test suite encountered failures!" << std::endl;
+        exit(1);
     }
 }
