@@ -9,6 +9,7 @@
 #include <mutex>
 #include <cmath>
 #include <memory>
+#include <algorithm>
 
 enum APUModel
 {
@@ -22,7 +23,16 @@ enum APURunnerState
     RUNNER_IDLE = 0,
     RUNNER_FETCHING_AMMO = 1,
     RUNNER_DELIVERING = 2,
-    RUNNER_RELOADING = 3
+    RUNNER_RELOADING = 3,
+    RUNNER_INCAPACITATED = 4
+};
+
+enum DockSentinelState
+{
+    DOCK_SENTINEL_SWARMING = 0,
+    DOCK_SENTINEL_VORTEX_DIVE = 1,
+    DOCK_SENTINEL_LATCHED_CUTTING = 2,
+    DOCK_SENTINEL_DESTROYED = 3
 };
 
 struct APUVector3
@@ -49,6 +59,7 @@ struct APUVector3
     APUVector3 operator*(float s) const { return APUVector3(x * s, y * s, z * s); }
     APUVector3 operator/(float s) const { return APUVector3(x / s, y / s, z / s); }
     APUVector3& operator+=(const APUVector3& o) { x += o.x; y += o.y; z += o.z; return *this; }
+    APUVector3& operator-=(const APUVector3& o) { x -= o.x; y -= o.y; z -= o.z; return *this; }
 };
 
 struct APUWeaponArm
@@ -57,13 +68,15 @@ struct APUWeaponArm
     uint32 ammoMaxCapacity{2500};
     float barrelTempCelsius{25.0f};
     float maxSafeTempCelsius{850.0f};
-    float heatAccumulationPerShot{0.25f}; // deg C per 30mm slug
+    float heatAccumulationPerShot{0.75f}; // deg C per 30mm slug
     float passiveCoolingRate{18.0f};      // deg C per second
     bool isOverheated{false};
     bool isJammed{false};
-    float firingRateRpm{1200.0f};         // 1200 RPM per cannon
+    float firingRateRpm{2500.0f};         // 2500 RPM high-velocity rotary cannon
     float fireCooldownSec{0.0f};
     float accuracyBloomRad{0.015f};
+    float recoilImpulsePerShot{3.5f};     // Hydraulic recoil force per round
+    uint32 totalRoundsFired{0};
 };
 
 struct APUUnitState
@@ -77,12 +90,13 @@ struct APUUnitState
     APUVector3 velocity{0.0f, 0.0f, 0.0f};
     float facingDegrees{0.0f};
 
-    // Hydraulic locomotion
+    // Hydraulic locomotion & chassis integrity
     float hydraulicPressurePsi{3000.0f}; // Nominal 3000 PSI
     float stepPhase{0.0f};               // 0..1 gait cycle
     float suspensionDamping{0.85f};
     float legArmorIntegrity{100.0f};
     float cockpitShieldIntegrity{100.0f};
+    float pilotHealth{100.0f};
 
     // Dual 30mm auto-cannons
     APUWeaponArm leftArm;
@@ -90,6 +104,33 @@ struct APUUnitState
 
     bool isMounted{false};
     bool activeCoolantVenting{false};
+    float coolantReserveSec{45.0f};
+    uint32 sentinelsLatchedCount{0};
+    uint32 sentinelsNeutralized{0};
+};
+
+struct SentinelUnit
+{
+    uint32 sentinelId{0};
+    APUVector3 position{0.0f, 1500.0f, 0.0f};
+    APUVector3 velocity{0.0f, -50.0f, 0.0f};
+    DockSentinelState state{DOCK_SENTINEL_SWARMING};
+    float health{150.0f};
+    float maxHealth{150.0f};
+    uint32 targetApuId{1};
+    float latchTimerSec{0.0f};
+    float plasmaTorchDps{35.0f}; // Continuous DPS to APU shield/chassis
+    float spiralAngleRad{0.0f};
+    float spiralRadius{250.0f};
+};
+
+struct CraneHopper
+{
+    uint32 hopperId{1};
+    std::string designation{"Cavern Gantry Crane 01"};
+    APUVector3 position{-600.0f, 0.0f, -600.0f};
+    uint32 ammoStockpile{50000};
+    bool isOperational{true};
 };
 
 struct AmmoRunnerNPC
@@ -98,9 +139,13 @@ struct AmmoRunnerNPC
     std::string name{"Runner Kid"};
     APUVector3 position{0.0f, 0.0f, 0.0f};
     APURunnerState state{RUNNER_IDLE};
-    uint32 targetApuId{0};
+    uint32 targetApuId{1};
+    uint32 assignedHopperId{1};
     uint32 ammoBoxesCarried{2}; // 1250 rounds per box
     float speedUnitsPerSec{450.0f};
+    float health{100.0f};
+    float maxHealth{100.0f};
+    uint32 totalDeliveriesMade{0};
 };
 
 struct DiggerBreach
@@ -112,6 +157,7 @@ struct DiggerBreach
     bool isDomePierced{false};
     uint32 activeSentinelsDischarged{0};
     uint32 maxSentinelsToDeploy{1500};
+    float dischargeRatePerSec{25.0f};
 };
 
 struct ZionSubterraneanLogistics
@@ -132,19 +178,34 @@ public:
     void Initialize();
     void UpdateSimulation(float deltaTimeSec);
 
-    // APU Lifecycle & Movement
+    // APU Lifecycle & Locomotion (Phase 7)
     uint32 RegisterAPU(uint32 pilotCharUID, const std::string& pilotHandle, APUModel model, const APUVector3& spawnPos);
     bool MountAPU(uint32 apuId, uint32 pilotCharUID);
     bool EjectAPU(uint32 apuId);
     bool UpdateAPULocomotion(uint32 apuId, const APUVector3& moveInput, float turnDegrees, float deltaTimeSec);
 
-    // Ballistic Weapons & Overheat Mechanics
+    // Ballistic Weapons & Overheat Mechanics (Phase 7)
     bool FireWeapons(uint32 apuId, bool fireLeft, bool fireRight, uint32& outRoundsFired, float deltaTimeSec);
     bool TriggerCoolantVent(uint32 apuId);
+    bool ClearThermalJam(uint32 apuId);
 
-    // Ammo Runner Logistics
-    uint32 DispatchAmmoRunner(uint32 targetApuId, const APUVector3& depotPos);
+    // Sentinel Swarm Boids Simulation (Phase 8)
+    uint32 SpawnSentinel(const APUVector3& origin, uint32 targetApuId);
+    size_t SpawnSentinelSwarm(uint32 count, const APUVector3& origin, uint32 targetApuId);
+    void UpdateSentinelSwarm(float deltaTimeSec);
+    uint32 ApplyFlakDamage(const APUVector3& burstPos, float blastRadius, float damage);
+    size_t GetActiveSentinelCount() const;
+    size_t GetLatchedSentinelCount(uint32 apuId) const;
+    const SentinelUnit* GetSentinel(uint32 sentinelId) const;
+
+    // Ammo Runner Logistics Loop (Phase 9)
+    uint32 RegisterCraneHopper(const std::string& designation, const APUVector3& pos, uint32 stockpile);
+    uint32 DispatchAmmoRunner(uint32 targetApuId, uint32 hopperId);
+    uint32 DispatchAmmoRunner(uint32 targetApuId, const APUVector3& depotPos); // Backward compatible
     void UpdateAmmoRunners(float deltaTimeSec);
+    bool RequestEmergencyAmmoResupply(uint32 apuId);
+    const CraneHopper* GetCraneHopper(uint32 hopperId) const;
+    size_t GetCraneHopperCount() const;
 
     // Zion Dock Breach Mega-Event
     uint32 TriggerDiggerBreach(const APUVector3& breachPos);
@@ -153,6 +214,7 @@ public:
 
     // Telemetry & Status
     const APUUnitState* GetAPU(uint32 apuId) const;
+    const AmmoRunnerNPC* GetAmmoRunner(uint32 runnerId) const;
     size_t GetActiveAPUCount() const;
     size_t GetActiveBreachCount() const;
     size_t GetActiveRunnerCount() const;
@@ -163,11 +225,15 @@ private:
     mutable std::recursive_mutex m_apuMutex;
     std::map<uint32, APUUnitState> m_apus;
     std::map<uint32, AmmoRunnerNPC> m_runners;
+    std::vector<CraneHopper> m_hoppers;
+    std::vector<SentinelUnit> m_sentinels;
     std::vector<DiggerBreach> m_breaches;
     ZionSubterraneanLogistics m_logistics;
 
     uint32 m_nextApuId{1};
     uint32 m_nextRunnerId{1};
+    uint32 m_nextHopperId{1};
+    uint32 m_nextSentinelId{1};
     uint32 m_nextBreachId{1};
     float m_simTimeSec{0.0f};
 };
