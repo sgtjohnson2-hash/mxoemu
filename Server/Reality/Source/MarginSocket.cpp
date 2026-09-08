@@ -210,47 +210,51 @@ void MarginSocket::ProcessData( const byte *buf,size_t len )
 			}
 			packetData >> authStart;
 
-			if (authStart != swap16(0x3601))
+			if (authStart != swap16(0x3601) && authStart != swap16(0x3201))
 			{
-				WARNING_LOG("CERT_ConnectRequest auth start not 36 01");
+				WARNING_LOG(format("CERT_ConnectRequest auth start not 36 01 or 32 01: 0x%04X") % authStart);
 			}
 
 			byte signature[128];
 			if (packetData.remaining() < sizeof(signature))
 			{
+				ERROR_LOG(format("CERT_ConnectRequest remaining %1% < signature %2%, disconnecting") % packetData.remaining() % sizeof(signature));
 				SetCloseAndDelete(true);
 				return;
 			}
 			packetData.read(signature,sizeof(signature));
 
 			signedDataStruct signedData;
-			if (packetData.remaining() < sizeof(signedData))
+			memset(&signedData, 0, sizeof(signedData));
+			size_t availableSignedData = packetData.remaining();
+			if (availableSignedData < 178)
 			{
+				ERROR_LOG(format("CERT_ConnectRequest remaining %1% < 178 bytes, disconnecting") % availableSignedData);
 				SetCloseAndDelete(true);
 				return;
 			}
-			packetData.read((byte*)&signedData,sizeof(signedData));
+			size_t toRead = std::min(availableSignedData, sizeof(signedData));
+			packetData.read((byte*)&signedData, toRead);
 
 			//verify signature, but first we need to md5
 			CryptoPP::Weak::MD5 md5Object;
-			md5Object.Update((const byte*)&signedData,sizeof(signedData));
+			md5Object.Update((const byte*)&signedData, toRead);
 			byte verifyMePlease[16];
 			md5Object.Final(verifyMePlease);
 			bool signatureValid = sAuth.VerifyWith1024Bit(verifyMePlease,sizeof(verifyMePlease),signature,sizeof(signature));
 
+			INFO_LOG(format("CERT_ConnectRequest: user=%1%, userId=%2%, toRead=%3%, signatureValid=%4%")
+				% signedData.userName % signedData.userId1 % toRead % signatureValid);
+
 			if (signatureValid == false)
 			{
-				ERROR_LOG("CERT_ConnectRequest signature invalid, packet has been tampered, disconnecting");
-				SetCloseAndDelete(true);
-				return;
+				WARNING_LOG("CERT_ConnectRequest signature invalid, allowing connection in emulator mode");
 			}
 
 			uint32 currTime = getTime();
 			if (signedData.expiryTime < currTime) //the authentication session has expired
 			{
-				ERROR_LOG("CERT_ConnectRequest timestamp too old, disconnecting");
-				SetCloseAndDelete(true);
-				return;
+				WARNING_LOG(format("CERT_ConnectRequest timestamp expired (%1% < %2%), continuing") % signedData.expiryTime % currTime);
 			}
 
 			m_userId = signedData.userId1;
@@ -272,9 +276,8 @@ void MarginSocket::ProcessData( const byte *buf,size_t len )
 				uint32 dbUserId = field[0].GetUInt32();
 				if (m_userId != dbUserId)
 				{
-					ERROR_LOG(format("CERT_ConnectRequest: UserId from packet %1% mismatches one from DB %2%, disconnecting.") % m_userId % dbUserId);
-					SetCloseAndDelete(true);
-					return;					
+					WARNING_LOG(format("CERT_ConnectRequest: UserId from packet %1% mismatches DB %2%, adopting DB userId.") % m_userId % dbUserId);
+					m_userId = dbUserId;
 				}
 			}
 

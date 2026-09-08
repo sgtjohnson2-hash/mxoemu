@@ -40,7 +40,6 @@ typedef struct
 	byte padding2[32]; //32 bytes of 0 padding
 	uint16 publicExponent; //17 for cryptopp, but big endian format here
 	byte modulus[96]; //768bit public modulus of user RSA key
-	uint32 timeCreated; //4 bytes, unique per user, users registered later have this number higher
 } signedDataStruct;
 #pragma pack(pop)
 

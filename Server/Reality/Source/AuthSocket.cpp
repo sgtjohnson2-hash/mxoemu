@@ -420,7 +420,6 @@ void AuthSocket::HandleAuthRequest( ByteBuffer &packet )
 	signedData.expiryTime = getTime() + 60 * 10;
 	signedData.publicExponent = swap16(m_publicExponent);
 	memcpy(signedData.modulus,m_publicModulus.data(),sizeof(signedData.modulus));
-	signedData.timeCreated = m_timeCreated;
 
 	CryptoPP::Weak::MD5 md5Object;
 	md5Object.Update((const byte*)&signedData,sizeof(signedData));
