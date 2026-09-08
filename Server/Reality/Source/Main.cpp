@@ -96,6 +96,7 @@ void RunNeuralSwarmTestSuite();
 void RunStructuralVoxelTestSuite();
 void RunNeuralAudioTestSuite();
 void RunSharedMemoryShardTestSuite();
+void RunEpochVINeuromorphicSuite();
 
 static bool g_testUnderworld = false;
 static bool g_testSimulation = false;
@@ -126,6 +127,7 @@ static bool g_testNeuralSwarm = false;
 static bool g_testStructuralVoxel = false;
 static bool g_testNeuralAudio = false;
 static bool g_testShardFabric = false;
+static bool g_testNeuromorphic = false;
 
 int main(int argc, char* argv[])
 {
@@ -201,6 +203,8 @@ int main(int argc, char* argv[])
             g_testNeuralAudio = true;
         } else if (arg == "--test-shard" || arg == "--test-multi-shard" || arg == "--test-fabric" || arg == "--test-construct-shard") {
             g_testShardFabric = true;
+        } else if (arg == "--test-neuromorphic" || arg == "--test-snn" || arg == "--test-spike") {
+            g_testNeuromorphic = true;
         } else if (arg == "--test-all") {
             g_testFrank = true;
             g_testUnderworld = true;
@@ -232,13 +236,14 @@ int main(int argc, char* argv[])
             g_testStructuralVoxel = true;
             g_testNeuralAudio = true;
             g_testShardFabric = true;
+            g_testNeuromorphic = true;
         }
     }
 
 #ifndef UNITTEST
-    if (g_testFrank && g_testUnderworld && g_testSimulation && g_testEmergentAI && g_testPolice && g_testBiography && g_testSocial && g_testFamily && g_testEmergentLife && g_testSLM && g_testMafia && g_testExiles && g_testPossession && g_testFreeway && g_testConstruct && g_testAPU && g_testHovercraft && g_testBackdoor && g_testMobilAve && g_testCorruptCops && g_testOperatorBridge && g_testCyberdeck && g_testMegacityDestruction && g_testMatrixReboot && g_testCastleLore && g_testEpoch4 && g_testNeuralSwarm && g_testStructuralVoxel && g_testNeuralAudio && g_testShardFabric) {
+    if (g_testFrank && g_testUnderworld && g_testSimulation && g_testEmergentAI && g_testPolice && g_testBiography && g_testSocial && g_testFamily && g_testEmergentLife && g_testSLM && g_testMafia && g_testExiles && g_testPossession && g_testFreeway && g_testConstruct && g_testAPU && g_testHovercraft && g_testBackdoor && g_testMobilAve && g_testCorruptCops && g_testOperatorBridge && g_testCyberdeck && g_testMegacityDestruction && g_testMatrixReboot && g_testCastleLore && g_testEpoch4 && g_testNeuralSwarm && g_testStructuralVoxel && g_testNeuralAudio && g_testShardFabric && g_testNeuromorphic) {
         std::cout << "\n============================================================" << std::endl;
-        std::cout << "  RUNNING COMPLETE MEGACITY & TACTICAL TEST SUITE (30 SUITES)" << std::endl;
+        std::cout << "  RUNNING COMPLETE MEGACITY & TACTICAL TEST SUITE (31 SUITES)" << std::endl;
         std::cout << "============================================================\n" << std::endl;
         RunFrankCastleTestSuite();
         RunUnderworldTestSuite();
@@ -270,9 +275,12 @@ int main(int argc, char* argv[])
         RunStructuralVoxelTestSuite();
         RunNeuralAudioTestSuite();
         RunSharedMemoryShardTestSuite();
+        RunEpochVINeuromorphicSuite();
         std::cout << "\n============================================================" << std::endl;
-        std::cout << "  ALL 30 MEGACITY EMERGENCE & TACTICAL SUITES PASSED 100%!  " << std::endl;
+        std::cout << "  ALL 31 MEGACITY EMERGENCE & TACTICAL SUITES PASSED 100%!  " << std::endl;
         std::cout << "============================================================\n" << std::endl;
+    } else if (g_testNeuromorphic) {
+        RunEpochVINeuromorphicSuite();
     } else if (g_testShardFabric) {
         RunSharedMemoryShardTestSuite();
     } else if (g_testNeuralAudio) {
