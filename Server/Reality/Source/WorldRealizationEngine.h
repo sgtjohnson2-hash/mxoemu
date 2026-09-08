@@ -154,6 +154,47 @@ struct Active3DTemporalEcho
     float remainingTimeSec{3.0f};
 };
 
+struct Active3DCyclePortal
+{
+    uint32_t portalId{0};
+    float posX{0.0f}, posY{0.0f}, posZ{0.0f};
+    int cycle{1};
+    float remainingTimeSec{10.0f};
+};
+
+struct Active3DThreatWave
+{
+    uint32_t waveId{0};
+    float posX{0.0f}, posZ{0.0f};
+    float currentRadius{0.0f};
+    float maxRadius{500.0f};
+    float remainingTimeSec{3.0f};
+};
+
+struct Active3DVoxelCover
+{
+    uint32_t coverId{0};
+    float posX{0.0f}, posY{0.0f}, posZ{0.0f};
+    float width{2.0f};
+    float height{1.5f};
+    float health{500.0f};
+    float remainingTimeSec{30.0f};
+};
+
+struct Active3DSentinelEclipse
+{
+    uint32_t eclipseId{0};
+    float coveragePercent{0.9f};
+    float remainingTimeSec{20.0f};
+};
+
+struct Active3DArchitectBeam
+{
+    uint32_t beamId{0};
+    float posX{0.0f}, posY{0.0f}, posZ{0.0f};
+    float remainingTimeSec{4.0f};
+};
+
 class WorldRealizationEngine : public Singleton<WorldRealizationEngine>
 {
 public:
@@ -257,6 +298,26 @@ public:
     uint32_t ManifestTemporalEcho3D(uint32_t echoId, float x, float y, float z, float duration = 3.0f);
     size_t GetActiveTemporalEchoCount() const;
 
+    // 21. Multi-Dimensional Cosmogenesis 3D Inter-Cycle Portal
+    uint32_t ManifestCyclePortal3D(float x, float y, float z, int cycle = 1);
+    size_t GetActiveCyclePortalCount() const;
+
+    // 22. Quantum Entangled Mesh 3D Dynamic Threat Wave
+    uint32_t ManifestQuantumThreatWave3D(float x, float z, float radius = 500.0f);
+    size_t GetActiveThreatWaveCount() const;
+
+    // 23. Source Code In-Flight 3D Voxel Cover Synthesis
+    uint32_t SynthesizeVoxelCover3D(float x, float y, float z, float width = 2.0f, float height = 1.5f);
+    size_t GetActiveVoxelCoverCount() const;
+
+    // 24. Deep Machine Core 3D Sentinel Swarm Skybox Eclipse
+    uint32_t TriggerSentinelEclipse3D(float coveragePercent = 0.9f, float durationSec = 20.0f);
+    size_t GetActiveSentinelEclipseCount() const;
+
+    // 25. Grand Unified Architect 3D Piercing Laser Column
+    uint32_t ManifestArchitectConsoleBeam3D(float x, float y, float z);
+    size_t GetActiveArchitectBeamCount() const;
+
 private:
     mutable std::shared_mutex m_realizationMutex;
     std::unordered_map<uint32_t, Active3DCourier> m_couriers;
@@ -274,6 +335,11 @@ private:
     std::unordered_map<uint32_t, Active3DHiveSynapse> m_hiveSynapses;
     std::unordered_map<uint32_t, Active3DPanicCrowd> m_panicCrowds;
     std::unordered_map<uint32_t, Active3DTemporalEcho> m_temporalEchoes;
+    std::unordered_map<uint32_t, Active3DCyclePortal> m_cyclePortals;
+    std::unordered_map<uint32_t, Active3DThreatWave> m_threatWaves;
+    std::unordered_map<uint32_t, Active3DVoxelCover> m_voxelCovers;
+    std::unordered_map<uint32_t, Active3DSentinelEclipse> m_sentinelEclipses;
+    std::unordered_map<uint32_t, Active3DArchitectBeam> m_architectBeams;
 
     uint32_t m_nextCourierId{1};
     uint32_t m_nextSmokeId{1};
@@ -287,6 +353,11 @@ private:
     uint32_t m_nextSynapseId{1};
     uint32_t m_nextPanicCrowdId{1};
     uint32_t m_nextTemporalEchoId{1};
+    uint32_t m_nextPortalId{1};
+    uint32_t m_nextWaveId{1};
+    uint32_t m_nextCoverId{1};
+    uint32_t m_nextEclipseId{1};
+    uint32_t m_nextBeamId{1};
     size_t m_totalRupturesManifested{0};
 };
 

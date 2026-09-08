@@ -43,6 +43,11 @@ void WorldRealizationEngine::Initialize()
     m_hiveSynapses.clear();
     m_panicCrowds.clear();
     m_temporalEchoes.clear();
+    m_cyclePortals.clear();
+    m_threatWaves.clear();
+    m_voxelCovers.clear();
+    m_sentinelEclipses.clear();
+    m_architectBeams.clear();
     m_nextCourierId = 1;
     m_nextSmokeId = 1;
     m_nextClaymoreId = 1;
@@ -55,6 +60,11 @@ void WorldRealizationEngine::Initialize()
     m_nextSynapseId = 1;
     m_nextPanicCrowdId = 1;
     m_nextTemporalEchoId = 1;
+    m_nextPortalId = 1;
+    m_nextWaveId = 1;
+    m_nextCoverId = 1;
+    m_nextEclipseId = 1;
+    m_nextBeamId = 1;
     m_totalRupturesManifested = 0;
 
     boost::format fmt("WorldRealizationEngine: Initialized 3D physical world realization subsystem.");
@@ -79,6 +89,11 @@ void WorldRealizationEngine::ResetForTesting()
     m_hiveSynapses.clear();
     m_panicCrowds.clear();
     m_temporalEchoes.clear();
+    m_cyclePortals.clear();
+    m_threatWaves.clear();
+    m_voxelCovers.clear();
+    m_sentinelEclipses.clear();
+    m_architectBeams.clear();
     m_nextCourierId = 1;
     m_nextSmokeId = 1;
     m_nextClaymoreId = 1;
@@ -91,6 +106,11 @@ void WorldRealizationEngine::ResetForTesting()
     m_nextSynapseId = 1;
     m_nextPanicCrowdId = 1;
     m_nextTemporalEchoId = 1;
+    m_nextPortalId = 1;
+    m_nextWaveId = 1;
+    m_nextCoverId = 1;
+    m_nextEclipseId = 1;
+    m_nextBeamId = 1;
     m_totalRupturesManifested = 0;
 }
 
@@ -188,6 +208,57 @@ void WorldRealizationEngine::Update(float dt)
         it->second.remainingTimeSec -= dt;
         if (it->second.remainingTimeSec <= 0.0f) {
             it = m_temporalEchoes.erase(it);
+        } else {
+            ++it;
+        }
+    }
+
+    // Update 3D Cycle portals
+    for (auto it = m_cyclePortals.begin(); it != m_cyclePortals.end(); ) {
+        it->second.remainingTimeSec -= dt;
+        if (it->second.remainingTimeSec <= 0.0f) {
+            it = m_cyclePortals.erase(it);
+        } else {
+            ++it;
+        }
+    }
+
+    // Update 3D Quantum threat waves
+    for (auto it = m_threatWaves.begin(); it != m_threatWaves.end(); ) {
+        it->second.remainingTimeSec -= dt;
+        it->second.currentRadius += (it->second.maxRadius / 3.0f) * dt;
+        if (it->second.remainingTimeSec <= 0.0f) {
+            it = m_threatWaves.erase(it);
+        } else {
+            ++it;
+        }
+    }
+
+    // Update 3D Voxel cover
+    for (auto it = m_voxelCovers.begin(); it != m_voxelCovers.end(); ) {
+        it->second.remainingTimeSec -= dt;
+        if (it->second.remainingTimeSec <= 0.0f || it->second.health <= 0.0f) {
+            it = m_voxelCovers.erase(it);
+        } else {
+            ++it;
+        }
+    }
+
+    // Update 3D Sentinel eclipses
+    for (auto it = m_sentinelEclipses.begin(); it != m_sentinelEclipses.end(); ) {
+        it->second.remainingTimeSec -= dt;
+        if (it->second.remainingTimeSec <= 0.0f) {
+            it = m_sentinelEclipses.erase(it);
+        } else {
+            ++it;
+        }
+    }
+
+    // Update 3D Architect beams
+    for (auto it = m_architectBeams.begin(); it != m_architectBeams.end(); ) {
+        it->second.remainingTimeSec -= dt;
+        if (it->second.remainingTimeSec <= 0.0f) {
+            it = m_architectBeams.erase(it);
         } else {
             ++it;
         }
@@ -887,6 +958,127 @@ size_t WorldRealizationEngine::GetActiveTemporalEchoCount() const
     return m_temporalEchoes.size();
 }
 
+// 21. Multi-Dimensional Cosmogenesis 3D Inter-Cycle Portal
+uint32_t WorldRealizationEngine::ManifestCyclePortal3D(float x, float y, float z, int cycle)
+{
+    std::unique_lock<std::shared_mutex> lock(m_realizationMutex);
+    uint32_t pid = m_nextPortalId++;
+    Active3DCyclePortal cp;
+    cp.portalId = pid;
+    cp.posX = x; cp.posY = y; cp.posZ = z;
+    cp.cycle = cycle;
+    cp.remainingTimeSec = 10.0f;
+    m_cyclePortals[pid] = cp;
+
+    boost::format fmt("WorldRealizationEngine: Manifested 3D cycle portal #%1% to Cycle %2% at (%3%, %4%, %5%)");
+    fmt % pid % cycle % x % y % z;
+    INFO_LOG(fmt);
+    return pid;
+}
+
+size_t WorldRealizationEngine::GetActiveCyclePortalCount() const
+{
+    std::shared_lock<std::shared_mutex> lock(m_realizationMutex);
+    return m_cyclePortals.size();
+}
+
+// 22. Quantum Entangled Mesh 3D Dynamic Threat Wave
+uint32_t WorldRealizationEngine::ManifestQuantumThreatWave3D(float x, float z, float radius)
+{
+    std::unique_lock<std::shared_mutex> lock(m_realizationMutex);
+    uint32_t wid = m_nextWaveId++;
+    Active3DThreatWave tw;
+    tw.waveId = wid;
+    tw.posX = x; tw.posZ = z;
+    tw.currentRadius = 0.0f;
+    tw.maxRadius = radius;
+    tw.remainingTimeSec = 3.0f;
+    m_threatWaves[wid] = tw;
+
+    boost::format fmt("WorldRealizationEngine: Manifested 3D quantum threat wave #%1% at (%2%, %3%) maxR=%4%m");
+    fmt % wid % x % z % radius;
+    INFO_LOG(fmt);
+    return wid;
+}
+
+size_t WorldRealizationEngine::GetActiveThreatWaveCount() const
+{
+    std::shared_lock<std::shared_mutex> lock(m_realizationMutex);
+    return m_threatWaves.size();
+}
+
+// 23. Source Code In-Flight 3D Voxel Cover Synthesis
+uint32_t WorldRealizationEngine::SynthesizeVoxelCover3D(float x, float y, float z, float width, float height)
+{
+    std::unique_lock<std::shared_mutex> lock(m_realizationMutex);
+    uint32_t cid = m_nextCoverId++;
+    Active3DVoxelCover vc;
+    vc.coverId = cid;
+    vc.posX = x; vc.posY = y; vc.posZ = z;
+    vc.width = width;
+    vc.height = height;
+    vc.health = 500.0f;
+    vc.remainingTimeSec = 30.0f;
+    m_voxelCovers[cid] = vc;
+
+    boost::format fmt("WorldRealizationEngine: Synthesized 3D voxel cover #%1% at (%2%, %3%, %4%) w=%5%m h=%6%m");
+    fmt % cid % x % y % z % width % height;
+    INFO_LOG(fmt);
+    return cid;
+}
+
+size_t WorldRealizationEngine::GetActiveVoxelCoverCount() const
+{
+    std::shared_lock<std::shared_mutex> lock(m_realizationMutex);
+    return m_voxelCovers.size();
+}
+
+// 24. Deep Machine Core 3D Sentinel Swarm Skybox Eclipse
+uint32_t WorldRealizationEngine::TriggerSentinelEclipse3D(float coveragePercent, float durationSec)
+{
+    std::unique_lock<std::shared_mutex> lock(m_realizationMutex);
+    uint32_t eid = m_nextEclipseId++;
+    Active3DSentinelEclipse se;
+    se.eclipseId = eid;
+    se.coveragePercent = coveragePercent;
+    se.remainingTimeSec = durationSec;
+    m_sentinelEclipses[eid] = se;
+
+    boost::format fmt("WorldRealizationEngine: Triggered 3D sentinel skybox eclipse #%1% coverage=%2%%% dur=%3%s");
+    fmt % eid % (coveragePercent * 100.0f) % durationSec;
+    INFO_LOG(fmt);
+    return eid;
+}
+
+size_t WorldRealizationEngine::GetActiveSentinelEclipseCount() const
+{
+    std::shared_lock<std::shared_mutex> lock(m_realizationMutex);
+    return m_sentinelEclipses.size();
+}
+
+// 25. Grand Unified Architect 3D Piercing Laser Column
+uint32_t WorldRealizationEngine::ManifestArchitectConsoleBeam3D(float x, float y, float z)
+{
+    std::unique_lock<std::shared_mutex> lock(m_realizationMutex);
+    uint32_t bid = m_nextBeamId++;
+    Active3DArchitectBeam ab;
+    ab.beamId = bid;
+    ab.posX = x; ab.posY = y; ab.posZ = z;
+    ab.remainingTimeSec = 4.0f;
+    m_architectBeams[bid] = ab;
+
+    boost::format fmt("WorldRealizationEngine: Manifested 3D architect console beam #%1% at (%2%, %3%, %4%)");
+    fmt % bid % x % y % z;
+    INFO_LOG(fmt);
+    return bid;
+}
+
+size_t WorldRealizationEngine::GetActiveArchitectBeamCount() const
+{
+    std::shared_lock<std::shared_mutex> lock(m_realizationMutex);
+    return m_architectBeams.size();
+}
+
 // ============================================================================
 // Headless Test Suite 39: 3D World Realization Engine
 // ============================================================================
@@ -1050,5 +1242,30 @@ void RunWorldRealizationTestSuite()
     assert(echId > 0);
     assert(sWorldRealizationEngine.GetActiveTemporalEchoCount() == 1);
 
-    std::cout << "[PASSED] Suite 39: 3D World Realization Engine (65 assertions passed)." << std::endl;
+    // 16. Cycle Portal
+    uint32_t cPtl = sWorldRealizationEngine.ManifestCyclePortal3D(100.0f, 0.0f, 100.0f, 2);
+    assert(cPtl > 0);
+    assert(sWorldRealizationEngine.GetActiveCyclePortalCount() == 1);
+
+    // 17. Quantum Threat Wave
+    uint32_t qTw = sWorldRealizationEngine.ManifestQuantumThreatWave3D(200.0f, 200.0f, 300.0f);
+    assert(qTw > 0);
+    assert(sWorldRealizationEngine.GetActiveThreatWaveCount() == 1);
+
+    // 18. Synthesized Voxel Cover
+    uint32_t sVc = sWorldRealizationEngine.SynthesizeVoxelCover3D(50.0f, 0.0f, 50.0f, 2.5f, 1.8f);
+    assert(sVc > 0);
+    assert(sWorldRealizationEngine.GetActiveVoxelCoverCount() == 1);
+
+    // 19. Sentinel Skybox Eclipse
+    uint32_t sEcl = sWorldRealizationEngine.TriggerSentinelEclipse3D(0.95f, 15.0f);
+    assert(sEcl > 0);
+    assert(sWorldRealizationEngine.GetActiveSentinelEclipseCount() == 1);
+
+    // 20. Architect Console Beam
+    uint32_t aBm = sWorldRealizationEngine.ManifestArchitectConsoleBeam3D(500.0f, 0.0f, 500.0f);
+    assert(aBm > 0);
+    assert(sWorldRealizationEngine.GetActiveArchitectBeamCount() == 1);
+
+    std::cout << "[PASSED] Suite 39: 3D World Realization Engine (75 assertions passed)." << std::endl;
 }

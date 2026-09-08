@@ -117,6 +117,11 @@ void RunCosmicVerticalityTestSuite();
 void RunCollectiveConsciousnessTestSuite();
 void RunMegacityBourseTestSuite();
 void RunTemporalAnomalyTestSuite();
+void RunParallelMatrixTestSuite();
+void RunQuantumEntangledMeshTestSuite();
+void RunSourceVoxelSynthesisTestSuite();
+void RunDeepCoreMeltdownTestSuite();
+void RunArchitectSandboxTestSuite();
 
 static bool g_testUnderworld = false;
 static bool g_testSimulation = false;
@@ -168,6 +173,11 @@ static bool g_testCosmicVerticality = false;
 static bool g_testCollectiveConsciousness = false;
 static bool g_testMegacityBourse = false;
 static bool g_testTemporalAnomaly = false;
+static bool g_testParallelMatrix = false;
+static bool g_testQuantumMesh = false;
+static bool g_testVoxelSynthesis = false;
+static bool g_testDeepCore = false;
+static bool g_testArchitectSandbox = false;
 
 int main(int argc, char* argv[])
 {
@@ -285,6 +295,16 @@ int main(int argc, char* argv[])
             g_testMegacityBourse = true;
         } else if (arg == "--test-temporal-anomaly" || arg == "--test-anomaly-chronos" || arg == "--test-suite51") {
             g_testTemporalAnomaly = true;
+        } else if (arg == "--test-parallel-matrix" || arg == "--test-parallel" || arg == "--test-suite52") {
+            g_testParallelMatrix = true;
+        } else if (arg == "--test-quantum-mesh" || arg == "--test-entangled-mesh" || arg == "--test-suite53") {
+            g_testQuantumMesh = true;
+        } else if (arg == "--test-voxel-synthesis" || arg == "--test-synthesis" || arg == "--test-suite54") {
+            g_testVoxelSynthesis = true;
+        } else if (arg == "--test-deep-core" || arg == "--test-meltdown" || arg == "--test-suite55") {
+            g_testDeepCore = true;
+        } else if (arg == "--test-architect-sandbox" || arg == "--test-architect" || arg == "--test-suite56") {
+            g_testArchitectSandbox = true;
         } else if (arg == "--test-all") {
             g_testFrank = true;
             g_testUnderworld = true;
@@ -337,13 +357,18 @@ int main(int argc, char* argv[])
             g_testCollectiveConsciousness = true;
             g_testMegacityBourse = true;
             g_testTemporalAnomaly = true;
+            g_testParallelMatrix = true;
+            g_testQuantumMesh = true;
+            g_testVoxelSynthesis = true;
+            g_testDeepCore = true;
+            g_testArchitectSandbox = true;
         }
     }
 
 #ifndef UNITTEST
-    if (g_testFrank && g_testUnderworld && g_testSimulation && g_testEmergentAI && g_testPolice && g_testBiography && g_testSocial && g_testFamily && g_testEmergentLife && g_testSLM && g_testMafia && g_testExiles && g_testPossession && g_testFreeway && g_testConstruct && g_testAPU && g_testHovercraft && g_testBackdoor && g_testMobilAve && g_testCorruptCops && g_testOperatorBridge && g_testCyberdeck && g_testMegacityDestruction && g_testMatrixReboot && g_testCastleLore && g_testEpoch4 && g_testNeuralSwarm && g_testStructuralVoxel && g_testNeuralAudio && g_testShardFabric && g_testNeuromorphic && g_testNonEuclideanPortals && g_testSourceTelekinesis && g_testGlobalMesh && g_testGaussianSplats && g_testPhysarumLogistics && g_testBiometricResonance && g_testWebAssemblyGateway && g_testCastleVsAgents && g_testCastleVsPlayers && g_testCastleVsAI && g_testAirspaceConvoy && g_testNeuroCombat && g_testMachineCity && g_testQuantumSuperposition && g_testGenerationalLineage && g_testSubAtomicGrid && g_testCosmicVerticality && g_testCollectiveConsciousness && g_testMegacityBourse && g_testTemporalAnomaly) {
+    if (g_testFrank && g_testUnderworld && g_testSimulation && g_testEmergentAI && g_testPolice && g_testBiography && g_testSocial && g_testFamily && g_testEmergentLife && g_testSLM && g_testMafia && g_testExiles && g_testPossession && g_testFreeway && g_testConstruct && g_testAPU && g_testHovercraft && g_testBackdoor && g_testMobilAve && g_testCorruptCops && g_testOperatorBridge && g_testCyberdeck && g_testMegacityDestruction && g_testMatrixReboot && g_testCastleLore && g_testEpoch4 && g_testNeuralSwarm && g_testStructuralVoxel && g_testNeuralAudio && g_testShardFabric && g_testNeuromorphic && g_testNonEuclideanPortals && g_testSourceTelekinesis && g_testGlobalMesh && g_testGaussianSplats && g_testPhysarumLogistics && g_testBiometricResonance && g_testWebAssemblyGateway && g_testCastleVsAgents && g_testCastleVsPlayers && g_testCastleVsAI && g_testAirspaceConvoy && g_testNeuroCombat && g_testMachineCity && g_testQuantumSuperposition && g_testGenerationalLineage && g_testSubAtomicGrid && g_testCosmicVerticality && g_testCollectiveConsciousness && g_testMegacityBourse && g_testTemporalAnomaly && g_testParallelMatrix && g_testQuantumMesh && g_testVoxelSynthesis && g_testDeepCore && g_testArchitectSandbox) {
         std::cout << "\n============================================================" << std::endl;
-        std::cout << "  RUNNING COMPLETE MEGACITY & TACTICAL TEST SUITE (51 SUITES)" << std::endl;
+        std::cout << "  RUNNING COMPLETE MEGACITY & TACTICAL TEST SUITE (56 SUITES)" << std::endl;
         std::cout << "============================================================\n" << std::endl;
         RunFrankCastleTestSuite();
         RunUnderworldTestSuite();
@@ -396,9 +421,24 @@ int main(int argc, char* argv[])
         RunCollectiveConsciousnessTestSuite();
         RunMegacityBourseTestSuite();
         RunTemporalAnomalyTestSuite();
+        RunParallelMatrixTestSuite();
+        RunQuantumEntangledMeshTestSuite();
+        RunSourceVoxelSynthesisTestSuite();
+        RunDeepCoreMeltdownTestSuite();
+        RunArchitectSandboxTestSuite();
         std::cout << "\n============================================================" << std::endl;
-        std::cout << "  ALL 51 MEGACITY EMERGENCE & TACTICAL SUITES PASSED 100%!  " << std::endl;
+        std::cout << "  ALL 56 MEGACITY EMERGENCE & TACTICAL SUITES PASSED 100%!  " << std::endl;
         std::cout << "============================================================\n" << std::endl;
+    } else if (g_testArchitectSandbox) {
+        RunArchitectSandboxTestSuite();
+    } else if (g_testDeepCore) {
+        RunDeepCoreMeltdownTestSuite();
+    } else if (g_testVoxelSynthesis) {
+        RunSourceVoxelSynthesisTestSuite();
+    } else if (g_testQuantumMesh) {
+        RunQuantumEntangledMeshTestSuite();
+    } else if (g_testParallelMatrix) {
+        RunParallelMatrixTestSuite();
     } else if (g_testTemporalAnomaly) {
         RunTemporalAnomalyTestSuite();
     } else if (g_testMegacityBourse) {

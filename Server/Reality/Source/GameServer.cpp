@@ -89,6 +89,11 @@
 #include "CollectiveConsciousnessEngine.h"
 #include "MegacityBourseEngine.h"
 #include "TemporalAnomalyEngine.h"
+#include "ParallelMatrixEngine.h"
+#include "QuantumEntangledMeshEngine.h"
+#include "SourceVoxelSynthesisEngine.h"
+#include "DeepCoreMeltdownEngine.h"
+#include "ArchitectSandboxEngine.h"
 #include <boost/bind.hpp>
 
 initialiseSingleton( GameServer );
@@ -161,6 +166,11 @@ bool GameServer::Start()
 	sCollectiveConsciousnessEngine.Initialize();
 	sMegacityBourseEngine.Initialize();
 	sTemporalAnomalyEngine.Initialize();
+	sParallelMatrixEngine.Initialize();
+	sQuantumEntangledMeshEngine.Initialize();
+	sSourceVoxelSynthesisEngine.Initialize();
+	sDeepCoreMeltdownEngine.Initialize();
+	sArchitectSandboxEngine.Initialize();
 
 	string Interface = sConfig.GetStringDefault("GameServer.IP", "0.0.0.0");
 	int Port = sConfig.GetIntDefault("GameServer.Port", 10000);
@@ -289,6 +299,11 @@ void GameServer::SimulationLoop()
 			sCollectiveConsciousnessEngine.Update(dtSec);
 			sMegacityBourseEngine.Update(dtSec);
 			sTemporalAnomalyEngine.Update(dtSec);
+			sParallelMatrixEngine.Update(dtSec);
+			sQuantumEntangledMeshEngine.Update(dtSec);
+			sSourceVoxelSynthesisEngine.Update(dtSec);
+			sDeepCoreMeltdownEngine.Update(dtSec);
+			sArchitectSandboxEngine.Update(dtSec);
 
 			// The Anomaly Event (Phase 50)
 			static uint32 lastAnomalyCheckMs = 0;
