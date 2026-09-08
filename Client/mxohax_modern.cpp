@@ -154,10 +154,12 @@ int PASCAL DetourConnect(SOCKET s, const struct sockaddr *name, int namelen) {
     if (name && name->sa_family == AF_INET && namelen >= sizeof(struct sockaddr_in)) {
         struct sockaddr_in* sin = (struct sockaddr_in*)name;
         u_short port = ntohs(sin->sin_port);
+        char* ip = inet_ntoa(sin->sin_addr);
+        Log("[mxohax] connect() called: dest=%s:%u\n", ip ? ip : "unknown", port);
         if (port == 10000 || port == 11000 || port == 80) {
             struct sockaddr_in redirected = *sin;
             redirected.sin_addr.s_addr = inet_addr(g_TargetServerIp);
-            Log("[mxohax] connect() intercepted for port %u -> routing to %s:%u\n", port, g_TargetServerIp, port);
+            Log("[mxohax] connect() redirected for port %u -> routing to %s:%u\n", port, g_TargetServerIp, port);
             return OriginalConnect ? OriginalConnect(s, (struct sockaddr*)&redirected, namelen) : SOCKET_ERROR;
         }
     }
@@ -344,24 +346,8 @@ static bool TryAutoJackIn(DWORD clientBase) {
         }
     }
 
-    // 2. Populate client globals for character identity
-    *reinterpret_cast<DWORD*>(clientBase + 0x00896CCC) = 360; // CharId
-    char* pFirstName = reinterpret_cast<char*>(clientBase + 0x00896D04);
-    char* pLastName  = reinterpret_cast<char*>(clientBase + 0x00896D3C);
-    strncpy_s(pFirstName, 32, "s1acker", 31);
-    strncpy_s(pLastName, 32, "", 31);
-    *reinterpret_cast<DWORD*>(clientBase + 0x00896D74) = 1;   // WorldId
-
-    // 3. Check WorldMgr State and invoke StartWorldLoad if not already loading
-    DWORD pWorldMgrDword = reinterpret_cast<DWORD>(pWorldMgr);
-    DWORD* pState = reinterpret_cast<DWORD*>(pWorldMgrDword + 0x1C);
-    if (pState && *pState < 2) {
-        Log("[mxohax] [AutoJackIn] WorldMgr State was %u -> calling StartWorldLoad (0x10120060)...\n", *pState);
-        typedef void (__thiscall *StartWorldLoad_t)(void* pWorldMgr);
-        StartWorldLoad_t pStartWorldLoad = reinterpret_cast<StartWorldLoad_t>(clientBase + 0x00120060);
-        pStartWorldLoad(pWorldMgr);
-        Log("[mxohax] [AutoJackIn] StartWorldLoad completed! New state: %u\n", *pState);
-    }
+    // 2. Preserving native display globals and world state machine
+    // Native client.dll transitions WorldMgr state to 2 naturally upon character select network response.
 
     // 4. Do NOT force m_inWorld = 1 prematurely here!
     // LithTech's world loader (0x10123B3D) requires m_inWorld == 0 to initialize chunks.
@@ -617,15 +603,8 @@ static void ApplyClientPatches(HMODULE hClient) {
         Log("[mxohax] SUCCESS: client.dll GetPlayerActiveObject hooked at 0x%p! Null dereference guarded.\n", pGetActiveObj);
     }
 
-    // 5. Populate character identity globals in client.dll immediately
-    *reinterpret_cast<DWORD*>(clientBase + 0x00896CCC) = 360; // CharId
-    char* pFirstName = reinterpret_cast<char*>(clientBase + 0x00896D04);
-    char* pLastName  = reinterpret_cast<char*>(clientBase + 0x00896D3C);
-    strncpy_s(pFirstName, 32, "s1acker", 31);
-    strncpy_s(pLastName, 32, "", 31);
-    *reinterpret_cast<DWORD*>(clientBase + 0x00896D74) = 1;   // WorldId
-
-    Log("[mxohax] SUCCESS: Initialized client.dll character identity globals for s1acker (charId=360)\n");
+    // 5. Preserving native render display resolution and mode parameters (0x00896CCC - 0x00896D74)
+    Log("[mxohax] Preserved native client.dll display resolution globals.\n");
 
     // 6. Direct World Load Patches:
     // Patch A: Preserved native client.dll + 0x0012196E (movzx esi, bl) so character selection and auto-login operate naturally.
