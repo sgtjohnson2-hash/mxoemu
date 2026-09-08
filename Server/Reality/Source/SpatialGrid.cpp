@@ -125,11 +125,8 @@ void SpatialGrid::RemoveClient(GameClient* client)
     }
 }
 
-std::vector<GameClient*> SpatialGrid::GetClientsInRadius(float x, float z, uint32 instanceId) const
+void SpatialGrid::GetClientsInRadius(float x, float z, std::vector<GameClient*>& outClients, uint32 instanceId) const
 {
-    std::vector<GameClient*> localClients;
-    localClients.reserve(64);
-    
     int gx, gy;
     WorldToGrid(x, z, gx, gy);
 
@@ -148,12 +145,18 @@ std::vector<GameClient*> SpatialGrid::GetClientsInRadius(float x, float z, uint3
                 auto& cell = nIt->second;
                 std::shared_lock<std::shared_mutex> cellLock(m_cellMutexes[neighborHash % 1024]);
                 for (GameClient* c : cell->clients) {
-                    localClients.push_back(c);
+                    outClients.push_back(c);
                 }
             }
         }
     }
+}
 
+std::vector<GameClient*> SpatialGrid::GetClientsInRadius(float x, float z, uint32 instanceId) const
+{
+    std::vector<GameClient*> localClients;
+    localClients.reserve(64);
+    GetClientsInRadius(x, z, localClients, instanceId);
     return localClients;
 }
 
@@ -224,11 +227,9 @@ std::vector<GameClient*> SpatialGrid::GetClientsNearClient(GameClient* client) c
     return localClients;
 }
 
-std::vector<GameClient*> SpatialGrid::GetClientsInAoI(float x, float z, float maxRadius, uint32 instanceId) const
+void SpatialGrid::GetClientsInAoI(float x, float z, std::vector<GameClient*>& outClients, float maxRadius, uint32 instanceId) const
 {
     float rSq = maxRadius * maxRadius;
-    std::vector<GameClient*> scopedClients;
-    scopedClients.reserve(128);
 
     int gx, gy;
     WorldToGrid(x, z, gx, gy);
@@ -264,7 +265,7 @@ std::vector<GameClient*> SpatialGrid::GetClientsInAoI(float x, float z, float ma
                     float pz = float(po->getPosition().z) - z;
                     if (px * px + pz * pz <= rSq)
                     {
-                        scopedClients.push_back(client);
+                        outClients.push_back(client);
                         m_aoiPassedPackets.fetch_add(1, std::memory_order_relaxed);
                     }
                     else
@@ -275,7 +276,13 @@ std::vector<GameClient*> SpatialGrid::GetClientsInAoI(float x, float z, float ma
             }
         }
     }
+}
 
+std::vector<GameClient*> SpatialGrid::GetClientsInAoI(float x, float z, float maxRadius, uint32 instanceId) const
+{
+    std::vector<GameClient*> scopedClients;
+    scopedClients.reserve(128);
+    GetClientsInAoI(x, z, scopedClients, maxRadius, instanceId);
     return scopedClients;
 }
 

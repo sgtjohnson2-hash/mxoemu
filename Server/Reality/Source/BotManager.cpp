@@ -282,42 +282,21 @@ void BotManager::Update()
     {
         m_lastTrafficTickMS = now;
         
-        // Find active players and spawn a neutral pedestrian near them if they are alone
-        std::vector<PlayerObject*> activePlayers;
-        auto goIds = sObjMgr.getAllGOIds();
-        for (uint32 id : goIds)
-        {
-            PlayerObject* p = sObjMgr.getGOPtr(id);
-            if (p && p->getCharacterUID() < 9000000) // 9000000+ are bot UIDs
-            {
-                activePlayers.push_back(p);
-            }
-        }
-
-        for (PlayerObject* p : activePlayers)
-        {
+        // Find active human players and spawn a neutral pedestrian near them if they are alone
+        sObjMgr.ForEachHumanPlayer([this](PlayerObject* p) {
             // Spawn a random pedestrian nearby (radius 20)
             float rx = p->getPosition().x + ((rand() % 40) - 20);
             float ry = p->getPosition().y;
             float rz = p->getPosition().z + ((rand() % 40) - 20);
             
             SpawnBot(1, rx, ry, rz, 1); // 1 = FACTION_MACHINES/Neutral Pedestrian
-        }
+        });
     }
 
-    // Collect all active players (cache updated every 2 seconds)
+    // Collect all active human players (cache updated every 2 seconds)
     if (now - m_lastPlayerCacheTickMS > 2000)
     {
-        m_activePlayerIds.clear();
-        auto goIds = sObjMgr.getAllGOIds();
-        for (uint32 id : goIds)
-        {
-            PlayerObject* p = sObjMgr.getGOPtr(id);
-            if (p && p->getCharacterUID() < 9000000)
-            {
-                m_activePlayerIds.push_back(id);
-            }
-        }
+        m_activePlayerIds = sObjMgr.getHumanPlayerGOIds();
         m_lastPlayerCacheTickMS = now;
     }
 
@@ -460,14 +439,17 @@ void BotManager::Update()
 void BotManager::PopulateWorld()
 {
     const auto& npcs = sDataLoader.GetAllNPCs();
-    INFO_LOG(format("BotManager: Populating world with %1% authentic NPC spawn points...") % npcs.size());
+    INFO_LOG(format("BotManager: Populating world with %1% authentic NPC spawn points (Ceiling: %2%)...") % npcs.size() % MAX_BOT_POPULATION_CEILING);
 
     std::vector<std::shared_ptr<BotClient>> newBots;
-    newBots.reserve(npcs.size());
+    newBots.reserve(std::min((size_t)MAX_BOT_POPULATION_CEILING, npcs.size()));
 
     int spawnCount = 0;
     for (auto it = npcs.begin(); it != npcs.end(); ++it)
     {
+        if (newBots.size() >= MAX_BOT_POPULATION_CEILING) {
+            break;
+        }
         const NPCTemplate& templ = it->second;
         
         int factionId = FACTION_ZION;

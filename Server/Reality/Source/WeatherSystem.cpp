@@ -117,11 +117,9 @@ void WeatherSystem::Update(uint32 currentMs)
             INFO_LOG("WeatherSystem: Anomaly ended, weather cleared.");
             
             string broadcastMsg = (format("{c:00FF00}[System] Environmental matrix stable.{/c}")).str();
-            auto players = sObjMgr.getAllGOIds();
-            for (auto goId : players) {
-                PlayerObject* p = sObjMgr.getGOPtrSafe(goId);
-                if (p && !p->getClient().isBot()) p->getClient().QueueCommand(std::make_shared<SystemChatMsg>(broadcastMsg));
-            }
+            sObjMgr.ForEachHumanPlayer([&broadcastMsg](PlayerObject* p) {
+                p->getClient().QueueCommand(std::make_shared<SystemChatMsg>(broadcastMsg));
+            });
         }
         return; // Skip normal weather while glitching
     }
@@ -146,13 +144,9 @@ void WeatherSystem::Update(uint32 currentMs)
         // Broadcast hourly ambient notification every 4 in-game hours
         if (curHourInt % 4 == 0) {
             std::string alert = (format("{c:55FF55}[Matrix Clock] %1% - %2%{/c}") % timeStr % periodDesc).str();
-            auto players = sObjMgr.getAllGOIds();
-            for (auto goId : players) {
-                PlayerObject* p = sObjMgr.getGOPtrSafe(goId);
-                if (p && !p->getClient().isBot()) {
-                    p->getClient().QueueCommand(std::make_shared<SystemChatMsg>(alert));
-                }
-            }
+            sObjMgr.ForEachHumanPlayer([&alert](PlayerObject* p) {
+                p->getClient().QueueCommand(std::make_shared<SystemChatMsg>(alert));
+            });
         }
     }
 
@@ -188,32 +182,20 @@ void WeatherSystem::SetWeather(uint32 type, float intensity)
     INFO_LOG(format("WeatherSystem: Weather changed to Type %1%, Intensity %2%") % type % intensity);
 
     // Broadcast weather change to online human players
-    auto players = sObjMgr.getAllGOIds();
-    for (auto goId : players)
-    {
-        PlayerObject* p = sObjMgr.getGOPtrSafe(goId);
-        if (p && !p->getClient().isBot()) {
-            p->getClient().QueueCommand(std::make_shared<SystemChatMsg>(
-                (format("{c:AAAAAA}[Environment] Weather changed. Type: %1%, Intensity: %2%{/c}") % type % intensity).str()
-            ));
-        }
-    }
+    std::string weatherMsg = (format("{c:AAAAAA}[Environment] Weather changed. Type: %1%, Intensity: %2%{/c}") % type % intensity).str();
+    sObjMgr.ForEachHumanPlayer([&weatherMsg](PlayerObject* p) {
+        p->getClient().QueueCommand(std::make_shared<SystemChatMsg>(weatherMsg));
+    });
 }
 
 void WeatherSystem::UpdateSkybox(uint32 currentMs, float greenTint)
 {
     m_skyboxGreenTint = std::clamp(greenTint, 0.0f, 1.0f);
 
-    auto players = sObjMgr.getAllGOIds();
-    for (auto goId : players)
-    {
-        PlayerObject* p = sObjMgr.getGOPtrSafe(goId);
-        if (p && !p->getClient().isBot()) {
-            p->getClient().QueueCommand(std::make_shared<SystemChatMsg>(
-                (format("{c:00FF00}[Environment] Skybox tint adjusted to %1%{/c}") % m_skyboxGreenTint).str()
-            ));
-        }
-    }
+    std::string skyboxMsg = (format("{c:00FF00}[Environment] Skybox tint adjusted to %1%{/c}") % m_skyboxGreenTint).str();
+    sObjMgr.ForEachHumanPlayer([&skyboxMsg](PlayerObject* p) {
+        p->getClient().QueueCommand(std::make_shared<SystemChatMsg>(skyboxMsg));
+    });
 }
 
 void WeatherSystem::TriggerGlitchAnomaly(float intensity, uint32 durationMs)
@@ -224,10 +206,8 @@ void WeatherSystem::TriggerGlitchAnomaly(float intensity, uint32 durationMs)
     m_skyboxGreenTint = intensity;
     
     string broadcastMsg = (format("{c:00FF00}[System] Massive anomaly detected in the environment matrix. Code rain expected.{/c}")).str();
-    auto players = sObjMgr.getAllGOIds();
-    for (auto goId : players) {
-        PlayerObject* p = sObjMgr.getGOPtrSafe(goId);
-        if (p && !p->getClient().isBot()) p->getClient().QueueCommand(std::make_shared<SystemChatMsg>(broadcastMsg));
-    }
+    sObjMgr.ForEachHumanPlayer([&broadcastMsg](PlayerObject* p) {
+        p->getClient().QueueCommand(std::make_shared<SystemChatMsg>(broadcastMsg));
+    });
     INFO_LOG(format("WeatherSystem: Triggered Glitch Anomaly with intensity %1% for %2%ms") % intensity % durationMs);
 }

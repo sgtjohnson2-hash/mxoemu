@@ -25,6 +25,8 @@
 
 #include "Common.h"
 #include <future>
+#include <condition_variable>
+#include <functional>
 #include "GameServer.h"
 #include "GameClient.h"
 #include "MarginServer.h"
@@ -209,11 +211,87 @@ void GameServer::Loop(void)
 	m_udpHandler.Select(0,4000); //4ms
 }
 
+namespace {
+class EnginePipelineWorker {
+public:
+    EnginePipelineWorker() {
+        m_running = true;
+        m_busy = false;
+        m_worker = std::thread([this]() {
+            while (m_running) {
+                std::function<void()> task;
+                {
+                    std::unique_lock<std::mutex> lock(m_mutex);
+                    m_cvWork.wait(lock, [this]() { return !m_running || m_hasWork; });
+                    if (!m_running) break;
+                    task = std::move(m_currentTask);
+                    m_hasWork = false;
+                }
+                if (task) {
+                    task();
+                }
+                {
+                    std::unique_lock<std::mutex> lock(m_mutex);
+                    m_busy = false;
+                }
+                m_cvDone.notify_one();
+            }
+        });
+    }
+
+    ~EnginePipelineWorker() {
+        Stop();
+    }
+
+    void Dispatch(std::function<void()> task) {
+        {
+            std::unique_lock<std::mutex> lock(m_mutex);
+            m_currentTask = std::move(task);
+            m_hasWork = true;
+            m_busy = true;
+        }
+        m_cvWork.notify_one();
+    }
+
+    void Wait() {
+        std::unique_lock<std::mutex> lock(m_mutex);
+        m_cvDone.wait(lock, [this]() { return !m_busy; });
+    }
+
+    void Stop() {
+        if (m_running) {
+            {
+                std::unique_lock<std::mutex> lock(m_mutex);
+                m_running = false;
+                m_hasWork = true;
+            }
+            m_cvWork.notify_all();
+            if (m_worker.joinable()) {
+                m_worker.join();
+            }
+        }
+    }
+
+private:
+    std::thread m_worker;
+    std::mutex m_mutex;
+    std::condition_variable m_cvWork;
+    std::condition_variable m_cvDone;
+    std::function<void()> m_currentTask;
+    bool m_running{false};
+    bool m_hasWork{false};
+    bool m_busy{false};
+};
+}
+
 void GameServer::SimulationLoop()
 {
     INFO_LOG("DEBUG_TRACER: SimulationLoop started");
 	uint32 m_lastSimMs = getMSTime();
 	constexpr uint32 TARGET_TICK_MS = 33; // 30 TPS target (~33.3ms)
+
+	EnginePipelineWorker workerEnv;
+	EnginePipelineWorker workerNarrative;
 
 	while (m_runSimulation)
 	{
@@ -224,14 +302,14 @@ void GameServer::SimulationLoop()
 			if (aiDeltaMs == 0) aiDeltaMs = 1;
 			m_lastSimMs = currentMs;
 
-			// Phase 2: Parallelized Multithreaded Engine Pipeline
-			auto futureEnv = std::async(std::launch::async, [currentMs]() {
+			// Phase 2: Parallelized Multithreaded Engine Pipeline via Persistent Workers
+			workerEnv.Dispatch([currentMs]() {
 				try { sAdaptiveMusicSystem.update(currentMs); } catch (const std::exception& e) { ERROR_LOG(format("SimulationLoop: sAdaptiveMusicSystem caught %1%") % e.what()); }
 				try { sWeatherSys.Update(currentMs); } catch (const std::exception& e) { ERROR_LOG(format("SimulationLoop: sWeatherSys caught %1%") % e.what()); }
 				try { sVehicleSys.Tick(currentMs); } catch (const std::exception& e) { ERROR_LOG(format("SimulationLoop: sVehicleSys caught %1%") % e.what()); }
 			});
 
-			auto futureNarrative = std::async(std::launch::async, [aiDeltaMs]() {
+			workerNarrative.Dispatch([aiDeltaMs]() {
 				try { sMissionSys.Update(aiDeltaMs); } catch (const std::exception& e) { ERROR_LOG(format("SimulationLoop: sMissionSys caught %1%") % e.what()); }
 				try { sLogisticsMgr.Update(aiDeltaMs); } catch (const std::exception& e) { ERROR_LOG(format("SimulationLoop: sLogisticsMgr caught %1%") % e.what()); }
 				try { sWorldDirector.Update(aiDeltaMs); } catch (const std::exception& e) { ERROR_LOG(format("SimulationLoop: sWorldDirector caught %1%") % e.what()); }
@@ -265,8 +343,8 @@ void GameServer::SimulationLoop()
 			try { sMegacityDestructionEngine.UpdateSimulation(aiDeltaMs / 1000.0f); } catch (const std::exception& e) { ERROR_LOG(format("SimulationLoop: sMegacityDestructionEngine caught %1%") % e.what()); }
 			try { sMatrixRebootEngine.UpdateSimulation(aiDeltaMs / 1000.0f); } catch (const std::exception& e) { ERROR_LOG(format("SimulationLoop: sMatrixRebootEngine caught %1%") % e.what()); }
 
-			futureEnv.get();
-			futureNarrative.get();
+			workerEnv.Wait();
+			workerNarrative.Wait();
 
 			static uint32 lastMetricLogMs = 0;
 			static uint32 tickCount = 0;

@@ -58,12 +58,22 @@ void RunEpochIVMasteryTestSuite()
     // Fast human player registration
     uint32 mockHumanGoid = 0x9999;
     testObjMgr.RegisterHumanPlayerGOId(mockHumanGoid);
+    testObjMgr.RegisterHumanPlayerGOId(mockHumanGoid); // Duplicate registration should be idempotent
     auto humanIdsAfterHuman = testObjMgr.getHumanPlayerGOIds();
-    bool humanFound = false;
+    size_t countFound = 0;
     for (uint32 id : humanIdsAfterHuman) {
-        if (id == mockHumanGoid) humanFound = true;
+        if (id == mockHumanGoid) countFound++;
     }
-    TEST_ASSERT(humanFound, "Human player registered in fast human player list");
+    TEST_ASSERT(countFound == 1, "Human player registered in fast human player list (idempotent, no duplicates)");
+
+    // Test UnregisterHumanPlayerGOId
+    testObjMgr.UnregisterHumanPlayerGOId(mockHumanGoid);
+    auto humanIdsAfterUnreg = testObjMgr.getHumanPlayerGOIds();
+    bool unregStillPresent = false;
+    for (uint32 id : humanIdsAfterUnreg) {
+        if (id == mockHumanGoid) unregStillPresent = true;
+    }
+    TEST_ASSERT(!unregStillPresent, "Human player unregistered via UnregisterHumanPlayerGOId");
 
     // Also register the active bot object into human registry to test ForEachHumanPlayer iterator
     testObjMgr.RegisterHumanPlayerGOId(botGoid);
@@ -90,8 +100,19 @@ void RunEpochIVMasteryTestSuite()
     auto clientsInRadius = sSpatialGrid.GetClientsInRadius(0.0f, 0.0f, 150.0f, 0u);
     TEST_ASSERT(true, "SpatialGrid GetClientsInRadius executed with single directory lock");
 
+    // Zero-allocation buffer overload
+    std::vector<GameClient*> preallocatedClients;
+    preallocatedClients.reserve(64);
+    sSpatialGrid.GetClientsInRadius(0.0f, 0.0f, preallocatedClients, 0u);
+    TEST_ASSERT(true, "SpatialGrid GetClientsInRadius executed with reusable pre-allocated buffer");
+
     auto aoiClients = sSpatialGrid.GetClientsInAoI(0.0f, 0.0f, 25000.0f, 0);
     TEST_ASSERT(true, "SpatialGrid GetClientsInAoI executed with pre-reserved buffer");
+
+    std::vector<GameClient*> preallocatedAoI;
+    preallocatedAoI.reserve(128);
+    sSpatialGrid.GetClientsInAoI(0.0f, 0.0f, preallocatedAoI, 25000.0f, 0);
+    TEST_ASSERT(true, "SpatialGrid GetClientsInAoI executed with reusable pre-allocated buffer");
 
     bool withinAoI = sSpatialGrid.IsWithinAoI(100.0f, 100.0f, 200.0f, 200.0f, 500.0f);
     TEST_ASSERT(withinAoI, "Distance math confirms points within 500m AoI boundary");
@@ -118,6 +139,9 @@ void RunEpochIVMasteryTestSuite()
     TEST_ASSERT(!badTuned && badMorse == "[STATIC]", "Off-frequency tuning receives ambient RF static");
 
     std::string lootReport;
+    bool lootedZeroId = sFrankCastleMgr.LootArmsBazaarCrate(101, 0, "1984-PUNISHER", lootReport);
+    TEST_ASSERT(!lootedZeroId && lootReport.find("Invalid") != std::string::npos, "Invalid operative ID (0) denied access to arms crate");
+
     bool lootedWrongCode = sFrankCastleMgr.LootArmsBazaarCrate(101, 8802, "WRONG-CODE", lootReport);
     TEST_ASSERT(!lootedWrongCode && lootReport.find("DENIED") != std::string::npos, "Incorrect crypto passcode denied access to arms crate");
 
@@ -136,6 +160,12 @@ void RunEpochIVMasteryTestSuite()
     const auto* fort2 = sFrankCastleMgr.GetFortification(2);
     TEST_ASSERT(fort2 && fort2->steelDoorsReinforced && fort2->cctvTelemetryActive && fort2->tripwireShotgunTrapArmed,
                 "Safehouse 2 fortification telemetry verified fully armed");
+
+    // Vetted ally bypass test
+    sFrankCastleMgr.AdjustPlayerTrust(8802, "VettedAlly", 850, "Perimeter security");
+    uint32 allyDmg = 0;
+    bool allyTriggered = sFrankCastleMgr.TriggerFortificationDefense(2, 8802, allyDmg);
+    TEST_ASSERT(!allyTriggered && allyDmg == 0, "Vetted ally permitted safe entry without triggering shotgun tripwire");
 
     uint32 trapDmg = 0;
     bool trapTriggered = sFrankCastleMgr.TriggerFortificationDefense(2, 9999, trapDmg);
@@ -207,6 +237,9 @@ void RunEpochIVMasteryTestSuite()
 
     bool traverseExit = sBackdoorNetwork.TraverseInfiniteHallway(1, 0, nextSegment, exitPos);
     TEST_ASSERT(traverseExit && nextSegment == 0 && exitPos.x == 99640.0f, "Door 0 leads back to Megacity exit hardline");
+
+    bool traverseInvalidDoor = sBackdoorNetwork.TraverseInfiniteHallway(0, 99, nextSegment, exitPos);
+    TEST_ASSERT(!traverseInvalidDoor, "Out-of-bounds door index safely rejected by infinite hallway");
 
     std::cout << "\n------------------------------------------------------------" << std::endl;
     std::cout << "  EPOCH IV ENGINE MASTERY & REALISM TEST SUITE COMPLETE" << std::endl;

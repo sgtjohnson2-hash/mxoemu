@@ -438,6 +438,9 @@ bool BackdoorNetwork::TraverseInfiniteHallway(uint32 currentSegment, uint32 door
     }
 
     const auto& seg = m_infiniteSegments[currentSegment];
+    if (doorChoice >= seg.doorCount) {
+        return false;
+    }
     m_totalTransits++;
 
     if (doorChoice == 0) {

@@ -3088,6 +3088,10 @@ ArmsBazaarCrate* FrankCastleManager::GetArmsBazaar(uint32 crateId)
 bool FrankCastleManager::LootArmsBazaarCrate(uint32 crateId, uint32 playerGoId, const std::string& code, std::string& outLootReport)
 {
     std::lock_guard<std::recursive_mutex> lock(m_mutex);
+    if (playerGoId == 0) {
+        outLootReport = "ERROR: Invalid operative identifier.";
+        return false;
+    }
     auto it = m_armsBazaars.find(crateId);
     if (it == m_armsBazaars.end()) {
         outLootReport = "ERROR: Crate not found.";
@@ -3170,6 +3174,11 @@ bool FrankCastleManager::TriggerFortificationDefense(uint32 safehouseId, uint32 
     auto it = m_fortifications.find(safehouseId);
     if (it == m_fortifications.end()) return false;
     outDamageDealt = 0;
+
+    // Do not trigger defensive traps on Frank Castle or vetted allies
+    if (intruderGoId == m_frankGoId) return false;
+    if (intruderGoId != 0 && GetPlayerTrustTier(intruderGoId) >= TRUST_TIER_3_VETTED_ALLY) return false;
+
     if (it->second.tripwireShotgunTrapArmed) {
         outDamageDealt = 450; // 12-gauge flechette blast
         it->second.intrudersRepelled++;

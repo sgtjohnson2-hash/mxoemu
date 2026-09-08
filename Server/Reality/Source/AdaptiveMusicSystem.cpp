@@ -25,6 +25,7 @@ void AdaptiveMusicSystem::update(uint32 currentMs)
     if (currentMs - m_lastTickMs < 1000) return; // Tick every 1s
     m_lastTickMs = currentMs;
 
+    std::lock_guard<std::mutex> lock(m_musicMutex);
     for (auto it = m_playerMusicStates.begin(); it != m_playerMusicStates.end(); ++it)
     {
         PlayerMusicState& state = it->second;
@@ -68,6 +69,7 @@ void AdaptiveMusicSystem::update(uint32 currentMs)
 
 void AdaptiveMusicSystem::registerThreat(uint32 playerGoId, uint32 threatAmount, uint32 currentMs)
 {
+    std::lock_guard<std::mutex> lock(m_musicMutex);
     PlayerMusicState& state = m_playerMusicStates[playerGoId];
     state.threatLevel += threatAmount;
     state.lastUpdateMs = currentMs;
@@ -84,6 +86,7 @@ void AdaptiveMusicSystem::registerThreat(uint32 playerGoId, uint32 threatAmount,
 
 void AdaptiveMusicSystem::clearThreat(uint32 playerGoId, uint32 currentMs)
 {
+    std::lock_guard<std::mutex> lock(m_musicMutex);
     if (m_playerMusicStates.find(playerGoId) != m_playerMusicStates.end())
     {
         m_playerMusicStates[playerGoId].threatLevel = 0;

@@ -31,6 +31,7 @@ public:
 
     // Retrieves all clients in the local cell and the 8 adjacent neighboring cells
     std::vector<GameClient*> GetClientsInRadius(float x, float z, uint32 instanceId = 0) const;
+    void GetClientsInRadius(float x, float z, std::vector<GameClient*>& outClients, uint32 instanceId = 0) const;
     
     // Retrieves all clients near another client based on their cached cell
     std::vector<GameClient*> GetClientsNearClient(GameClient* client) const;
@@ -42,6 +43,7 @@ public:
     // Phase 7: Area-of-Interest (AoI) Network Scoping (<250m radius filtering)
     static constexpr float AOI_RADIUS_WORLD_UNITS = 25000.0f; // 250m
     std::vector<GameClient*> GetClientsInAoI(float x, float z, float maxRadius = 25000.0f, uint32 instanceId = 0) const;
+    void GetClientsInAoI(float x, float z, std::vector<GameClient*>& outClients, float maxRadius = 25000.0f, uint32 instanceId = 0) const;
     bool IsWithinAoI(float x1, float z1, float x2, float z2, float maxRadius = 25000.0f) const;
     void RecordAoIScopedPacket(bool passed) const;
     void GetAoIScopingStats(uint64& outCulled, uint64& outPassed) const;

@@ -5,6 +5,7 @@
 #include "Singleton.h"
 #include <map>
 #include <string>
+#include <mutex>
 
 enum MusicState
 {
@@ -39,6 +40,7 @@ public:
 private:
     void sendMusicCommand(uint32 playerGoId, const std::string& family, const std::string& stemType, int index = -1);
     
+    mutable std::mutex m_musicMutex;
     std::map<uint32, PlayerMusicState> m_playerMusicStates;
     uint32 m_lastTickMs;
 };

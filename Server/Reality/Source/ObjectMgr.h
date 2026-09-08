@@ -77,7 +77,18 @@ public:
 	void RegisterHumanPlayerGOId(uint32 goId)
 	{
 		std::unique_lock<std::shared_mutex> lock(m_objMutex);
-		m_humanPlayerGoIds.push_back(goId);
+		if (std::find(m_humanPlayerGoIds.begin(), m_humanPlayerGoIds.end(), goId) == m_humanPlayerGoIds.end()) {
+			m_humanPlayerGoIds.push_back(goId);
+		}
+	}
+
+	void UnregisterHumanPlayerGOId(uint32 goId)
+	{
+		std::unique_lock<std::shared_mutex> lock(m_objMutex);
+		auto it = std::find(m_humanPlayerGoIds.begin(), m_humanPlayerGoIds.end(), goId);
+		if (it != m_humanPlayerGoIds.end()) {
+			m_humanPlayerGoIds.erase(it);
+		}
 	}
 
 	template<typename Func>
@@ -86,6 +97,7 @@ public:
 		std::vector<std::shared_ptr<PlayerObject>> humans;
 		{
 			std::shared_lock<std::shared_mutex> lock(m_objMutex);
+			if (m_humanPlayerGoIds.empty()) return;
 			humans.reserve(m_humanPlayerGoIds.size());
 			for (uint32 id : m_humanPlayerGoIds)
 			{
