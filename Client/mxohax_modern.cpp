@@ -55,6 +55,11 @@ static LONG WINAPI CrashHandler(PEXCEPTION_POINTERS pExc) {
                 ctx->Eip = static_cast<DWORD>(clientBase + 0x0016D4DD);
                 return EXCEPTION_CONTINUE_EXECUTION;
             }
+            if (clientBase && (uintptr_t)addr >= clientBase + 0x00162270 && (uintptr_t)addr <= clientBase + 0x001622DC && ctx) {
+                Log("[mxohax] Recovering from crash at client.dll + 0x%08X: jumping to epilogue (0x%p)\n", (uintptr_t)addr - clientBase, (void*)(clientBase + 0x001622DC));
+                ctx->Eip = static_cast<DWORD>(clientBase + 0x001622DC);
+                return EXCEPTION_CONTINUE_EXECUTION;
+            }
         }
     }
     return EXCEPTION_CONTINUE_SEARCH;
@@ -794,6 +799,17 @@ static void ApplyClientPatches(HMODULE hClient) {
         VirtualProtect(pVecPatch, 3, oldProt, &oldProt);
         FlushInstructionCache(GetCurrentProcess(), pVecPatch, 3);
         Log("[mxohax] SUCCESS: Patched client.dll + 0x0016D410 (ret 8) to guard against vector corruption!\n");
+    }
+
+    // Patch F: 0x00162270: 3 bytes safe vector save bypass (ret 4: C2 04 00)
+    // Guards against uninitialized/corrupted vector serialization crash at client.dll + 0x001622AE
+    LPVOID pSavePatch = reinterpret_cast<LPVOID>(clientBase + 0x00162270);
+    if (VirtualProtect(pSavePatch, 3, PAGE_EXECUTE_READWRITE, &oldProt)) {
+        BYTE patch[3] = { 0xC2, 0x04, 0x00 }; // ret 4
+        memcpy(pSavePatch, patch, 3);
+        VirtualProtect(pSavePatch, 3, oldProt, &oldProt);
+        FlushInstructionCache(GetCurrentProcess(), pSavePatch, 3);
+        Log("[mxohax] SUCCESS: Patched client.dll + 0x00162270 (ret 4) to guard against vector save crash!\n");
     }
 }
 
