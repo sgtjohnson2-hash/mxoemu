@@ -75,6 +75,11 @@ static LONG WINAPI CrashHandler(PEXCEPTION_POINTERS pExc) {
                 ctx->Eip = static_cast<DWORD>(clientBase + 0x001622DC);
                 return EXCEPTION_CONTINUE_EXECUTION;
             }
+            if (clientBase && (uintptr_t)addr == clientBase + 0x000A20E6 && ctx) {
+                Log("[mxohax] Recovering from null deref at client.dll + 0x000A20E6 ([pWorldMgr+0xCC]==NULL). Jumping to safe return (0x%p)\n", (void*)(clientBase + 0x000A2213));
+                ctx->Eip = static_cast<DWORD>(clientBase + 0x000A2213);
+                return EXCEPTION_CONTINUE_EXECUTION;
+            }
             // Guard against memcpy crash in 0x10255710 (client.dll + 0x0025581B)
             if (ctx && ctx->Esp) {
                 DWORD* pStack = reinterpret_cast<DWORD*>(ctx->Esp);
@@ -768,6 +773,23 @@ __declspec(naked) void Hook_Abb90Check() {
     }
 }
 
+static uintptr_t g_retWmNormal = 0;
+static uintptr_t g_retWmSkip = 0;
+
+__declspec(naked) void Hook_WorldMgrCCCheck() {
+    __asm {
+        mov cl, byte ptr [eax + 0xc8]
+        test cl, cl
+        je _wm_skip
+        cmp dword ptr [eax + 0xcc], 0
+        je _wm_skip
+        jmp dword ptr [g_retWmNormal]
+
+    _wm_skip:
+        jmp dword ptr [g_retWmSkip]
+    }
+}
+
 typedef int (__thiscall *ParseSubpacket_t)(void* pThis, const byte* pData, int len);
 static ParseSubpacket_t OriginalParseSubpacket = nullptr;
 
@@ -925,6 +947,23 @@ static void ApplyClientPatches(HMODULE hClient) {
         VirtualProtect(pSub0cFail2, 2, oldProt, &oldProt);
         FlushInstructionCache(GetCurrentProcess(), pSub0cFail2, 2);
         Log("[mxohax] SUCCESS: Patched client.dll + 0x0022D215 (mov al, 1) to prevent subpacket 0x0C abort!\n");
+    }
+
+    // Patch I: 0x000A20C6: 14 bytes safe WorldMgr+0xCC null check
+    // Guards against crash 0xC0000005 at client.dll + 0x000A20E6 when [pWorldMgr + 0xCC] is null
+    g_retWmNormal = clientBase + 0x000A20D4;
+    g_retWmSkip = clientBase + 0x000A2213;
+
+    LPVOID pWmPatch = reinterpret_cast<LPVOID>(clientBase + 0x000A20C6);
+    if (VirtualProtect(pWmPatch, 14, PAGE_EXECUTE_READWRITE, &oldProt)) {
+        BYTE patch[14];
+        patch[0] = 0xE9;
+        *reinterpret_cast<DWORD*>(&patch[1]) = static_cast<DWORD>(reinterpret_cast<uintptr_t>(&Hook_WorldMgrCCCheck) - (reinterpret_cast<uintptr_t>(pWmPatch) + 5));
+        memset(&patch[5], 0x90, 9);
+        memcpy(pWmPatch, patch, 14);
+        VirtualProtect(pWmPatch, 14, oldProt, &oldProt);
+        FlushInstructionCache(GetCurrentProcess(), pWmPatch, 14);
+        Log("[mxohax] SUCCESS: Patched client.dll + 0x000A20C6 for safe WorldMgr+0xCC check!\n");
     }
 }
 
