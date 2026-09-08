@@ -356,13 +356,9 @@ static bool TryAutoJackIn(DWORD clientBase) {
         Log("[mxohax] [AutoJackIn] StartWorldLoad completed! New state: %u\n", *pState);
     }
 
-    // 4. Activate inWorld simulation loop (CClientShell::m_inWorld at +0x20)
-    uintptr_t shellAddr = clientBase + 0x00896A38;
-    BYTE* pInWorld = reinterpret_cast<BYTE*>(shellAddr + 0x20);
-    if (pInWorld && *pInWorld != 1) {
-        *pInWorld = 1;
-        Log("[mxohax] [AutoJackIn] CClientShell::m_inWorld successfully set to 1! 3D simulation active.\n");
-    }
+    // 4. Do NOT force m_inWorld = 1 prematurely here!
+    // LithTech's world loader (0x10123B3D) requires m_inWorld == 0 to initialize chunks.
+    // m_inWorld will be set to 1 natively by client.dll at 0x10121F4B once the 3D scene is ready.
 
     // 5. Transition matrix.exe Margin State Machine to State 9 (Connecting) -> State 5 (In-World)
     void* pMarginMgr = *reinterpret_cast<void**>(0x004B3A44);
@@ -396,6 +392,17 @@ static void __fastcall DetourFrameTick(void* pThis, void* /*edx*/) {
     DWORD pShell = clientBase + 0x00896A38;
     BYTE inWorld = *reinterpret_cast<BYTE*>(pShell + 0x20);
     static BYTE s_lastInWorld = 0xFF;
+    // Log WorldMgr state transitions
+    void* pWorldMgr = *reinterpret_cast<void**>(clientBase + 0x0089DD68);
+    if (pWorldMgr) {
+        DWORD* pState = reinterpret_cast<DWORD*>(reinterpret_cast<DWORD>(pWorldMgr) + 0x1C);
+        static DWORD s_lastState = 0xFFFFFFFF;
+        if (pState && *pState != s_lastState) {
+            s_lastState = *pState;
+            Log("[mxohax] *** WorldMgr State transitioned to %u ***\n", s_lastState);
+        }
+    }
+
     if (inWorld != s_lastInWorld) {
         s_lastInWorld = inWorld;
         Log("[mxohax] *** CClientShell::m_inWorld changed to %u! (CClientShell=0x%p) ***\n", inWorld, (void*)pShell);
@@ -403,6 +410,12 @@ static void __fastcall DetourFrameTick(void* pThis, void* /*edx*/) {
             Log("[mxohax] ******************************************************\n");
             Log("[mxohax] *** IN-WORLD CONFIRMED: 3D SIMULATION LOOP ACTIVE! ***\n");
             Log("[mxohax] ******************************************************\n");
+            void* pUI = *reinterpret_cast<void**>(clientBase + 0x00898C54);
+            if (pUI && OriginalHideControl) {
+                OriginalHideControl(pUI, 0x04);
+                OriginalHideControl(pUI, 0x57);
+                Log("[mxohax] Dismissed loading screens 0x04 and 0x57 upon entering world!\n");
+            }
         }
     }
 
@@ -635,16 +648,8 @@ static void ApplyClientPatches(HMODULE hClient) {
         Log("[mxohax] SUCCESS: Patched client.dll + 0x0012196E to auto-select operative #0 (31 F6 90)!\n");
     }
 
-    // Patch B: 0x00121AE6: EB 09 90 90 90 90 90 90 90 90 90 (jmp 0x10121af1; 9x nop)
-    // Converts early ret 0x14 into direct jump to StartWorldLoad (0x10120060) and background asset streamer (0x101170c0)!
-    LPVOID pWorldLoadJumpPatch = reinterpret_cast<LPVOID>(clientBase + 0x00121AE6);
-    if (VirtualProtect(pWorldLoadJumpPatch, 11, PAGE_EXECUTE_READWRITE, &oldProt)) {
-        const BYTE patchBytes[11] = { 0xEB, 0x09, 0x90, 0x90, 0x90, 0x90, 0x90, 0x90, 0x90, 0x90, 0x90 };
-        memcpy(pWorldLoadJumpPatch, patchBytes, 11);
-        VirtualProtect(pWorldLoadJumpPatch, 11, oldProt, &oldProt);
-        FlushInstructionCache(GetCurrentProcess(), pWorldLoadJumpPatch, 11);
-        Log("[mxohax] SUCCESS: Patched client.dll + 0x00121AE6 to jump directly to StartWorldLoad (EB 09 + 9 NOPs)!\n");
-    }
+    // Patch B: Removed. Leaving native clean ret 0x14 at 0x10121AE6 so the function epilogue executes cleanly.
+    Log("[mxohax] Preserved native clean character load epilogue at client.dll + 0x00121AE6.\n");
 
     // Patch C: 0x0012B3EE: 16 bytes safe camera check
     g_pEdf8Addr = clientBase + 0x0089EDF8;
