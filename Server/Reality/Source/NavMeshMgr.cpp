@@ -135,6 +135,13 @@ std::vector<std::pair<float, float>> NavMeshMgr::FindPath(float startX, float st
         return path;
     }
 
+    float dx = targetX - startX;
+    float dz = targetZ - startZ;
+    if (dx * dx + dz * dz < 100.0f) {
+        path.push_back({targetX, targetZ});
+        return path;
+    }
+
     // Check if line between start and target intersects static city buildings
     if (!sStaticObjMgr.CheckLineOfSight(startX, 0.0f, startZ, targetX, 0.0f, targetZ))
     {

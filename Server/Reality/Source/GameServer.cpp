@@ -309,42 +309,54 @@ void GameServer::SimulationLoop()
 				try { sVehicleSys.Tick(currentMs); } catch (const std::exception& e) { ERROR_LOG(format("SimulationLoop: sVehicleSys caught %1%") % e.what()); }
 			});
 
-			workerNarrative.Dispatch([aiDeltaMs]() {
-				try { sMissionSys.Update(aiDeltaMs); } catch (const std::exception& e) { ERROR_LOG(format("SimulationLoop: sMissionSys caught %1%") % e.what()); }
-				try { sLogisticsMgr.Update(aiDeltaMs); } catch (const std::exception& e) { ERROR_LOG(format("SimulationLoop: sLogisticsMgr caught %1%") % e.what()); }
-				try { sWorldDirector.Update(aiDeltaMs); } catch (const std::exception& e) { ERROR_LOG(format("SimulationLoop: sWorldDirector caught %1%") % e.what()); }
-				try { sBioEngine.Update(aiDeltaMs); } catch (const std::exception& e) { ERROR_LOG(format("SimulationLoop: sBioEngine caught %1%") % e.what()); }
-				try { sSocialEngine.Update(aiDeltaMs); } catch (const std::exception& e) { ERROR_LOG(format("SimulationLoop: sSocialEngine caught %1%") % e.what()); }
-				try { sFamilyDreamsEngine.Update(aiDeltaMs); } catch (const std::exception& e) { ERROR_LOG(format("SimulationLoop: sFamilyDreamsEngine caught %1%") % e.what()); }
-				try { sEmergentLifeEngine.Update(aiDeltaMs); } catch (const std::exception& e) { ERROR_LOG(format("SimulationLoop: sEmergentLifeEngine caught %1%") % e.what()); }
-				try { sSLMDialogueEngine.Update(aiDeltaMs); } catch (const std::exception& e) { ERROR_LOG(format("SimulationLoop: sSLMDialogueEngine caught %1%") % e.what()); }
-			});
+			static uint32 macroAiAccumulatorMs = 0;
+			macroAiAccumulatorMs += aiDeltaMs;
+			bool doMacroTick = (macroAiAccumulatorMs >= 100);
+			uint32 macroDeltaMs = macroAiAccumulatorMs;
+			if (doMacroTick) {
+				macroAiAccumulatorMs = 0;
+				workerNarrative.Dispatch([macroDeltaMs]() {
+					try { sMissionSys.Update(macroDeltaMs); } catch (const std::exception& e) { ERROR_LOG(format("SimulationLoop: sMissionSys caught %1%") % e.what()); }
+					try { sLogisticsMgr.Update(macroDeltaMs); } catch (const std::exception& e) { ERROR_LOG(format("SimulationLoop: sLogisticsMgr caught %1%") % e.what()); }
+					try { sWorldDirector.Update(macroDeltaMs); } catch (const std::exception& e) { ERROR_LOG(format("SimulationLoop: sWorldDirector caught %1%") % e.what()); }
+					try { sBioEngine.Update(macroDeltaMs); } catch (const std::exception& e) { ERROR_LOG(format("SimulationLoop: sBioEngine caught %1%") % e.what()); }
+					try { sSocialEngine.Update(macroDeltaMs); } catch (const std::exception& e) { ERROR_LOG(format("SimulationLoop: sSocialEngine caught %1%") % e.what()); }
+					try { sFamilyDreamsEngine.Update(macroDeltaMs); } catch (const std::exception& e) { ERROR_LOG(format("SimulationLoop: sFamilyDreamsEngine caught %1%") % e.what()); }
+					try { sEmergentLifeEngine.Update(macroDeltaMs); } catch (const std::exception& e) { ERROR_LOG(format("SimulationLoop: sEmergentLifeEngine caught %1%") % e.what()); }
+					try { sSLMDialogueEngine.Update(macroDeltaMs); } catch (const std::exception& e) { ERROR_LOG(format("SimulationLoop: sSLMDialogueEngine caught %1%") % e.what()); }
+				});
+			}
 
-			// Main thread ticks Combat, BotMgr, Faction Warfare, Law & Underworld
+			// Main thread ticks real-time Combat, Bot physical movement, Faction Warfare, Frank Castle
 			try { sCombatSys.Update(); } catch (const std::exception& e) { ERROR_LOG(format("SimulationLoop: sCombatSys caught %1%") % e.what()); }
 			try { sBotMgr.Update(); } catch (const std::exception& e) { ERROR_LOG(format("SimulationLoop: sBotMgr caught %1%") % e.what()); }
 			try { sFactionWarMgr.update(aiDeltaMs); } catch (const std::exception& e) { ERROR_LOG(format("SimulationLoop: sFactionWarMgr caught %1%") % e.what()); }
 			try { sStatusEffectManager.Update(aiDeltaMs / 1000.0f); } catch (const std::exception& e) { ERROR_LOG(format("SimulationLoop: sStatusEffectManager caught %1%") % e.what()); }
-			try { sSensoryPerception.Update(aiDeltaMs / 1000.0f, currentMs); } catch (const std::exception& e) { ERROR_LOG(format("SimulationLoop: sSensoryPerception caught %1%") % e.what()); }
-			try { sSentientCharacters.Update(aiDeltaMs / 1000.0f); } catch (const std::exception& e) { ERROR_LOG(format("SimulationLoop: sSentientCharacters caught %1%") % e.what()); }
-			try { sRadioDispatchSystem.Update(aiDeltaMs); } catch (const std::exception& e) { ERROR_LOG(format("SimulationLoop: sRadioDispatchSystem caught %1%") % e.what()); }
-			try { sSmithCascade.Update(aiDeltaMs); } catch (const std::exception& e) { ERROR_LOG(format("SimulationLoop: sSmithCascade caught %1%") % e.what()); }
-			try { sBackdoorNetwork.Update(aiDeltaMs); } catch (const std::exception& e) { ERROR_LOG(format("SimulationLoop: sBackdoorNetwork caught %1%") % e.what()); }
 			try { sFrankCastleMgr.Update(aiDeltaMs); } catch (const std::exception& e) { ERROR_LOG(format("SimulationLoop: sFrankCastleMgr caught %1%") % e.what()); }
-			try { sUnderworldMgr.Update(aiDeltaMs); } catch (const std::exception& e) { ERROR_LOG(format("SimulationLoop: sUnderworldMgr caught %1%") % e.what()); }
-			try { sCityLifeMgr.Update(aiDeltaMs); } catch (const std::exception& e) { ERROR_LOG(format("SimulationLoop: sCityLifeMgr caught %1%") % e.what()); }
-			try { sEmergentAIMgr.Update(aiDeltaMs); } catch (const std::exception& e) { ERROR_LOG(format("SimulationLoop: sEmergentAIMgr caught %1%") % e.what()); }
-			try { sEmergentPoliceMgr.Update(aiDeltaMs); } catch (const std::exception& e) { ERROR_LOG(format("SimulationLoop: sEmergentPoliceMgr caught %1%") % e.what()); }
-			try { sOracleVision.Update(aiDeltaMs / 1000.0f); } catch (const std::exception& e) { ERROR_LOG(format("SimulationLoop: sOracleVision caught %1%") % e.what()); }
-			try { sMafiaMgr.Update(aiDeltaMs); } catch (const std::exception& e) { ERROR_LOG(format("SimulationLoop: sMafiaMgr caught %1%") % e.what()); }
-			try { sExileMgr.Update(aiDeltaMs); } catch (const std::exception& e) { ERROR_LOG(format("SimulationLoop: sExileMgr caught %1%") % e.what()); }
-			try { sCorruptCopMgr.Update(aiDeltaMs); } catch (const std::exception& e) { ERROR_LOG(format("SimulationLoop: sCorruptCopMgr caught %1%") % e.what()); }
-			try { sCyberdeckHackingSystem.UpdateSimulation(aiDeltaMs / 1000.0f); } catch (const std::exception& e) { ERROR_LOG(format("SimulationLoop: sCyberdeckHackingSystem caught %1%") % e.what()); }
-			try { sMegacityDestructionEngine.UpdateSimulation(aiDeltaMs / 1000.0f); } catch (const std::exception& e) { ERROR_LOG(format("SimulationLoop: sMegacityDestructionEngine caught %1%") % e.what()); }
-			try { sMatrixRebootEngine.UpdateSimulation(aiDeltaMs / 1000.0f); } catch (const std::exception& e) { ERROR_LOG(format("SimulationLoop: sMatrixRebootEngine caught %1%") % e.what()); }
+
+			if (doMacroTick) {
+				try { sSensoryPerception.Update(macroDeltaMs / 1000.0f, currentMs); } catch (const std::exception& e) { ERROR_LOG(format("SimulationLoop: sSensoryPerception caught %1%") % e.what()); }
+				try { sSentientCharacters.Update(macroDeltaMs / 1000.0f); } catch (const std::exception& e) { ERROR_LOG(format("SimulationLoop: sSentientCharacters caught %1%") % e.what()); }
+				try { sRadioDispatchSystem.Update(macroDeltaMs); } catch (const std::exception& e) { ERROR_LOG(format("SimulationLoop: sRadioDispatchSystem caught %1%") % e.what()); }
+				try { sSmithCascade.Update(macroDeltaMs); } catch (const std::exception& e) { ERROR_LOG(format("SimulationLoop: sSmithCascade caught %1%") % e.what()); }
+				try { sBackdoorNetwork.Update(macroDeltaMs); } catch (const std::exception& e) { ERROR_LOG(format("SimulationLoop: sBackdoorNetwork caught %1%") % e.what()); }
+				try { sUnderworldMgr.Update(macroDeltaMs); } catch (const std::exception& e) { ERROR_LOG(format("SimulationLoop: sUnderworldMgr caught %1%") % e.what()); }
+				try { sCityLifeMgr.Update(macroDeltaMs); } catch (const std::exception& e) { ERROR_LOG(format("SimulationLoop: sCityLifeMgr caught %1%") % e.what()); }
+				try { sEmergentAIMgr.Update(macroDeltaMs); } catch (const std::exception& e) { ERROR_LOG(format("SimulationLoop: sEmergentAIMgr caught %1%") % e.what()); }
+				try { sEmergentPoliceMgr.Update(macroDeltaMs); } catch (const std::exception& e) { ERROR_LOG(format("SimulationLoop: sEmergentPoliceMgr caught %1%") % e.what()); }
+				try { sOracleVision.Update(macroDeltaMs / 1000.0f); } catch (const std::exception& e) { ERROR_LOG(format("SimulationLoop: sOracleVision caught %1%") % e.what()); }
+				try { sMafiaMgr.Update(macroDeltaMs); } catch (const std::exception& e) { ERROR_LOG(format("SimulationLoop: sMafiaMgr caught %1%") % e.what()); }
+				try { sExileMgr.Update(macroDeltaMs); } catch (const std::exception& e) { ERROR_LOG(format("SimulationLoop: sExileMgr caught %1%") % e.what()); }
+				try { sCorruptCopMgr.Update(macroDeltaMs); } catch (const std::exception& e) { ERROR_LOG(format("SimulationLoop: sCorruptCopMgr caught %1%") % e.what()); }
+				try { sCyberdeckHackingSystem.UpdateSimulation(macroDeltaMs / 1000.0f); } catch (const std::exception& e) { ERROR_LOG(format("SimulationLoop: sCyberdeckHackingSystem caught %1%") % e.what()); }
+				try { sMegacityDestructionEngine.UpdateSimulation(macroDeltaMs / 1000.0f); } catch (const std::exception& e) { ERROR_LOG(format("SimulationLoop: sMegacityDestructionEngine caught %1%") % e.what()); }
+				try { sMatrixRebootEngine.UpdateSimulation(macroDeltaMs / 1000.0f); } catch (const std::exception& e) { ERROR_LOG(format("SimulationLoop: sMatrixRebootEngine caught %1%") % e.what()); }
+			}
 
 			workerEnv.Wait();
-			workerNarrative.Wait();
+			if (doMacroTick) {
+				workerNarrative.Wait();
+			}
 
 			static uint32 lastMetricLogMs = 0;
 			static uint32 tickCount = 0;

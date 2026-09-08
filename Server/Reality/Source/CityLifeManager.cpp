@@ -1576,6 +1576,10 @@ void CityLifeManager::TriggerAreaPanic(float x, float z, float radius, const std
             float dx = c.currentLocation.x - x;
             float dz = c.currentLocation.z - z;
             if (dx * dx + dz * dz <= rSq) {
+                if (c.currentRoutine == RoutineScheduleState::Panicking) {
+                    c.panicTimerMs = durationMs;
+                    continue;
+                }
                 c.currentRoutine = RoutineScheduleState::Panicking;
                 c.panicTimerMs = durationMs;
                 c.panicReason = cause;
