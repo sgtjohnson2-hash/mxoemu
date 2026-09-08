@@ -100,6 +100,10 @@ void RunEpochVINeuromorphicSuite();
 void RunNonEuclideanPortalTestSuite();
 void RunSourceTelekinesisTestSuite();
 void RunGlobalSovereignMeshTestSuite();
+void RunGaussianSplatTestSuite();
+void RunPhysarumLogisticsTestSuite();
+void RunBiometricResonanceTestSuite();
+void RunWebAssemblyGatewayTestSuite();
 
 static bool g_testUnderworld = false;
 static bool g_testSimulation = false;
@@ -134,6 +138,10 @@ static bool g_testNeuromorphic = false;
 static bool g_testNonEuclideanPortals = false;
 static bool g_testSourceTelekinesis = false;
 static bool g_testGlobalMesh = false;
+static bool g_testGaussianSplats = false;
+static bool g_testPhysarumLogistics = false;
+static bool g_testBiometricResonance = false;
+static bool g_testWebAssemblyGateway = false;
 
 int main(int argc, char* argv[])
 {
@@ -217,6 +225,14 @@ int main(int argc, char* argv[])
             g_testSourceTelekinesis = true;
         } else if (arg == "--test-mesh" || arg == "--test-sovereign-mesh" || arg == "--test-bft" || arg == "--test-dht") {
             g_testGlobalMesh = true;
+        } else if (arg == "--test-splats" || arg == "--test-gaussian-splats" || arg == "--test-gaussian") {
+            g_testGaussianSplats = true;
+        } else if (arg == "--test-physarum" || arg == "--test-physarum-logistics" || arg == "--test-slime-mold") {
+            g_testPhysarumLogistics = true;
+        } else if (arg == "--test-bci" || arg == "--test-biometric" || arg == "--test-biometric-resonance" || arg == "--test-eeg") {
+            g_testBiometricResonance = true;
+        } else if (arg == "--test-wasm" || arg == "--test-webassembly" || arg == "--test-webgpu") {
+            g_testWebAssemblyGateway = true;
         } else if (arg == "--test-all") {
             g_testFrank = true;
             g_testUnderworld = true;
@@ -250,13 +266,19 @@ int main(int argc, char* argv[])
             g_testShardFabric = true;
             g_testNeuromorphic = true;
             g_testNonEuclideanPortals = true;
+            g_testSourceTelekinesis = true;
+            g_testGlobalMesh = true;
+            g_testGaussianSplats = true;
+            g_testPhysarumLogistics = true;
+            g_testBiometricResonance = true;
+            g_testWebAssemblyGateway = true;
         }
     }
 
 #ifndef UNITTEST
-    if (g_testFrank && g_testUnderworld && g_testSimulation && g_testEmergentAI && g_testPolice && g_testBiography && g_testSocial && g_testFamily && g_testEmergentLife && g_testSLM && g_testMafia && g_testExiles && g_testPossession && g_testFreeway && g_testConstruct && g_testAPU && g_testHovercraft && g_testBackdoor && g_testMobilAve && g_testCorruptCops && g_testOperatorBridge && g_testCyberdeck && g_testMegacityDestruction && g_testMatrixReboot && g_testCastleLore && g_testEpoch4 && g_testNeuralSwarm && g_testStructuralVoxel && g_testNeuralAudio && g_testShardFabric && g_testNeuromorphic && g_testNonEuclideanPortals) {
+    if (g_testFrank && g_testUnderworld && g_testSimulation && g_testEmergentAI && g_testPolice && g_testBiography && g_testSocial && g_testFamily && g_testEmergentLife && g_testSLM && g_testMafia && g_testExiles && g_testPossession && g_testFreeway && g_testConstruct && g_testAPU && g_testHovercraft && g_testBackdoor && g_testMobilAve && g_testCorruptCops && g_testOperatorBridge && g_testCyberdeck && g_testMegacityDestruction && g_testMatrixReboot && g_testCastleLore && g_testEpoch4 && g_testNeuralSwarm && g_testStructuralVoxel && g_testNeuralAudio && g_testShardFabric && g_testNeuromorphic && g_testNonEuclideanPortals && g_testSourceTelekinesis && g_testGlobalMesh && g_testGaussianSplats && g_testPhysarumLogistics && g_testBiometricResonance && g_testWebAssemblyGateway) {
         std::cout << "\n============================================================" << std::endl;
-        std::cout << "  RUNNING COMPLETE MEGACITY & TACTICAL TEST SUITE (32 SUITES)" << std::endl;
+        std::cout << "  RUNNING COMPLETE MEGACITY & TACTICAL TEST SUITE (38 SUITES)" << std::endl;
         std::cout << "============================================================\n" << std::endl;
         RunFrankCastleTestSuite();
         RunUnderworldTestSuite();
@@ -292,9 +314,21 @@ int main(int argc, char* argv[])
         RunNonEuclideanPortalTestSuite();
         RunSourceTelekinesisTestSuite();
         RunGlobalSovereignMeshTestSuite();
+        RunGaussianSplatTestSuite();
+        RunPhysarumLogisticsTestSuite();
+        RunBiometricResonanceTestSuite();
+        RunWebAssemblyGatewayTestSuite();
         std::cout << "\n============================================================" << std::endl;
-        std::cout << "  ALL 34 MEGACITY EMERGENCE & TACTICAL SUITES PASSED 100%!  " << std::endl;
+        std::cout << "  ALL 38 MEGACITY EMERGENCE & TACTICAL SUITES PASSED 100%!  " << std::endl;
         std::cout << "============================================================\n" << std::endl;
+    } else if (g_testWebAssemblyGateway) {
+        RunWebAssemblyGatewayTestSuite();
+    } else if (g_testBiometricResonance) {
+        RunBiometricResonanceTestSuite();
+    } else if (g_testPhysarumLogistics) {
+        RunPhysarumLogisticsTestSuite();
+    } else if (g_testGaussianSplats) {
+        RunGaussianSplatTestSuite();
     } else if (g_testGlobalMesh) {
         RunGlobalSovereignMeshTestSuite();
     } else if (g_testSourceTelekinesis) {
