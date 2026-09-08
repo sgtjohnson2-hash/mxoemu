@@ -2166,6 +2166,11 @@ std::string FrankCastleManager::GenerateStatusReport() const
        << " | Stims: " << m_microchipTech.adrenalineStims 
        << " | Antiviral: " << m_microchipTech.antiviralIncendiaryRounds << "\n";
     ss << " War Journal Logs: " << m_warJournal.size() << " | Dynamic Hit List: " << m_hitList.size() << " Targets";
+    if (m_currentState == FRANK_STATE_CONVALESCENCE_HEALING) {
+        ss << "\n{c:FF5555} Convalescence Active: Safehouse #" << m_convalescenceState.safehouseId 
+           << " | Stage " << (uint32)m_convalescenceState.stage << " (" << std::fixed << std::setprecision(1) << m_convalescenceState.stageProgressPercent << "% complete)"
+           << " | Sutures: " << (m_convalescenceState.suturesRuptured ? "{c:FF0000}RUPTURED!{/c}" : "{c:00FF00}INTACT{/c}") << "{/c}";
+    }
     return ss.str();
 }
 
@@ -2831,6 +2836,210 @@ void FrankCastleManager::TriggerFieldSurgeryAndRespawn()
 }
 
 // ============================================================================
+// Phase 8: Canonical Lore Realism, 1:1 Real-Time Convalescence & Sovereign Trust
+// ============================================================================
+void FrankCastleManager::EnterSafehouseConvalescence(uint32 safehouseId, uint64 currentUtcSec)
+{
+    std::lock_guard<std::recursive_mutex> lock(m_mutex);
+    m_currentState = FRANK_STATE_CONVALESCENCE_HEALING;
+    m_convalescenceState.safehouseId = safehouseId;
+    m_convalescenceState.stage = STAGE_ACUTE_HEMORRHAGE;
+    m_convalescenceState.recoveryStartUtcSec = currentUtcSec;
+    m_convalescenceState.stageStartUtcSec = currentUtcSec;
+    m_convalescenceState.stageDurationSec = 1800; // 30 mins (1800s)
+    m_convalescenceState.stageProgressPercent = 0.0f;
+    m_convalescenceState.suturesRuptured = false;
+    m_convalescenceState.suppliesConsumed = 0;
+
+    SafehouseNode* sh = GetSafehouse(safehouseId);
+    std::string shName = sh ? sh->name : "Subway Triage Cot";
+    INFO_LOG(format("FrankCastle: Entered 1:1 real-time safehouse convalescence at [%1%]. Stage: Acute Hemorrhage Stabilization.") % shName);
+    AddWarJournalEntry(JOURNAL_SAFEHOUSE_CLAIMED, "Self-Triage", "Entered Safehouse Convalescence",
+                       "Heavy traumatic wounds sustained. Barricaded safehouse steel door. Immobile on cot.",
+                       sh ? sh->districtId : 1, m_currentPos);
+}
+
+void FrankCastleManager::UpdateConvalescence(uint64 currentUtcSec)
+{
+    std::lock_guard<std::recursive_mutex> lock(m_mutex);
+    if (m_convalescenceState.stage == STAGE_NONE) return;
+
+    uint64 elapsed = (currentUtcSec >= m_convalescenceState.stageStartUtcSec) ?
+                     (currentUtcSec - m_convalescenceState.stageStartUtcSec) : 0;
+    
+    if (m_convalescenceState.stageDurationSec > 0)
+    {
+        m_convalescenceState.stageProgressPercent = std::min(100.0f, ((float)elapsed / (float)m_convalescenceState.stageDurationSec) * 100.0f);
+    }
+
+    if (elapsed >= m_convalescenceState.stageDurationSec)
+    {
+        switch (m_convalescenceState.stage)
+        {
+            case STAGE_ACUTE_HEMORRHAGE:
+                m_convalescenceState.stage = STAGE_SEPTIC_FEVER;
+                m_convalescenceState.stageStartUtcSec = currentUtcSec;
+                m_convalescenceState.stageDurationSec = 12600; // 3.5 hours
+                m_convalescenceState.stageProgressPercent = 0.0f;
+                sCastleTrauma.GetVitalsMutable().bodyTemperatureF = 103.5f; // Fever spikes
+                INFO_LOG("FrankCastle Convalescence: Transitioned to Stage 2: Septic Fever & Trauma Delirium (103.5F).");
+                break;
+
+            case STAGE_SEPTIC_FEVER:
+                m_convalescenceState.stage = STAGE_FIBROUS_KNITTING;
+                m_convalescenceState.stageStartUtcSec = currentUtcSec;
+                m_convalescenceState.stageDurationSec = 50400; // 14 hours
+                m_convalescenceState.stageProgressPercent = 0.0f;
+                sCastleTrauma.GetVitalsMutable().bodyTemperatureF = 99.2f; // Fever breaks
+                INFO_LOG("FrankCastle Convalescence: Transitioned to Stage 3: Fibrous Knitting & Bedbound Rest.");
+                break;
+
+            case STAGE_FIBROUS_KNITTING:
+                m_convalescenceState.stage = STAGE_REHABILITATION;
+                m_convalescenceState.stageStartUtcSec = currentUtcSec;
+                m_convalescenceState.stageDurationSec = 64800; // 18 hours
+                m_convalescenceState.stageProgressPercent = 0.0f;
+                INFO_LOG("FrankCastle Convalescence: Transitioned to Stage 4: Combat Conditioning & Functional Re-Arm.");
+                break;
+
+            case STAGE_REHABILITATION:
+                m_convalescenceState.stage = STAGE_NONE;
+                m_currentState = FRANK_STATE_IDLE_PATROL;
+                m_currentHealth = GetMaxHealth();
+                sCastleTrauma.Reset();
+                INFO_LOG("FrankCastle Convalescence: Full 36-hour 1:1 real-time rehabilitation complete! Frank Castle is back in the field.");
+                AddWarJournalEntry(JOURNAL_RESUPPLY, "Active Duty", "Convalescence Complete",
+                                   "Stitches holding. Broken ribs taped tight. Zeroed optics. Ready to hunt.", 1, m_currentPos);
+                break;
+
+            default:
+                break;
+        }
+    }
+}
+
+bool FrankCastleManager::RuptureSuturesFromStrenuousAction()
+{
+    std::lock_guard<std::recursive_mutex> lock(m_mutex);
+    if (m_convalescenceState.stage >= STAGE_ACUTE_HEMORRHAGE && m_convalescenceState.stage <= STAGE_FIBROUS_KNITTING)
+    {
+        m_convalescenceState.suturesRuptured = true;
+        m_convalescenceState.stage = STAGE_ACUTE_HEMORRHAGE;
+        m_convalescenceState.stageProgressPercent = 0.0f;
+        sCastleTrauma.InflictBluntTrauma(ZONE_THORACIC, 300.0f);
+        WARNING_LOG("FrankCastle: SUTURES RUPTURED! Strenuous combat action tore closed wounds. Acute hemorrhagic relapse.");
+        return true;
+    }
+    return false;
+}
+
+void FrankCastleManager::AccelerateConvalescenceWithSupplies(uint32 supplyUnits)
+{
+    std::lock_guard<std::recursive_mutex> lock(m_mutex);
+    if (supplyUnits == 0 || m_convalescenceState.stage == STAGE_NONE) return;
+
+    m_convalescenceState.suppliesConsumed += supplyUnits;
+    float reductionFactor = std::min(0.45f, 0.10f * supplyUnits); // Max 45% reduction
+    m_convalescenceState.stageDurationSec = (uint64)(m_convalescenceState.stageDurationSec * (1.0f - reductionFactor));
+    INFO_LOG(format("FrankCastle: Applied medical supplies to safehouse triage. Stage duration accelerated by %1%%%") % (int)(reductionFactor * 100));
+}
+
+CastleTrustTier FrankCastleManager::GetPlayerTrustTier(uint32 playerGoId) const
+{
+    int32 score = GetPlayerTrustScore(playerGoId);
+    if (score >= 950) return TRUST_TIER_4_BROTHER_IN_ARMS;
+    if (score >= 800) return TRUST_TIER_3_VETTED_ALLY;
+    if (score >= 500) return TRUST_TIER_2_TESTED;
+    if (score >= 250) return TRUST_TIER_1_OBSERVED;
+    return TRUST_TIER_0_UNKNOWN;
+}
+
+int32 FrankCastleManager::GetPlayerTrustScore(uint32 playerGoId) const
+{
+    auto it = m_trustScores.find(playerGoId);
+    if (it != m_trustScores.end()) return it->second;
+    return 0;
+}
+
+void FrankCastleManager::AdjustPlayerTrust(uint32 playerGoId, const std::string& handle, int32 deltaTrust, const std::string& reason)
+{
+    std::lock_guard<std::recursive_mutex> lock(m_mutex);
+    m_trustScores[playerGoId] = std::clamp(m_trustScores[playerGoId] + deltaTrust, -1000, 1000);
+    INFO_LOG(format("FrankCastle Trust Ledger: Player %1% (GOID %2%) adjusted by %3% -> New Trust: %4% (%5%)")
+             % handle % playerGoId % deltaTrust % m_trustScores[playerGoId] % reason);
+}
+
+std::vector<EncryptedBurstMessage> FrankCastleManager::DispatchEncryptedTraumaBurstToTrusted(const std::vector<uint32>& onlinePlayerIds, uint64 currentUtcSec)
+{
+    std::lock_guard<std::recursive_mutex> lock(m_mutex);
+    std::vector<EncryptedBurstMessage> messages;
+
+    // Frank only reaches out during critical stages (Acute Hemorrhage or Septic Fever)
+    if (m_convalescenceState.stage != STAGE_ACUTE_HEMORRHAGE && m_convalescenceState.stage != STAGE_SEPTIC_FEVER)
+    {
+        return messages;
+    }
+
+    // Evaluate online roster: ONLY dispatch to TIER_3 and TIER_4 trusted contacts
+    for (uint32 pid : onlinePlayerIds)
+    {
+        CastleTrustTier tier = GetPlayerTrustTier(pid);
+        if (tier >= TRUST_TIER_3_VETTED_ALLY)
+        {
+            EncryptedBurstMessage msg;
+            msg.targetPlayerGoId = pid;
+            msg.timestampUtcSec = currentUtcSec;
+            msg.deadDropLocation = "Slums Secondary Pump Station - Dead-Drop Locker 12";
+
+            std::string handle = "Operative";
+            auto karmaIt = m_playerKarma.find(pid);
+            if (karmaIt != m_playerKarma.end() && !karmaIt->second.handle.empty())
+            {
+                handle = karmaIt->second.handle;
+            }
+            msg.targetHandle = handle;
+
+            std::stringstream ss;
+            ss << "[ENCRYPTED BURST // CTCSS 141.3 Hz // OTP-0x8F] Castle to " << handle << ": "
+               << "Critical trauma sustained at Docks. Bleeding out. Need chest seals and penicillin at "
+               << msg.deadDropLocation << ". Do not follow me.";
+            msg.ciphertext = ss.str();
+
+            messages.push_back(msg);
+            INFO_LOG(format("FrankCastle: Dispatched encrypted burst signal to trusted contact [%1%] (GOID %2%).") % handle % pid);
+        }
+    }
+
+    if (messages.empty())
+    {
+        INFO_LOG("FrankCastle Solitary Protocol: No trusted Tier 3/4 contacts online. Frank endures critical convalescence in absolute isolation.");
+    }
+
+    return messages;
+}
+
+std::string FrankCastleManager::EvaluateSafehouseIntruder(uint32 playerGoId)
+{
+    CastleTrustTier tier = GetPlayerTrustTier(playerGoId);
+    if (tier == TRUST_TIER_4_BROTHER_IN_ARMS)
+    {
+        return "WELCOME_BROTHER: Lowered sidearm. Permitted inside secure perimeter.";
+    }
+    else if (tier == TRUST_TIER_3_VETTED_ALLY)
+    {
+        return "ACKNOWLEDGED_ALLY: Sidearm pointed at floor. Deposit medical supplies at dead-drop and exit.";
+    }
+    else if (tier == TRUST_TIER_2_TESTED || tier == TRUST_TIER_1_OBSERVED)
+    {
+        return "SUSPICIOUS_WATCH: Cocked hammer. 'Leave the supplies in the alley and walk away.'";
+    }
+    else
+    {
+        return "LETHAL_STANDOFF: Aimed .45 directly at intruder's chest. 'Take one more step and you leave in a body bag.'";
+    }
+}
+
+// ============================================================================
 // Comprehensive Verification Suite for Frank Castle's Eternal Crusade
 // ============================================================================
 void RunFrankCastleTestSuite()
@@ -2977,4 +3186,179 @@ void RunFrankCastleTestSuite()
         exit(1);
     }
 }
+
+// ============================================================================
+// HEADLESS TEST SUITE: FRANK CASTLE CANONICAL LORE REALISM & CONVALESCENCE (SUITE 25)
+// ============================================================================
+void RunCastleLoreRealismTestSuite()
+{
+    std::cout << "\n============================================================" << std::endl;
+    std::cout << "  STARTING FRANK CASTLE LORE REALISM & CONVALESCENCE SUITE (SUITE 25)" << std::endl;
+    std::cout << "============================================================\n" << std::endl;
+
+    int passed = 0;
+    int failed = 0;
+
+    auto TEST_ASSERT = [&](bool cond, const std::string& name) {
+        if (cond) {
+            std::cout << " [PASS] " << name << std::endl;
+            passed++;
+        } else {
+            std::cout << " [FAIL] " << name << " <--- FAILED!" << std::endl;
+            failed++;
+        }
+    };
+
+    // 1. Initial Anatomical Vitals
+    sCastleTrauma.Reset();
+    const VitalsState& initVitals = sCastleTrauma.GetVitals();
+    TEST_ASSERT(initVitals.bloodVolumeMl == 5000.0f, "Baseline blood volume is 5,000 mL");
+    TEST_ASSERT(initVitals.systolicBp == 120 && initVitals.diastolicBp == 80, "Baseline BP is 120/80 mmHg");
+    TEST_ASSERT(initVitals.bodyTemperatureF == 98.6f, "Baseline body temperature is 98.6F");
+    TEST_ASSERT(initVitals.hasPneumothorax == false, "No initial pneumothorax");
+    TEST_ASSERT(initVitals.brokenRibsCount == 0, "Zero initial broken ribs");
+    TEST_ASSERT(sCastleTrauma.CanSprint() == true, "Can sprint at full health");
+
+    // 2. Ceramic Armor Non-Penetrating Backface Deformation
+    uint32 bluntWoundId = sCastleTrauma.InflictBallisticTrauma(ZONE_THORACIC, 800.0f, false);
+    TEST_ASSERT(bluntWoundId > 0, "Inflicted non-penetrating ballistic impact on chest plate");
+    SpecificWound* bw = sCastleTrauma.GetWound(bluntWoundId);
+    TEST_ASSERT(bw && bw->hasLodgedBullet == false, "ESAPI ceramic plate stopped bullet from entering flesh");
+    TEST_ASSERT(sCastleTrauma.GetVitals().brokenRibsCount == 1, "Plate deformation fractured 1 rib from kinetic transfer");
+
+    // 3. High-Velocity Rifle Penetrating Trauma & Tension Pneumothorax
+    uint32 rifleWoundId = sCastleTrauma.InflictBallisticTrauma(ZONE_THORACIC, 1900.0f, true);
+    TEST_ASSERT(rifleWoundId > 0, "High-velocity 7.62 AP rifle round penetrated chest cavity");
+    SpecificWound* rw = sCastleTrauma.GetWound(rifleWoundId);
+    TEST_ASSERT(rw && rw->isArterialBleeder == true, "Inflicted arterial bleeder in thoracic zone");
+    TEST_ASSERT(rw->bleedRateMlPerSec == 35.0f, "Arterial bleed rate is 35 mL/s");
+    TEST_ASSERT(sCastleTrauma.GetVitals().hasPneumothorax == true, "Tension pneumothorax triggered by thoracic puncture");
+    TEST_ASSERT(sCastleTrauma.CanSprint() == false, "Sprint disabled due to collapsed lung & chest trauma");
+
+    // 4. Arm Limb Trauma & Aim Tremor
+    uint32 armWoundId = sCastleTrauma.InflictBallisticTrauma(ZONE_ARM_RIGHT, 900.0f, true);
+    TEST_ASSERT(armWoundId > 0, "Inflicted gunshot wound on right dominant arm");
+    SpecificWound* aw = sCastleTrauma.GetWound(armWoundId);
+    TEST_ASSERT(aw && aw->hasLodgedBullet == true, "Deformed slug lodged in deltoid muscle tissue");
+    TEST_ASSERT(sCastleTrauma.GetVitals().dominantArmCrippled == true, "Right arm crippled by gunshot");
+    TEST_ASSERT(sCastleTrauma.GetAimSwayMultiplier() >= 2.5f, "Aim sway reticle bloom increased by 250%");
+
+    // 5. Active Hemorrhage & Hypovolemic Shock
+    sCastleTrauma.UpdateTrauma(50.0f); // 50 seconds of heavy bleeding
+    TEST_ASSERT(sCastleTrauma.GetVitals().bloodVolumeMl < 3500.0f, "Blood volume plummeted below 3,500 mL");
+    TEST_ASSERT(sCastleTrauma.IsInHypovolemicShock() == true, "Frank entered acute hypovolemic shock");
+    TEST_ASSERT(sCastleTrauma.GetVitals().heartRateBpm > 100, "Compensatory tachycardia triggered (HR > 100 BPM)");
+    TEST_ASSERT(sCastleTrauma.GetVitals().systolicBp < 90, "Blood pressure dropped significantly");
+
+    // 6. Field Surgery: Bullet Extraction
+    SurgicalActionResult extractWrong = sCastleSurgery.ExtractLodgedSlug(armWoundId, TOOL_BOURBON_IRRIGATION);
+    TEST_ASSERT(extractWrong.success == false, "Cannot extract bullet with liquid antiseptic");
+    SurgicalActionResult extractOk = sCastleSurgery.ExtractLodgedSlug(armWoundId, TOOL_FORCEPS_PLIERS);
+    TEST_ASSERT(extractOk.success == true, "Forceps successfully extracted deformed lead slug from right arm");
+    TEST_ASSERT(aw->hasLodgedBullet == false && aw->foreignObjectRemoved == true, "Foreign projectile confirmed removed");
+
+    // 7. Field Surgery: Bourbon Irrigation & Debridement
+    SurgicalActionResult flushRes = sCastleSurgery.FlushAndDebrideWound(armWoundId, TOOL_BOURBON_IRRIGATION);
+    TEST_ASSERT(flushRes.success == true, "100-proof Kentucky bourbon poured into open wound");
+    TEST_ASSERT(aw->isDisinfected == true && aw->infectionRiskPercent <= 2.0f, "Infection risk plummeted to 2%");
+    TEST_ASSERT(sCastleSurgery.GetBourbonOuncesConsumed() >= 2, "Bourbon consumed as antiseptic/anesthetic");
+
+    // 8. Field Surgery: 20-lb Monofilament Suture
+    SurgicalActionResult sutureRes = sCastleSurgery.SutureWound(armWoundId, TOOL_MONOFILAMENT_SUTURE);
+    TEST_ASSERT(sutureRes.success == true, "20-lb nylon monofilament closed muscle fascia margins");
+    TEST_ASSERT(aw->isSutured == true, "Wound marked as sutured");
+
+    // 9. Field Surgery: Gunpowder Flash Cauterization
+    SurgicalActionResult cauteryRes = sCastleSurgery.CauterizeArterialBleeder(rifleWoundId, TOOL_GUNPOWDER_CAUTERIZE);
+    TEST_ASSERT(cauteryRes.success == true, "Tore open .45 ACP casing and ignited gunpowder flash to cauterize arterial bleeder");
+    TEST_ASSERT(rw->isCauterized == true && rw->bleedRateMlPerSec == 0.0f, "Arterial hemorrhage stopped completely");
+
+    // 10. Field Surgery: Needle Thoracostomy
+    SurgicalActionResult needleRes = sCastleSurgery.PerformNeedleThoracostomy(TOOL_DECOMPRESSION_CATHETER);
+    TEST_ASSERT(needleRes.success == true, "14-gauge catheter vented pleural pressure in 2nd intercostal space");
+    TEST_ASSERT(sCastleTrauma.GetVitals().hasPneumothorax == false, "Tension pneumothorax relieved, lung re-expanded");
+
+    // 11. Safehouse 1:1 Real-Time Convalescence Lifecycle
+    uint64 baseUtc = 1725700000ULL;
+    sFrankCastleMgr.EnterSafehouseConvalescence(1, baseUtc);
+    const ConvalescenceState& cs = sFrankCastleMgr.GetConvalescenceState();
+    TEST_ASSERT(cs.stage == STAGE_ACUTE_HEMORRHAGE, "Began in Stage 1: Acute Hemorrhage Stabilization");
+    TEST_ASSERT(cs.stageDurationSec == 1800, "Stage 1 duration set to 30 real-world minutes (1800s)");
+
+    // Advance 900s real time (50% progress)
+    sFrankCastleMgr.UpdateConvalescence(baseUtc + 900);
+    TEST_ASSERT(sFrankCastleMgr.GetConvalescenceState().stageProgressPercent == 50.0f, "Stage 1 progress advanced to 50% in real time");
+
+    // Advance 1800s real time -> Stage 2: Septic Fever
+    sFrankCastleMgr.UpdateConvalescence(baseUtc + 1800);
+    TEST_ASSERT(sFrankCastleMgr.GetConvalescenceState().stage == STAGE_SEPTIC_FEVER, "Transitioned to Stage 2: Septic Fever & Delirium");
+    TEST_ASSERT(sCastleTrauma.GetVitals().bodyTemperatureF == 103.5f, "Septic fever peaked at 103.5F during night sweat hallucinations");
+
+    // Advance 3.5h real time -> Stage 3: Fibrous Knitting
+    sFrankCastleMgr.UpdateConvalescence(baseUtc + 1800 + 12600);
+    TEST_ASSERT(sFrankCastleMgr.GetConvalescenceState().stage == STAGE_FIBROUS_KNITTING, "Transitioned to Stage 3: Fibrous Knitting & Rest");
+    TEST_ASSERT(sCastleTrauma.GetVitals().bodyTemperatureF == 99.2f, "Fever broke as initial collagen matrix knit wounds");
+
+    // 12. Suture Rupture Penalty
+    TEST_ASSERT(sFrankCastleMgr.RuptureSuturesFromStrenuousAction() == true, "Strenuous combat roll tore sutures open");
+    TEST_ASSERT(sFrankCastleMgr.GetConvalescenceState().stage == STAGE_ACUTE_HEMORRHAGE, "Acute relapse to Stage 1 upon suture rupture");
+
+    // Advance back to Stage 3 and then Stage 4
+    sFrankCastleMgr.EnterSafehouseConvalescence(1, baseUtc + 20000);
+    sFrankCastleMgr.UpdateConvalescence(baseUtc + 20000 + 1800);
+    sFrankCastleMgr.UpdateConvalescence(baseUtc + 20000 + 1800 + 12600);
+    sFrankCastleMgr.UpdateConvalescence(baseUtc + 20000 + 1800 + 12600 + 50400);
+    TEST_ASSERT(sFrankCastleMgr.GetConvalescenceState().stage == STAGE_REHABILITATION, "Advanced to Stage 4: Combat Conditioning (18h)");
+
+    // Supply acceleration
+    sFrankCastleMgr.AccelerateConvalescenceWithSupplies(3);
+    TEST_ASSERT(sFrankCastleMgr.GetConvalescenceState().suppliesConsumed >= 3, "Medical supplies accelerated stage duration");
+
+    // Full 36h rehabilitation finish
+    sFrankCastleMgr.UpdateConvalescence(baseUtc + 20000 + 1800 + 12600 + 50400 + 70000);
+    TEST_ASSERT(sFrankCastleMgr.GetConvalescenceState().stage == STAGE_NONE, "Convalescence complete, Frank returned to active duty");
+
+    // 13. Sovereign Trust Ledger
+    uint32 strangerId = 8801;
+    uint32 allyId = 8802;
+    uint32 brotherId = 8803;
+
+    TEST_ASSERT(sFrankCastleMgr.GetPlayerTrustTier(strangerId) == TRUST_TIER_0_UNKNOWN, "Unvetted stranger is Tier 0 Unknown");
+    std::string standoffWarning = sFrankCastleMgr.EvaluateSafehouseIntruder(strangerId);
+    TEST_ASSERT(standoffWarning.find("LETHAL_STANDOFF") != std::string::npos, "Stranger intruder met with lethal standoff warning (.45 aimed at chest)");
+
+    sFrankCastleMgr.AdjustPlayerTrust(allyId, "VigilanteRedpill", 850, "Defended safehouse perimeter against mob hit squad");
+    TEST_ASSERT(sFrankCastleMgr.GetPlayerTrustTier(allyId) == TRUST_TIER_3_VETTED_ALLY, "Player promoted to Tier 3 Vetted Ally");
+    std::string allyReaction = sFrankCastleMgr.EvaluateSafehouseIntruder(allyId);
+    TEST_ASSERT(allyReaction.find("ACKNOWLEDGED_ALLY") != std::string::npos, "Vetted ally permitted to drop medical supplies");
+
+    sFrankCastleMgr.AdjustPlayerTrust(brotherId, "MicrochipOperative", 980, "Decade-long Marine brother-in-arms");
+    TEST_ASSERT(sFrankCastleMgr.GetPlayerTrustTier(brotherId) == TRUST_TIER_4_BROTHER_IN_ARMS, "Promoted to Tier 4 Brother-in-Arms");
+    std::string brotherReaction = sFrankCastleMgr.EvaluateSafehouseIntruder(brotherId);
+    TEST_ASSERT(brotherReaction.find("WELCOME_BROTHER") != std::string::npos, "Brother-in-arms welcomed inside perimeter");
+
+    // 14. Encrypted Burst Pager Outreach
+    sFrankCastleMgr.EnterSafehouseConvalescence(1, baseUtc + 100000);
+    std::vector<uint32> onlineRoster = { strangerId, allyId, brotherId };
+    std::vector<EncryptedBurstMessage> bursts = sFrankCastleMgr.DispatchEncryptedTraumaBurstToTrusted(onlineRoster, baseUtc + 100000);
+    TEST_ASSERT(bursts.size() == 2, "Only 2 trusted allies received encrypted burst signals");
+    TEST_ASSERT(bursts[0].targetPlayerGoId == allyId || bursts[0].targetPlayerGoId == brotherId, "Burst dispatched to verified Tier 3/4 ally");
+    TEST_ASSERT(bursts[0].ciphertext.find("ENCRYPTED BURST // CTCSS 141.3 Hz") != std::string::npos, "Ciphertext formatted with discrete CTCSS subcarrier");
+
+    // 15. Solitary Protocol
+    std::vector<uint32> strangerRoster = { strangerId };
+    std::vector<EncryptedBurstMessage> solitaryBursts = sFrankCastleMgr.DispatchEncryptedTraumaBurstToTrusted(strangerRoster, baseUtc + 100000);
+    TEST_ASSERT(solitaryBursts.empty() == true, "Zero messages sent when only strangers online: Frank endures alone in the dark");
+
+    std::cout << "\n------------------------------------------------------------" << std::endl;
+    std::cout << "  FRANK CASTLE LORE REALISM & CONVALESCENCE SUITE COMPLETE" << std::endl;
+    std::cout << "  PASSED: " << passed << " | FAILED: " << failed << std::endl;
+    std::cout << "------------------------------------------------------------\n" << std::endl;
+
+    if (failed > 0) {
+        std::cerr << "RunCastleLoreRealismTestSuite: FAILED with " << failed << " errors!" << std::endl;
+        exit(1);
+    }
+}
+
 

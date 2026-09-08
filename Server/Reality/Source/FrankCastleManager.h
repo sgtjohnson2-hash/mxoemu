@@ -6,6 +6,8 @@
 #include "LocationVector.h"
 #include "AI/QTable.h"
 #include "SmithVirusCascade.h"
+#include "CastleTraumaModel.h"
+#include "CastleSurgeryEngine.h"
 #include <string>
 #include <vector>
 #include <map>
@@ -247,7 +249,8 @@ enum FrankTacticalState {
     FRANK_STATE_STALKING_TARGET = 9,      // Phase 1: Recon & Ambush stalking
     FRANK_STATE_RESUPPLY_RUN = 10,        // Phase 2: Microchip cache re-arm
     FRANK_STATE_DEFEND_SAFEHOUSE = 11,    // Phase 3: Safehouse siege defense
-    FRANK_STATE_CLEAN_SWEEP_RAID = 12     // Phase 4: Syndicate decapitation raid
+    FRANK_STATE_CLEAN_SWEEP_RAID = 12,    // Phase 4: Syndicate decapitation raid
+    FRANK_STATE_CONVALESCENCE_HEALING = 13 // Phase 8: 1:1 real-time safehouse recovery
 };
 
 enum FrankMasteryRank {
@@ -294,6 +297,44 @@ enum VisualBattleCondition {
     VISUAL_LIGHT_DAMAGE = 1,          // 74% - 50% HP
     VISUAL_HEAVY_DAMAGE = 2,          // 49% - 25% HP
     VISUAL_CRITICAL_BATTLE_WEAR = 3   // < 25% HP
+};
+
+// ============================================================================
+// Phase 8: Canonical Lore Realism, Trauma Physics & Sovereign Trust Ledger
+// ============================================================================
+enum ConvalescenceStage {
+    STAGE_NONE               = 0,
+    STAGE_ACUTE_HEMORRHAGE   = 1, // 0 - 30 mins (1800s real time): bedridden, tourniquets, hypovolemia
+    STAGE_SEPTIC_FEVER       = 2, // 30m - 4.0h (12600s real time): 103.5F fever, night sweats, delirium
+    STAGE_FIBROUS_KNITTING   = 3, // 4.0h - 18.0h (50400s real time): stitches holding, taped ribs, 30% speed
+    STAGE_REHABILITATION     = 4  // 18.0h - 36.0h (64800s real time): push-ups, dry fire, zeroing, 85-95%
+};
+
+struct ConvalescenceState {
+    uint32 safehouseId{0};
+    ConvalescenceStage stage{STAGE_NONE};
+    uint64 recoveryStartUtcSec{0};
+    uint64 stageStartUtcSec{0};
+    uint64 stageDurationSec{0};
+    float stageProgressPercent{0.0f};
+    bool suturesRuptured{false};
+    uint32 suppliesConsumed{0};
+};
+
+enum CastleTrustTier {
+    TRUST_TIER_0_UNKNOWN        = 0, // Trust 0 - 249: Complete stranger, lethal standoff warning
+    TRUST_TIER_1_OBSERVED       = 1, // Trust 250 - 499: Neutral, permitted at alley dead-drop
+    TRUST_TIER_2_TESTED         = 2, // Trust 500 - 799: Proven anti-mob operative
+    TRUST_TIER_3_VETTED_ALLY    = 3, // Trust 800 - 949: Reliable ally, receives encrypted burst pager
+    TRUST_TIER_4_BROTHER_IN_ARMS= 4  // Trust 950 - 1000: Rare inner circle (Microchip / Henry Russo)
+};
+
+struct EncryptedBurstMessage {
+    uint32 targetPlayerGoId{0};
+    std::string targetHandle;
+    std::string ciphertext;
+    std::string deadDropLocation;
+    uint64 timestampUtcSec{0};
 };
 
 // ============================================================================
@@ -436,9 +477,20 @@ public:
     void UpdateVisualAppearance();
     std::string GenerateRemasterTelemetryJson() const;
     void TriggerSpatialBallisticAudio(float x, float y, float z, const std::string& weaponType);
-    std::string GenerateStatusReport() const;
+    // Phase 8: Canonical Lore Realism, 1:1 Real-Time Convalescence & Sovereign Trust
+    void EnterSafehouseConvalescence(uint32 safehouseId, uint64 currentUtcSec);
+    void UpdateConvalescence(uint64 currentUtcSec);
+    bool RuptureSuturesFromStrenuousAction();
+    void AccelerateConvalescenceWithSupplies(uint32 supplyUnits);
+    const ConvalescenceState& GetConvalescenceState() const { return m_convalescenceState; }
+    CastleTrustTier GetPlayerTrustTier(uint32 playerGoId) const;
+    int32 GetPlayerTrustScore(uint32 playerGoId) const;
+    void AdjustPlayerTrust(uint32 playerGoId, const std::string& handle, int32 deltaTrust, const std::string& reason);
+    std::vector<EncryptedBurstMessage> DispatchEncryptedTraumaBurstToTrusted(const std::vector<uint32>& onlinePlayerIds, uint64 currentUtcSec);
+    std::string EvaluateSafehouseIntruder(uint32 playerGoId);
 
     // Administrative & Tactical Commands
+    std::string GenerateStatusReport() const;
     void ScanForAgentsAndThreats();
     void CommandOrderAttack(uint32 targetGoId);
     void CommandDeployToSafehouse(uint32 safehouseId);
@@ -523,9 +575,15 @@ private:
     uint32 m_nextBroadcastId{1};
     std::vector<VigilanteContract> m_contracts;
 
+    // Phase 8 collections & state
+    ConvalescenceState m_convalescenceState;
+    std::unordered_map<uint32, int32> m_trustScores;
+
     mutable std::recursive_mutex m_mutex;
 };
 
 #define sFrankCastleMgr FrankCastleManager::getSingleton()
+
+void RunCastleLoreRealismTestSuite();
 
 #endif // MXOEMU_FRANK_CASTLE_MANAGER_H

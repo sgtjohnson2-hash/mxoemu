@@ -90,6 +90,7 @@ void RunOperatorBridgeTestSuite();
 void RunCyberdeckHackingTestSuite();
 void RunMegacityDestructionTestSuite();
 void RunMatrixRebootTestSuite();
+void RunCastleLoreRealismTestSuite();
 
 static bool g_testUnderworld = false;
 static bool g_testSimulation = false;
@@ -114,6 +115,7 @@ static bool g_testOperatorBridge = false;
 static bool g_testCyberdeck = false;
 static bool g_testMegacityDestruction = false;
 static bool g_testMatrixReboot = false;
+static bool g_testCastleLore = false;
 
 int main(int argc, char* argv[])
 {
@@ -177,6 +179,8 @@ int main(int argc, char* argv[])
             g_testMegacityDestruction = true;
         } else if (arg == "--test-reboot" || arg == "--test-cycle7") {
             g_testMatrixReboot = true;
+        } else if (arg == "--test-castle-lore" || arg == "--test-trauma" || arg == "--test-convalescence") {
+            g_testCastleLore = true;
         } else if (arg == "--test-all") {
             g_testFrank = true;
             g_testUnderworld = true;
@@ -202,13 +206,14 @@ int main(int argc, char* argv[])
             g_testCyberdeck = true;
             g_testMegacityDestruction = true;
             g_testMatrixReboot = true;
+            g_testCastleLore = true;
         }
     }
 
 #ifndef UNITTEST
-    if (g_testFrank && g_testUnderworld && g_testSimulation && g_testEmergentAI && g_testPolice && g_testBiography && g_testSocial && g_testFamily && g_testEmergentLife && g_testSLM && g_testMafia && g_testExiles && g_testPossession && g_testFreeway && g_testConstruct && g_testAPU && g_testHovercraft && g_testBackdoor && g_testMobilAve && g_testCorruptCops && g_testOperatorBridge && g_testCyberdeck && g_testMegacityDestruction && g_testMatrixReboot) {
+    if (g_testFrank && g_testUnderworld && g_testSimulation && g_testEmergentAI && g_testPolice && g_testBiography && g_testSocial && g_testFamily && g_testEmergentLife && g_testSLM && g_testMafia && g_testExiles && g_testPossession && g_testFreeway && g_testConstruct && g_testAPU && g_testHovercraft && g_testBackdoor && g_testMobilAve && g_testCorruptCops && g_testOperatorBridge && g_testCyberdeck && g_testMegacityDestruction && g_testMatrixReboot && g_testCastleLore) {
         std::cout << "\n============================================================" << std::endl;
-        std::cout << "  RUNNING COMPLETE MEGACITY & TACTICAL TEST SUITE (24 SUITES)" << std::endl;
+        std::cout << "  RUNNING COMPLETE MEGACITY & TACTICAL TEST SUITE (25 SUITES)" << std::endl;
         std::cout << "============================================================\n" << std::endl;
         RunFrankCastleTestSuite();
         RunUnderworldTestSuite();
@@ -234,9 +239,12 @@ int main(int argc, char* argv[])
         RunCyberdeckHackingTestSuite();
         RunMegacityDestructionTestSuite();
         RunMatrixRebootTestSuite();
+        RunCastleLoreRealismTestSuite();
         std::cout << "\n============================================================" << std::endl;
-        std::cout << "  ALL 24 MEGACITY EMERGENCE & TACTICAL SUITES PASSED 100%!  " << std::endl;
+        std::cout << "  ALL 25 MEGACITY EMERGENCE & TACTICAL SUITES PASSED 100%!  " << std::endl;
         std::cout << "============================================================\n" << std::endl;
+    } else if (g_testCastleLore) {
+        RunCastleLoreRealismTestSuite();
     } else if (g_testMatrixReboot) {
         RunMatrixRebootTestSuite();
     } else if (g_testMegacityDestruction) {
