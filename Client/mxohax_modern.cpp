@@ -98,22 +98,39 @@ struct MxoCharacterData {
     BYTE  padding[256];
 };
 
+struct MxoCharRecord {
+    BYTE     pad[3];          // 0x00..0x02
+    uint32_t charIdLow;       // 0x03..0x06: 360 (read at matrix.exe 0x0043C653)
+    uint32_t charIdHigh;      // 0x07..0x0A: 0   (read at matrix.exe 0x0043C65C)
+    BYTE     pad2;            // 0x0B
+    uint16_t worldId;         // 0x0C..0x0D: 1   (read at matrix.exe 0x0043D269)
+    BYTE     extra[32];
+};
+
 struct MxoConnParams {
-    BYTE  pad[3];             // 0x00..0x02
-    char  serverIp[32];       // 0x03..0x22: Null-terminated string ("15.204.82.250")
-    WORD  serverPort;         // 10000
-    BYTE  extra[32];
+    BYTE     pad0;            // 0x00: 0
+    WORD     worldId;         // 0x01..0x02: 1 (read at matrix.exe 0x00441243)
+    char     serverIp[32];    // 0x03..0x22: "15.204.82.250" (read at matrix.exe 0x0043F340)
+    WORD     serverPort;      // 10000
+    BYTE     extra[32];
 };
 
 static void* g_SyntheticVtbl[64];
 static void* __fastcall DummyDestructor(void* pThis, void* /*edx*/, unsigned char /*flags*/) { return pThis; }
 
 struct MxoCharObj {
-    void** pVtbl;               // 0x00..0x03
-    BYTE  pad1[0x0C];           // 0x04..0x0F
-    MxoConnParams* pConnParams; // 0x10: Pointer to MxoConnParams
-    MxoCharacterData* pData;    // 0x14: Pointer to MxoCharacterData
-    BYTE  pad2[0x20];
+    void**         pVtbl;       // 0x00..0x03
+    BYTE           pad1[0x0C];  // 0x04..0x0F
+    MxoCharRecord* pRecord;     // 0x10: Pointer to MxoCharRecord (read at matrix.exe 0x0043C650)
+    const char*    pCharName;   // 0x14: Pointer to character name string (read at matrix.exe 0x0043FD30)
+    BYTE           pad2[0x20];
+};
+
+struct MxoConnObj {
+    void**         pVtbl;       // 0x00..0x03
+    BYTE           pad1[0x0C];  // 0x04..0x0F
+    MxoConnParams* pConnParams; // 0x10: Pointer to MxoConnParams (read at matrix.exe 0x0043F340, 0x00441240)
+    BYTE           pad2[0x20];
 };
 #pragma pack(pop)
 
@@ -122,9 +139,11 @@ static MxoCharacterData   g_SyntheticChar = {
     "s1acker", "",
     100, 100, 101, 1, 360
 };
-
+static const char         g_SyntheticCharName[] = "s1acker";
+static MxoCharRecord      g_SyntheticCharRecord;
 static MxoConnParams      g_SyntheticConnParams;
 static MxoCharObj         g_SyntheticCharObj;
+static MxoConnObj         g_SyntheticConnObj;
 
 
 // ============================================================================
@@ -231,20 +250,30 @@ static void SetupSyntheticCharManager(DWORD pThisDword) {
         g_SyntheticVtbl[i] = (void*)&DummyDestructor;
     }
 
-    // 2. Connection parameters
+    // 2. Character record (for matrix.exe 0x0043C650 MS_LoadCharacterRequest packet building)
+    memset(&g_SyntheticCharRecord, 0, sizeof(g_SyntheticCharRecord));
+    g_SyntheticCharRecord.charIdLow = 360;
+    g_SyntheticCharRecord.charIdHigh = 0;
+    g_SyntheticCharRecord.worldId = 1;
+
+    // 3. Connection parameters (for matrix.exe 0x0043F340 IP resolution and 0x00441240 worldId)
     memset(&g_SyntheticConnParams, 0, sizeof(g_SyntheticConnParams));
+    g_SyntheticConnParams.worldId = 1;
     strcpy_s(g_SyntheticConnParams.serverIp, sizeof(g_SyntheticConnParams.serverIp), g_TargetServerIp);
     g_SyntheticConnParams.serverPort = 10000;
 
-    // 3. Character object
+    // 4. Character and Connection objects
     g_SyntheticCharObj.pVtbl = g_SyntheticVtbl;
-    g_SyntheticCharObj.pConnParams = &g_SyntheticConnParams;
-    g_SyntheticCharObj.pData = &g_SyntheticChar;
+    g_SyntheticCharObj.pRecord = &g_SyntheticCharRecord;
+    g_SyntheticCharObj.pCharName = g_SyntheticCharName;
 
-    // 4. Populate matrix.exe Character Manager
+    g_SyntheticConnObj.pVtbl = g_SyntheticVtbl;
+    g_SyntheticConnObj.pConnParams = &g_SyntheticConnParams;
+
+    // 5. Populate matrix.exe Character Manager
     *reinterpret_cast<BYTE*>(pThisDword + 0x640) = 1;                              // Character count = 1
     *reinterpret_cast<void**>(pThisDword + 0x644) = &g_SyntheticCharObj;            // Character 0 object
-    *reinterpret_cast<void**>(pThisDword + 0x658) = &g_SyntheticCharObj;            // Character 0 connection object (0x43F3D1 guard)
+    *reinterpret_cast<void**>(pThisDword + 0x658) = &g_SyntheticConnObj;            // Character 0 connection object (0x43F3D1 guard)
     *reinterpret_cast<BYTE*>(pThisDword + 0x66c) = 0;                              // Selected character index = 0
     *reinterpret_cast<BYTE*>(pThisDword + 0x778) = 1;                              // State check flag (0x43c618)
     *reinterpret_cast<DWORD*>(pThisDword + 0x77c) = 1;                             // WorldId = 1
@@ -330,11 +359,10 @@ static void __fastcall DetourClearCharacters(void* pThis, void* /*edx*/) {
                 dtor(pChar, 1);
             }
         }
-        *ppChar = nullptr;
 
         void** ppConn = reinterpret_cast<void**>(p + 0x18 + i * 4);
         void* pConn = *ppConn;
-        if (pConn && pConn != &g_SyntheticCharObj) {
+        if (pConn && pConn != &g_SyntheticConnObj) {
             void** pVtbl = *reinterpret_cast<void***>(pConn);
             if (pVtbl && pVtbl[0]) {
                 typedef void* (__thiscall *Dtor_t)(void*, BYTE);
@@ -342,10 +370,20 @@ static void __fastcall DetourClearCharacters(void* pThis, void* /*edx*/) {
                 dtor(pConn, 1);
             }
         }
-        *ppConn = nullptr;
     }
-    p[0] = 0;
-    p[0x2C] = 0xFF;
+    // Re-mount synthetic operative s1acker so matrix.exe can never be in an unselected/cleared state
+    p[0] = 1;
+    *reinterpret_cast<void**>(p + 4) = &g_SyntheticCharObj;
+    *reinterpret_cast<void**>(p + 0x18) = &g_SyntheticConnObj;
+    p[0x2C] = 0; // Selected index = 0 (offset 0x66C on MarginMgr)
+
+    DWORD pMarginMgr = reinterpret_cast<DWORD>(p - 0x640);
+    *reinterpret_cast<BYTE*>(pMarginMgr + 0x778) = 1;
+    *reinterpret_cast<DWORD*>(pMarginMgr + 0x77c) = 1;
+    memcpy(reinterpret_cast<void*>(pMarginMgr + 0x674), &g_SyntheticChar, sizeof(g_SyntheticChar));
+
+    Log("[mxohax] [matrix.exe] ClearCharacters preserved operative s1acker (count=1, selected=0, charObj=0x%p, connObj=0x%p)\n",
+        &g_SyntheticCharObj, &g_SyntheticConnObj);
 }
 
 // 0x00428D10: ClearCharObjects in matrix.exe
@@ -367,9 +405,10 @@ static void __fastcall DetourClearCharObjects(void* pThis, void* /*edx*/) {
                 dtor(pChar, 1);
             }
         }
-        *ppChar = nullptr;
     }
-    p[0] = 0;
+    p[0] = 1;
+    *reinterpret_cast<void**>(p + 4) = &g_SyntheticCharObj;
+    Log("[mxohax] [matrix.exe] ClearCharObjects preserved operative s1acker (count=1, charObj=0x%p)\n", &g_SyntheticCharObj);
 }
 
 // ============================================================================
@@ -768,13 +807,24 @@ static void InitializeMxOHaxSynchronous() {
     LoadTargetServerIp();
 
     // Initialize synthetic structures
+    memset(&g_SyntheticCharRecord, 0, sizeof(g_SyntheticCharRecord));
+    g_SyntheticCharRecord.charIdLow = 360;
+    g_SyntheticCharRecord.charIdHigh = 0;
+    g_SyntheticCharRecord.worldId = 1;
+
     memset(&g_SyntheticConnParams, 0, sizeof(g_SyntheticConnParams));
+    g_SyntheticConnParams.worldId = 1;
     strcpy_s(g_SyntheticConnParams.serverIp, sizeof(g_SyntheticConnParams.serverIp), g_TargetServerIp);
     g_SyntheticConnParams.serverPort = 10000;
 
     memset(&g_SyntheticCharObj, 0, sizeof(g_SyntheticCharObj));
-    g_SyntheticCharObj.pConnParams = &g_SyntheticConnParams;
-    g_SyntheticCharObj.pData = &g_SyntheticChar;
+    g_SyntheticCharObj.pVtbl = g_SyntheticVtbl;
+    g_SyntheticCharObj.pRecord = &g_SyntheticCharRecord;
+    g_SyntheticCharObj.pCharName = g_SyntheticCharName;
+
+    memset(&g_SyntheticConnObj, 0, sizeof(g_SyntheticConnObj));
+    g_SyntheticConnObj.pVtbl = g_SyntheticVtbl;
+    g_SyntheticConnObj.pConnParams = &g_SyntheticConnParams;
 
     if (MH_Initialize() != MH_OK) {
         Log("[mxohax] ERROR: Failed to initialize MinHook!\n");
@@ -852,6 +902,17 @@ static void InitializeMxOHaxSynchronous() {
     if (MH_CreateHook(pClearObjs, &DetourClearCharObjects, reinterpret_cast<LPVOID*>(&OriginalClearCharObjects)) == MH_OK) {
         MH_EnableHook(pClearObjs);
         Log("[mxohax] SUCCESS: matrix.exe ClearCharObjects hooked at 0x%p!\n", pClearObjs);
+    }
+
+    // 6. Patch matrix.exe 0x0043D1D6 (NOP 88 06 -> 90 90) to prevent overwriting character count with 0
+    LPVOID pCountPatch = reinterpret_cast<LPVOID>(0x0043D1D6);
+    DWORD oldProt = 0;
+    if (VirtualProtect(pCountPatch, 2, PAGE_EXECUTE_READWRITE, &oldProt)) {
+        BYTE nop2[2] = { 0x90, 0x90 };
+        memcpy(pCountPatch, nop2, 2);
+        VirtualProtect(pCountPatch, 2, oldProt, &oldProt);
+        FlushInstructionCache(GetCurrentProcess(), pCountPatch, 2);
+        Log("[mxohax] SUCCESS: Patched matrix.exe + 0x0003D1D6 (NOP mov byte ptr [esi], al) to preserve character count!\n");
     }
 }
 
