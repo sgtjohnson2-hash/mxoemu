@@ -37,6 +37,7 @@ public:
 
 	vector<class MarginSocket*> FindByCharacterUID(uint64 charUID);
 	class MarginSocket *FindBySessionId(uint32 sessionId);
+	vector<class MarginSocket*> GetAllSockets();
 };
 
 #endif // _MARGINHANDLER_H

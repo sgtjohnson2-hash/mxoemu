@@ -100,34 +100,55 @@ void GameClient::HandlePacket( const char *pData, size_t nLength )
 	{
 		m_lastServerMS = getMSTime();
 
+		INFO_LOG(format("InitialUDPPacket(%1%): Received 43-byte UDP packet: %2%")
+			% Address() % Bin2Hex(pData, nLength, 0));
+
 		ByteBuffer packetData;
-		packetData.append(pData,nLength);
-		packetData.rpos(0x0B);
-		if (packetData.remaining() < sizeof(m_characterUID))
+		packetData.append(pData, nLength);
+
+		// Extract candidate charUIDs from packet at offset 0x0B
+		uint64 rawCharUID64 = 0;
+		uint32 rawCharUID32 = 0;
+		if (packetData.size() >= 0x0B + sizeof(uint64))
 		{
-			Invalidate();
-			return;
-		}
-		packetData >> m_characterUID;
-		try
-		{
-			m_playerGoId = sObjMgr.constructPlayer(this,m_characterUID);
-		}
-		catch (...) {
-			ERROR_LOG(format("InitialUDPPacket(%1%): Character doesn't exist") % Address() );
-			Invalidate();
-			return;
+			packetData.rpos(0x0B);
+			packetData >> rawCharUID64;
+			packetData.rpos(0x0B);
+			packetData >> rawCharUID32;
 		}
 
-		vector<MarginSocket*> marginConns = sMargin.GetSocketsForCharacterUID(m_characterUID);
-		INFO_LOG(format("InitialUDPPacket(%1%): Received for charUID %2%, found %3% candidate margin sockets") % Address() % m_characterUID % marginConns.size());
-		if (marginConns.size() < 1)
+		// Gather candidate MarginSockets for session matching
+		vector<MarginSocket*> marginConns;
+		if (rawCharUID64 > 0)
 		{
-			ERROR_LOG(format("InitialUDPPacket(%1%): Margin session for character not found (GetSocketsForCharacterUID returned 0 for charUID %2%)") % Address() % m_characterUID );
-			Invalidate();
-			return;
+			auto c = sMargin.GetSocketsForCharacterUID(rawCharUID64);
+			marginConns.insert(marginConns.end(), c.begin(), c.end());
 		}
-		//we need to test every margin session that has the same charId, for a matching sessionId
+		if (rawCharUID32 > 0 && rawCharUID32 != (uint32)rawCharUID64)
+		{
+			auto c = sMargin.GetSocketsForCharacterUID(rawCharUID32);
+			marginConns.insert(marginConns.end(), c.begin(), c.end());
+		}
+
+		// Also include any active margin socket that is ready for UDP
+		auto allSockets = sMargin.GetAllSockets();
+		for (auto* sock : allSockets)
+		{
+			if (sock && sock->IsReadyForUdp())
+			{
+				bool exists = false;
+				for (auto* m : marginConns)
+				{
+					if (m == sock) { exists = true; break; }
+				}
+				if (!exists) marginConns.push_back(sock);
+			}
+		}
+
+		INFO_LOG(format("InitialUDPPacket(%1%): Raw charUID64=%2%, charUID32=%3%, evaluating %4% candidate margin sockets")
+			% Address() % rawCharUID64 % rawCharUID32 % marginConns.size());
+
+		// Cryptographically match the session token against candidate MarginSockets
 		MarginSocket* matchedMarginConn = NULL;
 		for (size_t i = 0; i < marginConns.size(); ++i)
 		{
@@ -136,16 +157,15 @@ void GameClient::HandlePacket( const char *pData, size_t nLength )
 
 			uint32 candidateSessionId = candidate->GetSessionId();
 			vector<byte> twofishKey = candidate->GetTwofishKey();
+			if (twofishKey.empty()) continue;
+
 			TwofishCryptEngine testTfEngine;
 			testTfEngine.Initialize(&twofishKey[0], twofishKey.size());
 
 			packetData.rpos(packetData.size() - TwofishCryptMethod::BLOCKSIZE);
 			if (packetData.remaining() < TwofishCryptMethod::BLOCKSIZE)
-			{
-				Invalidate();
-				candidate->ForceDisconnect();
-				return;
-			}
+				continue;
+
 			vector<byte> encryptedSessionId(packetData.remaining());
 			packetData.read(encryptedSessionId);
 			ByteBuffer decryptedData = testTfEngine.Decrypt(&encryptedSessionId[0], encryptedSessionId.size(), false);
@@ -161,6 +181,7 @@ void GameClient::HandlePacket( const char *pData, size_t nLength )
 			{
 				matchedMarginConn = candidate;
 				m_sessionId = candidateSessionId;
+				m_characterUID = candidate->GetCharUID();
 				m_charWorldId = candidate->GetWorldCharId();
 				m_tfEngine.Initialize(&twofishKey[0], twofishKey.size());
 				break;
@@ -173,11 +194,37 @@ void GameClient::HandlePacket( const char *pData, size_t nLength )
 			Invalidate();
 			return;
 		}
+
+		INFO_LOG(format("InitialUDPPacket(%1%): Cryptographic Twofish session matched! CharacterUID=%2%, WorldCharId=%3%, SessionId=%4%")
+			% Address() % m_characterUID % m_charWorldId % m_sessionId);
+
+		// Safely construct player object using validated m_characterUID from the matched Margin session
+		if (m_playerGoId == 0)
+		{
+			try
+			{
+				m_playerGoId = sObjMgr.constructPlayer(this, m_characterUID);
+			}
+			catch (const std::exception& ex)
+			{
+				ERROR_LOG(format("InitialUDPPacket(%1%): Exception constructing player for charUID %2%: %3%") % Address() % m_characterUID % ex.what());
+				Invalidate();
+				matchedMarginConn->ForceDisconnect();
+				return;
+			}
+			catch (...)
+			{
+				ERROR_LOG(format("InitialUDPPacket(%1%): Character %2% doesn't exist in DB") % Address() % m_characterUID);
+				Invalidate();
+				matchedMarginConn->ForceDisconnect();
+				return;
+			}
+		}
+
 		MarginSocket* marginConn = matchedMarginConn;
+		m_encryptionInitialized = true;
 
-		m_encryptionInitialized=true;
-
-		//send latency/loss calibration heartbeats
+		// send latency/loss calibration heartbeats
 		const int numberOfBeats = 5;
 		for (int i=0;i<numberOfBeats;i++)
 		{
@@ -191,7 +238,7 @@ void GameClient::HandlePacket( const char *pData, size_t nLength )
 			m_sock->SendToBuf(m_address, beatPacket.contents(), beatPacket.size(), 0);
 		}
 
-		//notify margin that udp session is established
+		// notify margin that udp session is established
 		if (marginConn->UdpReady(this) == false)
 		{
 			ERROR_LOG(format("InitialUDPPacket(%1%): Margin not ready for UDP connection") % Address() );

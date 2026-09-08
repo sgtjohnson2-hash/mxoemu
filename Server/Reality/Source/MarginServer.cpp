@@ -111,3 +111,9 @@ void MarginServer::ForceDisconnectSession( uint32 sessionId )
 		sock->SetCloseAndDelete();
 	}
 }
+
+vector<MarginSocket*> MarginServer::GetAllSockets()
+{
+	return marginSocketHandler.GetAllSockets();
+}
+

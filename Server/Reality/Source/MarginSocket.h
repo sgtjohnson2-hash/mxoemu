@@ -54,6 +54,7 @@ public:
 	{
 		this->SetCloseAndDelete(true);
 	}
+	bool IsReadyForUdp() const { return readyForUdp; }
 	bool UdpReady(class GameClient *theClient);
 private:
 	void ProcessData(const byte *buf,size_t len);

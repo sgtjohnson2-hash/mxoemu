@@ -81,3 +81,24 @@ class MarginSocket *MarginHandler::FindBySessionId( uint32 sessionId )
 	}
 	return NULL;
 }
+
+vector<MarginSocket*> MarginHandler::GetAllSockets()
+{
+	vector<MarginSocket*> tempVect;
+	for (socket_m::iterator it = m_sockets.begin(); it != m_sockets.end(); it++)
+	{
+		Socket *p = it->second;
+		if (p == NULL)
+			continue;
+		TcpSocket *tcpSock = dynamic_cast<TcpSocket *>(p);
+		if (tcpSock == NULL)
+			continue;
+		MarginSocket *margSock = dynamic_cast<MarginSocket *>(tcpSock);
+		if (margSock == NULL)
+			continue;
+
+		tempVect.push_back(margSock);
+	}
+	return tempVect;
+}
+

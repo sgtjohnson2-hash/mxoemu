@@ -50,6 +50,11 @@ static LONG WINAPI CrashHandler(PEXCEPTION_POINTERS pExc) {
                 Log("[mxohax] ESI: 0x%08X, EDI: 0x%08X, ESP: 0x%08X, EBP: 0x%08X\n",
                     ctx->Esi, ctx->Edi, ctx->Esp, ctx->Ebp);
             }
+            if (clientBase && (uintptr_t)addr == clientBase + 0x0016D495 && ctx) {
+                Log("[mxohax] Recovering from crash at client.dll + 0x0016D495: jumping to epilogue (0x%p)\n", (void*)(clientBase + 0x0016D4DD));
+                ctx->Eip = static_cast<DWORD>(clientBase + 0x0016D4DD);
+                return EXCEPTION_CONTINUE_EXECUTION;
+            }
         }
     }
     return EXCEPTION_CONTINUE_SEARCH;
@@ -202,7 +207,11 @@ int PASCAL DetourSendTo(SOCKET s, const char *buf, int len, int flags, const str
             static bool s_loggedSend = false;
             if (!s_loggedSend) {
                 s_loggedSend = true;
-                Log("[mxohax] sendto() UDP transmitting %d bytes to port 10000 at %s\n", len, g_TargetServerIp);
+                char hexBuf[256] = {0};
+                for (int i = 0; i < len && i < 64; ++i) {
+                    sprintf(hexBuf + i * 3, "%02X ", (unsigned char)buf[i]);
+                }
+                Log("[mxohax] sendto() UDP transmitting %d bytes to port 10000 at %s. Hex: %s\n", len, g_TargetServerIp, hexBuf);
             }
             return OriginalSendTo ? OriginalSendTo(s, buf, len, flags, (struct sockaddr*)&redirected, tolen) : SOCKET_ERROR;
         }
@@ -774,6 +783,17 @@ static void ApplyClientPatches(HMODULE hClient) {
         VirtualProtect(pAbbPatch, 8, oldProt, &oldProt);
         FlushInstructionCache(GetCurrentProcess(), pAbbPatch, 8);
         Log("[mxohax] SUCCESS: Patched client.dll + 0x0012B4F1 for safe net check!\n");
+    }
+
+    // Patch E: 0x0016D410: 3 bytes safe vector population bypass (ret 8: C2 08 00)
+    // Guards against uninitialized/corrupted buffer pointer crash at client.dll + 0x0016D495
+    LPVOID pVecPatch = reinterpret_cast<LPVOID>(clientBase + 0x0016D410);
+    if (VirtualProtect(pVecPatch, 3, PAGE_EXECUTE_READWRITE, &oldProt)) {
+        BYTE patch[3] = { 0xC2, 0x08, 0x00 }; // ret 8
+        memcpy(pVecPatch, patch, 3);
+        VirtualProtect(pVecPatch, 3, oldProt, &oldProt);
+        FlushInstructionCache(GetCurrentProcess(), pVecPatch, 3);
+        Log("[mxohax] SUCCESS: Patched client.dll + 0x0016D410 (ret 8) to guard against vector corruption!\n");
     }
 }
 
