@@ -1,126 +1,150 @@
-﻿#ifndef MXOEMU_MACHINE_CITY_SYSTEM_H
-#define MXOEMU_MACHINE_CITY_SYSTEM_H
+#pragma once
 
 #include "Common.h"
 #include "Singleton.h"
 #include <string>
 #include <vector>
-#include <map>
-#include <mutex>
+#include <unordered_map>
+#include <shared_mutex>
+#include <cstdint>
 #include <cmath>
-#include <memory>
+#include <algorithm>
+
+// ============================================================================
+// Epoch X: Pillar I - Machine City (01) & Deus Ex Machina Sovereign Core
+// Geothermal energy spires, Coppertop pod battery telemetry, Sentinel crèches
+// ============================================================================
+
+struct GeothermalSpire
+{
+    uint32_t spireId{0};
+    std::string spireName;
+    float posX{0.0f}, posY{0.0f}, posZ{0.0f};
+    float heightMeters{850.0f}; // Penetrates scorch-cloud layer
+    float energyOutputMegawatts{1200.0f};
+    float thermalLoadPercent{65.0f};
+    bool isActive{true};
+};
+
+struct DeusExMachinaCore
+{
+    float threatAlertLevel{25.0f}; // 0 - 100
+    double aggregateEnergyReserveJoules{8.5e14}; // 850 Terajoules
+    float sentinelDefenseReadiness{100.0f}; // %
+    float diplomaticCompliance{85.0f}; // % Zion ceasefire index
+    std::string currentTreatyStatus{"Armistice_Active"};
+};
+
+struct CoppertopHarvestMatrix
+{
+    uint32_t totalSuspendedHumans{6200000};
+    float avgHumanJoulesPerSec{115.0f}; // ~115 Watts body heat + bio-electricity
+    float neuralRebellionIndex{4.2f}; // %
+    double currentHarvestWatts{7.13e8}; // ~713 Megawatts total bio-power
+};
+
+struct SentinelAssemblyCreche
+{
+    uint32_t crecheId{0};
+    std::string facilityName;
+    float depthMeters{1500.0f}; // Sub-surface cavern
+    float incursionHeatThreshold{60.0f};
+    uint32_t sentinelsConstructed{500};
+    bool isDeploying{false};
+};
 
 enum DeusEmotionalState
 {
     DEUS_INDIFFERENCE = 0,
-    DEUS_ASSESSING    = 1,
-    DEUS_RAGE         = 2,
-    DEUS_CONSENSUS    = 3
-};
-
-enum DeusBossPhase
-{
-    DEUS_PHASE_SWARM_VORTEX  = 1,
-    DEUS_PHASE_ENERGY_TETHER = 2,
-    DEUS_PHASE_THE_BARGAIN   = 3,
-    DEUS_PHASE_CONCLUDED     = 4
-};
-
-struct MachineVector3
-{
-    float x{0.0f};
-    float y{0.0f};
-    float z{0.0f};
-
-    MachineVector3() = default;
-    MachineVector3(float _x, float _y, float _z) : x(_x), y(_y), z(_z) {}
-
-    float LengthSq() const { return x * x + y * y + z * z; }
-    float Length() const { return std::sqrt(LengthSq()); }
-
-    MachineVector3 Normalized() const
-    {
-        float l = Length();
-        if (l < 0.0001f) return MachineVector3(0.0f, 0.0f, 0.0f);
-        return MachineVector3(x / l, y / l, z / l);
-    }
-
-    MachineVector3 operator+(const MachineVector3& o) const { return MachineVector3(x + o.x, y + o.y, z + o.z); }
-    MachineVector3 operator-(const MachineVector3& o) const { return MachineVector3(x - o.x, y - o.y, z - o.z); }
-    MachineVector3 operator*(float s) const { return MachineVector3(x * s, y * s, z * s); }
-    MachineVector3 operator/(float s) const { return MachineVector3(x / s, y / s, z / s); }
-    MachineVector3& operator+=(const MachineVector3& o) { x += o.x; y += o.y; z += o.z; return *this; }
-};
-
-struct PowerGridTether
-{
-    uint32 tetherId{1};
-    MachineVector3 anchorPos{0.0f, 5000.0f, 0.0f};
-    float currentEnergyMw{750.0f};
-    float integrityPercent{100.0f};
-    bool isSevered{false};
+    DEUS_CURIOSITY = 1,
+    DEUS_RAGE = 2,
+    DEUS_CONSENSUS = 3
 };
 
 struct DeusExMachinaState
 {
-    uint32 swarmDroneCount{100000};
+    int currentPhase{1};
     DeusEmotionalState emotionalState{DEUS_INDIFFERENCE};
-    DeusBossPhase currentPhase{DEUS_PHASE_SWARM_VORTEX};
-    float faceScaleMeters{120.0f};
-    MachineVector3 position{0.0f, 15000.0f, 250000.0f}; // 01 Central Core
-
+    uint32_t swarmDroneCount{100000};
     float vortexShieldIntegrity{100.0f};
-    float bargainProgressPercent{0.0f};
     bool peaceTreatyRatified{false};
+};
 
-    std::vector<PowerGridTether> powerTethers;
+struct PowerGridTether
+{
+    uint32_t tetherId{0};
+    std::string tetherName;
+    float currentEnergyMw{750.0f};
+    bool isSevered{false};
 };
 
 struct MachineTechBlueprint
 {
-    uint32 blueprintId{1};
-    std::string techName{"Hardline Overclock Relay"};
-    std::string description{"Boosts local bandwidth and grants instant hardline extraction."};
-    uint32 requiredMachineStanding{85};
-    uint32 costInfoCurrency{45000};
+    uint32_t blueprintId{0};
+    std::string blueprintName;
+    std::string tier;
 };
 
 class MachineCitySystem : public Singleton<MachineCitySystem>
 {
 public:
     MachineCitySystem();
-    ~MachineCitySystem() = default;
+    ~MachineCitySystem();
 
     void Initialize();
-    void UpdateSimulation(float deltaTimeSec);
+    void ResetForTesting();
+    void Update(float dt);
+    void UpdateSimulation(float dt) { Update(dt); }
 
-    // Atmospheric Scorched Sky Transit
-    bool CheckScorchedSkyBreach(float altitudeY, bool& outSunlightVisible, float& outEmpSurgeVolt) const;
+    // 1. Geothermal Energy Spires (Pillar I.1)
+    uint32_t RegisterSpire(uint32_t spireId, const std::string& name, float x, float y, float z,
+                           float height = 850.0f, float mw = 1200.0f);
+    const GeothermalSpire* GetSpire(uint32_t spireId) const;
+    size_t GetSpireCount() const;
+    bool TriggerThermalEnergyDischarge(uint32_t spireId, float targetX, float targetY, float targetZ,
+                                       float voltageMV, uint32_t& outArcId);
 
-    // Deus Ex Machina Encounter
-    void StartDeusEncounter();
-    bool DamageVortexShield(float damage);
-    bool SeverPowerTether(uint32 tetherId);
-    bool AdvanceBargainDialogue(const std::string& philosophicalResponse, std::string& outDeusReply);
+    // 2. Coppertop Pod Harvest Siphon Telemetry (Pillar I.2)
+    double ComputeTotalBioEnergyOutputWatts() const;
+    void SetSuspendedHumanPopulation(uint32_t count, float rebellionIndex = 4.2f);
+    float GetNeuralRebellionIndex() const;
 
-    // Blueprints & Tech Unlocks
-    uint32 RegisterMachineTech(const std::string& name, const std::string& desc, uint32 minRep, uint32 cost);
-    bool UnlockTechBlueprint(uint32 blueprintId, uint32 playerReputation);
+    // 3. Deus Ex Machina Sovereign Intelligence (Pillar I.3)
+    void EvaluateThreatAlert(float megacityRedpillHeat, uint32_t& outDispatchedSentinels);
+    const DeusExMachinaCore& GetCoreState() const;
+    bool MutateDiplomaticAccord(float complianceDelta, std::string& outNewStatus);
 
-    // Telemetry & Getters
-    const DeusExMachinaState& GetDeusState() const { return m_deus; }
+    // 4. Sentinel Assembly Crèche Subterranean Incursions (Pillar I.4)
+    uint32_t RegisterCreche(uint32_t crecheId, const std::string& name, float depthMeters = 1500.0f,
+                            float heatThreshold = 60.0f, uint32_t initialUnits = 500);
+    bool LaunchSentinelCrecheIncursion(uint32_t crecheId, float sewerX, float sewerY, float sewerZ,
+                                      uint32_t count, bool& outBreachManifested);
+    size_t GetCrecheCount() const;
+
+    // Phase 21 & /zerone compatibility methods
+    bool CheckScorchedSkyBreach(float altitude, bool& outSunlightVisible) const;
+    DeusExMachinaState GetDeusState() const;
+    bool SeverPowerTether(uint32_t tetherId);
+    bool DamageVortexShield(float damageAmount);
     size_t GetSeveredTetherCount() const;
+    bool AdvanceBargainDialogue(int dialogueStep, std::string& outResponse);
+    uint32_t RegisterMachineTech(uint32_t id, const std::string& name, const std::string& tier);
     size_t GetTotalBlueprintCount() const;
-    bool IsPeaceTreatyActive() const { return m_deus.peaceTreatyRatified; }
 
 private:
-    mutable std::recursive_mutex m_cityMutex;
-    DeusExMachinaState m_deus;
-    std::vector<MachineTechBlueprint> m_blueprints;
-    uint32 m_nextBlueprintId{1};
-    float m_simTimeSec{0.0f};
+    mutable std::shared_mutex m_machineMutex;
+    std::unordered_map<uint32_t, GeothermalSpire> m_spires;
+    std::unordered_map<uint32_t, SentinelAssemblyCreche> m_creches;
+    DeusExMachinaCore m_core;
+    CoppertopHarvestMatrix m_harvest;
+    DeusExMachinaState m_deusState;
+    std::unordered_map<uint32_t, PowerGridTether> m_tethers;
+    std::unordered_map<uint32_t, MachineTechBlueprint> m_blueprints;
+    uint32_t m_nextSpireId{1};
+    uint32_t m_nextCrecheId{1};
+    uint32_t m_nextTechId{1};
 };
 
 #define sMachineCitySystem MachineCitySystem::getSingleton()
 
-#endif // MXOEMU_MACHINE_CITY_SYSTEM_H
+void RunMachineCityTestSuite();

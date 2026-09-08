@@ -81,6 +81,9 @@
 #include "CastleUnderworldAssaultEngine.h"
 #include "AirspaceAndConvoyEngine.h"
 #include "NeuroevolutionaryCombatEngine.h"
+#include "MachineCitySystem.h"
+#include "QuantumSuperpositionEngine.h"
+#include "GenerationalLineageEngine.h"
 #include <boost/bind.hpp>
 
 initialiseSingleton( GameServer );
@@ -145,6 +148,9 @@ bool GameServer::Start()
 	sCastleUnderworldAssaultEngine.Initialize();
 	sAirspaceAndConvoyEngine.Initialize();
 	sNeuroevolutionaryCombatEngine.Initialize();
+	sMachineCitySystem.Initialize();
+	sQuantumSuperpositionEngine.Initialize();
+	sGenerationalLineageEngine.Initialize();
 
 	string Interface = sConfig.GetStringDefault("GameServer.IP", "0.0.0.0");
 	int Port = sConfig.GetIntDefault("GameServer.Port", 10000);
@@ -265,6 +271,9 @@ void GameServer::SimulationLoop()
 			sCastleUnderworldAssaultEngine.Update(dtSec);
 			sAirspaceAndConvoyEngine.Update(dtSec);
 			sNeuroevolutionaryCombatEngine.Update(dtSec);
+			sMachineCitySystem.Update(dtSec);
+			sQuantumSuperpositionEngine.Update(dtSec);
+			sGenerationalLineageEngine.Update(dtSec);
 
 			// The Anomaly Event (Phase 50)
 			static uint32 lastAnomalyCheckMs = 0;

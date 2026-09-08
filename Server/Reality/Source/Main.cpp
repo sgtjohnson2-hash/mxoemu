@@ -109,6 +109,9 @@ void RunCastlePvPKarmaTestSuite();
 void RunCastleUnderworldAssaultTestSuite();
 void RunAirspaceAndConvoyTestSuite();
 void RunNeuroevolutionaryCombatTestSuite();
+void RunMachineCityTestSuite();
+void RunQuantumSuperpositionTestSuite();
+void RunGenerationalLineageTestSuite();
 
 static bool g_testUnderworld = false;
 static bool g_testSimulation = false;
@@ -152,6 +155,9 @@ static bool g_testCastleVsPlayers = false;
 static bool g_testCastleVsAI = false;
 static bool g_testAirspaceConvoy = false;
 static bool g_testNeuroCombat = false;
+static bool g_testMachineCity = false;
+static bool g_testQuantumSuperposition = false;
+static bool g_testGenerationalLineage = false;
 
 int main(int argc, char* argv[])
 {
@@ -253,6 +259,12 @@ int main(int argc, char* argv[])
             g_testAirspaceConvoy = true;
         } else if (arg == "--test-neuro-combat" || arg == "--test-neuroevolutionary-combat" || arg == "--test-suite43") {
             g_testNeuroCombat = true;
+        } else if (arg == "--test-machine-city" || arg == "--test-01-core" || arg == "--test-suite44") {
+            g_testMachineCity = true;
+        } else if (arg == "--test-quantum-superposition" || arg == "--test-quantum" || arg == "--test-suite45") {
+            g_testQuantumSuperposition = true;
+        } else if (arg == "--test-generational-lineage" || arg == "--test-lineage" || arg == "--test-suite46") {
+            g_testGenerationalLineage = true;
         } else if (arg == "--test-all") {
             g_testFrank = true;
             g_testUnderworld = true;
@@ -297,13 +309,16 @@ int main(int argc, char* argv[])
             g_testCastleVsAI = true;
             g_testAirspaceConvoy = true;
             g_testNeuroCombat = true;
+            g_testMachineCity = true;
+            g_testQuantumSuperposition = true;
+            g_testGenerationalLineage = true;
         }
     }
 
 #ifndef UNITTEST
-    if (g_testFrank && g_testUnderworld && g_testSimulation && g_testEmergentAI && g_testPolice && g_testBiography && g_testSocial && g_testFamily && g_testEmergentLife && g_testSLM && g_testMafia && g_testExiles && g_testPossession && g_testFreeway && g_testConstruct && g_testAPU && g_testHovercraft && g_testBackdoor && g_testMobilAve && g_testCorruptCops && g_testOperatorBridge && g_testCyberdeck && g_testMegacityDestruction && g_testMatrixReboot && g_testCastleLore && g_testEpoch4 && g_testNeuralSwarm && g_testStructuralVoxel && g_testNeuralAudio && g_testShardFabric && g_testNeuromorphic && g_testNonEuclideanPortals && g_testSourceTelekinesis && g_testGlobalMesh && g_testGaussianSplats && g_testPhysarumLogistics && g_testBiometricResonance && g_testWebAssemblyGateway && g_testCastleVsAgents && g_testCastleVsPlayers && g_testCastleVsAI && g_testAirspaceConvoy && g_testNeuroCombat) {
+    if (g_testFrank && g_testUnderworld && g_testSimulation && g_testEmergentAI && g_testPolice && g_testBiography && g_testSocial && g_testFamily && g_testEmergentLife && g_testSLM && g_testMafia && g_testExiles && g_testPossession && g_testFreeway && g_testConstruct && g_testAPU && g_testHovercraft && g_testBackdoor && g_testMobilAve && g_testCorruptCops && g_testOperatorBridge && g_testCyberdeck && g_testMegacityDestruction && g_testMatrixReboot && g_testCastleLore && g_testEpoch4 && g_testNeuralSwarm && g_testStructuralVoxel && g_testNeuralAudio && g_testShardFabric && g_testNeuromorphic && g_testNonEuclideanPortals && g_testSourceTelekinesis && g_testGlobalMesh && g_testGaussianSplats && g_testPhysarumLogistics && g_testBiometricResonance && g_testWebAssemblyGateway && g_testCastleVsAgents && g_testCastleVsPlayers && g_testCastleVsAI && g_testAirspaceConvoy && g_testNeuroCombat && g_testMachineCity && g_testQuantumSuperposition && g_testGenerationalLineage) {
         std::cout << "\n============================================================" << std::endl;
-        std::cout << "  RUNNING COMPLETE MEGACITY & TACTICAL TEST SUITE (43 SUITES)" << std::endl;
+        std::cout << "  RUNNING COMPLETE MEGACITY & TACTICAL TEST SUITE (46 SUITES)" << std::endl;
         std::cout << "============================================================\n" << std::endl;
         RunFrankCastleTestSuite();
         RunUnderworldTestSuite();
@@ -348,9 +363,18 @@ int main(int argc, char* argv[])
         RunCastleUnderworldAssaultTestSuite();
         RunAirspaceAndConvoyTestSuite();
         RunNeuroevolutionaryCombatTestSuite();
+        RunMachineCityTestSuite();
+        RunQuantumSuperpositionTestSuite();
+        RunGenerationalLineageTestSuite();
         std::cout << "\n============================================================" << std::endl;
-        std::cout << "  ALL 43 MEGACITY EMERGENCE & TACTICAL SUITES PASSED 100%!  " << std::endl;
+        std::cout << "  ALL 46 MEGACITY EMERGENCE & TACTICAL SUITES PASSED 100%!  " << std::endl;
         std::cout << "============================================================\n" << std::endl;
+    } else if (g_testGenerationalLineage) {
+        RunGenerationalLineageTestSuite();
+    } else if (g_testQuantumSuperposition) {
+        RunQuantumSuperpositionTestSuite();
+    } else if (g_testMachineCity) {
+        RunMachineCityTestSuite();
     } else if (g_testNeuroCombat) {
         RunNeuroevolutionaryCombatTestSuite();
     } else if (g_testAirspaceConvoy) {

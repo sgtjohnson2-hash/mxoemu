@@ -35,11 +35,16 @@ void WorldRealizationEngine::Initialize()
     m_sniperTracers.clear();
     m_supplyCrates.clear();
     m_roadblocks.clear();
+    m_energyArcs.clear();
+    m_distortions.clear();
+    m_physicsBubbles.clear();
     m_nextCourierId = 1;
     m_nextSmokeId = 1;
     m_nextClaymoreId = 1;
     m_nextTracerId = 1;
     m_nextCrateId = 1;
+    m_nextArcId = 1;
+    m_nextDistortionId = 1;
     m_totalRupturesManifested = 0;
 
     boost::format fmt("WorldRealizationEngine: Initialized 3D physical world realization subsystem.");
@@ -56,11 +61,16 @@ void WorldRealizationEngine::ResetForTesting()
     m_sniperTracers.clear();
     m_supplyCrates.clear();
     m_roadblocks.clear();
+    m_energyArcs.clear();
+    m_distortions.clear();
+    m_physicsBubbles.clear();
     m_nextCourierId = 1;
     m_nextSmokeId = 1;
     m_nextClaymoreId = 1;
     m_nextTracerId = 1;
     m_nextCrateId = 1;
+    m_nextArcId = 1;
+    m_nextDistortionId = 1;
     m_totalRupturesManifested = 0;
 }
 
@@ -88,6 +98,26 @@ void WorldRealizationEngine::Update(float dt)
         it->second.remainingTimeSec -= dt;
         if (it->second.remainingTimeSec <= 0.0f) {
             it = m_sniperTracers.erase(it);
+        } else {
+            ++it;
+        }
+    }
+
+    // Update 3D Machine energy arcs
+    for (auto it = m_energyArcs.begin(); it != m_energyArcs.end(); ) {
+        it->second.remainingTimeSec -= dt;
+        if (it->second.remainingTimeSec <= 0.0f) {
+            it = m_energyArcs.erase(it);
+        } else {
+            ++it;
+        }
+    }
+
+    // Update 3D Quantum collapse distortions
+    for (auto it = m_distortions.begin(); it != m_distortions.end(); ) {
+        it->second.remainingTimeSec -= dt;
+        if (it->second.remainingTimeSec <= 0.0f) {
+            it = m_distortions.erase(it);
         } else {
             ++it;
         }
@@ -558,6 +588,109 @@ size_t WorldRealizationEngine::GetActiveRoadblockCount() const
 {
     std::shared_lock<std::shared_mutex> lock(m_realizationMutex);
     return m_roadblocks.size();
+}
+
+// 12. 01 Machine City Energy Arcs & Geothermal Discharges
+uint32_t WorldRealizationEngine::ManifestMachineEnergyArc3D(float startX, float startY, float startZ,
+                                                            float targetX, float targetY, float targetZ, float voltageMV)
+{
+    std::unique_lock<std::shared_mutex> lock(m_realizationMutex);
+    uint32_t aid = m_nextArcId++;
+    Active3DMachineEnergyArc arc;
+    arc.arcId = aid;
+    arc.startX = startX; arc.startY = startY; arc.startZ = startZ;
+    arc.targetX = targetX; arc.targetY = targetY; arc.targetZ = targetZ;
+    arc.voltageMV = voltageMV;
+    arc.remainingTimeSec = 1.2f;
+    m_energyArcs[aid] = arc;
+
+    boost::format fmt("WorldRealizationEngine: Manifested 3D Machine energy arc #%1% (%2% MV) from (%3%, %4%, %5%) to (%6%, %7%, %8%)");
+    fmt % aid % voltageMV % startX % startY % startZ % targetX % targetY % targetZ;
+    INFO_LOG(fmt);
+    return aid;
+}
+
+size_t WorldRealizationEngine::GetActiveMachineEnergyArcCount() const
+{
+    std::shared_lock<std::shared_mutex> lock(m_realizationMutex);
+    return m_energyArcs.size();
+}
+
+// 13. Quantum Superposition Wavefunction Collapse Distortions
+uint32_t WorldRealizationEngine::ManifestQuantumCollapseDistortion3D(float x, float y, float z, float radius)
+{
+    std::unique_lock<std::shared_mutex> lock(m_realizationMutex);
+    uint32_t did = m_nextDistortionId++;
+    Active3DQuantumDistortion qd;
+    qd.distortionId = did;
+    qd.posX = x; qd.posY = y; qd.posZ = z;
+    qd.radius = radius;
+    qd.remainingTimeSec = 2.0f;
+    m_distortions[did] = qd;
+
+    boost::format fmt("WorldRealizationEngine: Manifested 3D quantum collapse distortion #%1% at (%2%, %3%, %4%) radius %5%");
+    fmt % did % x % y % z % radius;
+    INFO_LOG(fmt);
+    return did;
+}
+
+size_t WorldRealizationEngine::GetActiveQuantumDistortionCount() const
+{
+    std::shared_lock<std::shared_mutex> lock(m_realizationMutex);
+    return m_distortions.size();
+}
+
+// 14. Subterranean Utility Ruptures
+void WorldRealizationEngine::ManifestSubterraneanUtilityRupture3D(float x, float y, float z, const std::string& utilityType)
+{
+    ManifestStructuralRupture3D(x, y, z, 350.0f, utilityType);
+}
+
+// 15. Local Reality Reshaping AST Physics Bubbles
+void WorldRealizationEngine::RegisterPhysicsConstantBubble3D(uint32_t bubbleId, float x, float y, float z,
+                                                             float radius, float customGravity, float timeDilation)
+{
+    std::unique_lock<std::shared_mutex> lock(m_realizationMutex);
+    Active3DPhysicsBubble pb;
+    pb.bubbleId = bubbleId;
+    pb.posX = x; pb.posY = y; pb.posZ = z;
+    pb.radius = radius;
+    pb.customGravity = customGravity;
+    pb.timeDilation = timeDilation;
+    m_physicsBubbles[bubbleId] = pb;
+
+    boost::format fmt("WorldRealizationEngine: Registered 3D physics bubble #%1% at (%2%, %3%, %4%) r=%5% g=%6% dilation=%7%");
+    fmt % bubbleId % x % y % z % radius % customGravity % timeDilation;
+    INFO_LOG(fmt);
+}
+
+void WorldRealizationEngine::UnregisterPhysicsConstantBubble3D(uint32_t bubbleId)
+{
+    std::unique_lock<std::shared_mutex> lock(m_realizationMutex);
+    m_physicsBubbles.erase(bubbleId);
+}
+
+bool WorldRealizationEngine::IsPointInPhysicsBubble(float x, float y, float z, float& outGravity, float& outDilation) const
+{
+    std::shared_lock<std::shared_mutex> lock(m_realizationMutex);
+    for (const auto& kv : m_physicsBubbles) {
+        const auto& pb = kv.second;
+        float dx = x - pb.posX;
+        float dy = y - pb.posY;
+        float dz = z - pb.posZ;
+        if (dx * dx + dy * dy + dz * dz <= pb.radius * pb.radius) {
+            outGravity = pb.customGravity;
+            outDilation = pb.timeDilation;
+            return true;
+        }
+    }
+    return false;
+}
+
+size_t WorldRealizationEngine::GetActivePhysicsBubbleCount() const
+{
+    std::shared_lock<std::shared_mutex> lock(m_realizationMutex);
+    return m_physicsBubbles.size();
 }
 
 // ============================================================================

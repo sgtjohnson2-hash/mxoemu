@@ -84,6 +84,32 @@ struct Active3DRoadblockBarricade
     bool blocksVehicles{true};
 };
 
+struct Active3DMachineEnergyArc
+{
+    uint32_t arcId{0};
+    float startX{0.0f}, startY{0.0f}, startZ{0.0f};
+    float targetX{0.0f}, targetY{0.0f}, targetZ{0.0f};
+    float voltageMV{50.0f};
+    float remainingTimeSec{1.2f};
+};
+
+struct Active3DQuantumDistortion
+{
+    uint32_t distortionId{0};
+    float posX{0.0f}, posY{0.0f}, posZ{0.0f};
+    float radius{500.0f};
+    float remainingTimeSec{2.0f};
+};
+
+struct Active3DPhysicsBubble
+{
+    uint32_t bubbleId{0};
+    float posX{0.0f}, posY{0.0f}, posZ{0.0f};
+    float radius{1200.0f};
+    float customGravity{0.0f};
+    float timeDilation{0.2f};
+};
+
 class WorldRealizationEngine : public Singleton<WorldRealizationEngine>
 {
 public:
@@ -148,6 +174,25 @@ public:
     bool IsPathBlockedByRoadblock(float fromX, float fromY, float toX, float toY) const;
     size_t GetActiveRoadblockCount() const;
 
+    // 12. 01 Machine City Energy Arcs & Geothermal Discharges
+    uint32_t ManifestMachineEnergyArc3D(float startX, float startY, float startZ,
+                                        float targetX, float targetY, float targetZ, float voltageMV = 50.0f);
+    size_t GetActiveMachineEnergyArcCount() const;
+
+    // 13. Quantum Superposition Wavefunction Collapse Distortions
+    uint32_t ManifestQuantumCollapseDistortion3D(float x, float y, float z, float radius = 500.0f);
+    size_t GetActiveQuantumDistortionCount() const;
+
+    // 14. Subterranean Utility Ruptures (High-pressure steam / High-voltage sparks)
+    void ManifestSubterraneanUtilityRupture3D(float x, float y, float z, const std::string& utilityType = "High_Pressure_Steam");
+
+    // 15. Local Reality Reshaping AST Physics Bubbles
+    void RegisterPhysicsConstantBubble3D(uint32_t bubbleId, float x, float y, float z,
+                                         float radius = 1200.0f, float customGravity = 0.0f, float timeDilation = 0.2f);
+    void UnregisterPhysicsConstantBubble3D(uint32_t bubbleId);
+    bool IsPointInPhysicsBubble(float x, float y, float z, float& outGravity, float& outDilation) const;
+    size_t GetActivePhysicsBubbleCount() const;
+
 private:
     mutable std::shared_mutex m_realizationMutex;
     std::unordered_map<uint32_t, Active3DCourier> m_couriers;
@@ -157,12 +202,17 @@ private:
     std::unordered_map<uint32_t, Active3DSniperTracer> m_sniperTracers;
     std::unordered_map<uint32_t, Active3DSupplyCrate> m_supplyCrates;
     std::unordered_map<uint32_t, Active3DRoadblockBarricade> m_roadblocks;
+    std::unordered_map<uint32_t, Active3DMachineEnergyArc> m_energyArcs;
+    std::unordered_map<uint32_t, Active3DQuantumDistortion> m_distortions;
+    std::unordered_map<uint32_t, Active3DPhysicsBubble> m_physicsBubbles;
 
     uint32_t m_nextCourierId{1};
     uint32_t m_nextSmokeId{1};
     uint32_t m_nextClaymoreId{1};
     uint32_t m_nextTracerId{1};
     uint32_t m_nextCrateId{1};
+    uint32_t m_nextArcId{1};
+    uint32_t m_nextDistortionId{1};
     size_t m_totalRupturesManifested{0};
 };
 
