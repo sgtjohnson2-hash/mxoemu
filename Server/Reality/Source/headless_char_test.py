@@ -283,11 +283,14 @@ def run_test(host: str, auth_port: int, margin_port: int, username: str, passwor
     print(f"\n[+] Connecting to AuthServer at {host}:{auth_port}...")
     
     # Locate pubkey.dat
+    repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
     pubkey_paths = [
+        os.path.join(repo_root, "Server", "Reality", "Binaries", "pubkey.dat"),
         r"D:\Github\MxOEmu\Server\Reality\Binaries\pubkey.dat",
         r"E:\Games\The Matrix Online\pubkey.dat",
         os.path.join(os.path.dirname(__file__), "pubkey.dat"),
-        os.path.join(os.path.dirname(__file__), "..", "Binaries", "pubkey.dat")
+        os.path.join(os.path.dirname(__file__), "..", "Binaries", "pubkey.dat"),
+        "/home/ubuntu/mxoemu/Server/Reality/Binaries/pubkey.dat"
     ]
     pubkey_path = next((p for p in pubkey_paths if os.path.exists(p)), None)
     if not pubkey_path:
