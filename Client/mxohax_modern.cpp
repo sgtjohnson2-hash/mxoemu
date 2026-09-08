@@ -429,18 +429,6 @@ static void __fastcall DetourFrameTick(void* pThis, void* /*edx*/) {
     if (s_tickCount % 50 == 0) {
         Log("[mxohax] DetourFrameTick: Frame #%d active (inWorld=%u)\n", s_tickCount, inWorld);
     }
-
-    if (!s_autoJackInDone) {
-        if (s_screen5DActive) {
-            s_screen5DFrames++;
-            if (s_screen5DFrames >= 5) {
-                Log("[mxohax] DetourFrameTick: Screen 0x5D active for %d frames -> triggering AutoJackIn...\n", s_screen5DFrames);
-                if (TryAutoJackIn(clientBase)) {
-                    s_autoJackInDone = true;
-                }
-            }
-        }
-    }
 }
 
 // Process Exit Hooks
@@ -640,16 +628,8 @@ static void ApplyClientPatches(HMODULE hClient) {
     Log("[mxohax] SUCCESS: Initialized client.dll character identity globals for s1acker (charId=360)\n");
 
     // 6. Direct World Load Patches:
-    // Patch A: 0x0012196E: 31 F6 90 (xor esi, esi; nop) -> forces selected operative index = 0
-    LPVOID pAutoSelectPatch = reinterpret_cast<LPVOID>(clientBase + 0x0012196E);
-    DWORD oldProt = 0;
-    if (VirtualProtect(pAutoSelectPatch, 3, PAGE_EXECUTE_READWRITE, &oldProt)) {
-        const BYTE patchBytes[3] = { 0x31, 0xF6, 0x90 };
-        memcpy(pAutoSelectPatch, patchBytes, 3);
-        VirtualProtect(pAutoSelectPatch, 3, oldProt, &oldProt);
-        FlushInstructionCache(GetCurrentProcess(), pAutoSelectPatch, 3);
-        Log("[mxohax] SUCCESS: Patched client.dll + 0x0012196E to auto-select operative #0 (31 F6 90)!\n");
-    }
+    // Patch A: Preserved native client.dll + 0x0012196E (movzx esi, bl) so character selection and auto-login operate naturally.
+    Log("[mxohax] Preserved native character select logic at client.dll + 0x0012196E.\n");
 
     // Patch B: Removed. Leaving native clean ret 0x14 at 0x10121AE6 so the function epilogue executes cleanly.
     Log("[mxohax] Preserved native clean character load epilogue at client.dll + 0x00121AE6.\n");
@@ -659,6 +639,7 @@ static void ApplyClientPatches(HMODULE hClient) {
     g_retCameraNormal = clientBase + 0x0012B3FE;
     g_retCameraSkip = clientBase + 0x0012B4F1;
 
+    DWORD oldProt = 0;
     LPVOID pCamPatch = reinterpret_cast<LPVOID>(clientBase + 0x0012B3EE);
     if (VirtualProtect(pCamPatch, 16, PAGE_EXECUTE_READWRITE, &oldProt)) {
         BYTE patch[16];

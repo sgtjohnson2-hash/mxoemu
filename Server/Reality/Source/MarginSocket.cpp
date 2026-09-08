@@ -258,7 +258,7 @@ void MarginSocket::ProcessData( const byte *buf,size_t len )
 
 			//scope for db ptr
 			{
-				PreparedStatement stmt("SELECT `userId`, `username` FROM `users` WHERE `username` = ?0 LIMIT 1");
+				PreparedStatement stmt("SELECT `userId`, `username` FROM `users` WHERE LOWER(`username`) = LOWER(?0) LIMIT 1");
 				stmt.SetString(0, m_username);
 				scoped_ptr<QueryResult> result(sDatabase.QueryPrepared(&stmt));
 				if (result == NULL)
