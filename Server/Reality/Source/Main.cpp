@@ -98,6 +98,7 @@ void RunNeuralAudioTestSuite();
 void RunSharedMemoryShardTestSuite();
 void RunEpochVINeuromorphicSuite();
 void RunNonEuclideanPortalTestSuite();
+void RunSourceTelekinesisTestSuite();
 
 static bool g_testUnderworld = false;
 static bool g_testSimulation = false;
@@ -130,6 +131,7 @@ static bool g_testNeuralAudio = false;
 static bool g_testShardFabric = false;
 static bool g_testNeuromorphic = false;
 static bool g_testNonEuclideanPortals = false;
+static bool g_testSourceTelekinesis = false;
 
 int main(int argc, char* argv[])
 {
@@ -209,6 +211,8 @@ int main(int argc, char* argv[])
             g_testNeuromorphic = true;
         } else if (arg == "--test-portal" || arg == "--test-portals" || arg == "--test-non-euclidean") {
             g_testNonEuclideanPortals = true;
+        } else if (arg == "--test-telekinesis" || arg == "--test-source-telekinesis" || arg == "--test-bullet-freeze") {
+            g_testSourceTelekinesis = true;
         } else if (arg == "--test-all") {
             g_testFrank = true;
             g_testUnderworld = true;
@@ -282,9 +286,12 @@ int main(int argc, char* argv[])
         RunSharedMemoryShardTestSuite();
         RunEpochVINeuromorphicSuite();
         RunNonEuclideanPortalTestSuite();
+        RunSourceTelekinesisTestSuite();
         std::cout << "\n============================================================" << std::endl;
-        std::cout << "  ALL 32 MEGACITY EMERGENCE & TACTICAL SUITES PASSED 100%!  " << std::endl;
+        std::cout << "  ALL 33 MEGACITY EMERGENCE & TACTICAL SUITES PASSED 100%!  " << std::endl;
         std::cout << "============================================================\n" << std::endl;
+    } else if (g_testSourceTelekinesis) {
+        RunSourceTelekinesisTestSuite();
     } else if (g_testNonEuclideanPortals) {
         RunNonEuclideanPortalTestSuite();
     } else if (g_testNeuromorphic) {
