@@ -136,6 +136,7 @@ void LogisticsManager::SetupSubstations()
 
 bool LogisticsManager::DispatchCourier(CourierType type, uint32 routeIndex)
 {
+    if (m_couriers.size() >= 3) return false;
     if (routeIndex >= m_routes.size()) return false;
     const CourierRoute& route = m_routes[routeIndex];
     if (route.waypoints.empty()) return false;
@@ -207,6 +208,14 @@ bool LogisticsManager::DispatchCourier(CourierType type, uint32 routeIndex)
     }
 
     m_couriers.push_back(courier);
+
+    if (route.waypoints.size() > 1) {
+        LocationVector firstWp = route.waypoints[1];
+        cBot->MoveTo((float)firstWp.x, (float)firstWp.y, (float)firstWp.z);
+        if (eBot) {
+            eBot->MoveTo((float)firstWp.x - 500.0f, (float)firstWp.y, (float)firstWp.z - 500.0f);
+        }
+    }
 
     cBot->Say((format("Courier underway carrying: %1%. Moving to destination.") % cargo).str());
     INFO_LOG(format("LogisticsManager: Dispatched Courier %1% carrying [%2%] along Route %3%") 
@@ -356,11 +365,20 @@ void LogisticsManager::Update(uint32 deltaMs)
 void LogisticsManager::UpdateCouriers(uint32 deltaMs)
 {
     uint32 now = getMSTime();
-    float dtSeconds = deltaMs / 1000.0f;
 
     for (auto it = m_couriers.begin(); it != m_couriers.end();) {
         ActiveCourier& courier = *it;
         if (courier.destroyed || courier.reachedDestination) {
+            if (courier.courierGoId != 0) {
+                if (auto po = sObjMgr.getGOPtrSafe(courier.courierGoId)) {
+                    po->killPlayer(0, 0x280001C2);
+                }
+            }
+            for (uint32 eGoId : courier.escortGoIds) {
+                if (auto po = sObjMgr.getGOPtrSafe(eGoId)) {
+                    po->killPlayer(0, 0x280001C2);
+                }
+            }
             it = m_couriers.erase(it);
             continue;
         }
@@ -401,30 +419,21 @@ void LogisticsManager::UpdateCouriers(uint32 deltaMs)
 
         if (dist <= 1500.0f) { // Reached waypoint (within 15m)
             courier.currentWaypoint++;
-        } else {
-            // Move toward waypoint
-            dx /= dist;
-            dz /= dist;
-            float moveSpeed = 4.5f * 100.0f; // 4.5 m/s
-            float newX = (float)curPos.x + dx * moveSpeed * dtSeconds;
-            float newZ = (float)curPos.z + dz * moveSpeed * dtSeconds;
-
-            auto bot = sBotMgr.GetBotByGOID(courier.courierGoId);
-            if (bot) bot->MoveTo(newX, (float)curPos.y, newZ);
-
-            // Escorts follow courier
-            for (uint32 eGoId : courier.escortGoIds) {
-                auto eBot = sBotMgr.GetBotByGOID(eGoId);
-                if (eBot) {
-                    eBot->MoveTo((float)curPos.x - 800.0f, (float)curPos.y, (float)curPos.z - 800.0f);
+            if (courier.currentWaypoint < route.waypoints.size()) {
+                LocationVector nextWp = route.waypoints[courier.currentWaypoint];
+                auto bot = sBotMgr.GetBotByGOID(courier.courierGoId);
+                if (bot) bot->MoveTo((float)nextWp.x, (float)nextWp.y, (float)nextWp.z);
+                for (uint32 eGoId : courier.escortGoIds) {
+                    auto eBot = sBotMgr.GetBotByGOID(eGoId);
+                    if (eBot) eBot->MoveTo((float)nextWp.x - 500.0f, (float)nextWp.y, (float)nextWp.z - 500.0f);
                 }
             }
+        }
 
-            if (now - courier.lastCalloutTime > 180000) {
-                courier.lastCalloutTime = now;
-                DEBUG_LOG(format("LogisticsManager: Courier %1% passing checkpoint en route with [%2%]") 
-                          % courier.courierGoId % courier.cargoDescription);
-            }
+        if (now - courier.lastCalloutTime > 180000) {
+            courier.lastCalloutTime = now;
+            DEBUG_LOG(format("LogisticsManager: Courier %1% passing checkpoint en route with [%2%]") 
+                      % courier.courierGoId % courier.cargoDescription);
         }
 
         ++it;
