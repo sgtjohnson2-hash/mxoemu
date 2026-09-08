@@ -543,8 +543,11 @@ bool WorldRealizationEngine::IsPathBlockedByRoadblock(float fromX, float fromY, 
     for (const auto& kv : m_roadblocks) {
         const auto& rb = kv.second;
         if (!rb.blocksVehicles) continue;
-        float distToBarricade = std::sqrt((fromX - rb.posX) * (fromX - rb.posX) + (fromY - rb.posY) * (fromY - rb.posY));
-        if (distToBarricade < rb.lengthMeters * 100.0f) {
+        float threshold = rb.lengthMeters * 100.0f;
+        float d1 = std::sqrt((fromX - rb.posX) * (fromX - rb.posX) + (fromY - rb.posY) * (fromY - rb.posY));
+        float d2 = std::sqrt((fromX - rb.posX) * (fromX - rb.posX) + (fromY - rb.posZ) * (fromY - rb.posZ));
+        float d3 = std::sqrt((toX - rb.posX) * (toX - rb.posX) + (toY - rb.posZ) * (toY - rb.posZ));
+        if (d1 < threshold || d2 < threshold || d3 < threshold) {
             return true;
         }
     }

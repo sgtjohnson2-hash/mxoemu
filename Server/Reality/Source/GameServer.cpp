@@ -79,6 +79,8 @@
 #include "CastleAgentCombatEngine.h"
 #include "CastlePvPKarmaEngine.h"
 #include "CastleUnderworldAssaultEngine.h"
+#include "AirspaceAndConvoyEngine.h"
+#include "NeuroevolutionaryCombatEngine.h"
 #include <boost/bind.hpp>
 
 initialiseSingleton( GameServer );
@@ -141,6 +143,8 @@ bool GameServer::Start()
 	sCastleAgentCombatEngine.Initialize();
 	sCastlePvPKarmaEngine.Initialize();
 	sCastleUnderworldAssaultEngine.Initialize();
+	sAirspaceAndConvoyEngine.Initialize();
+	sNeuroevolutionaryCombatEngine.Initialize();
 
 	string Interface = sConfig.GetStringDefault("GameServer.IP", "0.0.0.0");
 	int Port = sConfig.GetIntDefault("GameServer.Port", 10000);
@@ -259,6 +263,8 @@ void GameServer::SimulationLoop()
 			sCastleAgentCombatEngine.Update(dtSec);
 			sCastlePvPKarmaEngine.Update(dtSec);
 			sCastleUnderworldAssaultEngine.Update(dtSec);
+			sAirspaceAndConvoyEngine.Update(dtSec);
+			sNeuroevolutionaryCombatEngine.Update(dtSec);
 
 			// The Anomaly Event (Phase 50)
 			static uint32 lastAnomalyCheckMs = 0;
