@@ -465,26 +465,50 @@ void MarginSocket::ProcessData( const byte *buf,size_t len )
 		}
 	case MS_LoadCharacterRequest:
 		{
-			//first 8 bytes are uint64 charid
-			if (packetData.remaining() < sizeof(charId))
-				break;
-
-			packetData >> charId;
-			//scope for db ptr
+			// Try reading 8-byte charId from packet header (bytes 1..8)
+			if (packetData.remaining() >= sizeof(charId))
 			{
-				PreparedStatement stmt("SELECT `charId`, `userId`, `handle`, `firstName`, `lastName`, `background` FROM `characters` WHERE `userId` = ?0 AND `charId` = ?1 LIMIT 1");
-				stmt.SetUInt32(0, m_userId);
-				stmt.SetUInt32(1, charId);
-				scoped_ptr<QueryResult> result(sDatabase.QueryPrepared(&stmt));
+				packetData >> charId;
+			}
+
+			// If charId in header was 0, check offset 9 (MxoCharacterData format from matrix.exe)
+			if (charId == 0 && packetData.size() >= 13)
+			{
+				uint32 charId32 = *reinterpret_cast<const uint32*>(&packetData.contents()[9]);
+				if (charId32 != 0)
+				{
+					charId = charId32;
+					DEBUG_LOG(format("MS_LoadCharacterRequest: Extracted charId %1% from MxoCharacterData at offset 9") % charId);
+				}
+			}
+
+			// Scope for db ptr
+			{
+				scoped_ptr<QueryResult> result;
+				if (charId != 0)
+				{
+					PreparedStatement stmt("SELECT `charId`, `userId`, `handle`, `firstName`, `lastName`, `background` FROM `characters` WHERE `userId` = ?0 AND `charId` = ?1 LIMIT 1");
+					stmt.SetUInt32(0, m_userId);
+					stmt.SetUInt32(1, (uint32)charId);
+					result.reset(sDatabase.QueryPrepared(&stmt));
+				}
+				else
+				{
+					PreparedStatement stmt("SELECT `charId`, `userId`, `handle`, `firstName`, `lastName`, `background` FROM `characters` WHERE `userId` = ?0 ORDER BY `charId` ASC LIMIT 1");
+					stmt.SetUInt32(0, m_userId);
+					result.reset(sDatabase.QueryPrepared(&stmt));
+				}
+
 				if (result == NULL)
 				{
-					ERROR_LOG(format("MS_LoadCharacterRequest: Character doesn't exist or username %1% doesn't own it") % m_username );
+					ERROR_LOG(format("MS_LoadCharacterRequest: Character doesn't exist or username %1% doesn't own it (charId=%2%, userId=%3%)")
+						% m_username % charId % m_userId);
 					SetCloseAndDelete(true);
 					return;
 				}
 
 				Field *field = result->Fetch();
-
+				charId = field[0].GetUInt32();
 				m_charName = field[2].GetString();
 				m_firstName = field[3].GetString();
 				m_lastName = field[4].GetString();
@@ -493,75 +517,21 @@ void MarginSocket::ProcessData( const byte *buf,size_t len )
 					m_background = field[5].GetString();
 				else
 					m_background = string();
+
+				INFO_LOG(format("MS_LoadCharacterRequest: Successfully authenticated character '%1%' (charId=%2%) for user '%3%' (userId=%4%)")
+					% m_charName % charId % m_username % m_userId);
 			}
 
-			//Don't allow multiple users with the same character id
-			if (sConfig.GetBoolDefault("MarginServer.AllowMultipleSessionsPerCharacter", false)==false)
+			// Don't allow multiple users with the same character id
+			if (sConfig.GetBoolDefault("MarginServer.AllowMultipleSessionsPerCharacter", false) == false)
 			{
 				auto allUsers = sGame.GetClientsWithCharacterId(charId);
-				if(allUsers.size() > 0) //someone else already using account
+				if (allUsers.size() > 0) // someone else already using account
 				{
 					ERROR_LOG(format("MS_LoadCharacterRequest: Closing connection for %1% (one already exists)") % m_charName );
 					this->SetCloseAndDelete(true);
 					return;
 				}
-			}
-
-			//then 32 zeroes
-			vector<byte> justZeroes(32);
-			if (packetData.remaining() < justZeroes.size())
-				break;
-			packetData.read(&justZeroes[0],justZeroes.size());
-			if (std::accumulate(justZeroes.begin(),justZeroes.end(),0) != 0)
-			{
-				WARNING_LOG(format("MS_LoadCharacterRequest: Zeroes were %1%") % Bin2Hex(&justZeroes[0],justZeroes.size()) );
-			}
-
-			uint32 strangeCounter=0;
-			byte shouldBeStrangeThing[16];
-			while (packetData.remaining() >= sizeof(shouldBeStrangeThing))
-			{
-				packetData.read(shouldBeStrangeThing,sizeof(shouldBeStrangeThing));
-				if (memcmp(shouldBeStrangeThing,weirdSequenceOfBytes,sizeof(shouldBeStrangeThing)) != 0)
-				{
-					//roll back the 16 bytes we read
-					packetData.rpos(packetData.rpos()-sizeof(shouldBeStrangeThing));
-					break;
-				}
-				else
-				{
-					strangeCounter++;
-				}
-			}
-			if (strangeCounter != 9)
-			{
-				WARNING_LOG(format("MS_LoadCharacterRequest: Strange counter was not 9 but %1%") % strangeCounter);
-			}
-
-			//abs position in packet of weird string size uint16
-			uint16 weirdStringPos;
-			if (packetData.remaining() < sizeof(weirdStringPos))
-				break;
-			packetData >> weirdStringPos;
-			if (weirdStringPos >= packetData.size())
-				break;
-			packetData.rpos(weirdStringPos);
-			uint16 weirdStringLen;
-			if (packetData.remaining() < sizeof(weirdStringLen))
-				break;
-			packetData >> weirdStringLen;
-			if (packetData.remaining() < weirdStringLen)
-				break;
-			vector<byte> stringStorage(weirdStringLen);
-			packetData.read(&stringStorage[0],stringStorage.size());
-			if (stringStorage.size() > 1)
-			{
-				soeChatString = string((const char*)&stringStorage[0],stringStorage.size()-1);
-				WARNING_LOG(format("MS_LoadCharacterRequest: weird string is %1%") % soeChatString );
-			}
-			else
-			{
-				soeChatString = string();
 			}
 
 			SendLoadCharacterReplies();
