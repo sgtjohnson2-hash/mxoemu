@@ -92,6 +92,8 @@ void RunMegacityDestructionTestSuite();
 void RunMatrixRebootTestSuite();
 void RunCastleLoreRealismTestSuite();
 void RunEpochIVMasteryTestSuite();
+void RunNeuralSwarmTestSuite();
+void RunStructuralVoxelTestSuite();
 
 static bool g_testUnderworld = false;
 static bool g_testSimulation = false;
@@ -118,6 +120,8 @@ static bool g_testMegacityDestruction = false;
 static bool g_testMatrixReboot = false;
 static bool g_testCastleLore = false;
 static bool g_testEpoch4 = false;
+static bool g_testNeuralSwarm = false;
+static bool g_testStructuralVoxel = false;
 
 int main(int argc, char* argv[])
 {
@@ -185,6 +189,10 @@ int main(int argc, char* argv[])
             g_testCastleLore = true;
         } else if (arg == "--test-epoch4" || arg == "--test-epoch-iv") {
             g_testEpoch4 = true;
+        } else if (arg == "--test-swarm" || arg == "--test-smith-cascade" || arg == "--test-neural-swarm" || arg == "--test-epoch5") {
+            g_testNeuralSwarm = true;
+        } else if (arg == "--test-structural-voxel" || arg == "--test-voxel-rupture" || arg == "--test-structural-rupture") {
+            g_testStructuralVoxel = true;
         } else if (arg == "--test-all") {
             g_testFrank = true;
             g_testUnderworld = true;
@@ -212,13 +220,15 @@ int main(int argc, char* argv[])
             g_testMatrixReboot = true;
             g_testCastleLore = true;
             g_testEpoch4 = true;
+            g_testNeuralSwarm = true;
+            g_testStructuralVoxel = true;
         }
     }
 
 #ifndef UNITTEST
-    if (g_testFrank && g_testUnderworld && g_testSimulation && g_testEmergentAI && g_testPolice && g_testBiography && g_testSocial && g_testFamily && g_testEmergentLife && g_testSLM && g_testMafia && g_testExiles && g_testPossession && g_testFreeway && g_testConstruct && g_testAPU && g_testHovercraft && g_testBackdoor && g_testMobilAve && g_testCorruptCops && g_testOperatorBridge && g_testCyberdeck && g_testMegacityDestruction && g_testMatrixReboot && g_testCastleLore && g_testEpoch4) {
+    if (g_testFrank && g_testUnderworld && g_testSimulation && g_testEmergentAI && g_testPolice && g_testBiography && g_testSocial && g_testFamily && g_testEmergentLife && g_testSLM && g_testMafia && g_testExiles && g_testPossession && g_testFreeway && g_testConstruct && g_testAPU && g_testHovercraft && g_testBackdoor && g_testMobilAve && g_testCorruptCops && g_testOperatorBridge && g_testCyberdeck && g_testMegacityDestruction && g_testMatrixReboot && g_testCastleLore && g_testEpoch4 && g_testNeuralSwarm && g_testStructuralVoxel) {
         std::cout << "\n============================================================" << std::endl;
-        std::cout << "  RUNNING COMPLETE MEGACITY & TACTICAL TEST SUITE (26 SUITES)" << std::endl;
+        std::cout << "  RUNNING COMPLETE MEGACITY & TACTICAL TEST SUITE (28 SUITES)" << std::endl;
         std::cout << "============================================================\n" << std::endl;
         RunFrankCastleTestSuite();
         RunUnderworldTestSuite();
@@ -246,9 +256,15 @@ int main(int argc, char* argv[])
         RunMatrixRebootTestSuite();
         RunCastleLoreRealismTestSuite();
         RunEpochIVMasteryTestSuite();
+        RunNeuralSwarmTestSuite();
+        RunStructuralVoxelTestSuite();
         std::cout << "\n============================================================" << std::endl;
-        std::cout << "  ALL 26 MEGACITY EMERGENCE & TACTICAL SUITES PASSED 100%!  " << std::endl;
+        std::cout << "  ALL 28 MEGACITY EMERGENCE & TACTICAL SUITES PASSED 100%!  " << std::endl;
         std::cout << "============================================================\n" << std::endl;
+    } else if (g_testStructuralVoxel) {
+        RunStructuralVoxelTestSuite();
+    } else if (g_testNeuralSwarm) {
+        RunNeuralSwarmTestSuite();
     } else if (g_testEpoch4) {
         RunEpochIVMasteryTestSuite();
     } else if (g_testCastleLore) {
