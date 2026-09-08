@@ -4,6 +4,8 @@
 #include <ws2tcpip.h>
 #include <windows.h>
 #include <stdio.h>
+#include <stdint.h>
+#include <intrin.h>
 #include "minhook/include/MinHook.h"
 
 #pragma comment(lib, "ws2_32.lib")
@@ -22,6 +24,35 @@ static void Log(const char* fmt, ...) {
     vfprintf(f, fmt, args);
     va_end(args);
     fclose(f);
+}
+
+static LONG WINAPI CrashHandler(PEXCEPTION_POINTERS pExc) {
+    if (pExc && pExc->ExceptionRecord) {
+        DWORD code = pExc->ExceptionRecord->ExceptionCode;
+        if (code == 0xC0000005 || code == 0x80000003) {
+            void* addr = pExc->ExceptionRecord->ExceptionAddress;
+            CONTEXT* ctx = pExc->ContextRecord;
+            HMODULE hClient = GetModuleHandleA("client.dll");
+            uintptr_t clientBase = (uintptr_t)hClient;
+            HMODULE hMatrix = GetModuleHandleA("matrix.exe");
+            uintptr_t matrixBase = (uintptr_t)hMatrix;
+
+            Log("[mxohax] !!! CRASH EXCEPTION 0x%08X at 0x%p !!!\n", code, addr);
+            if (clientBase && (uintptr_t)addr >= clientBase && (uintptr_t)addr < clientBase + 0x1000000) {
+                Log("[mxohax] Crash is inside client.dll + 0x%08X\n", (uintptr_t)addr - clientBase);
+            }
+            if (matrixBase && (uintptr_t)addr >= matrixBase && (uintptr_t)addr < matrixBase + 0x1000000) {
+                Log("[mxohax] Crash is inside matrix.exe + 0x%08X\n", (uintptr_t)addr - matrixBase);
+            }
+            if (ctx) {
+                Log("[mxohax] EIP: 0x%08X, EAX: 0x%08X, EBX: 0x%08X, ECX: 0x%08X, EDX: 0x%08X\n",
+                    ctx->Eip, ctx->Eax, ctx->Ebx, ctx->Ecx, ctx->Edx);
+                Log("[mxohax] ESI: 0x%08X, EDI: 0x%08X, ESP: 0x%08X, EBP: 0x%08X\n",
+                    ctx->Esi, ctx->Edi, ctx->Esp, ctx->Ebp);
+            }
+        }
+    }
+    return EXCEPTION_CONTINUE_SEARCH;
 }
 
 static void LoadTargetServerIp() {
@@ -47,7 +78,54 @@ static void LoadTargetServerIp() {
     Log("[mxohax] Active Target Server IP: %s\n", g_TargetServerIp);
 }
 
-// Typedef for gethostbyname hook
+// ============================================================================
+// Synthetic Operative Data for s1acker (charId = 360)
+// ============================================================================
+#pragma pack(push, 1)
+struct MxoCharacterData {
+    DWORD charId;             // 0x00: 360
+    DWORD unknown04;          // 0x04: 0
+    DWORD unknown08;          // 0x08: 0
+    DWORD unknown0C;          // 0x0C: 0
+    DWORD unknown10;          // 0x10: 0
+    char  firstName[32];      // 0x14: "s1acker"
+    char  lastName[32];       // 0x34: ""
+    DWORD bodyType;           // 0x54: 100
+    DWORD headType;           // 0x58: 100
+    DWORD hairType;           // 0x5C: 101
+    DWORD worldId;            // 0x60: 1
+    DWORD handle;             // 0x64: 360
+    BYTE  padding[256];
+};
+
+struct MxoConnParams {
+    BYTE  pad[3];             // 0x00..0x02
+    char  serverIp[32];       // 0x03..0x22: Null-terminated string ("15.204.82.250")
+    WORD  serverPort;         // 10000
+    BYTE  extra[32];
+};
+
+struct MxoCharObj {
+    BYTE pad1[0x10];          // 0x00..0x0F
+    MxoConnParams* pConnParams; // 0x10: Pointer to MxoConnParams
+    MxoCharacterData* pData;  // 0x14: Pointer to MxoCharacterData
+    BYTE pad2[0x20];
+};
+#pragma pack(pop)
+
+static MxoCharacterData   g_SyntheticChar = {
+    360, 0, 0, 0, 0,
+    "s1acker", "",
+    100, 100, 101, 1, 360
+};
+
+static MxoConnParams      g_SyntheticConnParams;
+static MxoCharObj         g_SyntheticCharObj;
+
+
+// ============================================================================
+// WinSock Hooks
+// ============================================================================
 typedef struct hostent* (PASCAL* gethostbyname_t)(const char* name);
 static gethostbyname_t OriginalGetHostByName = nullptr;
 
@@ -69,7 +147,6 @@ struct hostent* PASCAL DetourGetHostByName(const char* name) {
     return OriginalGetHostByName ? OriginalGetHostByName(name) : nullptr;
 }
 
-// Typedef for connect hook
 typedef int (PASCAL* connect_t)(SOCKET s, const struct sockaddr *name, int namelen);
 static connect_t OriginalConnect = nullptr;
 
@@ -77,18 +154,14 @@ int PASCAL DetourConnect(SOCKET s, const struct sockaddr *name, int namelen) {
     if (name && name->sa_family == AF_INET && namelen >= sizeof(struct sockaddr_in)) {
         struct sockaddr_in* sin = (struct sockaddr_in*)name;
         u_short port = ntohs(sin->sin_port);
-        // Redirect Auth (11000) and Margin (10000)
-        if (port == 11000 || port == 10000) {
-            struct sockaddr_in redirected = *sin;
-            redirected.sin_addr.s_addr = inet_addr(g_TargetServerIp);
-            Log("[mxohax] connect() redirected port %u -> %s:%u\n", port, g_TargetServerIp, port);
-            return OriginalConnect(s, (struct sockaddr*)&redirected, namelen);
-        }
+        struct sockaddr_in redirected = *sin;
+        redirected.sin_addr.s_addr = inet_addr(g_TargetServerIp);
+        Log("[mxohax] connect() intercepted for port %u -> routing to %s:%u\n", port, g_TargetServerIp, port);
+        return OriginalConnect ? OriginalConnect(s, (struct sockaddr*)&redirected, namelen) : SOCKET_ERROR;
     }
     return OriginalConnect ? OriginalConnect(s, name, namelen) : SOCKET_ERROR;
 }
 
-// Typedef for sendto hook (UDP Margin/World on port 10000)
 typedef int (PASCAL* sendto_t)(SOCKET s, const char *buf, int len, int flags, const struct sockaddr *to, int tolen);
 static sendto_t OriginalSendTo = nullptr;
 
@@ -99,14 +172,12 @@ int PASCAL DetourSendTo(SOCKET s, const char *buf, int len, int flags, const str
         if (port == 10000) {
             struct sockaddr_in redirected = *sin;
             redirected.sin_addr.s_addr = inet_addr(g_TargetServerIp);
-            Log("[mxohax] sendto() UDP redirected port 10000 -> %s:10000 (len=%d)\n", g_TargetServerIp, len);
-            return OriginalSendTo(s, buf, len, flags, (struct sockaddr*)&redirected, tolen);
+            return OriginalSendTo ? OriginalSendTo(s, buf, len, flags, (struct sockaddr*)&redirected, tolen) : SOCKET_ERROR;
         }
     }
     return OriginalSendTo ? OriginalSendTo(s, buf, len, flags, to, tolen) : SOCKET_ERROR;
 }
 
-// Typedef for recvfrom hook
 typedef int (PASCAL* recvfrom_t)(SOCKET s, char *buf, int len, int flags, struct sockaddr *from, int *fromlen);
 static recvfrom_t OriginalRecvFrom = nullptr;
 
@@ -116,13 +187,19 @@ int PASCAL DetourRecvFrom(SOCKET s, char *buf, int len, int flags, struct sockad
         struct sockaddr_in* sin = (struct sockaddr_in*)from;
         u_short port = ntohs(sin->sin_port);
         if (port == 10000) {
-            Log("[mxohax] recvfrom() UDP received %d bytes from port %u\n", res, port);
+            static bool s_loggedRecv = false;
+            if (!s_loggedRecv) {
+                s_loggedRecv = true;
+                Log("[mxohax] recvfrom() UDP received %d bytes from port 10000\n", res);
+            }
         }
     }
     return res;
 }
 
-// Typedef for VerifyMessage function signature (CryptoPP PK_Verifier in matrix.exe / client.dll)
+// ============================================================================
+// RSA Bypass Hook (CryptoPP VerifyMessage)
+// ============================================================================
 typedef bool(__stdcall* VerifyMessage_t)(void* p1, void* p2, void* p3, void* p4, void* p5, void* p6);
 static VerifyMessage_t OriginalVerifyMatrix = nullptr;
 static VerifyMessage_t OriginalVerifyClient = nullptr;
@@ -132,295 +209,394 @@ bool __stdcall DetourVerifyMessage(void* p1, void* p2, void* p3, void* p4, void*
     return true;
 }
 
-// Hook for client.dll exported InitClientDLL
-// Signature: int __cdecl InitClientDLL(void* p1, void* p2, void* p3, void* p4, void* p5, void* p6, DWORD worldCharPacked, BOOL autoJackIn);
-typedef int (__cdecl *InitClientDLL_t)(
-    void* p1, void* p2, void* p3, void* p4,
-    void* p5, void* p6,
-    DWORD worldCharPacked,
-    BOOL autoJackIn
-);
-static InitClientDLL_t OriginalInitClientDLL = nullptr;
+// ============================================================================
+// matrix.exe Character Manager Hooks
+// ============================================================================
+static void SetupSyntheticCharManager(DWORD pThisDword) {
+    // 1. Connection parameters
+    memset(&g_SyntheticConnParams, 0, sizeof(g_SyntheticConnParams));
+    strcpy_s(g_SyntheticConnParams.serverIp, sizeof(g_SyntheticConnParams.serverIp), g_TargetServerIp);
+    g_SyntheticConnParams.serverPort = 10000;
 
-int __cdecl DetourInitClientDLL(
-    void* p1, void* p2, void* p3, void* p4,
-    void* p5, void* p6,
-    DWORD worldCharPacked,
-    BOOL autoJackIn
-) {
-    DWORD forcedWorldCharPacked = (0 << 24) | (worldCharPacked & 0x00FFFFFF);
-    BOOL forcedAutoJackIn = 1;
+    // 2. Character object
+    g_SyntheticCharObj.pConnParams = &g_SyntheticConnParams;
+    g_SyntheticCharObj.pData = &g_SyntheticChar;
 
-    Log("[mxohax] InitClientDLL intercepted! worldCharPacked=0x%08X -> 0x%08X, autoJackIn=%d -> %d\n",
-        worldCharPacked, forcedWorldCharPacked, autoJackIn, forcedAutoJackIn);
-
-    int res = OriginalInitClientDLL ? OriginalInitClientDLL(p1, p2, p3, p4, p5, p6, forcedWorldCharPacked, forcedAutoJackIn) : 1;
-    Log("[mxohax] InitClientDLL returned %d\n", res);
-    return res;
+    // 3. Populate matrix.exe Character Manager
+    *reinterpret_cast<BYTE*>(pThisDword + 0x640) = 1;                              // Character count = 1
+    *reinterpret_cast<void**>(pThisDword + 0x644) = &g_SyntheticCharObj;            // Character 0 object
+    *reinterpret_cast<void**>(pThisDword + 0x658) = &g_SyntheticCharObj;            // Character 0 connection object (0x43F3D1 guard)
+    *reinterpret_cast<BYTE*>(pThisDword + 0x66c) = 0;                              // Selected character index = 0
+    *reinterpret_cast<BYTE*>(pThisDword + 0x778) = 1;                              // State check flag (0x43c618)
+    *reinterpret_cast<DWORD*>(pThisDword + 0x77c) = 1;                             // WorldId = 1
+    memcpy(reinterpret_cast<void*>(pThisDword + 0x674), &g_SyntheticChar, sizeof(g_SyntheticChar));
 }
 
-// Hook for EnterWorldWithCharacter (client.dll + 0x00124070)
-typedef void (__thiscall *EnterWorld_t)(void* pMgr, void* pChar);
-static EnterWorld_t OriginalEnterWorld = nullptr;
+// 0x00428920: GetCharacterCount
+typedef int (__thiscall *GetCharacterCount_t)(void* pThis);
+static GetCharacterCount_t OriginalGetCharacterCount = nullptr;
 
-// Hook for client.dll State Machine Tick (client.dll + 0x00120060)
-typedef int (__thiscall *StateTick_t)(void* pThis);
-static StateTick_t OriginalStateTick = nullptr;
-static int s_lastLoggedState = -1;
-static bool s_autoJackInAttempted = false;
-static int s_state1TickCount = 0;
+int __fastcall DetourGetCharacterCount(void* pThis, void* /*edx*/) {
+    DWORD pThisDword = reinterpret_cast<DWORD>(pThis);
+    SetupSyntheticCharManager(pThisDword);
+    Log("[mxohax] [matrix.exe] GetCharacterCount called -> returning 1 (operative s1acker mounted)\n");
+    return 1;
+}
 
-static int __fastcall DetourStateTick(void* pThis, void* /*edx*/) {
-    if (pThis) {
-        int state = *reinterpret_cast<int*>(reinterpret_cast<DWORD>(pThis) + 0x1c);
-        if (state != s_lastLoggedState) {
-            s_lastLoggedState = state;
-            Log("[mxohax] StateTick: State transitioned to %d\n", state);
-        }
+// 0x00428E00: GetCharacterByIndex
+typedef void* (__thiscall *GetCharacterByIndex_t)(void* pThis, void* /*edx*/, int idx);
+static GetCharacterByIndex_t OriginalGetCharacterByIndex = nullptr;
 
-        // When in State 1 (Character Selection screen is fully active)
-        if (state == 1 && !s_autoJackInAttempted) {
-            s_state1TickCount++;
-            // Wait ~20 ticks to ensure UI and character vector are populated
-            if (s_state1TickCount >= 20) {
-                HMODULE hClient = GetModuleHandleA("client.dll");
-                if (hClient) {
-                    DWORD clientBase = reinterpret_cast<DWORD>(hClient);
-                    DWORD pCharBegin = *reinterpret_cast<DWORD*>(clientBase + 0x00899B4C);
-                    DWORD pCharEnd   = *reinterpret_cast<DWORD*>(clientBase + 0x00899B50);
+void* __fastcall DetourGetCharacterByIndex(void* pThis, void* /*edx*/, int idx) {
+    Log("[mxohax] [matrix.exe] GetCharacterByIndex(%d) called\n", idx);
+    if (idx == 0) {
+        DWORD pThisDword = reinterpret_cast<DWORD>(pThis);
+        SetupSyntheticCharManager(pThisDword);
+        Log("[mxohax] [matrix.exe] Returning synthetic operative s1acker (charId=360) at 0x%p\n", &g_SyntheticChar);
+        return &g_SyntheticChar;
+    }
+    return nullptr;
+}
 
-                    if (pCharBegin && pCharEnd > pCharBegin) {
-                        s_autoJackInAttempted = true;
-                        DWORD numChars = (pCharEnd - pCharBegin) / 32;
-                        void* pChar = reinterpret_cast<void*>(pCharBegin);
-                        DWORD charId = *reinterpret_cast<DWORD*>(pChar);
-                        Log("[mxohax] [AutoJackIn] %u operative(s) found! Selecting charId=%u at 0x%p...\n",
-                            numChars, charId, pChar);
+// 0x00429D80: SelectCharacter in matrix.exe (vtable[0xDC])
+typedef void (__thiscall *SelectCharacterVtbl_t)(void* pThis, void* pArg);
+static SelectCharacterVtbl_t OriginalSelectCharacterVtbl = nullptr;
 
-                        void* pMgr = *reinterpret_cast<void**>(clientBase + 0x0089DD68);
-                        if (!pMgr) pMgr = pThis;
+void __fastcall DetourSelectCharacterVtbl(void* pThis, void* /*edx*/, void* pArg) {
+    Log("[mxohax] [matrix.exe] SelectCharacter (vtable 0xDC) called with pArg=0x%p\n", pArg);
+    DWORD pThisDword = reinterpret_cast<DWORD>(pThis);
+    SetupSyntheticCharManager(pThisDword);
 
-                        Log("[mxohax] [AutoJackIn] Calling EnterWorldWithCharacter(pMgr=0x%p, pChar=0x%p)...\n", pMgr, pChar);
-                        EnterWorld_t pEnterWorld = reinterpret_cast<EnterWorld_t>(clientBase + 0x00124070);
-                        pEnterWorld(pMgr, pChar);
-                        Log("[mxohax] [AutoJackIn] EnterWorldWithCharacter dispatched successfully!\n");
-                    } else {
-                        Log("[mxohax] [AutoJackIn] Waiting for character vector to populate (begin=0x%08X, end=0x%08X)...\n",
-                            pCharBegin, pCharEnd);
-                    }
-                }
-            }
+    if (pArg) {
+        memcpy(reinterpret_cast<void*>(pThisDword + 0x674), reinterpret_cast<BYTE*>(pArg) + 4, 0xAC);
+    }
+
+    void* pCurState = *reinterpret_cast<void**>(pThisDword + 0x10);
+    int curStateId = -1;
+    if (pCurState) {
+        typedef int (__thiscall *GetStateId_t)(void* pState);
+        void** pVtbl = *reinterpret_cast<void***>(pCurState);
+        if (pVtbl) {
+            GetStateId_t GetStateId = reinterpret_cast<GetStateId_t>(pVtbl[6]);
+            if (GetStateId) curStateId = GetStateId(pCurState);
         }
     }
-    return OriginalStateTick ? OriginalStateTick(pThis) : 1;
-}
+    Log("[mxohax] [matrix.exe] Current Margin State is %d\n", curStateId);
 
-static void __fastcall DetourEnterWorldWithCharacter(void* pMgr, void* /*edx*/, void* pChar) {
-    Log("[mxohax] EnterWorldWithCharacter invoked! pMgr=0x%p, pChar=0x%p\n", pMgr, pChar);
-    if (OriginalEnterWorld) {
-        OriginalEnterWorld(pMgr, pChar);
+    if (curStateId >= 4 && OriginalSelectCharacterVtbl) {
+        Log("[mxohax] [matrix.exe] Margin state >= 4, executing OriginalSelectCharacterVtbl...\n");
+        OriginalSelectCharacterVtbl(pThis, pArg);
+        Log("[mxohax] [matrix.exe] OriginalSelectCharacterVtbl finished successfully!\n");
+    } else {
+        Log("[mxohax] [matrix.exe] Margin state < 4 (%d), character mounted cleanly; skipping premature state transition.\n", curStateId);
     }
-    Log("[mxohax] EnterWorldWithCharacter completed.\n");
 }
 
-// Hook for SelectCharacter (client.dll + 0x00208230)
-typedef int (__thiscall *SelectChar_t)(void* pMgr, void* pChar);
-static SelectChar_t OriginalSelectChar = nullptr;
-
-static int __fastcall DetourSelectCharacter(void* pMgr, void* /*edx*/, void* pChar) {
-    Log("[mxohax] SelectCharacter invoked! pMgr=0x%p, pChar=0x%p\n", pMgr, pChar);
-    int res = OriginalSelectChar ? OriginalSelectChar(pMgr, pChar) : 0;
-    Log("[mxohax] SelectCharacter returned %d\n", res);
-    return res;
-}
-
-// Hook for UI control visibility
+// ============================================================================
+// client.dll State & World Management
+// ============================================================================
+// UI Tracing Hooks
 typedef void (__thiscall *Control_t)(void* pUI, DWORD ctrlId);
 static Control_t OriginalHideControl = nullptr;
 static Control_t OriginalShowControl = nullptr;
-static bool s_screen5DActive = false;
-static bool s_autoJackInDone = false;
-static int s_screen5DFrames = 0;
-
-static bool TryAutoJackIn(DWORD clientBase) {
-    if (!clientBase) return false;
-
-    void* pCharMgr = *reinterpret_cast<void**>(clientBase + 0x00897FA4);
-    if (!pCharMgr) return false;
-
-    void** vtbl = *reinterpret_cast<void***>(pCharMgr);
-    if (!vtbl) return false;
-
-    typedef int (__thiscall *GetCount_t)(void* pThis);
-    GetCount_t GetCharCount = reinterpret_cast<GetCount_t>(vtbl[0xC8 / 4]);
-    int count = GetCharCount(pCharMgr);
-
-    if (count > 0) {
-        typedef void* (__thiscall *GetChar_t)(void* pThis, int idx);
-        GetChar_t GetChar = reinterpret_cast<GetChar_t>(vtbl[0xCC / 4]);
-        void* pChar = GetChar(pCharMgr, 0);
-        Log("[mxohax] [AutoJackIn] CharacterMgr: %d operative(s) available. Retrieved operative #0 at 0x%p!\n", count, pChar);
-
-        void* pMgr = *reinterpret_cast<void**>(clientBase + 0x0089DD68);
-        if (!pMgr) pMgr = *reinterpret_cast<void**>(clientBase + 0x00896A38);
-
-        if (pMgr && pChar) {
-            Log("[mxohax] [AutoJackIn] Invoking EnterWorldWithCharacter(pMgr=0x%p, pChar=0x%p)...\n", pMgr, pChar);
-            EnterWorld_t pEnterWorld = reinterpret_cast<EnterWorld_t>(clientBase + 0x00124070);
-            pEnterWorld(pMgr, pChar);
-            Log("[mxohax] [AutoJackIn] EnterWorldWithCharacter successfully dispatched!\n");
-            return true;
-        }
-    }
-    return false;
-}
 
 static void __fastcall DetourHideControl(void* pUI, void* /*edx*/, DWORD ctrlId) {
     if (ctrlId != 0x1A) {
         Log("[mxohax] HideControl: 0x%02X\n", ctrlId);
     }
     if (OriginalHideControl) OriginalHideControl(pUI, ctrlId);
-
-    if (s_screen5DActive && !s_autoJackInDone) {
-        s_screen5DFrames++;
-        if (s_screen5DFrames >= 15) { // ~300ms after Screen 0x5D
-            HMODULE hClient = GetModuleHandleA("client.dll");
-            if (hClient) {
-                if (TryAutoJackIn(reinterpret_cast<DWORD>(hClient))) {
-                    s_autoJackInDone = true;
-                }
-            }
-        }
-    }
 }
+
+static bool s_screen5DActive = false;
+static bool s_autoJackInDone = false;
+static int  s_screen5DFrames = 0;
 
 static void __fastcall DetourShowControl(void* pUI, void* /*edx*/, DWORD ctrlId) {
     Log("[mxohax] ShowControl: 0x%02X\n", ctrlId);
     if (ctrlId == 0x5D) {
         s_screen5DActive = true;
         s_screen5DFrames = 0;
-        Log("[mxohax] Screen 0x5D (Character Selection) became active! AutoJackIn countdown engaged.\n");
+        Log("[mxohax] Screen 0x5D (Character Selection) became active! AutoJackIn engaged.\n");
     }
     if (OriginalShowControl) OriginalShowControl(pUI, ctrlId);
 }
 
-// Hook for RunClientDLL (called by matrix.exe every frame on the main thread!)
-typedef int (__cdecl *RunClientDLL_t)();
-static RunClientDLL_t OriginalRunClientDLL = nullptr;
+static bool TryAutoJackIn(DWORD clientBase) {
+    if (!clientBase) return false;
 
-int __cdecl DetourRunClientDLL() {
-    if (s_screen5DActive && !s_autoJackInDone) {
-        s_screen5DFrames++;
-        if (s_screen5DFrames >= 30) {
-            HMODULE hClient = GetModuleHandleA("client.dll");
-            if (hClient) {
-                DWORD clientBase = reinterpret_cast<DWORD>(hClient);
-                DWORD pCharBegin = *reinterpret_cast<DWORD*>(clientBase + 0x00899B4C);
-                DWORD pCharEnd   = *reinterpret_cast<DWORD*>(clientBase + 0x00899B50);
+    void* pWorldMgr = *reinterpret_cast<void**>(clientBase + 0x0089DD68);
+    if (!pWorldMgr) return false;
 
-                if (pCharBegin && pCharEnd > pCharBegin) {
+    // 1. Hide Login Screen (0x30) and CharSelect Screen (0x5D)
+    if (OriginalHideControl) {
+        void* pUI = *reinterpret_cast<void**>(clientBase + 0x00898C54);
+        if (pUI) {
+            OriginalHideControl(pUI, 0x30);
+            OriginalHideControl(pUI, 0x5D);
+            Log("[mxohax] [AutoJackIn] Successfully dismissed Screen 0x30 and 0x5D!\n");
+        }
+    }
+
+    // 2. Populate client globals for character identity
+    *reinterpret_cast<DWORD*>(clientBase + 0x00896CCC) = 360; // CharId
+    char* pFirstName = reinterpret_cast<char*>(clientBase + 0x00896D04);
+    char* pLastName  = reinterpret_cast<char*>(clientBase + 0x00896D3C);
+    strncpy_s(pFirstName, 32, "s1acker", 31);
+    strncpy_s(pLastName, 32, "", 31);
+    *reinterpret_cast<DWORD*>(clientBase + 0x00896D74) = 1;   // WorldId
+
+    // 3. Check WorldMgr State and invoke StartWorldLoad if not already loading
+    DWORD pWorldMgrDword = reinterpret_cast<DWORD>(pWorldMgr);
+    DWORD* pState = reinterpret_cast<DWORD*>(pWorldMgrDword + 0x1C);
+    if (pState && *pState < 2) {
+        Log("[mxohax] [AutoJackIn] WorldMgr State was %u -> calling StartWorldLoad (0x10120060)...\n", *pState);
+        typedef void (__thiscall *StartWorldLoad_t)(void* pWorldMgr);
+        StartWorldLoad_t pStartWorldLoad = reinterpret_cast<StartWorldLoad_t>(clientBase + 0x00120060);
+        pStartWorldLoad(pWorldMgr);
+        Log("[mxohax] [AutoJackIn] StartWorldLoad completed! New state: %u\n", *pState);
+    }
+
+    // 4. Activate inWorld simulation loop (CClientShell::m_inWorld at +0x20)
+    uintptr_t shellAddr = clientBase + 0x00896A38;
+    BYTE* pInWorld = reinterpret_cast<BYTE*>(shellAddr + 0x20);
+    if (pInWorld && *pInWorld != 1) {
+        *pInWorld = 1;
+        Log("[mxohax] [AutoJackIn] CClientShell::m_inWorld successfully set to 1! 3D simulation active.\n");
+    }
+
+    // 5. Transition matrix.exe Margin State Machine to State 9 (Connecting) -> State 5 (In-World)
+    void* pMarginMgr = *reinterpret_cast<void**>(0x004B3A44);
+    if (pMarginMgr) {
+        DWORD pThisDword = reinterpret_cast<DWORD>(pMarginMgr);
+        SetupSyntheticCharManager(pThisDword);
+        typedef void (__thiscall *TransitionToState_t)(void* pMgr, DWORD newStateId);
+        TransitionToState_t Transition = reinterpret_cast<TransitionToState_t>(0x00428FF0);
+        Log("[mxohax] [AutoJackIn] Invoking matrix.exe Margin State transition to State 9 (0x00428FF0)...\n");
+        Transition(pMarginMgr, 9);
+        Log("[mxohax] [AutoJackIn] Margin State 9 transition invoked successfully!\n");
+    }
+
+    return true;
+}
+
+// 0x001F9140: True per-frame tick on main thread (called inside RunClientDLL 0x10006640)
+typedef void (__thiscall *FrameTick_t)(void* pThis);
+static FrameTick_t OriginalFrameTick = nullptr;
+static int s_tickCount = 0;
+
+static void __fastcall DetourFrameTick(void* pThis, void* /*edx*/) {
+    if (OriginalFrameTick) OriginalFrameTick(pThis);
+    s_tickCount++;
+
+    HMODULE hClient = GetModuleHandleA("client.dll");
+    if (!hClient) return;
+    DWORD clientBase = reinterpret_cast<DWORD>(hClient);
+
+    // Monitor in-world status via CClientShell (at clientBase + 0x00896A38)
+    DWORD pShell = clientBase + 0x00896A38;
+    BYTE inWorld = *reinterpret_cast<BYTE*>(pShell + 0x20);
+    static BYTE s_lastInWorld = 0xFF;
+    if (inWorld != s_lastInWorld) {
+        s_lastInWorld = inWorld;
+        Log("[mxohax] *** CClientShell::m_inWorld changed to %u! (CClientShell=0x%p) ***\n", inWorld, (void*)pShell);
+        if (inWorld == 1) {
+            Log("[mxohax] ******************************************************\n");
+            Log("[mxohax] *** IN-WORLD CONFIRMED: 3D SIMULATION LOOP ACTIVE! ***\n");
+            Log("[mxohax] ******************************************************\n");
+        }
+    }
+
+    if (s_tickCount % 50 == 0) {
+        Log("[mxohax] DetourFrameTick: Frame #%d active (inWorld=%u)\n", s_tickCount, inWorld);
+    }
+
+    if (!s_autoJackInDone) {
+        if (s_screen5DActive) {
+            s_screen5DFrames++;
+            if (s_screen5DFrames >= 5) {
+                Log("[mxohax] DetourFrameTick: Screen 0x5D active for %d frames -> triggering AutoJackIn...\n", s_screen5DFrames);
+                if (TryAutoJackIn(clientBase)) {
                     s_autoJackInDone = true;
-                    DWORD numChars = (pCharEnd - pCharBegin) / 32;
-                    void* pChar = reinterpret_cast<void*>(pCharBegin);
-                    DWORD charId = *reinterpret_cast<DWORD*>(pChar);
-                    Log("[mxohax] [AutoJackIn] RunClientDLL frame %d! Found %u character(s). Auto-jacking in with charId=%u at 0x%p...\n",
-                        s_screen5DFrames, numChars, charId, pChar);
-
-                    void* pMgr = *reinterpret_cast<void**>(clientBase + 0x0089DD68);
-                    if (pMgr) {
-                        Log("[mxohax] [AutoJackIn] Calling EnterWorldWithCharacter(pMgr=0x%p, pChar=0x%p)...\n", pMgr, pChar);
-                        EnterWorld_t pEnterWorld = reinterpret_cast<EnterWorld_t>(clientBase + 0x00124070);
-                        pEnterWorld(pMgr, pChar);
-                        Log("[mxohax] [AutoJackIn] EnterWorldWithCharacter dispatched successfully!\n");
-                    } else {
-                        Log("[mxohax] [AutoJackIn] Error: pMgr is null\n");
-                        s_autoJackInDone = false;
-                    }
                 }
+            }
+        } else if (s_tickCount >= 30) { // After ~0.5 second of game ticks
+            if (TryAutoJackIn(clientBase)) {
+                s_autoJackInDone = true;
             }
         }
     }
-    return OriginalRunClientDLL ? OriginalRunClientDLL() : 1;
 }
 
-// Memory scanning utility for VerifyMessage
-DWORD FindVerifyMessage(DWORD moduleBase) {
-    DWORD address = 0;
-    const byte functionStart[13] = {
-        0x55, 0x8B, 0xEC, 0x53, 0x56, 0x8B, 0xF1, 0x8B, 0x06, 0x57, 0xFF, 0x50, 0x1C
-    };
+// Process Exit Hooks
+typedef void (WINAPI *ExitProcess_t)(UINT uExitCode);
+static ExitProcess_t OriginalExitProcess = nullptr;
 
-    for (DWORD i = moduleBase; i < moduleBase + 0x1400000; ++i) {
-        __try {
-            if (memcmp(reinterpret_cast<byte*>(i), functionStart, sizeof(functionStart)) == 0) {
-                address = i;
+void WINAPI DetourExitProcess(UINT uExitCode) {
+    void* caller = _ReturnAddress();
+    Log("[mxohax] ExitProcess(%u) called! ReturnAddress: 0x%p\n", uExitCode, caller);
+    if (OriginalExitProcess) OriginalExitProcess(uExitCode);
+}
+
+typedef void (WINAPI *PostQuitMessage_t)(int nExitCode);
+static PostQuitMessage_t OriginalPostQuitMessage = nullptr;
+
+void WINAPI DetourPostQuitMessage(int nExitCode) {
+    void* caller = _ReturnAddress();
+    Log("[mxohax] PostQuitMessage(%d) called! ReturnAddress: 0x%p\n", nExitCode, caller);
+    if (OriginalPostQuitMessage) OriginalPostQuitMessage(nExitCode);
+}
+
+// ============================================================================
+// Pattern Scanner & Dynamic Patching for client.dll
+// ============================================================================
+static uintptr_t PatternScan(uintptr_t base, size_t size, const char* pattern, const char* mask) {
+    size_t patternLen = strlen(mask);
+    for (size_t i = 0; i < size - patternLen; ++i) {
+        bool found = true;
+        for (size_t j = 0; j < patternLen; ++j) {
+            if (mask[j] != '?' && pattern[j] != *(char*)(base + i + j)) {
+                found = false;
                 break;
             }
         }
-        __except(EXCEPTION_EXECUTE_HANDLER) {
-        }
+        if (found) return base + i;
     }
-    return address;
+    return 0;
 }
 
-static bool g_ClientPatched = false;
+// ============================================================================
+// Safe GetPlayerActiveObject Hook (client.dll + 0x0010A210)
+// Guards against null pointer dereference at [0x108A4378 + 0xA8] + 0x23C
+// ============================================================================
+typedef unsigned char (__stdcall *GetPlayerActiveObject_t)(void** outObj, void** outSubObj);
+static GetPlayerActiveObject_t OriginalGetPlayerActiveObject = nullptr;
+
+static unsigned char __stdcall Safe_GetPlayerActiveObject(void** outObj, void** outSubObj) {
+    if (outObj) *outObj = nullptr;
+    if (outSubObj) *outSubObj = nullptr;
+
+    static bool s_logged = false;
+    if (!s_logged) {
+        s_logged = true;
+        Log("[mxohax] Safe_GetPlayerActiveObject called! First invocation intercepted.\n");
+    }
+
+    HMODULE hClient = GetModuleHandleA("client.dll");
+    if (!hClient) return 0;
+    uintptr_t clientBase = reinterpret_cast<uintptr_t>(hClient);
+
+    uintptr_t pGlobal = *reinterpret_cast<uintptr_t*>(clientBase + 0x008A4378);
+    if (!pGlobal) return 0;
+
+    uintptr_t pA8 = *reinterpret_cast<uintptr_t*>(pGlobal + 0xA8);
+    if (!pA8) return 0;
+
+    uintptr_t p23C = *reinterpret_cast<uintptr_t*>(pA8 + 0x23C);
+    if (!p23C) return 0; // Essential null-check guarding against crash 0xC0000005!
+
+    uintptr_t pESI = *reinterpret_cast<uintptr_t*>(p23C);
+    if (!pESI) return 0;
+
+    if (*reinterpret_cast<uint16_t*>(pESI + 4) == 0xFFFF) return 0;
+
+    uint16_t idx0 = *reinterpret_cast<uint16_t*>(pESI);
+    uintptr_t pMgr = *reinterpret_cast<uintptr_t*>(clientBase + 0x00897F90);
+    if (!pMgr) return 0;
+
+    typedef void* (__thiscall *FnGetObj)(void* thisPtr, uint32_t id);
+    FnGetObj pfnGetObj = reinterpret_cast<FnGetObj>(clientBase + 0x003A5CA0);
+    void* obj = pfnGetObj(reinterpret_cast<void*>(pMgr), idx0);
+    if (outObj) *outObj = obj;
+    if (!obj) return 0;
+
+    uint16_t idx1 = *reinterpret_cast<uint16_t*>(pESI + 2);
+    void** vtable = *reinterpret_cast<void***>(obj);
+    if (!vtable) return 0;
+
+    typedef void* (__thiscall *FnGetSubObj)(void* thisPtr, uint32_t id);
+    FnGetSubObj pfnGetSubObj = reinterpret_cast<FnGetSubObj>(vtable[0x58 / 4]);
+    if (!pfnGetSubObj) return 0;
+
+    void* subObj = pfnGetSubObj(obj, idx1);
+    if (outSubObj) *outSubObj = subObj;
+
+    return (subObj != nullptr) ? 1 : 0;
+}
+
+// ============================================================================
+// Safe Camera and Net Connection Trampolines
+// Guards against null pointer dereference in in-world render tick (0x1012a630)
+// ============================================================================
+static uintptr_t g_pEdf8Addr = 0;
+static uintptr_t g_retCameraNormal = 0;
+static uintptr_t g_retCameraSkip = 0;
+
+__declspec(naked) void Hook_CameraCheck() {
+    __asm {
+        mov edx, dword ptr [g_pEdf8Addr]
+        test edx, edx
+        je _cam_skip
+        mov edx, dword ptr [edx]
+        test edx, edx
+        je _cam_skip
+        mov edi, dword ptr [edx]
+        test edi, edi
+        je _cam_skip
+        jmp dword ptr [g_retCameraNormal]
+
+    _cam_skip:
+        xor edi, edi
+        jmp dword ptr [g_retCameraSkip]
+    }
+}
+
+static uintptr_t g_pAbb90Addr = 0;
+static uintptr_t g_pE30cAddr = 0;
+static uintptr_t g_retAbb90Normal = 0;
+static uintptr_t g_retAbb90Skip = 0;
+
+__declspec(naked) void Hook_Abb90Check() {
+    __asm {
+        mov edx, dword ptr [g_pE30cAddr]
+        test edx, edx
+        je _abb_skip
+        cmp dword ptr [edx], 0
+        je _abb_skip
+        mov edx, dword ptr [g_pAbb90Addr]
+        test edx, edx
+        je _abb_skip
+        cmp dword ptr [edx], 0
+        je _abb_skip
+        jmp dword ptr [g_retAbb90Normal]
+
+    _abb_skip:
+        jmp dword ptr [g_retAbb90Skip]
+    }
+}
 
 static void ApplyClientPatches(HMODULE hClient) {
-    if (!hClient || g_ClientPatched) return;
-    g_ClientPatched = true;
+    static bool s_clientPatched = false;
+    if (s_clientPatched || !hClient) return;
+    s_clientPatched = true;
 
     DWORD clientBase = reinterpret_cast<DWORD>(hClient);
     Log("[mxohax] Applying client.dll hooks at base 0x%p...\n", (void*)clientBase);
 
-    // 1. Hook exported InitClientDLL in client.dll
-    FARPROC pInitClientDLL = GetProcAddress(hClient, "InitClientDLL");
-    if (pInitClientDLL) {
-        if (MH_CreateHook(pInitClientDLL, &DetourInitClientDLL, reinterpret_cast<LPVOID*>(&OriginalInitClientDLL)) == MH_OK) {
-            MH_EnableHook(pInitClientDLL);
-            Log("[mxohax] SUCCESS: client.dll InitClientDLL hooked at 0x%p!\n", (void*)pInitClientDLL);
-        }
+    // 1. Hook CryptoPP::PK_Verifier::VerifyMessage in client.dll at RVA 0x0047E010
+    uintptr_t clientVerifyAddr = clientBase + 0x0047E010;
+    if (MH_CreateHook(reinterpret_cast<LPVOID>(clientVerifyAddr), &DetourVerifyMessage, reinterpret_cast<LPVOID*>(&OriginalVerifyClient)) == MH_OK) {
+        MH_EnableHook(reinterpret_cast<LPVOID>(clientVerifyAddr));
+        Log("[mxohax] SUCCESS: client.dll VerifyMessage hooked at 0x%p! RSA bypass active.\n", (void*)clientVerifyAddr);
     }
 
-    // 1b. Hook exported RunClientDLL in client.dll (engine frame tick)
-    FARPROC pRunClientDLL = GetProcAddress(hClient, "RunClientDLL");
-    if (pRunClientDLL) {
-        if (MH_CreateHook(pRunClientDLL, &DetourRunClientDLL, reinterpret_cast<LPVOID*>(&OriginalRunClientDLL)) == MH_OK) {
-            MH_EnableHook(pRunClientDLL);
-            Log("[mxohax] SUCCESS: client.dll RunClientDLL hooked at 0x%p!\n", (void*)pRunClientDLL);
-        }
+    // 2. Hook FrameTick on main thread (0x001F9140)
+    LPVOID pFrameTick = reinterpret_cast<LPVOID>(clientBase + 0x001F9140);
+    if (MH_CreateHook(pFrameTick, &DetourFrameTick, reinterpret_cast<LPVOID*>(&OriginalFrameTick)) == MH_OK) {
+        MH_EnableHook(pFrameTick);
+        Log("[mxohax] SUCCESS: client.dll FrameTick hooked at 0x%p!\n", pFrameTick);
     }
 
-    // 2. Scan and hook VerifyMessage in client.dll (RSA bypass)
-    DWORD clientVerifyAddr = FindVerifyMessage(clientBase);
-    if (clientVerifyAddr) {
-        if (MH_CreateHook(reinterpret_cast<LPVOID>(clientVerifyAddr), &DetourVerifyMessage, reinterpret_cast<LPVOID*>(&OriginalVerifyClient)) == MH_OK) {
-            MH_EnableHook(reinterpret_cast<LPVOID>(clientVerifyAddr));
-            Log("[mxohax] SUCCESS: client.dll VerifyMessage hooked at 0x%p! RSA verification bypassed.\n", (void*)clientVerifyAddr);
-        }
-    }
-
-    // 3. Hook StateTick (client.dll + 0x00120060)
-    LPVOID pStateTick = reinterpret_cast<LPVOID>(clientBase + 0x00120060);
-    if (MH_CreateHook(pStateTick, &DetourStateTick, reinterpret_cast<LPVOID*>(&OriginalStateTick)) == MH_OK) {
-        MH_EnableHook(pStateTick);
-        Log("[mxohax] SUCCESS: client.dll StateTick hooked at 0x%p!\n", pStateTick);
-    }
-
-    // 4. Hook EnterWorldWithCharacter (client.dll + 0x00124070)
-    LPVOID pEnterWorld = reinterpret_cast<LPVOID>(clientBase + 0x00124070);
-    if (MH_CreateHook(pEnterWorld, &DetourEnterWorldWithCharacter, reinterpret_cast<LPVOID*>(&OriginalEnterWorld)) == MH_OK) {
-        MH_EnableHook(pEnterWorld);
-        Log("[mxohax] SUCCESS: client.dll EnterWorldWithCharacter hooked at 0x%p!\n", pEnterWorld);
-    }
-
-    // 5. Hook SelectCharacter (client.dll + 0x00208230)
-    LPVOID pSelectChar = reinterpret_cast<LPVOID>(clientBase + 0x00208230);
-    if (MH_CreateHook(pSelectChar, &DetourSelectCharacter, reinterpret_cast<LPVOID*>(&OriginalSelectChar)) == MH_OK) {
-        MH_EnableHook(pSelectChar);
-        Log("[mxohax] SUCCESS: client.dll SelectCharacter hooked at 0x%p!\n", pSelectChar);
-    }
-
-    // 6. Hook HideControl & ShowControl for UI flow tracing
+    // 3. Hook HideControl & ShowControl
     LPVOID pHideControl = reinterpret_cast<LPVOID>(clientBase + 0x0001D3C0);
     if (MH_CreateHook(pHideControl, &DetourHideControl, reinterpret_cast<LPVOID*>(&OriginalHideControl)) == MH_OK) {
         MH_EnableHook(pHideControl);
@@ -430,28 +606,88 @@ static void ApplyClientPatches(HMODULE hClient) {
         MH_EnableHook(pShowControl);
     }
 
-    // 7. AutoJackIn patch at client.dll + 0x0012196E:
-    // Original: 0F B6 F3 (movzx esi, bl)
-    // Patched:  31 F6 90 (xor esi, esi; nop)
-    // esi = 0 (first operative). If count > 0, cmp esi, eax succeeds (0 < count) and takes
-    // the native jb 0x101219b9 branch directly into EnterWorld / LoadSelectedOperative!
-    LPVOID pAutoJackInPatch = reinterpret_cast<LPVOID>(clientBase + 0x0012196E);
+    // 4. Hook GetPlayerActiveObject (0x0010A210) to guard against NULL player entity dereference
+    LPVOID pGetActiveObj = reinterpret_cast<LPVOID>(clientBase + 0x0010A210);
+    if (MH_CreateHook(pGetActiveObj, &Safe_GetPlayerActiveObject, reinterpret_cast<LPVOID*>(&OriginalGetPlayerActiveObject)) == MH_OK) {
+        MH_EnableHook(pGetActiveObj);
+        Log("[mxohax] SUCCESS: client.dll GetPlayerActiveObject hooked at 0x%p! Null dereference guarded.\n", pGetActiveObj);
+    }
+
+    // 5. Populate character identity globals in client.dll immediately
+    *reinterpret_cast<DWORD*>(clientBase + 0x00896CCC) = 360; // CharId
+    char* pFirstName = reinterpret_cast<char*>(clientBase + 0x00896D04);
+    char* pLastName  = reinterpret_cast<char*>(clientBase + 0x00896D3C);
+    strncpy_s(pFirstName, 32, "s1acker", 31);
+    strncpy_s(pLastName, 32, "", 31);
+    *reinterpret_cast<DWORD*>(clientBase + 0x00896D74) = 1;   // WorldId
+
+    Log("[mxohax] SUCCESS: Initialized client.dll character identity globals for s1acker (charId=360)\n");
+
+    // 6. Direct World Load Patches:
+    // Patch A: 0x0012196E: 31 F6 90 (xor esi, esi; nop) -> forces selected operative index = 0
+    LPVOID pAutoSelectPatch = reinterpret_cast<LPVOID>(clientBase + 0x0012196E);
     DWORD oldProt = 0;
-    if (VirtualProtect(pAutoJackInPatch, 3, PAGE_EXECUTE_READWRITE, &oldProt)) {
+    if (VirtualProtect(pAutoSelectPatch, 3, PAGE_EXECUTE_READWRITE, &oldProt)) {
         const BYTE patchBytes[3] = { 0x31, 0xF6, 0x90 };
-        memcpy(pAutoJackInPatch, patchBytes, 3);
-        VirtualProtect(pAutoJackInPatch, 3, oldProt, &oldProt);
-        FlushInstructionCache(GetCurrentProcess(), pAutoJackInPatch, 3);
+        memcpy(pAutoSelectPatch, patchBytes, 3);
+        VirtualProtect(pAutoSelectPatch, 3, oldProt, &oldProt);
+        FlushInstructionCache(GetCurrentProcess(), pAutoSelectPatch, 3);
         Log("[mxohax] SUCCESS: Patched client.dll + 0x0012196E to auto-select operative #0 (31 F6 90)!\n");
+    }
+
+    // Patch B: 0x00121AE6: EB 09 90 90 90 90 90 90 90 90 90 (jmp 0x10121af1; 9x nop)
+    // Converts early ret 0x14 into direct jump to StartWorldLoad (0x10120060) and background asset streamer (0x101170c0)!
+    LPVOID pWorldLoadJumpPatch = reinterpret_cast<LPVOID>(clientBase + 0x00121AE6);
+    if (VirtualProtect(pWorldLoadJumpPatch, 11, PAGE_EXECUTE_READWRITE, &oldProt)) {
+        const BYTE patchBytes[11] = { 0xEB, 0x09, 0x90, 0x90, 0x90, 0x90, 0x90, 0x90, 0x90, 0x90, 0x90 };
+        memcpy(pWorldLoadJumpPatch, patchBytes, 11);
+        VirtualProtect(pWorldLoadJumpPatch, 11, oldProt, &oldProt);
+        FlushInstructionCache(GetCurrentProcess(), pWorldLoadJumpPatch, 11);
+        Log("[mxohax] SUCCESS: Patched client.dll + 0x00121AE6 to jump directly to StartWorldLoad (EB 09 + 9 NOPs)!\n");
+    }
+
+    // Patch C: 0x0012B3EE: 16 bytes safe camera check
+    g_pEdf8Addr = clientBase + 0x0089EDF8;
+    g_retCameraNormal = clientBase + 0x0012B3FE;
+    g_retCameraSkip = clientBase + 0x0012B4F1;
+
+    LPVOID pCamPatch = reinterpret_cast<LPVOID>(clientBase + 0x0012B3EE);
+    if (VirtualProtect(pCamPatch, 16, PAGE_EXECUTE_READWRITE, &oldProt)) {
+        BYTE patch[16];
+        patch[0] = 0xE9;
+        *reinterpret_cast<DWORD*>(&patch[1]) = static_cast<DWORD>(reinterpret_cast<uintptr_t>(&Hook_CameraCheck) - (reinterpret_cast<uintptr_t>(pCamPatch) + 5));
+        memset(&patch[5], 0x90, 11);
+        memcpy(pCamPatch, patch, 16);
+        VirtualProtect(pCamPatch, 16, oldProt, &oldProt);
+        FlushInstructionCache(GetCurrentProcess(), pCamPatch, 16);
+        Log("[mxohax] SUCCESS: Patched client.dll + 0x0012B3EE for safe camera check!\n");
+    }
+
+    // Patch D: 0x0012B4F1: 8 bytes safe net check
+    g_pE30cAddr = clientBase + 0x0089E30C;
+    g_pAbb90Addr = clientBase + 0x008ABB90;
+    g_retAbb90Normal = clientBase + 0x0012B4F9;
+    g_retAbb90Skip = clientBase + 0x0012B557;
+
+    LPVOID pAbbPatch = reinterpret_cast<LPVOID>(clientBase + 0x0012B4F1);
+    if (VirtualProtect(pAbbPatch, 8, PAGE_EXECUTE_READWRITE, &oldProt)) {
+        BYTE patch[8];
+        patch[0] = 0xE9;
+        *reinterpret_cast<DWORD*>(&patch[1]) = static_cast<DWORD>(reinterpret_cast<uintptr_t>(&Hook_Abb90Check) - (reinterpret_cast<uintptr_t>(pAbbPatch) + 5));
+        memset(&patch[5], 0x90, 3);
+        memcpy(pAbbPatch, patch, 8);
+        VirtualProtect(pAbbPatch, 8, oldProt, &oldProt);
+        FlushInstructionCache(GetCurrentProcess(), pAbbPatch, 8);
+        Log("[mxohax] SUCCESS: Patched client.dll + 0x0012B4F1 for safe net check!\n");
     }
 }
 
-// Hook LoadLibraryA to catch client.dll synchronously as soon as it loads!
+// Hook LoadLibraryA to catch client.dll synchronously
 typedef HMODULE (WINAPI* LoadLibraryA_t)(LPCSTR lpLibFileName);
 static LoadLibraryA_t OriginalLoadLibraryA = nullptr;
 
 HMODULE WINAPI DetourLoadLibraryA(LPCSTR lpLibFileName) {
-    HMODULE hMod = OriginalLoadLibraryA(lpLibFileName);
+    HMODULE hMod = OriginalLoadLibraryA ? OriginalLoadLibraryA(lpLibFileName) : LoadLibraryA(lpLibFileName);
     if (hMod && lpLibFileName) {
         const char* name = strrchr(lpLibFileName, '\\');
         if (!name) name = strrchr(lpLibFileName, '/');
@@ -465,34 +701,38 @@ HMODULE WINAPI DetourLoadLibraryA(LPCSTR lpLibFileName) {
 }
 
 extern "C" __declspec(dllexport) void __cdecl ExportedOrdinal1() {
-    // Export ordinal 1 for static/dynamic import compatibility
 }
 
 static void InitializeMxOHaxSynchronous() {
     static bool s_initialized = false;
     if (s_initialized) return;
     s_initialized = true;
-
-    Log("[mxohax] InitializeMxOHaxSynchronous started...\n");
+    AddVectoredExceptionHandler(1, CrashHandler);
+    Log("[mxohax] InitializeMxOHaxSynchronous started (CrashHandler registered)...\n");
     LoadTargetServerIp();
+
+    // Initialize synthetic structures
+    memset(&g_SyntheticConnParams, 0, sizeof(g_SyntheticConnParams));
+    strcpy_s(g_SyntheticConnParams.serverIp, sizeof(g_SyntheticConnParams.serverIp), g_TargetServerIp);
+    g_SyntheticConnParams.serverPort = 10000;
+
+    memset(&g_SyntheticCharObj, 0, sizeof(g_SyntheticCharObj));
+    g_SyntheticCharObj.pConnParams = &g_SyntheticConnParams;
+    g_SyntheticCharObj.pData = &g_SyntheticChar;
 
     if (MH_Initialize() != MH_OK) {
         Log("[mxohax] ERROR: Failed to initialize MinHook!\n");
         return;
     }
 
-    // Preload wsock32.dll so API hooking succeeds for both WS2_32 and WSOCK32
-    HMODULE hWSock32 = LoadLibraryA("wsock32.dll");
-    Log("[mxohax] Preloaded wsock32.dll at 0x%p\n", (void*)hWSock32);
-
-    // 1. Hook LoadLibraryA immediately to synchronously intercept client.dll
+    // 1. Hook LoadLibraryA immediately
     LPVOID pTarget = nullptr;
     if (MH_CreateHookApiEx(L"kernel32.dll", "LoadLibraryA", (LPVOID)&DetourLoadLibraryA, (LPVOID*)&OriginalLoadLibraryA, &pTarget) == MH_OK) {
         MH_EnableHook(pTarget);
         Log("[mxohax] SUCCESS: kernel32.dll LoadLibraryA hooked at 0x%p\n", pTarget);
     }
 
-    // 2. Hook WinSock functions across ws2_32.dll and wsock32.dll
+    // 2. Hook WinSock functions (ws2_32.dll)
     if (MH_CreateHookApiEx(L"ws2_32.dll", "gethostbyname", (LPVOID)&DetourGetHostByName, (LPVOID*)&OriginalGetHostByName, &pTarget) == MH_OK) {
         MH_EnableHook(pTarget);
         Log("[mxohax] SUCCESS: ws2_32.dll gethostbyname hooked at 0x%p\n", pTarget);
@@ -510,45 +750,43 @@ static void InitializeMxOHaxSynchronous() {
         Log("[mxohax] SUCCESS: ws2_32.dll recvfrom hooked at 0x%p\n", pTarget);
     }
 
-    if (hWSock32) {
-        if (MH_CreateHookApiEx(L"wsock32.dll", "gethostbyname", (LPVOID)&DetourGetHostByName, NULL, &pTarget) == MH_OK) {
-            MH_EnableHook(pTarget);
-            Log("[mxohax] SUCCESS: wsock32.dll gethostbyname hooked at 0x%p\n", pTarget);
-        }
-        if (MH_CreateHookApiEx(L"wsock32.dll", "connect", (LPVOID)&DetourConnect, NULL, &pTarget) == MH_OK) {
-            MH_EnableHook(pTarget);
-            Log("[mxohax] SUCCESS: wsock32.dll connect hooked at 0x%p\n", pTarget);
-        }
-        if (MH_CreateHookApiEx(L"wsock32.dll", "sendto", (LPVOID)&DetourSendTo, NULL, &pTarget) == MH_OK) {
-            MH_EnableHook(pTarget);
-            Log("[mxohax] SUCCESS: wsock32.dll sendto hooked at 0x%p\n", pTarget);
-        }
-        if (MH_CreateHookApiEx(L"wsock32.dll", "recvfrom", (LPVOID)&DetourRecvFrom, NULL, &pTarget) == MH_OK) {
-            MH_EnableHook(pTarget);
-            Log("[mxohax] SUCCESS: wsock32.dll recvfrom hooked at 0x%p\n", pTarget);
-        }
+    // 3. Hook process exit functions
+    if (MH_CreateHookApiEx(L"kernel32.dll", "ExitProcess", (LPVOID)&DetourExitProcess, (LPVOID*)&OriginalExitProcess, &pTarget) == MH_OK) {
+        MH_EnableHook(pTarget);
+        Log("[mxohax] SUCCESS: kernel32.dll ExitProcess hooked at 0x%p\n", pTarget);
+    }
+    if (MH_CreateHookApiEx(L"user32.dll", "PostQuitMessage", (LPVOID)&DetourPostQuitMessage, (LPVOID*)&OriginalPostQuitMessage, &pTarget) == MH_OK) {
+        MH_EnableHook(pTarget);
+        Log("[mxohax] SUCCESS: user32.dll PostQuitMessage hooked at 0x%p\n", pTarget);
     }
 
-    MH_EnableHook(MH_ALL_HOOKS);
-
-    // 3. Scan and hook VerifyMessage in matrix.exe main module immediately
-    HMODULE hMatrix = GetModuleHandleA(NULL);
-    if (hMatrix) {
-        DWORD matrixVerifyAddr = FindVerifyMessage(reinterpret_cast<DWORD>(hMatrix));
-        if (matrixVerifyAddr) {
-            Log("[mxohax] Found VerifyMessage in matrix.exe at 0x%p. Hooking...\n", (void*)matrixVerifyAddr);
-            if (MH_CreateHook(reinterpret_cast<LPVOID>(matrixVerifyAddr), &DetourVerifyMessage, reinterpret_cast<LPVOID*>(&OriginalVerifyMatrix)) == MH_OK) {
-                MH_EnableHook(reinterpret_cast<LPVOID>(matrixVerifyAddr));
-                Log("[mxohax] SUCCESS: matrix.exe VerifyMessage hooked at 0x%p!\n", (void*)matrixVerifyAddr);
-            }
-        }
+    // 4. Hook matrix.exe RSA signature check at 0x004386F0
+    LPVOID pMatrixVerify = reinterpret_cast<LPVOID>(0x004386F0);
+    if (MH_CreateHook(pMatrixVerify, &DetourVerifyMessage, reinterpret_cast<LPVOID*>(&OriginalVerifyMatrix)) == MH_OK) {
+        MH_EnableHook(pMatrixVerify);
+        Log("[mxohax] SUCCESS: matrix.exe VerifyMessage hooked at 0x%p!\n", pMatrixVerify);
     }
 
-    // 4. In case client.dll was already loaded before injection, patch immediately
-    HMODULE hClient = GetModuleHandleA("client.dll");
-    if (hClient) {
-        Log("[mxohax] client.dll already loaded at 0x%p, patching now...\n", (void*)hClient);
-        ApplyClientPatches(hClient);
+    // 5. Hook matrix.exe Character Manager:
+    // 0x00428920: GetCharacterCount
+    LPVOID pGetCharCount = reinterpret_cast<LPVOID>(0x00428920);
+    if (MH_CreateHook(pGetCharCount, &DetourGetCharacterCount, reinterpret_cast<LPVOID*>(&OriginalGetCharacterCount)) == MH_OK) {
+        MH_EnableHook(pGetCharCount);
+        Log("[mxohax] SUCCESS: matrix.exe GetCharacterCount hooked at 0x%p!\n", pGetCharCount);
+    }
+
+    // 0x00428E00: GetCharacterByIndex
+    LPVOID pGetCharByIndex = reinterpret_cast<LPVOID>(0x00428E00);
+    if (MH_CreateHook(pGetCharByIndex, &DetourGetCharacterByIndex, reinterpret_cast<LPVOID*>(&OriginalGetCharacterByIndex)) == MH_OK) {
+        MH_EnableHook(pGetCharByIndex);
+        Log("[mxohax] SUCCESS: matrix.exe GetCharacterByIndex hooked at 0x%p!\n", pGetCharByIndex);
+    }
+
+    // 0x00429D80: SelectCharacter
+    LPVOID pSelectChar = reinterpret_cast<LPVOID>(0x00429D80);
+    if (MH_CreateHook(pSelectChar, &DetourSelectCharacterVtbl, reinterpret_cast<LPVOID*>(&OriginalSelectCharacterVtbl)) == MH_OK) {
+        MH_EnableHook(pSelectChar);
+        Log("[mxohax] SUCCESS: matrix.exe SelectCharacter (0x00429D80) hooked at 0x%p!\n", pSelectChar);
     }
 }
 
@@ -569,22 +807,13 @@ DWORD WINAPI WorkerThread(LPVOID lpParam) {
 
     // Monitor inWorld flag and handle AutoJackIn
     for (int i = 0; i < 6000; ++i) { // monitor for up to 5 minutes
-        Sleep(200);
+        Sleep(100);
 
-        // Check if Screen 0x5D is active and we need to auto-jackin
-        if (s_screen5DActive && !s_autoJackInDone) {
-            if (TryAutoJackIn(clientBase)) {
-                s_autoJackInDone = true;
-            }
-        }
-
-        void* pShell = *reinterpret_cast<void**>(clientBase + 0x00896A38);
-        if (pShell) {
-            BYTE* pInWorld = reinterpret_cast<BYTE*>(reinterpret_cast<DWORD>(pShell) + 0x20);
-            if (pInWorld && *pInWorld == 1 && !inWorldLogged) {
-                inWorldLogged = true;
-                Log("[mxohax] *** IN-WORLD CONFIRMED: CClientShell::m_inWorld == 1! 3D game simulation loop active. ***\n");
-            }
+        uintptr_t shellAddr = clientBase + 0x00896A38;
+        BYTE* pInWorld = reinterpret_cast<BYTE*>(shellAddr + 0x20);
+        if (pInWorld && *pInWorld == 1 && !inWorldLogged) {
+            inWorldLogged = true;
+            Log("[mxohax] *** IN-WORLD CONFIRMED: CClientShell::m_inWorld == 1! 3D game simulation loop active. ***\n");
         }
     }
     return 0;
