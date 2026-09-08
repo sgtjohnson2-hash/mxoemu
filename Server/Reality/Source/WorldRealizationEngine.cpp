@@ -1,5 +1,6 @@
 #include "WorldRealizationEngine.h"
 #include "Log.h"
+#include "GameServer.h"
 #include "ObjectMgr.h"
 #include "BotManager.h"
 #include "PhysarumLogisticsEngine.h"
