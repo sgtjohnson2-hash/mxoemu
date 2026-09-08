@@ -38,6 +38,11 @@ void WorldRealizationEngine::Initialize()
     m_energyArcs.clear();
     m_distortions.clear();
     m_physicsBubbles.clear();
+    m_codeDissolutions.clear();
+    m_seismicTremors.clear();
+    m_hiveSynapses.clear();
+    m_panicCrowds.clear();
+    m_temporalEchoes.clear();
     m_nextCourierId = 1;
     m_nextSmokeId = 1;
     m_nextClaymoreId = 1;
@@ -45,6 +50,11 @@ void WorldRealizationEngine::Initialize()
     m_nextCrateId = 1;
     m_nextArcId = 1;
     m_nextDistortionId = 1;
+    m_nextDissolutionId = 1;
+    m_nextTremorId = 1;
+    m_nextSynapseId = 1;
+    m_nextPanicCrowdId = 1;
+    m_nextTemporalEchoId = 1;
     m_totalRupturesManifested = 0;
 
     boost::format fmt("WorldRealizationEngine: Initialized 3D physical world realization subsystem.");
@@ -64,6 +74,11 @@ void WorldRealizationEngine::ResetForTesting()
     m_energyArcs.clear();
     m_distortions.clear();
     m_physicsBubbles.clear();
+    m_codeDissolutions.clear();
+    m_seismicTremors.clear();
+    m_hiveSynapses.clear();
+    m_panicCrowds.clear();
+    m_temporalEchoes.clear();
     m_nextCourierId = 1;
     m_nextSmokeId = 1;
     m_nextClaymoreId = 1;
@@ -71,6 +86,11 @@ void WorldRealizationEngine::ResetForTesting()
     m_nextCrateId = 1;
     m_nextArcId = 1;
     m_nextDistortionId = 1;
+    m_nextDissolutionId = 1;
+    m_nextTremorId = 1;
+    m_nextSynapseId = 1;
+    m_nextPanicCrowdId = 1;
+    m_nextTemporalEchoId = 1;
     m_totalRupturesManifested = 0;
 }
 
@@ -118,6 +138,56 @@ void WorldRealizationEngine::Update(float dt)
         it->second.remainingTimeSec -= dt;
         if (it->second.remainingTimeSec <= 0.0f) {
             it = m_distortions.erase(it);
+        } else {
+            ++it;
+        }
+    }
+
+    // Update 3D Code dissolutions
+    for (auto it = m_codeDissolutions.begin(); it != m_codeDissolutions.end(); ) {
+        it->second.remainingTimeSec -= dt;
+        if (it->second.remainingTimeSec <= 0.0f) {
+            it = m_codeDissolutions.erase(it);
+        } else {
+            ++it;
+        }
+    }
+
+    // Update 3D Seismic tremors
+    for (auto it = m_seismicTremors.begin(); it != m_seismicTremors.end(); ) {
+        it->second.remainingTimeSec -= dt;
+        if (it->second.remainingTimeSec <= 0.0f) {
+            it = m_seismicTremors.erase(it);
+        } else {
+            ++it;
+        }
+    }
+
+    // Update 3D Hive synapses
+    for (auto it = m_hiveSynapses.begin(); it != m_hiveSynapses.end(); ) {
+        it->second.remainingTimeSec -= dt;
+        if (it->second.remainingTimeSec <= 0.0f) {
+            it = m_hiveSynapses.erase(it);
+        } else {
+            ++it;
+        }
+    }
+
+    // Update 3D Financial panic crowds
+    for (auto it = m_panicCrowds.begin(); it != m_panicCrowds.end(); ) {
+        it->second.remainingTimeSec -= dt;
+        if (it->second.remainingTimeSec <= 0.0f) {
+            it = m_panicCrowds.erase(it);
+        } else {
+            ++it;
+        }
+    }
+
+    // Update 3D Temporal echoes
+    for (auto it = m_temporalEchoes.begin(); it != m_temporalEchoes.end(); ) {
+        it->second.remainingTimeSec -= dt;
+        if (it->second.remainingTimeSec <= 0.0f) {
+            it = m_temporalEchoes.erase(it);
         } else {
             ++it;
         }
@@ -693,6 +763,130 @@ size_t WorldRealizationEngine::GetActivePhysicsBubbleCount() const
     return m_physicsBubbles.size();
 }
 
+// 16. Sub-Atomic Code Lattice 3D Dissolution
+uint32_t WorldRealizationEngine::ManifestCodeDissolution3D(float x, float y, float z, float radius, float density)
+{
+    std::unique_lock<std::shared_mutex> lock(m_realizationMutex);
+    uint32_t did = m_nextDissolutionId++;
+    Active3DCodeDissolution cd;
+    cd.dissolutionId = did;
+    cd.posX = x; cd.posY = y; cd.posZ = z;
+    cd.radius = radius;
+    cd.density = density;
+    cd.remainingTimeSec = 3.0f;
+    m_codeDissolutions[did] = cd;
+
+    boost::format fmt("WorldRealizationEngine: Manifested 3D code dissolution #%1% at (%2%, %3%, %4%) radius %5%m");
+    fmt % did % x % y % z % radius;
+    INFO_LOG(fmt);
+    return did;
+}
+
+size_t WorldRealizationEngine::GetActiveCodeDissolutionCount() const
+{
+    std::shared_lock<std::shared_mutex> lock(m_realizationMutex);
+    return m_codeDissolutions.size();
+}
+
+// 17. Cosmic Planetary 3D Seismic Tremor & Mantle Realization
+uint32_t WorldRealizationEngine::TriggerMegacitySeismicTremor3D(float x, float z, float magnitude, float depth)
+{
+    std::unique_lock<std::shared_mutex> lock(m_realizationMutex);
+    uint32_t tid = m_nextTremorId++;
+    Active3DSeismicTremor st;
+    st.tremorId = tid;
+    st.posX = x; st.posZ = z;
+    st.magnitude = magnitude;
+    st.depthKm = depth;
+    st.remainingTimeSec = 5.0f;
+    m_seismicTremors[tid] = st;
+
+    boost::format fmt("WorldRealizationEngine: Triggered 3D seismic tremor #%1% at (%2%, %3%) mag=%4% depth=%5%km");
+    fmt % tid % x % z % magnitude % depth;
+    INFO_LOG(fmt);
+    return tid;
+}
+
+size_t WorldRealizationEngine::GetActiveSeismicTremorCount() const
+{
+    std::shared_lock<std::shared_mutex> lock(m_realizationMutex);
+    return m_seismicTremors.size();
+}
+
+// 18. Hyper-Scale Sentience 3D Hive Mind Synaptic Arcs
+uint32_t WorldRealizationEngine::ManifestHiveMindSynapse3D(uint32_t srcId, uint32_t dstId, const std::string& type)
+{
+    std::unique_lock<std::shared_mutex> lock(m_realizationMutex);
+    uint32_t sid = m_nextSynapseId++;
+    Active3DHiveSynapse syn;
+    syn.synapseId = sid;
+    syn.srcId = srcId;
+    syn.dstId = dstId;
+    syn.type = type;
+    syn.remainingTimeSec = 2.0f;
+    m_hiveSynapses[sid] = syn;
+
+    boost::format fmt("WorldRealizationEngine: Manifested 3D hive synapse #%1% (%2%) between %3% and %4%");
+    fmt % sid % type % srcId % dstId;
+    INFO_LOG(fmt);
+    return sid;
+}
+
+size_t WorldRealizationEngine::GetActiveHiveSynapseCount() const
+{
+    std::shared_lock<std::shared_mutex> lock(m_realizationMutex);
+    return m_hiveSynapses.size();
+}
+
+// 19. Autonomous Economy 3D Financial Panic Crowd Realization
+uint32_t WorldRealizationEngine::ManifestFinancialPanicCrowd3D(float x, float z, float severity)
+{
+    std::unique_lock<std::shared_mutex> lock(m_realizationMutex);
+    uint32_t cid = m_nextPanicCrowdId++;
+    Active3DPanicCrowd pc;
+    pc.crowdId = cid;
+    pc.posX = x; pc.posZ = z;
+    pc.severity = severity;
+    pc.civilianCount = static_cast<uint32_t>(30 + severity * 40);
+    pc.remainingTimeSec = 15.0f;
+    m_panicCrowds[cid] = pc;
+
+    boost::format fmt("WorldRealizationEngine: Manifested 3D financial panic crowd #%1% at (%2%, %3%) civs=%4%");
+    fmt % cid % x % z % pc.civilianCount;
+    INFO_LOG(fmt);
+    return cid;
+}
+
+size_t WorldRealizationEngine::GetActivePanicCrowdCount() const
+{
+    std::shared_lock<std::shared_mutex> lock(m_realizationMutex);
+    return m_panicCrowds.size();
+}
+
+// 20. Trans-Dimensional Chronos 3D Temporal Phantom Echoes
+uint32_t WorldRealizationEngine::ManifestTemporalEcho3D(uint32_t echoId, float x, float y, float z, float duration)
+{
+    std::unique_lock<std::shared_mutex> lock(m_realizationMutex);
+    uint32_t tid = m_nextTemporalEchoId++;
+    Active3DTemporalEcho te;
+    te.echoId = (echoId > 0) ? echoId : tid;
+    te.posX = x; te.posY = y; te.posZ = z;
+    te.durationSec = duration;
+    te.remainingTimeSec = duration;
+    m_temporalEchoes[tid] = te;
+
+    boost::format fmt("WorldRealizationEngine: Manifested 3D temporal phantom echo #%1% at (%2%, %3%, %4%) dur=%5%s");
+    fmt % te.echoId % x % y % z % duration;
+    INFO_LOG(fmt);
+    return tid;
+}
+
+size_t WorldRealizationEngine::GetActiveTemporalEchoCount() const
+{
+    std::shared_lock<std::shared_mutex> lock(m_realizationMutex);
+    return m_temporalEchoes.size();
+}
+
 // ============================================================================
 // Headless Test Suite 39: 3D World Realization Engine
 // ============================================================================
@@ -831,5 +1025,30 @@ void RunWorldRealizationTestSuite()
     assert(sWorldRealizationEngine.IsPathBlockedByRoadblock(1050.0f, 0.0f, 1000.0f, 2000.0f));
     assert(!sWorldRealizationEngine.IsPathBlockedByRoadblock(5000.0f, 0.0f, 5000.0f, 5000.0f));
 
-    std::cout << "[PASSED] Suite 39: 3D World Realization Engine (55 assertions passed)." << std::endl;
+    // 11. Sub-Atomic Code Dissolution
+    uint32_t disId = sWorldRealizationEngine.ManifestCodeDissolution3D(100.0f, 20.0f, 100.0f, 15.0f, 1.0f);
+    assert(disId > 0);
+    assert(sWorldRealizationEngine.GetActiveCodeDissolutionCount() == 1);
+
+    // 12. Cosmic Seismic Tremor
+    uint32_t trmId = sWorldRealizationEngine.TriggerMegacitySeismicTremor3D(500.0f, 500.0f, 6.2f, 12.0f);
+    assert(trmId > 0);
+    assert(sWorldRealizationEngine.GetActiveSeismicTremorCount() == 1);
+
+    // 13. Hive Mind Synapse
+    uint32_t synId = sWorldRealizationEngine.ManifestHiveMindSynapse3D(101, 202, "MachineConsensus");
+    assert(synId > 0);
+    assert(sWorldRealizationEngine.GetActiveHiveSynapseCount() == 1);
+
+    // 14. Financial Panic Crowd
+    uint32_t crwId = sWorldRealizationEngine.ManifestFinancialPanicCrowd3D(1200.0f, -800.0f, 1.5f);
+    assert(crwId > 0);
+    assert(sWorldRealizationEngine.GetActivePanicCrowdCount() == 1);
+
+    // 15. Temporal Phantom Echo
+    uint32_t echId = sWorldRealizationEngine.ManifestTemporalEcho3D(77, 400.0f, 10.0f, 400.0f, 4.0f);
+    assert(echId > 0);
+    assert(sWorldRealizationEngine.GetActiveTemporalEchoCount() == 1);
+
+    std::cout << "[PASSED] Suite 39: 3D World Realization Engine (65 assertions passed)." << std::endl;
 }

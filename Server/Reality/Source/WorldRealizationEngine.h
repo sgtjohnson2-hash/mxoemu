@@ -110,6 +110,50 @@ struct Active3DPhysicsBubble
     float timeDilation{0.2f};
 };
 
+struct Active3DCodeDissolution
+{
+    uint32_t dissolutionId{0};
+    float posX{0.0f}, posY{0.0f}, posZ{0.0f};
+    float radius{10.0f};
+    float density{1.0f};
+    float remainingTimeSec{3.0f};
+};
+
+struct Active3DSeismicTremor
+{
+    uint32_t tremorId{0};
+    float posX{0.0f}, posZ{0.0f};
+    float magnitude{5.5f};
+    float depthKm{15.0f};
+    float remainingTimeSec{5.0f};
+};
+
+struct Active3DHiveSynapse
+{
+    uint32_t synapseId{0};
+    uint32_t srcId{0};
+    uint32_t dstId{0};
+    std::string type{"MachineConsensus"};
+    float remainingTimeSec{2.0f};
+};
+
+struct Active3DPanicCrowd
+{
+    uint32_t crowdId{0};
+    float posX{0.0f}, posZ{0.0f};
+    float severity{1.0f};
+    uint32_t civilianCount{50};
+    float remainingTimeSec{15.0f};
+};
+
+struct Active3DTemporalEcho
+{
+    uint32_t echoId{0};
+    float posX{0.0f}, posY{0.0f}, posZ{0.0f};
+    float durationSec{3.0f};
+    float remainingTimeSec{3.0f};
+};
+
 class WorldRealizationEngine : public Singleton<WorldRealizationEngine>
 {
 public:
@@ -193,6 +237,26 @@ public:
     bool IsPointInPhysicsBubble(float x, float y, float z, float& outGravity, float& outDilation) const;
     size_t GetActivePhysicsBubbleCount() const;
 
+    // 16. Sub-Atomic Code Lattice 3D Dissolution
+    uint32_t ManifestCodeDissolution3D(float x, float y, float z, float radius = 10.0f, float density = 1.0f);
+    size_t GetActiveCodeDissolutionCount() const;
+
+    // 17. Cosmic Planetary 3D Seismic Tremor & Mantle Realization
+    uint32_t TriggerMegacitySeismicTremor3D(float x, float z, float magnitude = 5.5f, float depth = 15.0f);
+    size_t GetActiveSeismicTremorCount() const;
+
+    // 18. Hyper-Scale Sentience 3D Hive Mind Synaptic Arcs
+    uint32_t ManifestHiveMindSynapse3D(uint32_t srcId, uint32_t dstId, const std::string& type = "MachineConsensus");
+    size_t GetActiveHiveSynapseCount() const;
+
+    // 19. Autonomous Economy 3D Financial Panic Crowd Realization
+    uint32_t ManifestFinancialPanicCrowd3D(float x, float z, float severity = 1.0f);
+    size_t GetActivePanicCrowdCount() const;
+
+    // 20. Trans-Dimensional Chronos 3D Temporal Phantom Echoes
+    uint32_t ManifestTemporalEcho3D(uint32_t echoId, float x, float y, float z, float duration = 3.0f);
+    size_t GetActiveTemporalEchoCount() const;
+
 private:
     mutable std::shared_mutex m_realizationMutex;
     std::unordered_map<uint32_t, Active3DCourier> m_couriers;
@@ -205,6 +269,11 @@ private:
     std::unordered_map<uint32_t, Active3DMachineEnergyArc> m_energyArcs;
     std::unordered_map<uint32_t, Active3DQuantumDistortion> m_distortions;
     std::unordered_map<uint32_t, Active3DPhysicsBubble> m_physicsBubbles;
+    std::unordered_map<uint32_t, Active3DCodeDissolution> m_codeDissolutions;
+    std::unordered_map<uint32_t, Active3DSeismicTremor> m_seismicTremors;
+    std::unordered_map<uint32_t, Active3DHiveSynapse> m_hiveSynapses;
+    std::unordered_map<uint32_t, Active3DPanicCrowd> m_panicCrowds;
+    std::unordered_map<uint32_t, Active3DTemporalEcho> m_temporalEchoes;
 
     uint32_t m_nextCourierId{1};
     uint32_t m_nextSmokeId{1};
@@ -213,6 +282,11 @@ private:
     uint32_t m_nextCrateId{1};
     uint32_t m_nextArcId{1};
     uint32_t m_nextDistortionId{1};
+    uint32_t m_nextDissolutionId{1};
+    uint32_t m_nextTremorId{1};
+    uint32_t m_nextSynapseId{1};
+    uint32_t m_nextPanicCrowdId{1};
+    uint32_t m_nextTemporalEchoId{1};
     size_t m_totalRupturesManifested{0};
 };
 

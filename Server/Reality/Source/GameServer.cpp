@@ -84,6 +84,11 @@
 #include "MachineCitySystem.h"
 #include "QuantumSuperpositionEngine.h"
 #include "GenerationalLineageEngine.h"
+#include "SubAtomicMatrixGrid.h"
+#include "CosmicVerticalityEngine.h"
+#include "CollectiveConsciousnessEngine.h"
+#include "MegacityBourseEngine.h"
+#include "TemporalAnomalyEngine.h"
 #include <boost/bind.hpp>
 
 initialiseSingleton( GameServer );
@@ -151,6 +156,11 @@ bool GameServer::Start()
 	sMachineCitySystem.Initialize();
 	sQuantumSuperpositionEngine.Initialize();
 	sGenerationalLineageEngine.Initialize();
+	sSubAtomicMatrixGrid.Initialize();
+	sCosmicVerticalityEngine.Initialize();
+	sCollectiveConsciousnessEngine.Initialize();
+	sMegacityBourseEngine.Initialize();
+	sTemporalAnomalyEngine.Initialize();
 
 	string Interface = sConfig.GetStringDefault("GameServer.IP", "0.0.0.0");
 	int Port = sConfig.GetIntDefault("GameServer.Port", 10000);
@@ -274,6 +284,11 @@ void GameServer::SimulationLoop()
 			sMachineCitySystem.Update(dtSec);
 			sQuantumSuperpositionEngine.Update(dtSec);
 			sGenerationalLineageEngine.Update(dtSec);
+			sSubAtomicMatrixGrid.Update(dtSec);
+			sCosmicVerticalityEngine.Update(dtSec);
+			sCollectiveConsciousnessEngine.Update(dtSec);
+			sMegacityBourseEngine.Update(dtSec);
+			sTemporalAnomalyEngine.Update(dtSec);
 
 			// The Anomaly Event (Phase 50)
 			static uint32 lastAnomalyCheckMs = 0;
