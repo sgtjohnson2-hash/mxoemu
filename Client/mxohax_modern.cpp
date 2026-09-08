@@ -775,27 +775,8 @@ static void InitializeMxOHaxSynchronous() {
         Log("[mxohax] SUCCESS: matrix.exe VerifyMessage hooked at 0x%p!\n", pMatrixVerify);
     }
 
-    // 5. Hook matrix.exe Character Manager:
-    // 0x00428920: GetCharacterCount
-    LPVOID pGetCharCount = reinterpret_cast<LPVOID>(0x00428920);
-    if (MH_CreateHook(pGetCharCount, &DetourGetCharacterCount, reinterpret_cast<LPVOID*>(&OriginalGetCharacterCount)) == MH_OK) {
-        MH_EnableHook(pGetCharCount);
-        Log("[mxohax] SUCCESS: matrix.exe GetCharacterCount hooked at 0x%p!\n", pGetCharCount);
-    }
-
-    // 0x00428E00: GetCharacterByIndex
-    LPVOID pGetCharByIndex = reinterpret_cast<LPVOID>(0x00428E00);
-    if (MH_CreateHook(pGetCharByIndex, &DetourGetCharacterByIndex, reinterpret_cast<LPVOID*>(&OriginalGetCharacterByIndex)) == MH_OK) {
-        MH_EnableHook(pGetCharByIndex);
-        Log("[mxohax] SUCCESS: matrix.exe GetCharacterByIndex hooked at 0x%p!\n", pGetCharByIndex);
-    }
-
-    // 0x00429D80: SelectCharacter
-    LPVOID pSelectChar = reinterpret_cast<LPVOID>(0x00429D80);
-    if (MH_CreateHook(pSelectChar, &DetourSelectCharacterVtbl, reinterpret_cast<LPVOID*>(&OriginalSelectCharacterVtbl)) == MH_OK) {
-        MH_EnableHook(pSelectChar);
-        Log("[mxohax] SUCCESS: matrix.exe SelectCharacter (0x00429D80) hooked at 0x%p!\n", pSelectChar);
-    }
+    // 5. Allow native Auth and Margin network flow to manage characters naturally
+    Log("[mxohax] Preserving native matrix.exe Character Manager for authentic server stream.\n");
 }
 
 DWORD WINAPI WorkerThread(LPVOID lpParam) {
