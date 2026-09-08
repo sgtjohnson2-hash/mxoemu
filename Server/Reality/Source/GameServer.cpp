@@ -58,7 +58,27 @@
 #include "HackerSystem.h"
 #include "PlayerObject.h"
 #include "HovercraftSystem.h"
-// removed duplicate include
+#include "FrankCastleManager.h"
+#include "UnderworldManager.h"
+#include "CityLifeManager.h"
+#include "EmergentPoliceManager.h"
+#include "MafiaEcosystemManager.h"
+#include "ExileChateauManager.h"
+#include "NeuralSwarmManager.h"
+#include "StructuralVoxelEngine.h"
+#include "SharedMemoryShardFabric.h"
+#include "NeuromorphicSpikeEngine.h"
+#include "NonEuclideanPortalEngine.h"
+#include "SourceCodeTelekinesisEngine.h"
+#include "GlobalSovereignMeshFabric.h"
+#include "GaussianSplatEngine.h"
+#include "PhysarumLogisticsEngine.h"
+#include "BiometricResonanceEngine.h"
+#include "WebAssemblyGatewayEngine.h"
+#include "WorldRealizationEngine.h"
+#include "CastleAgentCombatEngine.h"
+#include "CastlePvPKarmaEngine.h"
+#include "CastleUnderworldAssaultEngine.h"
 #include <boost/bind.hpp>
 
 initialiseSingleton( GameServer );
@@ -98,6 +118,29 @@ bool GameServer::Start()
 	sAsyncDatabase.Initialize();
 	sStatusEffectManager.Initialize();
 	sHackerSystem.Initialize();
+
+	// Initialize Megacity Tactical & Emergent Simulation Engines
+	sFrankCastleMgr.Initialize();
+	sUnderworldMgr.Initialize();
+	sCityLifeMgr.Initialize();
+	sEmergentPoliceMgr.Initialize();
+	sMafiaMgr.Initialize();
+	sExileMgr.Initialize();
+	sNeuralSwarmMgr.Initialize();
+	sStructuralVoxelEngine.Initialize();
+	sSharedMemoryShardFabric.Initialize();
+	sNeuromorphicSpikeEngine.Initialize();
+	sNonEuclideanPortalEngine.Initialize();
+	sSourceTelekinesisEngine.Initialize();
+	sGlobalSovereignMesh.Initialize();
+	sGaussianSplatEngine.Initialize();
+	sPhysarumLogisticsEngine.Initialize();
+	sBiometricResonanceEngine.Initialize();
+	sWebAssemblyGatewayEngine.Initialize();
+	sWorldRealizationEngine.Initialize();
+	sCastleAgentCombatEngine.Initialize();
+	sCastlePvPKarmaEngine.Initialize();
+	sCastleUnderworldAssaultEngine.Initialize();
 
 	string Interface = sConfig.GetStringDefault("GameServer.IP", "0.0.0.0");
 	int Port = sConfig.GetIntDefault("GameServer.Port", 10000);
@@ -194,43 +237,54 @@ void GameServer::SimulationLoop()
 			combatFuture.wait();
 			aiFuture.wait();
 
+			// Megacity Tactical & Emergent Simulation Engines Tick
+			float dtSec = aiDeltaMs / 1000.0f;
+			sFrankCastleMgr.Update(aiDeltaMs);
+			sUnderworldMgr.Update(aiDeltaMs);
+			sCityLifeMgr.Update(aiDeltaMs);
+			sEmergentPoliceMgr.Update(aiDeltaMs);
+			sMafiaMgr.Update(aiDeltaMs);
+			sExileMgr.Update(aiDeltaMs);
+			sNeuralSwarmMgr.Update(dtSec);
+			sStructuralVoxelEngine.Update(dtSec);
+			sSharedMemoryShardFabric.Update(dtSec);
+			sNonEuclideanPortalEngine.Update(dtSec);
+			sSourceTelekinesisEngine.Update(dtSec);
+			sGlobalSovereignMesh.Update(dtSec);
+			sGaussianSplatEngine.Update(dtSec);
+			sPhysarumLogisticsEngine.Update(dtSec);
+			sBiometricResonanceEngine.Update(dtSec);
+			sWebAssemblyGatewayEngine.Update(dtSec);
+			sWorldRealizationEngine.Update(dtSec);
+			sCastleAgentCombatEngine.Update(dtSec);
+			sCastlePvPKarmaEngine.Update(dtSec);
+			sCastleUnderworldAssaultEngine.Update(dtSec);
+
 			// The Anomaly Event (Phase 50)
 			static uint32 lastAnomalyCheckMs = 0;
 			if (currentMs - lastAnomalyCheckMs > 3600000) { // Every 1 hour
 				lastAnomalyCheckMs = currentMs;
 				if (rand() % 100 < 5) { // 5% chance
-					auto allIds = sObjMgr.getAllGOIds();
 					std::vector<uint32> validPlayers;
-					for (uint32 id : allIds) {
-						if (auto p = sObjMgr.getGOPtrSafe(id)) {
-							if (!p->getClient().isBot() && !p->isDead()) validPlayers.push_back(id);
-						}
-					}
+					sObjMgr.ForEachHumanPlayer([&](PlayerObject* p) {
+						if (!p->isDead()) validPlayers.push_back(sObjMgr.getGOId(p));
+					});
 					if (!validPlayers.empty()) {
 						uint32 chosenId = validPlayers[rand() % validPlayers.size()];
 						sStatusEffectManager.ApplyEffect(chosenId, EFFECT_THE_ANOMALY, 60.0f, 1.0f, 0.0f);
-						for (uint32 id : allIds) {
-							if (auto p = sObjMgr.getGOPtrSafe(id)) {
-								if (!p->getClient().isBot()) {
-									p->getClient().QueueCommand(std::make_shared<SystemChatMsg>("{c:00FFFF}[System] THE ANOMALY HAS MANIFESTED IN THE MEGA CITY.{/c}"));
-								}
-							}
-						}
+						sObjMgr.ForEachHumanPlayer([&](PlayerObject* p) {
+							p->getClient().QueueCommand(std::make_shared<SystemChatMsg>("{c:00FFFF}[System] THE ANOMALY HAS MANIFESTED IN THE MEGA CITY.{/c}"));
+						});
 						INFO_LOG(format("The Anomaly has been granted to player ID %1%.") % chosenId);
 					}
 				}
 			}
 
-			auto allIds = sObjMgr.getAllGOIds();
-			for (uint32 id : allIds) {
-				if (auto po = sObjMgr.getGOPtrSafe(id)) {
-					po->Update();
-					
-					// Item 55: Network Packet Batching
-					// Ensure all server-generated events from Combat, AI, and World are flushed out this tick
-					po->getClient().FlushQueue();
-				}
-			}
+			// Zero-allocation thread-safe object update & network packet batching
+			sObjMgr.ForEachGO([](PlayerObject* po) {
+				po->Update();
+				po->getClient().FlushQueue();
+			});
 
 			// Item 54: Flush pending lazy deletions from Garbage Collector
 			sObjMgr.FlushDeletions();

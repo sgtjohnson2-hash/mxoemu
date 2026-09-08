@@ -113,6 +113,28 @@ public:
 			}
 		}
 	}
+
+	template<typename Func>
+	void ForEachGO(Func&& func)
+	{
+		std::vector<std::shared_ptr<PlayerObject>> objects;
+		{
+			std::shared_lock<std::shared_mutex> lock(m_objMutex);
+			if (m_objects.empty()) return;
+			objects.reserve(m_objects.size());
+			for (auto& pair : m_objects)
+			{
+				if (pair.first >= OBJECTMANAGER_STARTINGOBJECTID && pair.second)
+					objects.push_back(pair.second);
+			}
+		}
+		for (auto& p : objects)
+		{
+			if (p) {
+				func(p.get());
+			}
+		}
+	}
 	void OpenDoor(uint32 doorId, class GameClient *requester);
 	vector<msgBaseClassPtr> GetAllOpenDoors(class GameClient *requester);
 

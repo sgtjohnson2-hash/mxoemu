@@ -40,7 +40,7 @@ void CastlePvPKarmaEngine::RegisterPlayer(uint32_t playerGoId, const std::string
 {
     std::unique_lock<std::shared_mutex> lock(m_karmaMutex);
     if (m_playerRecords.find(playerGoId) == m_playerRecords.end()) {
-        PlayerKarmaRecord record;
+        CastlePvPKarmaRecord record;
         record.playerGoId = playerGoId;
         record.playerName = name;
         record.karmaScore = 0;
@@ -54,7 +54,7 @@ void CastlePvPKarmaEngine::ModifyKarma(uint32_t playerGoId, int32_t deltaKarma, 
     std::unique_lock<std::shared_mutex> lock(m_karmaMutex);
     auto it = m_playerRecords.find(playerGoId);
     if (it == m_playerRecords.end()) {
-        PlayerKarmaRecord record;
+        CastlePvPKarmaRecord record;
         record.playerGoId = playerGoId;
         record.playerName = "Unknown Redpill";
         record.karmaScore = deltaKarma;
@@ -107,7 +107,7 @@ PlayerKarmaCategory CastlePvPKarmaEngine::GetPlayerCategory(uint32_t playerGoId)
     return PlayerKarmaCategory::AlliedProtector;
 }
 
-const PlayerKarmaRecord* CastlePvPKarmaEngine::GetPlayerRecord(uint32_t playerGoId) const
+const CastlePvPKarmaRecord* CastlePvPKarmaEngine::GetPlayerRecord(uint32_t playerGoId) const
 {
     std::shared_lock<std::shared_mutex> lock(m_karmaMutex);
     auto it = m_playerRecords.find(playerGoId);

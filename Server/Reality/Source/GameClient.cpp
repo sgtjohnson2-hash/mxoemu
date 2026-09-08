@@ -200,7 +200,15 @@ void GameClient::HandlePacket( const char *pData, size_t nLength )
 			marginConn->ForceDisconnect();
 			return;
 		}
-		sObjMgr.getGOPtr(m_playerGoId)->InitializeWorld();
+		if (auto p = sObjMgr.getGOSharedPtr(m_playerGoId)) {
+			p->InitializeWorld();
+		} else {
+			ERROR_LOG(format("InitialUDPPacket(%1%): Player GO ID %2% not found in ObjectMgr!") % Address() % m_playerGoId);
+			m_encryptionInitialized = false;
+			Invalidate();
+			marginConn->ForceDisconnect();
+			return;
+		}
 		FlushQueue();
 		return;
 	}

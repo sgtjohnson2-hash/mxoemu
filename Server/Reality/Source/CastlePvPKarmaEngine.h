@@ -31,7 +31,7 @@ enum class DownedPlayerFate
     ExecutedWithInfamy  // Severe Infamy: Tactical headshot & contraband confiscated
 };
 
-struct PlayerKarmaRecord
+struct CastlePvPKarmaRecord
 {
     uint32_t playerGoId{0};
     std::string playerName;
@@ -94,7 +94,7 @@ public:
     void ModifyKarma(uint32_t playerGoId, int32_t deltaKarma, const std::string& reason, const std::string& zone = "");
     int32_t GetPlayerKarma(uint32_t playerGoId) const;
     PlayerKarmaCategory GetPlayerCategory(uint32_t playerGoId) const;
-    const PlayerKarmaRecord* GetPlayerRecord(uint32_t playerGoId) const;
+    const CastlePvPKarmaRecord* GetPlayerRecord(uint32_t playerGoId) const;
 
     // Specific Infractions & Merits
     void RecordCivilianMurder(uint32_t playerGoId, const std::string& zone);
@@ -124,7 +124,7 @@ public:
 
 private:
     mutable std::shared_mutex m_karmaMutex;
-    std::unordered_map<uint32_t, PlayerKarmaRecord> m_playerRecords;
+    std::unordered_map<uint32_t, CastlePvPKarmaRecord> m_playerRecords;
     std::unordered_map<uint32_t, SniperPerch> m_sniperPerches;
     uint32_t m_nextPerchId{1};
     uint32_t m_nextInterceptId{1};
