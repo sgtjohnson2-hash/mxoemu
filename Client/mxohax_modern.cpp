@@ -154,10 +154,12 @@ int PASCAL DetourConnect(SOCKET s, const struct sockaddr *name, int namelen) {
     if (name && name->sa_family == AF_INET && namelen >= sizeof(struct sockaddr_in)) {
         struct sockaddr_in* sin = (struct sockaddr_in*)name;
         u_short port = ntohs(sin->sin_port);
-        struct sockaddr_in redirected = *sin;
-        redirected.sin_addr.s_addr = inet_addr(g_TargetServerIp);
-        Log("[mxohax] connect() intercepted for port %u -> routing to %s:%u\n", port, g_TargetServerIp, port);
-        return OriginalConnect ? OriginalConnect(s, (struct sockaddr*)&redirected, namelen) : SOCKET_ERROR;
+        if (port == 10000 || port == 11000 || port == 80) {
+            struct sockaddr_in redirected = *sin;
+            redirected.sin_addr.s_addr = inet_addr(g_TargetServerIp);
+            Log("[mxohax] connect() intercepted for port %u -> routing to %s:%u\n", port, g_TargetServerIp, port);
+            return OriginalConnect ? OriginalConnect(s, (struct sockaddr*)&redirected, namelen) : SOCKET_ERROR;
+        }
     }
     return OriginalConnect ? OriginalConnect(s, name, namelen) : SOCKET_ERROR;
 }
@@ -172,6 +174,11 @@ int PASCAL DetourSendTo(SOCKET s, const char *buf, int len, int flags, const str
         if (port == 10000) {
             struct sockaddr_in redirected = *sin;
             redirected.sin_addr.s_addr = inet_addr(g_TargetServerIp);
+            static bool s_loggedSend = false;
+            if (!s_loggedSend) {
+                s_loggedSend = true;
+                Log("[mxohax] sendto() UDP transmitting %d bytes to port 10000 at %s\n", len, g_TargetServerIp);
+            }
             return OriginalSendTo ? OriginalSendTo(s, buf, len, flags, (struct sockaddr*)&redirected, tolen) : SOCKET_ERROR;
         }
     }
@@ -431,10 +438,6 @@ static void __fastcall DetourFrameTick(void* pThis, void* /*edx*/) {
                 if (TryAutoJackIn(clientBase)) {
                     s_autoJackInDone = true;
                 }
-            }
-        } else if (s_tickCount >= 30) { // After ~0.5 second of game ticks
-            if (TryAutoJackIn(clientBase)) {
-                s_autoJackInDone = true;
             }
         }
     }
