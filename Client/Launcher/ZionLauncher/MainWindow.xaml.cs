@@ -119,6 +119,57 @@ namespace ZionLauncher
         const uint MEM_RESERVE = 0x00002000;
         const uint PAGE_READWRITE = 0x04;
 
+        [System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Sequential)]
+        struct STARTUPINFO
+        {
+            public uint cb;
+            public string lpReserved;
+            public string lpDesktop;
+            public string lpTitle;
+            public uint dwX;
+            public uint dwY;
+            public uint dwXSize;
+            public uint dwYSize;
+            public uint dwXCountChars;
+            public uint dwYCountChars;
+            public uint dwFillAttribute;
+            public uint dwFlags;
+            public short wShowWindow;
+            public short cbReserved2;
+            public IntPtr lpReserved2;
+            public IntPtr hStdInput;
+            public IntPtr hStdOutput;
+            public IntPtr hStdError;
+        }
+
+        [System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Sequential)]
+        struct PROCESS_INFORMATION
+        {
+            public IntPtr hProcess;
+            public IntPtr hThread;
+            public uint dwProcessId;
+            public uint dwThreadId;
+        }
+
+        [System.Runtime.InteropServices.DllImport("kernel32.dll", SetLastError = true, CharSet = System.Runtime.InteropServices.CharSet.Ansi)]
+        static extern bool CreateProcess(
+            string? lpApplicationName,
+            string lpCommandLine,
+            IntPtr lpProcessAttributes,
+            IntPtr lpThreadAttributes,
+            bool bInheritHandles,
+            uint dwCreationFlags,
+            IntPtr lpEnvironment,
+            string? lpCurrentDirectory,
+            [System.Runtime.InteropServices.In] ref STARTUPINFO lpStartupInfo,
+            out PROCESS_INFORMATION lpProcessInformation
+        );
+
+        [System.Runtime.InteropServices.DllImport("kernel32.dll", SetLastError = true)]
+        static extern uint ResumeThread(IntPtr hThread);
+
+        const uint CREATE_SUSPENDED = 0x00000004;
+
         public MainWindow()
         {
             InitializeComponent();
@@ -1663,17 +1714,46 @@ namespace ZionLauncher
 
                 string charArg = !string.IsNullOrWhiteSpace(operativeHandle) ? operativeHandle : username;
                 string launchArgs = $"-clone -nopatch -configsection HighDetail -user \"{username}\" -pwd \"{password}\" -char \"{charArg}\"";
-                var proc = Process.Start(new ProcessStartInfo
-                {
-                    FileName = clientExe,
-                    Arguments = launchArgs,
-                    WorkingDirectory = Path.GetDirectoryName(clientExe)!,
-                    UseShellExecute = false
-                });
+                string cmdLine = $"\"{clientExe}\" {launchArgs}";
+                string workDir = Path.GetDirectoryName(clientExe)!;
 
+                bool startedSuspended = false;
                 if (File.Exists(HookDll))
                 {
-                    _ = Task.Run(() => InjectImmediatelyAndWatch(proc));
+                    STARTUPINFO si = new STARTUPINFO();
+                    si.cb = (uint)System.Runtime.InteropServices.Marshal.SizeOf(si);
+                    if (CreateProcess(null, cmdLine, IntPtr.Zero, IntPtr.Zero, false, CREATE_SUSPENDED, IntPtr.Zero, workDir, ref si, out PROCESS_INFORMATION pi))
+                    {
+                        startedSuspended = true;
+                        bool injected = InjectDllIntoHandle(pi.hProcess, HookDll);
+                        ResumeThread(pi.hThread);
+                        CloseHandle(pi.hThread);
+                        CloseHandle(pi.hProcess);
+
+                        Dispatcher.Invoke(() =>
+                        {
+                            txtStatus.Foreground = Brushes.Lime;
+                            txtStatus.Text = injected
+                                ? $"[Jacked In] Matrix launched suspended, mxohax injected, process resumed (PID {pi.dwProcessId})."
+                                : $"[Jacked In] Matrix process resumed (PID {pi.dwProcessId}).";
+                        });
+                    }
+                }
+
+                if (!startedSuspended)
+                {
+                    var proc = Process.Start(new ProcessStartInfo
+                    {
+                        FileName = clientExe,
+                        Arguments = launchArgs,
+                        WorkingDirectory = workDir,
+                        UseShellExecute = false
+                    });
+
+                    if (File.Exists(HookDll))
+                    {
+                        _ = Task.Run(() => InjectImmediatelyAndWatch(proc));
+                    }
                 }
 
                 await Task.Delay(2000);
@@ -1728,6 +1808,34 @@ namespace ZionLauncher
             catch { }
         }
 
+        private bool InjectDllIntoHandle(IntPtr hProcess, string dllPath)
+        {
+            if (hProcess == IntPtr.Zero || !File.Exists(dllPath)) return false;
+            try
+            {
+                byte[] dllBytes = Encoding.ASCII.GetBytes(dllPath + "\0");
+                IntPtr allocMem = VirtualAllocEx(hProcess, IntPtr.Zero, (uint)dllBytes.Length, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
+                if (allocMem == IntPtr.Zero) return false;
+
+                if (!WriteProcessMemory(hProcess, allocMem, dllBytes, (uint)dllBytes.Length, out _))
+                    return false;
+
+                IntPtr kernel32 = GetModuleHandle("kernel32.dll");
+                IntPtr loadLibrary = GetProcAddress(kernel32, "LoadLibraryA");
+                if (loadLibrary == IntPtr.Zero) return false;
+
+                IntPtr hThread = CreateRemoteThread(hProcess, IntPtr.Zero, 0, loadLibrary, allocMem, 0, out _);
+                if (hThread != IntPtr.Zero)
+                {
+                    WaitForSingleObject(hThread, 3000);
+                    CloseHandle(hThread);
+                    return true;
+                }
+            }
+            catch { }
+            return false;
+        }
+
         private bool InjectDll(Process proc, string dllPath)
         {
             if (!File.Exists(dllPath)) return false;
@@ -1735,38 +1843,9 @@ namespace ZionLauncher
             {
                 IntPtr hProcess = OpenProcess(PROCESS_ALL_ACCESS, false, proc.Id);
                 if (hProcess == IntPtr.Zero) return false;
-
-                byte[] dllBytes = Encoding.ASCII.GetBytes(dllPath + "\0");
-                IntPtr allocMem = VirtualAllocEx(hProcess, IntPtr.Zero, (uint)dllBytes.Length, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
-                if (allocMem == IntPtr.Zero)
-                {
-                    CloseHandle(hProcess);
-                    return false;
-                }
-
-                if (!WriteProcessMemory(hProcess, allocMem, dllBytes, (uint)dllBytes.Length, out _))
-                {
-                    CloseHandle(hProcess);
-                    return false;
-                }
-
-                IntPtr kernel32 = GetModuleHandle("kernel32.dll");
-                IntPtr loadLibrary = GetProcAddress(kernel32, "LoadLibraryA");
-                if (loadLibrary == IntPtr.Zero)
-                {
-                    CloseHandle(hProcess);
-                    return false;
-                }
-
-                IntPtr hThread = CreateRemoteThread(hProcess, IntPtr.Zero, 0, loadLibrary, allocMem, 0, out _);
-                if (hThread != IntPtr.Zero)
-                {
-                    WaitForSingleObject(hThread, 3000);
-                    CloseHandle(hThread);
-                    CloseHandle(hProcess);
-                    return true;
-                }
+                bool result = InjectDllIntoHandle(hProcess, dllPath);
                 CloseHandle(hProcess);
+                return result;
             }
             catch { }
             return false;

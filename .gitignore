@@ -21,6 +21,8 @@
 *.map
 build_*/
 Server/Reality/build_msvc/
+**/publish/
+**/__pycache__/
 
 # IDE and Editor files
 .vs/
