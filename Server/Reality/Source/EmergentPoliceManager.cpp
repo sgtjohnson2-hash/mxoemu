@@ -4,6 +4,7 @@
 #include "EmergentAIEngine.h"
 #include "FrankCastleManager.h"
 #include "RadioDispatchSystem.h"
+#include "WorldRealizationEngine.h"
 #include "BotManager.h"
 #include "ObjectMgr.h"
 #include "PlayerObject.h"
@@ -202,6 +203,7 @@ void EmergentPoliceManager::InitializeDefaultRoadblocks()
         r.lanesCovered = 3;
         r.interceptionRadius = 50.0f;
         m_roadblocks[r.roadblockId] = r;
+        sWorldRealizationEngine.DeployTacticalRoadblock3D(r.roadblockId, r.location.x, r.location.y, r.location.z, 0.0f, r.interceptionRadius);
     }
 
     // Downtown
@@ -219,6 +221,7 @@ void EmergentPoliceManager::InitializeDefaultRoadblocks()
         r.lanesCovered = 4;
         r.interceptionRadius = 45.0f;
         m_roadblocks[r.roadblockId] = r;
+        sWorldRealizationEngine.DeployTacticalRoadblock3D(r.roadblockId, r.location.x, r.location.y, r.location.z, 0.0f, r.interceptionRadius);
     }
 
     // International (Harbor / Docks)
@@ -236,6 +239,7 @@ void EmergentPoliceManager::InitializeDefaultRoadblocks()
         r.lanesCovered = 3;
         r.interceptionRadius = 55.0f;
         m_roadblocks[r.roadblockId] = r;
+        sWorldRealizationEngine.DeployTacticalRoadblock3D(r.roadblockId, r.location.x, r.location.y, r.location.z, 0.0f, r.interceptionRadius);
     }
 
     // Industrial
@@ -253,6 +257,7 @@ void EmergentPoliceManager::InitializeDefaultRoadblocks()
         r.lanesCovered = 4;
         r.interceptionRadius = 60.0f;
         m_roadblocks[r.roadblockId] = r;
+        sWorldRealizationEngine.DeployTacticalRoadblock3D(r.roadblockId, r.location.x, r.location.y, r.location.z, 0.0f, r.interceptionRadius);
     }
 
     // Park East
@@ -270,6 +275,7 @@ void EmergentPoliceManager::InitializeDefaultRoadblocks()
         r.lanesCovered = 2;
         r.interceptionRadius = 40.0f;
         m_roadblocks[r.roadblockId] = r;
+        sWorldRealizationEngine.DeployTacticalRoadblock3D(r.roadblockId, r.location.x, r.location.y, r.location.z, 0.0f, r.interceptionRadius);
     }
 }
 

@@ -13,6 +13,7 @@
 #include "NeuralVoiceSystem.h"
 #include "UnderworldManager.h"
 #include "EmergentAIEngine.h"
+#include "WorldRealizationEngine.h"
 #include "Log.h"
 #include <algorithm>
 #include <cmath>
@@ -480,6 +481,7 @@ void FrankCastleManager::Update(uint32 deltaMs)
         m_currentState = FRANK_STATE_TACTICAL_RETREAT;
         m_stateTimerMs = 0;
         DEBUG_LOG("FrankCastle: Tactical smoke deployed. Vitals compromised. Falling back to safehouse for surgery and re-arm.");
+        sWorldRealizationEngine.ManifestTacticalSmoke3D(m_currentPos.x, m_currentPos.y, m_currentPos.z, 800.0f, 25.0f);
         AddWarJournalEntry(JOURNAL_TACTICAL_RETREAT, "Multiple Hostiles", "Emergency Smoke Extraction", "Fell back to fortified perimeter under heavy fire.", 1, m_currentPos);
     }
 

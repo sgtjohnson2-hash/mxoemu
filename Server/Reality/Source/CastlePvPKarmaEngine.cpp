@@ -1,4 +1,5 @@
 #include "CastlePvPKarmaEngine.h"
+#include "WorldRealizationEngine.h"
 #include "Log.h"
 #include <iostream>
 #include <cassert>
@@ -228,6 +229,9 @@ bool CastlePvPKarmaEngine::ExecuteSniperAmbush(uint32_t perchId, uint32_t target
     outResult.isKnockdown = true;
     outResult.tinnitusShakeSec = 4.0f;
 
+    // Manifest physical supersonic tracer and acoustic shockwave in 3D world
+    sWorldRealizationEngine.ManifestSniperTracer3D(perch.x, perch.y, perch.z, playerX, playerY, playerZ, 18000.0f);
+
     return true;
 }
 
@@ -298,6 +302,7 @@ bool CastlePvPKarmaEngine::GrantSafehouseSupplyCrateCode(uint32_t playerGoId, st
     auto it = m_playerRecords.find(playerGoId);
     if (it != m_playerRecords.end() && it->second.karmaScore >= 20) {
         outCrateUnlockCode = "CASTLE-SUPPLY-FM883-TUNGSTEN";
+        sWorldRealizationEngine.ManifestSafehouseSupplyDrop3D(100.0f, 0.0f, 100.0f, outCrateUnlockCode, 500);
         return true;
     }
     outCrateUnlockCode = "";

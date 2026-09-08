@@ -30,7 +30,16 @@ void WorldRealizationEngine::Initialize()
     std::unique_lock<std::shared_mutex> lock(m_realizationMutex);
     m_couriers.clear();
     m_stasisFields.clear();
+    m_smokeZones.clear();
+    m_claymores.clear();
+    m_sniperTracers.clear();
+    m_supplyCrates.clear();
+    m_roadblocks.clear();
     m_nextCourierId = 1;
+    m_nextSmokeId = 1;
+    m_nextClaymoreId = 1;
+    m_nextTracerId = 1;
+    m_nextCrateId = 1;
     m_totalRupturesManifested = 0;
 
     boost::format fmt("WorldRealizationEngine: Initialized 3D physical world realization subsystem.");
@@ -42,7 +51,16 @@ void WorldRealizationEngine::ResetForTesting()
     std::unique_lock<std::shared_mutex> lock(m_realizationMutex);
     m_couriers.clear();
     m_stasisFields.clear();
+    m_smokeZones.clear();
+    m_claymores.clear();
+    m_sniperTracers.clear();
+    m_supplyCrates.clear();
+    m_roadblocks.clear();
     m_nextCourierId = 1;
+    m_nextSmokeId = 1;
+    m_nextClaymoreId = 1;
+    m_nextTracerId = 1;
+    m_nextCrateId = 1;
     m_totalRupturesManifested = 0;
 }
 
@@ -52,6 +70,28 @@ void WorldRealizationEngine::Update(float dt)
 
     AdvanceCouriers(dt);
     Sync3DSwarmEntities(dt);
+
+    std::unique_lock<std::shared_mutex> lock(m_realizationMutex);
+
+    // Update 3D tactical smoke zones
+    for (auto it = m_smokeZones.begin(); it != m_smokeZones.end(); ) {
+        it->second.remainingTimeSec -= dt;
+        if (it->second.remainingTimeSec <= 0.0f) {
+            it = m_smokeZones.erase(it);
+        } else {
+            ++it;
+        }
+    }
+
+    // Update 3D supersonic sniper tracers
+    for (auto it = m_sniperTracers.begin(); it != m_sniperTracers.end(); ) {
+        it->second.remainingTimeSec -= dt;
+        if (it->second.remainingTimeSec <= 0.0f) {
+            it = m_sniperTracers.erase(it);
+        } else {
+            ++it;
+        }
+    }
 }
 
 uint32_t WorldRealizationEngine::SpawnPhysicalCourier(uint32_t sourceNodeId, uint32_t sinkNodeId, float speed)
@@ -269,6 +309,254 @@ void WorldRealizationEngine::Sync3DSwarmEntities(float dt)
     // Iterates active boids in NeuralSwarmManager and updates 3D positions of bound bots in ObjectMgr
 }
 
+// 7. Tactical Smoke 3D Obscuration
+uint32_t WorldRealizationEngine::ManifestTacticalSmoke3D(float x, float y, float z, float radius, float durationSec)
+{
+    std::unique_lock<std::shared_mutex> lock(m_realizationMutex);
+    uint32_t zid = m_nextSmokeId++;
+    Active3DSmokeZone zne;
+    zne.zoneId = zid;
+    zne.posX = x;
+    zne.posY = y;
+    zne.posZ = z;
+    zne.radius = radius;
+    zne.remainingTimeSec = durationSec;
+    zne.accuracyPenalty = 0.75f;
+    m_smokeZones[zid] = zne;
+
+    boost::format fmt("WorldRealizationEngine: Deployed 3D tactical smoke zone #%1% at (%2%, %3%, %4%) radius %5%m");
+    fmt % zid % x % y % z % (radius / 100.0f);
+    INFO_LOG(fmt);
+    return zid;
+}
+
+bool WorldRealizationEngine::IsPointInTacticalSmoke(float x, float y, float z) const
+{
+    std::shared_lock<std::shared_mutex> lock(m_realizationMutex);
+    for (const auto& kv : m_smokeZones) {
+        float dx = x - kv.second.posX;
+        float dy = y - kv.second.posY;
+        float dz = z - kv.second.posZ;
+        if (dx * dx + dy * dy + dz * dz <= kv.second.radius * kv.second.radius) {
+            return true;
+        }
+    }
+    return false;
+}
+
+size_t WorldRealizationEngine::GetActiveSmokeZoneCount() const
+{
+    std::shared_lock<std::shared_mutex> lock(m_realizationMutex);
+    return m_smokeZones.size();
+}
+
+// 8. Physical M18A1 Directional Claymore Trap
+uint32_t WorldRealizationEngine::DeployClaymoreTrap3D(uint32_t ownerGoId, float x, float y, float z, float yawRad, float arcAngleDeg, float rangeUnits)
+{
+    std::unique_lock<std::shared_mutex> lock(m_realizationMutex);
+    uint32_t cid = m_nextClaymoreId++;
+    Active3DClaymoreTrap c;
+    c.trapId = cid;
+    c.ownerGoId = ownerGoId;
+    c.posX = x;
+    c.posY = y;
+    c.posZ = z;
+    c.yawRad = yawRad;
+    c.arcAngleDeg = arcAngleDeg;
+    c.lethalRangeUnits = rangeUnits;
+    c.isArmed = true;
+    c.isDetonated = false;
+    m_claymores[cid] = c;
+
+    boost::format fmt("WorldRealizationEngine: Deployed 3D M18A1 Directional Claymore #%1% at (%2%, %3%, %4%)");
+    fmt % cid % x % y % z;
+    INFO_LOG(fmt);
+    return cid;
+}
+
+bool WorldRealizationEngine::CheckClaymoreTrigger(float entityX, float entityY, float entityZ, uint32_t entityGoId, uint32_t& outDetonatedTrapId, float& outBlastDamage)
+{
+    std::unique_lock<std::shared_mutex> lock(m_realizationMutex);
+    outDetonatedTrapId = 0;
+    outBlastDamage = 0.0f;
+
+    for (auto& kv : m_claymores) {
+        Active3DClaymoreTrap& c = kv.second;
+        if (!c.isArmed || c.isDetonated) continue;
+        if (entityGoId != 0 && entityGoId == c.ownerGoId) continue;
+
+        float dx = entityX - c.posX;
+        float dy = entityY - c.posY;
+        float dz = entityZ - c.posZ;
+        float dist = std::sqrt(dx * dx + dy * dy + dz * dz);
+
+        if (dist <= c.lethalRangeUnits && dist > 0.01f) {
+            float forwardX = std::sin(c.yawRad);
+            float forwardZ = std::cos(c.yawRad);
+            float dot = (dx * forwardX + dz * forwardZ) / dist;
+            float minCos = std::cos((c.arcAngleDeg * 0.5f) * 3.14159265f / 180.0f);
+
+            if (dot >= minCos) {
+                c.isDetonated = true;
+                c.isArmed = false;
+                outDetonatedTrapId = c.trapId;
+                outBlastDamage = 450.0f * (1.0f - (dist / c.lethalRangeUnits) * 0.5f);
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
+size_t WorldRealizationEngine::GetActiveClaymoreCount() const
+{
+    std::shared_lock<std::shared_mutex> lock(m_realizationMutex);
+    size_t count = 0;
+    for (const auto& kv : m_claymores) {
+        if (kv.second.isArmed && !kv.second.isDetonated) count++;
+    }
+    return count;
+}
+
+// 9. Supersonic Sniper Ballistic Tracer & Shockwave
+uint32_t WorldRealizationEngine::ManifestSniperTracer3D(float startX, float startY, float startZ, float endX, float endY, float endZ, float caliberJoules)
+{
+    std::unique_lock<std::shared_mutex> lock(m_realizationMutex);
+    uint32_t tid = m_nextTracerId++;
+    Active3DSniperTracer t;
+    t.tracerId = tid;
+    t.startX = startX;
+    t.startY = startY;
+    t.startZ = startZ;
+    t.endX = endX;
+    t.endY = endY;
+    t.endZ = endZ;
+    t.caliberJoules = caliberJoules;
+    t.remainingTimeSec = 1.5f;
+    m_sniperTracers[tid] = t;
+    return tid;
+}
+
+bool WorldRealizationEngine::IsInSupersonicAcousticCone(float playerX, float playerY, float playerZ, uint32_t tracerId, float& outAcousticDelaySec) const
+{
+    std::shared_lock<std::shared_mutex> lock(m_realizationMutex);
+    outAcousticDelaySec = 0.0f;
+    auto it = m_sniperTracers.find(tracerId);
+    if (it == m_sniperTracers.end()) return false;
+
+    const auto& t = it->second;
+    float vx = t.endX - t.startX;
+    float vy = t.endY - t.startY;
+    float vz = t.endZ - t.startZ;
+    float segLenSq = vx * vx + vy * vy + vz * vz;
+    if (segLenSq < 0.001f) return false;
+
+    float wx = playerX - t.startX;
+    float wy = playerY - t.startY;
+    float wz = playerZ - t.startZ;
+    float c1 = wx * vx + wy * vy + wz * vz;
+    float param = std::clamp(c1 / segLenSq, 0.0f, 1.0f);
+
+    float px = t.startX + param * vx;
+    float py = t.startY + param * vy;
+    float pz = t.startZ + param * vz;
+
+    float distToLine = std::sqrt((playerX - px) * (playerX - px) + (playerY - py) * (playerY - py) + (playerZ - pz) * (playerZ - pz));
+    if (distToLine <= 25000.0f) {
+        outAcousticDelaySec = distToLine / 343.0f;
+        return true;
+    }
+    return false;
+}
+
+size_t WorldRealizationEngine::GetActiveSniperTracerCount() const
+{
+    std::shared_lock<std::shared_mutex> lock(m_realizationMutex);
+    return m_sniperTracers.size();
+}
+
+// 10. Physical Safehouse Supply Crates & Dead-Drops
+uint32_t WorldRealizationEngine::ManifestSafehouseSupplyDrop3D(float x, float y, float z, const std::string& crateCode, uint32_t ammoCount)
+{
+    std::unique_lock<std::shared_mutex> lock(m_realizationMutex);
+    uint32_t cid = m_nextCrateId++;
+    Active3DSupplyCrate cr;
+    cr.crateId = cid;
+    cr.posX = x;
+    cr.posY = y;
+    cr.posZ = z;
+    cr.unlockCode = crateCode;
+    cr.ammoCount = ammoCount;
+    cr.isLooted = false;
+    m_supplyCrates[cid] = cr;
+
+    boost::format fmt("WorldRealizationEngine: Spawned physical 3D supply crate #%1% at (%2%, %3%, %4%) with unlock code [%5%]");
+    fmt % cid % x % y % z % crateCode;
+    INFO_LOG(fmt);
+    return cid;
+}
+
+bool WorldRealizationEngine::AttemptUnlockSupplyCrate(uint32_t crateId, const std::string& enteredCode, uint32_t& outAmmoHarvested)
+{
+    std::unique_lock<std::shared_mutex> lock(m_realizationMutex);
+    outAmmoHarvested = 0;
+    auto it = m_supplyCrates.find(crateId);
+    if (it == m_supplyCrates.end() || it->second.isLooted) return false;
+
+    if (it->second.unlockCode == enteredCode) {
+        it->second.isLooted = true;
+        outAmmoHarvested = it->second.ammoCount;
+        return true;
+    }
+    return false;
+}
+
+size_t WorldRealizationEngine::GetActiveSupplyCrateCount() const
+{
+    std::shared_lock<std::shared_mutex> lock(m_realizationMutex);
+    size_t count = 0;
+    for (const auto& kv : m_supplyCrates) {
+        if (!kv.second.isLooted) count++;
+    }
+    return count;
+}
+
+// 11. Physical Tactical Roadblock Barricades
+uint32_t WorldRealizationEngine::DeployTacticalRoadblock3D(uint32_t roadblockId, float x, float y, float z, float headingDeg, float lengthMeters)
+{
+    std::unique_lock<std::shared_mutex> lock(m_realizationMutex);
+    Active3DRoadblockBarricade rb;
+    rb.barricadeId = roadblockId;
+    rb.posX = x;
+    rb.posY = y;
+    rb.posZ = z;
+    rb.headingDeg = headingDeg;
+    rb.lengthMeters = lengthMeters;
+    rb.blocksVehicles = true;
+    m_roadblocks[roadblockId] = rb;
+    return roadblockId;
+}
+
+bool WorldRealizationEngine::IsPathBlockedByRoadblock(float fromX, float fromY, float toX, float toY) const
+{
+    std::shared_lock<std::shared_mutex> lock(m_realizationMutex);
+    for (const auto& kv : m_roadblocks) {
+        const auto& rb = kv.second;
+        if (!rb.blocksVehicles) continue;
+        float distToBarricade = std::sqrt((fromX - rb.posX) * (fromX - rb.posX) + (fromY - rb.posY) * (fromY - rb.posY));
+        if (distToBarricade < rb.lengthMeters * 100.0f) {
+            return true;
+        }
+    }
+    return false;
+}
+
+size_t WorldRealizationEngine::GetActiveRoadblockCount() const
+{
+    std::shared_lock<std::shared_mutex> lock(m_realizationMutex);
+    return m_roadblocks.size();
+}
+
 // ============================================================================
 // Headless Test Suite 39: 3D World Realization Engine
 // ============================================================================
@@ -359,5 +647,53 @@ void RunWorldRealizationTestSuite()
     float dilatedFactor = sWorldRealizationEngine.Compute3DPlayerTimeDilation(777);
     assert(dilatedFactor < 0.5f); // Bullet time active in 3D world!
 
-    std::cout << "[PASSED] Suite 39: 3D World Realization Engine (32 assertions passed)." << std::endl;
+    // 6. Tactical Smoke 3D Manifestation
+    uint32_t smkId = sWorldRealizationEngine.ManifestTacticalSmoke3D(100.0f, 0.0f, 100.0f, 500.0f, 20.0f);
+    assert(smkId > 0);
+    assert(sWorldRealizationEngine.GetActiveSmokeZoneCount() == 1);
+    assert(sWorldRealizationEngine.IsPointInTacticalSmoke(150.0f, 0.0f, 120.0f));
+    assert(!sWorldRealizationEngine.IsPointInTacticalSmoke(900.0f, 0.0f, 900.0f));
+
+    // 7. Directional Claymore Trap
+    uint32_t clmId = sWorldRealizationEngine.DeployClaymoreTrap3D(101, 500.0f, 0.0f, 500.0f, 0.0f, 60.0f, 1500.0f);
+    assert(clmId > 0);
+    assert(sWorldRealizationEngine.GetActiveClaymoreCount() == 1);
+    uint32_t trigId = 0;
+    float blastDmg = 0.0f;
+    bool claymoreHit = sWorldRealizationEngine.CheckClaymoreTrigger(500.0f, 0.0f, 1200.0f, 999, trigId, blastDmg);
+    assert(claymoreHit);
+    assert(trigId == clmId);
+    assert(blastDmg > 200.0f);
+    assert(sWorldRealizationEngine.GetActiveClaymoreCount() == 0);
+
+    // 8. Supersonic Sniper Tracer & Shockwave
+    uint32_t trcId = sWorldRealizationEngine.ManifestSniperTracer3D(0.0f, 100.0f, 0.0f, 0.0f, 0.0f, 1000.0f, 18000.0f);
+    assert(trcId > 0);
+    assert(sWorldRealizationEngine.GetActiveSniperTracerCount() == 1);
+    float acousticDelay = 0.0f;
+    bool inCone = sWorldRealizationEngine.IsInSupersonicAcousticCone(50.0f, 0.0f, 500.0f, trcId, acousticDelay);
+    assert(inCone);
+    assert(acousticDelay > 0.0f);
+
+    // 9. Safehouse Supply Crate
+    uint32_t crtId = sWorldRealizationEngine.ManifestSafehouseSupplyDrop3D(300.0f, 0.0f, 400.0f, "CASTLE_77", 600);
+    assert(crtId > 0);
+    assert(sWorldRealizationEngine.GetActiveSupplyCrateCount() == 1);
+    uint32_t lootedAmmo = 0;
+    bool badUnlock = sWorldRealizationEngine.AttemptUnlockSupplyCrate(crtId, "WRONG_CODE", lootedAmmo);
+    assert(!badUnlock);
+    assert(lootedAmmo == 0);
+    bool goodUnlock = sWorldRealizationEngine.AttemptUnlockSupplyCrate(crtId, "CASTLE_77", lootedAmmo);
+    assert(goodUnlock);
+    assert(lootedAmmo == 600);
+    assert(sWorldRealizationEngine.GetActiveSupplyCrateCount() == 0);
+
+    // 10. Tactical Roadblock
+    uint32_t rbId = sWorldRealizationEngine.DeployTacticalRoadblock3D(55, 1000.0f, 0.0f, 2000.0f, 90.0f, 20.0f);
+    assert(rbId == 55);
+    assert(sWorldRealizationEngine.GetActiveRoadblockCount() == 1);
+    assert(sWorldRealizationEngine.IsPathBlockedByRoadblock(1050.0f, 0.0f, 1000.0f, 2000.0f));
+    assert(!sWorldRealizationEngine.IsPathBlockedByRoadblock(5000.0f, 0.0f, 5000.0f, 5000.0f));
+
+    std::cout << "[PASSED] Suite 39: 3D World Realization Engine (55 assertions passed)." << std::endl;
 }

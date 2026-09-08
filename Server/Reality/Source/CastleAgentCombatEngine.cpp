@@ -1,4 +1,5 @@
 #include "CastleAgentCombatEngine.h"
+#include "WorldRealizationEngine.h"
 #include "Log.h"
 #include <iostream>
 #include <cassert>
@@ -188,6 +189,7 @@ uint32_t CastleAgentCombatEngine::ArmClaymore(float x, float y, float z, float d
     c.isDetonated = false;
 
     m_claymores[mid] = c;
+    sWorldRealizationEngine.DeployClaymoreTrap3D(0, x, y, z, std::atan2(c.facingX, c.facingZ), c.coneHalfAngleDeg * 2.0f, c.blastRadiusMeters * 100.0f);
     return mid;
 }
 
