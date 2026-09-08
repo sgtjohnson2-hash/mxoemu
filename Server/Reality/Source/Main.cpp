@@ -104,6 +104,9 @@ void RunGaussianSplatTestSuite();
 void RunPhysarumLogisticsTestSuite();
 void RunBiometricResonanceTestSuite();
 void RunWebAssemblyGatewayTestSuite();
+void RunCastleAgentCombatTestSuite();
+void RunCastlePvPKarmaTestSuite();
+void RunCastleUnderworldAssaultTestSuite();
 
 static bool g_testUnderworld = false;
 static bool g_testSimulation = false;
@@ -142,6 +145,9 @@ static bool g_testGaussianSplats = false;
 static bool g_testPhysarumLogistics = false;
 static bool g_testBiometricResonance = false;
 static bool g_testWebAssemblyGateway = false;
+static bool g_testCastleVsAgents = false;
+static bool g_testCastleVsPlayers = false;
+static bool g_testCastleVsAI = false;
 
 int main(int argc, char* argv[])
 {
@@ -233,6 +239,12 @@ int main(int argc, char* argv[])
             g_testBiometricResonance = true;
         } else if (arg == "--test-wasm" || arg == "--test-webassembly" || arg == "--test-webgpu") {
             g_testWebAssemblyGateway = true;
+        } else if (arg == "--test-castle-vs-agents" || arg == "--test-agent-combat" || arg == "--test-suite39") {
+            g_testCastleVsAgents = true;
+        } else if (arg == "--test-castle-vs-players" || arg == "--test-pvp-karma" || arg == "--test-suite40") {
+            g_testCastleVsPlayers = true;
+        } else if (arg == "--test-castle-vs-ai" || arg == "--test-underworld-assault" || arg == "--test-suite41") {
+            g_testCastleVsAI = true;
         } else if (arg == "--test-all") {
             g_testFrank = true;
             g_testUnderworld = true;
@@ -272,13 +284,16 @@ int main(int argc, char* argv[])
             g_testPhysarumLogistics = true;
             g_testBiometricResonance = true;
             g_testWebAssemblyGateway = true;
+            g_testCastleVsAgents = true;
+            g_testCastleVsPlayers = true;
+            g_testCastleVsAI = true;
         }
     }
 
 #ifndef UNITTEST
-    if (g_testFrank && g_testUnderworld && g_testSimulation && g_testEmergentAI && g_testPolice && g_testBiography && g_testSocial && g_testFamily && g_testEmergentLife && g_testSLM && g_testMafia && g_testExiles && g_testPossession && g_testFreeway && g_testConstruct && g_testAPU && g_testHovercraft && g_testBackdoor && g_testMobilAve && g_testCorruptCops && g_testOperatorBridge && g_testCyberdeck && g_testMegacityDestruction && g_testMatrixReboot && g_testCastleLore && g_testEpoch4 && g_testNeuralSwarm && g_testStructuralVoxel && g_testNeuralAudio && g_testShardFabric && g_testNeuromorphic && g_testNonEuclideanPortals && g_testSourceTelekinesis && g_testGlobalMesh && g_testGaussianSplats && g_testPhysarumLogistics && g_testBiometricResonance && g_testWebAssemblyGateway) {
+    if (g_testFrank && g_testUnderworld && g_testSimulation && g_testEmergentAI && g_testPolice && g_testBiography && g_testSocial && g_testFamily && g_testEmergentLife && g_testSLM && g_testMafia && g_testExiles && g_testPossession && g_testFreeway && g_testConstruct && g_testAPU && g_testHovercraft && g_testBackdoor && g_testMobilAve && g_testCorruptCops && g_testOperatorBridge && g_testCyberdeck && g_testMegacityDestruction && g_testMatrixReboot && g_testCastleLore && g_testEpoch4 && g_testNeuralSwarm && g_testStructuralVoxel && g_testNeuralAudio && g_testShardFabric && g_testNeuromorphic && g_testNonEuclideanPortals && g_testSourceTelekinesis && g_testGlobalMesh && g_testGaussianSplats && g_testPhysarumLogistics && g_testBiometricResonance && g_testWebAssemblyGateway && g_testCastleVsAgents && g_testCastleVsPlayers && g_testCastleVsAI) {
         std::cout << "\n============================================================" << std::endl;
-        std::cout << "  RUNNING COMPLETE MEGACITY & TACTICAL TEST SUITE (38 SUITES)" << std::endl;
+        std::cout << "  RUNNING COMPLETE MEGACITY & TACTICAL TEST SUITE (41 SUITES)" << std::endl;
         std::cout << "============================================================\n" << std::endl;
         RunFrankCastleTestSuite();
         RunUnderworldTestSuite();
@@ -318,9 +333,18 @@ int main(int argc, char* argv[])
         RunPhysarumLogisticsTestSuite();
         RunBiometricResonanceTestSuite();
         RunWebAssemblyGatewayTestSuite();
+        RunCastleAgentCombatTestSuite();
+        RunCastlePvPKarmaTestSuite();
+        RunCastleUnderworldAssaultTestSuite();
         std::cout << "\n============================================================" << std::endl;
-        std::cout << "  ALL 38 MEGACITY EMERGENCE & TACTICAL SUITES PASSED 100%!  " << std::endl;
+        std::cout << "  ALL 41 MEGACITY EMERGENCE & TACTICAL SUITES PASSED 100%!  " << std::endl;
         std::cout << "============================================================\n" << std::endl;
+    } else if (g_testCastleVsAI) {
+        RunCastleUnderworldAssaultTestSuite();
+    } else if (g_testCastleVsPlayers) {
+        RunCastlePvPKarmaTestSuite();
+    } else if (g_testCastleVsAgents) {
+        RunCastleAgentCombatTestSuite();
     } else if (g_testWebAssemblyGateway) {
         RunWebAssemblyGatewayTestSuite();
     } else if (g_testBiometricResonance) {
