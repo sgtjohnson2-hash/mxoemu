@@ -105,11 +105,15 @@ struct MxoConnParams {
     BYTE  extra[32];
 };
 
+static void* g_SyntheticVtbl[64];
+static void* __fastcall DummyDestructor(void* pThis, void* /*edx*/, unsigned char /*flags*/) { return pThis; }
+
 struct MxoCharObj {
-    BYTE pad1[0x10];          // 0x00..0x0F
+    void** pVtbl;               // 0x00..0x03
+    BYTE  pad1[0x0C];           // 0x04..0x0F
     MxoConnParams* pConnParams; // 0x10: Pointer to MxoConnParams
-    MxoCharacterData* pData;  // 0x14: Pointer to MxoCharacterData
-    BYTE pad2[0x20];
+    MxoCharacterData* pData;    // 0x14: Pointer to MxoCharacterData
+    BYTE  pad2[0x20];
 };
 #pragma pack(pop)
 
@@ -222,16 +226,22 @@ bool __stdcall DetourVerifyMessage(void* p1, void* p2, void* p3, void* p4, void*
 // matrix.exe Character Manager Hooks
 // ============================================================================
 static void SetupSyntheticCharManager(DWORD pThisDword) {
-    // 1. Connection parameters
+    // 1. Initialize vtable
+    for (int i = 0; i < 64; ++i) {
+        g_SyntheticVtbl[i] = (void*)&DummyDestructor;
+    }
+
+    // 2. Connection parameters
     memset(&g_SyntheticConnParams, 0, sizeof(g_SyntheticConnParams));
     strcpy_s(g_SyntheticConnParams.serverIp, sizeof(g_SyntheticConnParams.serverIp), g_TargetServerIp);
     g_SyntheticConnParams.serverPort = 10000;
 
-    // 2. Character object
+    // 3. Character object
+    g_SyntheticCharObj.pVtbl = g_SyntheticVtbl;
     g_SyntheticCharObj.pConnParams = &g_SyntheticConnParams;
     g_SyntheticCharObj.pData = &g_SyntheticChar;
 
-    // 3. Populate matrix.exe Character Manager
+    // 4. Populate matrix.exe Character Manager
     *reinterpret_cast<BYTE*>(pThisDword + 0x640) = 1;                              // Character count = 1
     *reinterpret_cast<void**>(pThisDword + 0x644) = &g_SyntheticCharObj;            // Character 0 object
     *reinterpret_cast<void**>(pThisDword + 0x658) = &g_SyntheticCharObj;            // Character 0 connection object (0x43F3D1 guard)
@@ -301,6 +311,67 @@ void __fastcall DetourSelectCharacterVtbl(void* pThis, void* /*edx*/, void* pArg
     }
 }
 
+// 0x00428CC0: ClearCharacters in matrix.exe
+typedef void (__thiscall *ClearCharacters_t)(void* pThis);
+static ClearCharacters_t OriginalClearCharacters = nullptr;
+
+static void __fastcall DetourClearCharacters(void* pThis, void* /*edx*/) {
+    Log("[mxohax] [matrix.exe] ClearCharacters (0x00428CC0) called on 0x%p\n", pThis);
+    BYTE* p = reinterpret_cast<BYTE*>(pThis);
+    BYTE count = p[0];
+    for (BYTE i = 0; i < count && i < 5; ++i) {
+        void** ppChar = reinterpret_cast<void**>(p + 4 + i * 4);
+        void* pChar = *ppChar;
+        if (pChar && pChar != &g_SyntheticCharObj) {
+            void** pVtbl = *reinterpret_cast<void***>(pChar);
+            if (pVtbl && pVtbl[0]) {
+                typedef void* (__thiscall *Dtor_t)(void*, BYTE);
+                Dtor_t dtor = reinterpret_cast<Dtor_t>(pVtbl[0]);
+                dtor(pChar, 1);
+            }
+        }
+        *ppChar = nullptr;
+
+        void** ppConn = reinterpret_cast<void**>(p + 0x18 + i * 4);
+        void* pConn = *ppConn;
+        if (pConn && pConn != &g_SyntheticCharObj) {
+            void** pVtbl = *reinterpret_cast<void***>(pConn);
+            if (pVtbl && pVtbl[0]) {
+                typedef void* (__thiscall *Dtor_t)(void*, BYTE);
+                Dtor_t dtor = reinterpret_cast<Dtor_t>(pVtbl[0]);
+                dtor(pConn, 1);
+            }
+        }
+        *ppConn = nullptr;
+    }
+    p[0] = 0;
+    p[0x2C] = 0xFF;
+}
+
+// 0x00428D10: ClearCharObjects in matrix.exe
+typedef void (__thiscall *ClearCharObjects_t)(void* pThis);
+static ClearCharObjects_t OriginalClearCharObjects = nullptr;
+
+static void __fastcall DetourClearCharObjects(void* pThis, void* /*edx*/) {
+    Log("[mxohax] [matrix.exe] ClearCharObjects (0x00428D10) called on 0x%p\n", pThis);
+    BYTE* p = reinterpret_cast<BYTE*>(pThis);
+    BYTE count = p[0];
+    for (BYTE i = 0; i < count && i < 5; ++i) {
+        void** ppChar = reinterpret_cast<void**>(p + 4 + i * 4);
+        void* pChar = *ppChar;
+        if (pChar && pChar != &g_SyntheticCharObj) {
+            void** pVtbl = *reinterpret_cast<void***>(pChar);
+            if (pVtbl && pVtbl[0]) {
+                typedef void* (__thiscall *Dtor_t)(void*, BYTE);
+                Dtor_t dtor = reinterpret_cast<Dtor_t>(pVtbl[0]);
+                dtor(pChar, 1);
+            }
+        }
+        *ppChar = nullptr;
+    }
+    p[0] = 0;
+}
+
 // ============================================================================
 // client.dll State & World Management
 // ============================================================================
@@ -346,14 +417,19 @@ static bool TryAutoJackIn(DWORD clientBase) {
         }
     }
 
-    // 2. Preserving native display globals and world state machine
-    // Native client.dll transitions WorldMgr state to 2 naturally upon character select network response.
+    // 2. Ensure CNetClient at clientBase + 0x0089BBA0 is marked connected
+    DWORD pNetClient = *reinterpret_cast<DWORD*>(clientBase + 0x0089BBA0);
+    if (pNetClient) {
+        *reinterpret_cast<DWORD*>(pNetClient + 0x08) = 2; // m_state = CONNECTED (2)
+        Log("[mxohax] [AutoJackIn] Ensured CNetClient at 0x%08X (m_state=2 CONNECTED)\n", pNetClient);
+    }
 
-    // 4. Do NOT force m_inWorld = 1 prematurely here!
-    // LithTech's world loader (0x10123B3D) requires m_inWorld == 0 to initialize chunks.
-    // m_inWorld will be set to 1 natively by client.dll at 0x10121F4B once the 3D scene is ready.
+    // 3. Mark character selected in client.dll WorldMgr so it transitions to State 2 naturally
+    *reinterpret_cast<BYTE*>(clientBase + 0x0089DD5D) = 1;
+    *reinterpret_cast<BYTE*>(reinterpret_cast<DWORD>(pWorldMgr) + 0x25) = 1;
+    Log("[mxohax] [AutoJackIn] Set WorldMgr character select flags (0x0089DD5D and pWorldMgr+0x25)\n");
 
-    // 5. Transition matrix.exe Margin State Machine to State 9 (Connecting) -> State 5 (In-World)
+    // 4. Transition matrix.exe Margin State Machine to State 9 (Connecting)
     void* pMarginMgr = *reinterpret_cast<void**>(0x004B3A44);
     if (pMarginMgr) {
         DWORD pThisDword = reinterpret_cast<DWORD>(pMarginMgr);
@@ -414,6 +490,18 @@ static void __fastcall DetourFrameTick(void* pThis, void* /*edx*/) {
 
     if (s_tickCount % 50 == 0) {
         Log("[mxohax] DetourFrameTick: Frame #%d active (inWorld=%u)\n", s_tickCount, inWorld);
+    }
+
+    if (!s_autoJackInDone) {
+        if (s_screen5DActive) {
+            s_screen5DFrames++;
+            if (s_screen5DFrames >= 5) {
+                Log("[mxohax] DetourFrameTick: Screen 0x5D active for %d frames -> triggering AutoJackIn...\n", s_screen5DFrames);
+                if (TryAutoJackIn(clientBase)) {
+                    s_autoJackInDone = true;
+                }
+            }
+        }
     }
 }
 
@@ -735,8 +823,36 @@ static void InitializeMxOHaxSynchronous() {
         Log("[mxohax] SUCCESS: matrix.exe VerifyMessage hooked at 0x%p!\n", pMatrixVerify);
     }
 
-    // 5. Allow native Auth and Margin network flow to manage characters naturally
-    Log("[mxohax] Preserving native matrix.exe Character Manager for authentic server stream.\n");
+    // 5. Hook matrix.exe Character Manager:
+    LPVOID pGetCharCount = reinterpret_cast<LPVOID>(0x00428920);
+    if (MH_CreateHook(pGetCharCount, &DetourGetCharacterCount, reinterpret_cast<LPVOID*>(&OriginalGetCharacterCount)) == MH_OK) {
+        MH_EnableHook(pGetCharCount);
+        Log("[mxohax] SUCCESS: matrix.exe GetCharacterCount hooked at 0x%p!\n", pGetCharCount);
+    }
+
+    LPVOID pGetCharByIndex = reinterpret_cast<LPVOID>(0x00428E00);
+    if (MH_CreateHook(pGetCharByIndex, &DetourGetCharacterByIndex, reinterpret_cast<LPVOID*>(&OriginalGetCharacterByIndex)) == MH_OK) {
+        MH_EnableHook(pGetCharByIndex);
+        Log("[mxohax] SUCCESS: matrix.exe GetCharacterByIndex hooked at 0x%p!\n", pGetCharByIndex);
+    }
+
+    LPVOID pSelectChar = reinterpret_cast<LPVOID>(0x00429D80);
+    if (MH_CreateHook(pSelectChar, &DetourSelectCharacterVtbl, reinterpret_cast<LPVOID*>(&OriginalSelectCharacterVtbl)) == MH_OK) {
+        MH_EnableHook(pSelectChar);
+        Log("[mxohax] SUCCESS: matrix.exe SelectCharacter (0x00429D80) hooked at 0x%p!\n", pSelectChar);
+    }
+
+    LPVOID pClearChars = reinterpret_cast<LPVOID>(0x00428CC0);
+    if (MH_CreateHook(pClearChars, &DetourClearCharacters, reinterpret_cast<LPVOID*>(&OriginalClearCharacters)) == MH_OK) {
+        MH_EnableHook(pClearChars);
+        Log("[mxohax] SUCCESS: matrix.exe ClearCharacters hooked at 0x%p!\n", pClearChars);
+    }
+
+    LPVOID pClearObjs = reinterpret_cast<LPVOID>(0x00428D10);
+    if (MH_CreateHook(pClearObjs, &DetourClearCharObjects, reinterpret_cast<LPVOID*>(&OriginalClearCharObjects)) == MH_OK) {
+        MH_EnableHook(pClearObjs);
+        Log("[mxohax] SUCCESS: matrix.exe ClearCharObjects hooked at 0x%p!\n", pClearObjs);
+    }
 }
 
 DWORD WINAPI WorkerThread(LPVOID lpParam) {
