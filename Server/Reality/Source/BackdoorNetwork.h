@@ -75,6 +75,15 @@ struct FirewallAnchor
     uint32 deployedBySquadId{0};
 };
 
+struct InfiniteHallwaySegment
+{
+    uint32 segmentIndex{0};
+    float hallwayDepthMeters{50.0f};
+    uint32 doorCount{6};
+    float anomalyGlitchRate{0.05f};
+    std::vector<uint32> linkedDoorIds;
+};
+
 class BackdoorNetwork : public Singleton<BackdoorNetwork>
 {
 public:
@@ -115,11 +124,20 @@ public:
     // Telemetry & Statistics
     uint32 GetTotalTransits() const;
 
+    // Procedural Infinite Green Hallway Backdoors (Epoch IV)
+    void InitializeProceduralHallways(uint32 segmentCount = 10);
+    bool TraverseInfiniteHallway(uint32 currentSegment, uint32 doorChoice, uint32& outNextSegment, PortalPosition& outExitPos);
+    bool IsInfiniteHallwayActive() const { return m_infiniteHallwayActive; }
+    size_t GetInfiniteSegmentCount() const;
+    const struct InfiniteHallwaySegment* GetInfiniteSegment(uint32 segmentIndex) const;
+
 private:
     mutable std::recursive_mutex m_networkMutex;
     std::vector<BackdoorPortal> m_portals;
     std::map<uint32, KeymakerMasterKey> m_craftedKeys;
     std::map<uint32, FirewallAnchor> m_firewallAnchors;
+    std::vector<struct InfiniteHallwaySegment> m_infiniteSegments;
+    bool m_infiniteHallwayActive{false};
     uint32 m_nextKeyId{1001};
     uint32 m_nextPuzzleId{1};
     uint32 m_totalTransits{0};

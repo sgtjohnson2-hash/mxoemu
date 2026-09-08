@@ -128,9 +128,13 @@ void SpatialGrid::RemoveClient(GameClient* client)
 std::vector<GameClient*> SpatialGrid::GetClientsInRadius(float x, float z, uint32 instanceId) const
 {
     std::vector<GameClient*> localClients;
+    localClients.reserve(64);
     
     int gx, gy;
     WorldToGrid(x, z, gx, gy);
+
+    // Single read-lock on cell directory for the entire radius query
+    std::shared_lock<std::shared_mutex> mapLock(m_mapMutex);
 
     // Retrieve from center and 8 neighbors
     for (int dx = -1; dx <= 1; ++dx)
@@ -138,19 +142,10 @@ std::vector<GameClient*> SpatialGrid::GetClientsInRadius(float x, float z, uint3
         for (int dy = -1; dy <= 1; ++dy)
         {
             uint64_t neighborHash = GetCellHash(gx + dx, gy + dy, instanceId);
-            
-            std::shared_ptr<SpatialGridCell> cell;
+            auto nIt = m_cells.find(neighborHash);
+            if (nIt != m_cells.end() && nIt->second)
             {
-                std::shared_lock<std::shared_mutex> mapLock(m_mapMutex);
-                auto nIt = m_cells.find(neighborHash);
-                if (nIt != m_cells.end() && nIt->second)
-                {
-                    cell = nIt->second;
-                }
-            }
-            
-            if (cell)
-            {
+                auto& cell = nIt->second;
                 std::shared_lock<std::shared_mutex> cellLock(m_cellMutexes[neighborHash % 1024]);
                 for (GameClient* c : cell->clients) {
                     localClients.push_back(c);
@@ -206,24 +201,19 @@ std::vector<GameClient*> SpatialGrid::GetClientsNearClient(GameClient* client) c
     uint32 instanceId = static_cast<uint32>(hash >> 32);
 
     std::vector<GameClient*> localClients;
+    localClients.reserve(64);
+
+    std::shared_lock<std::shared_mutex> mapLock(m_mapMutex);
+
     for (int yOffset = -1; yOffset <= 1; ++yOffset)
     {
         for (int xOffset = -1; xOffset <= 1; ++xOffset)
         {
             uint64_t neighborHash = GetCellHash(gx + xOffset, gy + yOffset, instanceId);
-            
-            std::shared_ptr<SpatialGridCell> cell;
+            auto nIt = m_cells.find(neighborHash);
+            if (nIt != m_cells.end() && nIt->second)
             {
-                std::shared_lock<std::shared_mutex> mapLock(m_mapMutex);
-                auto nIt = m_cells.find(neighborHash);
-                if (nIt != m_cells.end() && nIt->second)
-                {
-                    cell = nIt->second;
-                }
-            }
-
-            if (cell)
-            {
+                auto& cell = nIt->second;
                 std::shared_lock<std::shared_mutex> cellLock(m_cellMutexes[neighborHash % 1024]);
                 for (GameClient* c : cell->clients) {
                     localClients.push_back(c);
@@ -238,6 +228,7 @@ std::vector<GameClient*> SpatialGrid::GetClientsInAoI(float x, float z, float ma
 {
     float rSq = maxRadius * maxRadius;
     std::vector<GameClient*> scopedClients;
+    scopedClients.reserve(128);
 
     int gx, gy;
     WorldToGrid(x, z, gx, gy);
@@ -246,24 +237,19 @@ std::vector<GameClient*> SpatialGrid::GetClientsInAoI(float x, float z, float ma
     int cellRadius = static_cast<int>(std::ceil(maxRadius / m_cellSize));
     cellRadius = std::clamp(cellRadius, 1, 200);
 
+    // Single directory lock for entire AoI search
+    std::shared_lock<std::shared_mutex> mapLock(m_mapMutex);
+
     for (int dx = -cellRadius; dx <= cellRadius; ++dx)
     {
         for (int dy = -cellRadius; dy <= cellRadius; ++dy)
         {
             uint64_t cellHash = GetCellHash(gx + dx, gy + dy, instanceId);
+            auto it = m_cells.find(cellHash);
+            if (it == m_cells.end() || !it->second)
+                continue;
 
-            std::shared_ptr<SpatialGridCell> cell;
-            {
-                std::shared_lock<std::shared_mutex> mapLock(m_mapMutex);
-                auto it = m_cells.find(cellHash);
-                if (it != m_cells.end() && it->second)
-                {
-                    cell = it->second;
-                }
-            }
-
-            if (!cell) continue;
-
+            auto& cell = it->second;
             std::shared_lock<std::shared_mutex> cellLock(m_cellMutexes[cellHash % 1024]);
             for (GameClient* client : cell->clients)
             {

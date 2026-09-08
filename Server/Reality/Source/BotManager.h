@@ -48,6 +48,7 @@ public:
     void Update();
 
     void PopulateWorld();
+    static constexpr size_t MAX_BOT_POPULATION_CEILING = 12000;
     size_t GetBotCount() const {
         std::lock_guard<std::recursive_mutex> lock(m_botMutex);
         return m_bots.size();
@@ -61,6 +62,7 @@ private:
     std::vector<std::shared_ptr<BotClient>> m_bots;
     std::shared_ptr<const std::vector<std::shared_ptr<BotClient>>> m_botsSnapshot;
     bool m_botsDirty{true};
+    size_t m_recycleBotIndex{0};
     std::vector<LocationVector> m_hardlines;
     std::atomic<uint64> m_nextBotId;
     std::atomic<uint32> m_nextCrewId;

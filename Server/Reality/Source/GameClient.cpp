@@ -61,15 +61,17 @@ GameClient::GameClient(sockaddr_in inc_addr, GameSocket *sock):m_address(inc_add
 GameClient::~GameClient()
 {
 	try {
-		if (m_playerGoId != 0)
-		{
-			// Item 54: Lazy-deletion queue to prevent synchronous GC hitching
-			sObjMgr.QueueDeletion(m_playerGoId);
+		if (GameServer::getSingletonPtr()) {
+			if (m_playerGoId != 0)
+			{
+				// Item 54: Lazy-deletion queue to prevent synchronous GC hitching
+				sObjMgr.QueueDeletion(m_playerGoId);
+			}
+			sObjMgr.releaseRelevantSet(this);
 		}
-		sObjMgr.releaseRelevantSet(this);
 		sSpatialGrid.RemoveClient(this);
 
-		if (m_sessionId != 0)
+		if (m_sessionId != 0 && MarginServer::getSingletonPtr())
 		{
 			sMargin.ForceDisconnectSession(m_sessionId);
 		}

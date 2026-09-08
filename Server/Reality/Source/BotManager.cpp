@@ -103,6 +103,29 @@ std::shared_ptr<BotClient> BotManager::SpawnSingleBot(float x, float y, float z,
         faction = FactionWarManager::getSingleton().getControllingFactionByLocation(x, y, z);
     }
 
+    // Phase 2: Bot Population Ceiling & Spatial Recycling
+    {
+        std::lock_guard<std::recursive_mutex> lock(m_botMutex);
+        if (m_bots.size() >= MAX_BOT_POPULATION_CEILING && !m_bots.empty()) {
+            size_t idx = (m_recycleBotIndex++) % m_bots.size();
+            auto recycledBot = m_bots[idx];
+            if (recycledBot) {
+                recycledBot->SetFaction((mxoFaction)faction);
+                recycledBot->MoveTo(x, y, z);
+                PlayerObject* po = sObjMgr.getGOPtrSafe(recycledBot->GetPlayerGoId());
+                if (po) {
+                    po->setPosition(LocationVector(x, y, z));
+                    std::string factionName = "Civilian";
+                    if (faction == FACTION_ZION) factionName = "Zion";
+                    else if (faction == FACTION_MACHINES) factionName = "Machines";
+                    else if (faction == FACTION_MEROVINGIAN) factionName = "Merovingian";
+                    po->setFactionName(factionName);
+                }
+                return recycledBot;
+            }
+        }
+    }
+
     uint64 uid = findOrCreateBotCharacter(int(++m_nextBotId), x, y, z, faction);
     if (uid == 0)
     {

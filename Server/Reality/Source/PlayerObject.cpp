@@ -207,7 +207,9 @@ void PlayerObject::initGoId(uint32 theGoId)
 	{
 		INFO_LOG(format("Player name %1% has goid %2%") % m_handle % m_goId);
 		m_parent.QueueCommand(make_shared<SystemChatMsg>((format("Your Object Id is %1%")%m_goId).str()));
-		sGame.AnnounceCommand(&m_parent,make_shared<SystemChatMsg>((format("Player %1% connected with object id %2%")%m_handle%m_goId).str()));
+		if (GameServer::getSingletonPtr()) {
+			sGame.AnnounceCommand(&m_parent,make_shared<SystemChatMsg>((format("Player %1% connected with object id %2%")%m_handle%m_goId).str()));
+		}
 	}
 }
 

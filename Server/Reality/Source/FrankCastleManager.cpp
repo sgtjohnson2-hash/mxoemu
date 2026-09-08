@@ -122,6 +122,9 @@ void FrankCastleManager::Initialize()
     InitializeSafehouses();
     InitializeTacticalCaches();
     InitializeContracts();
+    InitializeArmsBazaars();
+    InitializeFortifications();
+    InitializeSubwayDeadDrops();
     LoadWarJournalFromFile("WarJournal.json");
     SpawnOrSyncLiveEntity();
 
@@ -3037,6 +3040,209 @@ std::string FrankCastleManager::EvaluateSafehouseIntruder(uint32 playerGoId)
     {
         return "LETHAL_STANDOFF: Aimed .45 directly at intruder's chest. 'Take one more step and you leave in a body bag.'";
     }
+}
+
+// ============================================================================
+// Phase 9 / Epoch IV: Lore Realism Phase 2 Implementations
+// ============================================================================
+void FrankCastleManager::InitializeArmsBazaars()
+{
+    std::lock_guard<std::recursive_mutex> lock(m_mutex);
+    m_armsBazaars.clear();
+
+    ArmsBazaarCrate c1;
+    c1.crateId = 101;
+    c1.frequencyCode = "FM 88.3";
+    c1.codename = "USMC Surplus Spec-Ops Crate Alpha";
+    c1.location = LocationVector(1260.0f, 0.0f, -3390.0f);
+    c1.districtId = 1;
+    c1.districtName = "Slums";
+    c1.duRounds = 120;
+    c1.c4Charges = 4;
+    c1.nightVisionGoggles = true;
+    c1.accessCode = "1984-PUNISHER";
+    m_armsBazaars[c1.crateId] = c1;
+
+    ArmsBazaarCrate c2;
+    c2.crateId = 102;
+    c2.frequencyCode = "FM 88.3";
+    c2.codename = "Microchip Tactical Ordinance Vault";
+    c2.location = LocationVector(3200.0f, 0.0f, 2100.0f);
+    c2.districtId = 2;
+    c2.districtName = "Downtown";
+    c2.duRounds = 250;
+    c2.c4Charges = 8;
+    c2.nightVisionGoggles = true;
+    c2.accessCode = "FORCE-RECON-77";
+    m_armsBazaars[c2.crateId] = c2;
+}
+
+ArmsBazaarCrate* FrankCastleManager::GetArmsBazaar(uint32 crateId)
+{
+    std::lock_guard<std::recursive_mutex> lock(m_mutex);
+    auto it = m_armsBazaars.find(crateId);
+    if (it != m_armsBazaars.end()) return &it->second;
+    return nullptr;
+}
+
+bool FrankCastleManager::LootArmsBazaarCrate(uint32 crateId, uint32 playerGoId, const std::string& code, std::string& outLootReport)
+{
+    std::lock_guard<std::recursive_mutex> lock(m_mutex);
+    auto it = m_armsBazaars.find(crateId);
+    if (it == m_armsBazaars.end()) {
+        outLootReport = "ERROR: Crate not found.";
+        return false;
+    }
+    if (it->second.isLooted) {
+        outLootReport = "EMPTY: Crate already salvaged.";
+        return false;
+    }
+    if (it->second.accessCode != code) {
+        outLootReport = "DENIED: Invalid crypto-cipher passcode.";
+        return false;
+    }
+    it->second.isLooted = true;
+    it->second.lootedByPlayerGoId = playerGoId;
+    outLootReport = (format("SUCCESS: Unlocked %1%! Acquired %2% DU rounds, %3% C4 charges, and FLIR NVGs.")
+                    % it->second.codename % it->second.duRounds % it->second.c4Charges).str();
+    return true;
+}
+
+bool FrankCastleManager::TuneRadioToBazaarFrequency(float freqMhz, std::string& outMorseSignal)
+{
+    if (std::abs(freqMhz - 88.3f) < 0.05f) {
+        outMorseSignal = "[FM 88.3 BAZAAR BEACON]: ... --- ... // MICROCHIP DROP ZONE CONFIRMED // ACCESS CODE 1984-PUNISHER";
+        return true;
+    }
+    outMorseSignal = "[STATIC]";
+    return false;
+}
+
+void FrankCastleManager::InitializeFortifications()
+{
+    std::lock_guard<std::recursive_mutex> lock(m_mutex);
+    if (m_safehouses.empty()) {
+        InitializeSafehouses();
+    }
+    m_fortifications.clear();
+    for (const auto& sh : m_safehouses) {
+        SafehouseFortification f;
+        f.safehouseId = sh.first;
+        if (sh.first == 1) {
+            f.steelDoorsReinforced = true;
+            f.cctvTelemetryActive = true;
+            f.tripwireShotgunTrapArmed = true;
+        }
+        m_fortifications[sh.first] = f;
+    }
+}
+
+bool FrankCastleManager::ReinforceSafehouseSteelDoors(uint32 safehouseId)
+{
+    std::lock_guard<std::recursive_mutex> lock(m_mutex);
+    auto it = m_fortifications.find(safehouseId);
+    if (it == m_fortifications.end()) return false;
+    it->second.steelDoorsReinforced = true;
+    return true;
+}
+
+bool FrankCastleManager::InstallCCTVTelemetry(uint32 safehouseId)
+{
+    std::lock_guard<std::recursive_mutex> lock(m_mutex);
+    auto it = m_fortifications.find(safehouseId);
+    if (it == m_fortifications.end()) return false;
+    it->second.cctvTelemetryActive = true;
+    return true;
+}
+
+bool FrankCastleManager::ArmTripwireShotgunTrap(uint32 safehouseId)
+{
+    std::lock_guard<std::recursive_mutex> lock(m_mutex);
+    auto it = m_fortifications.find(safehouseId);
+    if (it == m_fortifications.end()) return false;
+    it->second.tripwireShotgunTrapArmed = true;
+    return true;
+}
+
+bool FrankCastleManager::TriggerFortificationDefense(uint32 safehouseId, uint32 intruderGoId, uint32& outDamageDealt)
+{
+    std::lock_guard<std::recursive_mutex> lock(m_mutex);
+    auto it = m_fortifications.find(safehouseId);
+    if (it == m_fortifications.end()) return false;
+    outDamageDealt = 0;
+    if (it->second.tripwireShotgunTrapArmed) {
+        outDamageDealt = 450; // 12-gauge flechette blast
+        it->second.intrudersRepelled++;
+        it->second.tripwireShotgunTrapArmed = false; // Discharged
+        return true;
+    }
+    return false;
+}
+
+const SafehouseFortification* FrankCastleManager::GetFortification(uint32 safehouseId) const
+{
+    std::lock_guard<std::recursive_mutex> lock(m_mutex);
+    auto it = m_fortifications.find(safehouseId);
+    if (it != m_fortifications.end()) return &it->second;
+    return nullptr;
+}
+
+void FrankCastleManager::InitializeSubwayDeadDrops()
+{
+    std::lock_guard<std::recursive_mutex> lock(m_mutex);
+    m_subwayDeadDrops.clear();
+
+    SubwayDeadDrop d1;
+    d1.dropId = 201;
+    d1.stationName = "Adams Crest Platform B";
+    d1.platformLocation = LocationVector(1450.0f, -25.0f, -3200.0f);
+    d1.ctcssSubcarrierHz = 131.8f;
+    d1.cipherPayload = "MICROCHIP_INTEL_PACKAGE_ALPHA";
+    d1.requiredTrustTier = TRUST_TIER_1_OBSERVED;
+    m_subwayDeadDrops.push_back(d1);
+
+    SubwayDeadDrop d2;
+    d2.dropId = 202;
+    d2.stationName = "Downtown Transit Center Vault 4";
+    d2.platformLocation = LocationVector(3300.0f, -30.0f, 1950.0f);
+    d2.ctcssSubcarrierHz = 141.3f;
+    d2.cipherPayload = "SYSTEM_AGENT_PATROL_VECTORS";
+    d2.requiredTrustTier = TRUST_TIER_2_TESTED;
+    m_subwayDeadDrops.push_back(d2);
+}
+
+const std::vector<SubwayDeadDrop>& FrankCastleManager::GetSubwayDeadDrops() const
+{
+    std::lock_guard<std::recursive_mutex> lock(m_mutex);
+    return m_subwayDeadDrops;
+}
+
+bool FrankCastleManager::RetrieveSubwayDeadDrop(uint32 dropId, uint32 playerGoId, float ctcssToneHz, std::string& outPayload)
+{
+    std::lock_guard<std::recursive_mutex> lock(m_mutex);
+    for (auto& drop : m_subwayDeadDrops) {
+        if (drop.dropId == dropId) {
+            if (drop.isRetrieved) {
+                outPayload = "ALREADY_RETRIEVED";
+                return false;
+            }
+            if (std::abs(drop.ctcssSubcarrierHz - ctcssToneHz) > 0.5f) {
+                outPayload = "INVALID_CTCSS_SUBCARRIER";
+                return false;
+            }
+            CastleTrustTier tier = GetPlayerTrustTier(playerGoId);
+            if (tier < drop.requiredTrustTier) {
+                outPayload = "INSUFFICIENT_TRUST_TIER";
+                return false;
+            }
+            drop.isRetrieved = true;
+            drop.retrievedByPlayerGoId = playerGoId;
+            outPayload = drop.cipherPayload;
+            return true;
+        }
+    }
+    outPayload = "NOT_FOUND";
+    return false;
 }
 
 // ============================================================================

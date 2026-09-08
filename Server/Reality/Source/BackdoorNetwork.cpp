@@ -33,6 +33,7 @@ void BackdoorNetwork::Initialize()
     m_nextKeyId = 1001;
     m_nextPuzzleId = 1;
     m_totalTransits = 0;
+    InitializeProceduralHallways(10);
 
     // Register Default Backdoor Corridor Doors
     // Door 101: The Slums Industrial Warehouse
@@ -401,6 +402,81 @@ bool BackdoorNetwork::ExecuteCivilianJackout(uint32 entityGoId, uint32 hardlineI
     sFactionWarMgr.registerPvPKill(FACTION_ZION, FACTION_MACHINES); // Zion score reward
     INFO_LOG(format("BackdoorNetwork: Civilian %1% successfully jacked out to Zion via Hardline %2%!") % entityGoId % hardlineId);
     return true;
+}
+
+// ============================================================================
+// Procedural Infinite Green Hallway Backdoors (Epoch IV)
+// ============================================================================
+void BackdoorNetwork::InitializeProceduralHallways(uint32 segmentCount)
+{
+    std::lock_guard<std::recursive_mutex> lock(m_networkMutex);
+    m_infiniteSegments.clear();
+    m_infiniteHallwayActive = true;
+
+    for (uint32 i = 0; i < segmentCount; ++i)
+    {
+        InfiniteHallwaySegment seg;
+        seg.segmentIndex = i;
+        seg.hallwayDepthMeters = 50.0f * (i + 1);
+        seg.doorCount = 6;
+        seg.anomalyGlitchRate = 0.05f * (i + 1);
+        
+        for (uint32 d = 0; d < seg.doorCount; ++d) {
+            seg.linkedDoorIds.push_back(1000 + i * 10 + d);
+        }
+        m_infiniteSegments.push_back(seg);
+    }
+}
+
+bool BackdoorNetwork::TraverseInfiniteHallway(uint32 currentSegment, uint32 doorChoice, uint32& outNextSegment, PortalPosition& outExitPos)
+{
+    std::lock_guard<std::recursive_mutex> lock(m_networkMutex);
+    if (m_infiniteSegments.empty()) return false;
+
+    if (currentSegment >= m_infiniteSegments.size()) {
+        currentSegment = 0;
+    }
+
+    const auto& seg = m_infiniteSegments[currentSegment];
+    m_totalTransits++;
+
+    if (doorChoice == 0) {
+        outNextSegment = 0;
+        outExitPos.x = 99640.0f;
+        outExitPos.y = 500.0f;
+        outExitPos.z = 8350.0f;
+        outExitPos.headingDeg = 180.0f;
+        return true;
+    } else if (doorChoice == seg.doorCount - 1) {
+        outNextSegment = (currentSegment + 1) % m_infiniteSegments.size();
+        outExitPos.x = 0.0f;
+        outExitPos.y = 0.0f;
+        outExitPos.z = seg.hallwayDepthMeters * 10.0f;
+        outExitPos.headingDeg = 90.0f;
+        return true;
+    } else {
+        outNextSegment = (currentSegment + doorChoice) % m_infiniteSegments.size();
+        outExitPos.x = 100.0f * doorChoice;
+        outExitPos.y = 0.0f;
+        outExitPos.z = 1000.0f;
+        outExitPos.headingDeg = 0.0f;
+        return true;
+    }
+}
+
+size_t BackdoorNetwork::GetInfiniteSegmentCount() const
+{
+    std::lock_guard<std::recursive_mutex> lock(m_networkMutex);
+    return m_infiniteSegments.size();
+}
+
+const InfiniteHallwaySegment* BackdoorNetwork::GetInfiniteSegment(uint32 segmentIndex) const
+{
+    std::lock_guard<std::recursive_mutex> lock(m_networkMutex);
+    if (segmentIndex < m_infiniteSegments.size()) {
+        return &m_infiniteSegments[segmentIndex];
+    }
+    return nullptr;
 }
 
 // ============================================================================

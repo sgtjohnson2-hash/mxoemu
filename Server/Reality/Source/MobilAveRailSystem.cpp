@@ -27,6 +27,12 @@ void MobilAveRailSystem::Initialize()
     m_train.destinationShard = "EU-Central-1";
     m_train.isHazardActive = false;
 
+    // Reset Passenger Attachment
+    m_passengers.clear();
+    m_trainWorldX = 0.0f;
+    m_trainWorldY = 0.0f;
+    m_trainWorldZ = 150.0f;
+
     // Reset The Trainman Boss
     m_boss.health = 15000.0f;
     m_boss.maxHealth = 15000.0f;
@@ -42,6 +48,8 @@ void MobilAveRailSystem::UpdateSimulation(float deltaTimeSec)
     std::lock_guard<std::recursive_mutex> lock(m_railMutex);
     if (deltaTimeSec <= 0.0f) return;
     m_simTimeSec += deltaTimeSec;
+
+    UpdatePassengerTransforms(deltaTimeSec);
 
     // Progress Train Schedule
     m_train.cycleTimerSec += deltaTimeSec;
@@ -202,6 +210,73 @@ size_t MobilAveRailSystem::GetActiveSmuggleRunCount() const
         if (!pair.second.isCompleted && !pair.second.isSeized) activeCount++;
     }
     return activeCount;
+}
+
+bool MobilAveRailSystem::BoardTrain(uint32 playerGoId, float localX, float localY, float localZ)
+{
+    std::lock_guard<std::recursive_mutex> lock(m_railMutex);
+    BoardedPassenger p;
+    p.playerGoId = playerGoId;
+    p.localOffsetX = localX;
+    p.localOffsetY = localY;
+    p.localOffsetZ = localZ;
+    p.boardedTimestampSec = static_cast<uint64>(m_simTimeSec);
+    m_passengers[playerGoId] = p;
+    return true;
+}
+
+bool MobilAveRailSystem::DisembarkTrain(uint32 playerGoId, float& outWorldX, float& outWorldY, float& outWorldZ)
+{
+    std::lock_guard<std::recursive_mutex> lock(m_railMutex);
+    auto it = m_passengers.find(playerGoId);
+    if (it == m_passengers.end()) return false;
+    outWorldX = m_trainWorldX + it->second.localOffsetX;
+    outWorldY = m_trainWorldY + it->second.localOffsetY;
+    outWorldZ = m_trainWorldZ + it->second.localOffsetZ;
+    m_passengers.erase(it);
+    return true;
+}
+
+bool MobilAveRailSystem::IsPassengerOnboard(uint32 playerGoId) const
+{
+    std::lock_guard<std::recursive_mutex> lock(m_railMutex);
+    return m_passengers.find(playerGoId) != m_passengers.end();
+}
+
+void MobilAveRailSystem::GetTrainWorldPosition(float& outX, float& outY, float& outZ) const
+{
+    std::lock_guard<std::recursive_mutex> lock(m_railMutex);
+    outX = m_trainWorldX;
+    outY = m_trainWorldY;
+    outZ = m_trainWorldZ;
+}
+
+void MobilAveRailSystem::UpdatePassengerTransforms(float deltaTimeSec)
+{
+    std::lock_guard<std::recursive_mutex> lock(m_railMutex);
+    if (m_train.state == TRAIN_IN_TRANSIT || m_train.state == TRAIN_DEPARTING || m_train.state == TRAIN_APPROACHING) {
+        float speedUnitsPerSec = m_train.speedMph * 1.46667f * 10.0f;
+        m_trainWorldX += speedUnitsPerSec * deltaTimeSec;
+    } else if (m_train.state == TRAIN_DOCKED) {
+        m_trainWorldX = 0.0f;
+    }
+}
+
+size_t MobilAveRailSystem::GetBoardedPassengerCount() const
+{
+    std::lock_guard<std::recursive_mutex> lock(m_railMutex);
+    return m_passengers.size();
+}
+
+bool MobilAveRailSystem::GetPassengerWorldPosition(uint32 playerGoId, float& outX, float& outY, float& outZ) const
+{
+    std::lock_guard<std::recursive_mutex> lock(m_railMutex);
+    auto it = m_passengers.find(playerGoId);
+    if (it == m_passengers.end()) return false;
+    outX = m_trainWorldX + it->second.localOffsetX;
+    outY = m_trainWorldY + it->second.localOffsetY;
+    outZ = m_trainWorldZ + it->second.localOffsetZ;
+    return true;
 }
 
 // ============================================================================

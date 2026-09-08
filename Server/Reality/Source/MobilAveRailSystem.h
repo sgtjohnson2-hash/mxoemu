@@ -58,6 +58,15 @@ struct TrainmanBossState
     bool isDefeated{false};
 };
 
+struct BoardedPassenger
+{
+    uint32 playerGoId{0};
+    float localOffsetX{0.0f}; // relative to train carriage coordinate frame
+    float localOffsetY{0.0f};
+    float localOffsetZ{0.0f};
+    uint64 boardedTimestampSec{0};
+};
+
 class MobilAveRailSystem : public Singleton<MobilAveRailSystem>
 {
 public:
@@ -88,11 +97,25 @@ public:
     size_t GetActiveSmuggleRunCount() const;
     bool IsTrainDocked() const { return m_train.state == TRAIN_DOCKED; }
 
+    // Coordinate Frame Attachment for Boardable Trains (Epoch IV)
+    bool BoardTrain(uint32 playerGoId, float localX = 0.0f, float localY = 0.0f, float localZ = 0.0f);
+    bool DisembarkTrain(uint32 playerGoId, float& outWorldX, float& outWorldY, float& outWorldZ);
+    bool IsPassengerOnboard(uint32 playerGoId) const;
+    void GetTrainWorldPosition(float& outX, float& outY, float& outZ) const;
+    void UpdatePassengerTransforms(float deltaTimeSec);
+    size_t GetBoardedPassengerCount() const;
+    bool GetPassengerWorldPosition(uint32 playerGoId, float& outX, float& outY, float& outZ) const;
+
 private:
     mutable std::recursive_mutex m_railMutex;
     MobilTrain m_train;
     TrainmanBossState m_boss;
     std::map<uint32, SmuggleContract> m_smuggleRuns;
+    std::map<uint32, BoardedPassenger> m_passengers;
+
+    float m_trainWorldX{0.0f};
+    float m_trainWorldY{0.0f};
+    float m_trainWorldZ{150.0f};
 
     uint32 m_nextRunId{1};
     float m_simTimeSec{0.0f};

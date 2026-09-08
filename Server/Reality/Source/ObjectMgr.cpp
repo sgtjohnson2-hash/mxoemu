@@ -63,6 +63,9 @@ uint32 ObjectMgr::constructPlayer( GameClient* requester, uint64 charUID, bool i
 	{
 		std::unique_lock<std::shared_mutex> lock(m_objMutex);
 		m_objects[theNewObjectId] = std::shared_ptr<PlayerObject>(newPlayerObj, customDeleter);
+		if (!isBot) {
+			m_humanPlayerGoIds.push_back(theNewObjectId);
+		}
 	}
 
 	return theNewObjectId;
@@ -80,6 +83,11 @@ void ObjectMgr::destroyObject( uint32 goId )
 	if (it!=m_objects.end())
 	{
 		m_objects.erase(it);
+	}
+
+	auto hIt = std::find(m_humanPlayerGoIds.begin(), m_humanPlayerGoIds.end(), goId);
+	if (hIt != m_humanPlayerGoIds.end()) {
+		m_humanPlayerGoIds.erase(hIt);
 	}
 
 	//erase from object view maps (of all clients) and release object view

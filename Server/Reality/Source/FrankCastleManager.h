@@ -338,6 +338,45 @@ struct EncryptedBurstMessage {
 };
 
 // ============================================================================
+// Phase 9 / Epoch IV: Microchip Underground Arms Bazaars, Safehouse Fortification & Dead-Drop Network
+// ============================================================================
+struct ArmsBazaarCrate {
+    uint32 crateId{0};
+    std::string frequencyCode{"FM 88.3"};
+    std::string codename{"USMC Surplus Spec-Ops Supply"};
+    LocationVector location;
+    uint32 districtId{1};
+    std::string districtName{"Slums"};
+    uint32 duRounds{120};
+    uint32 c4Charges{4};
+    bool nightVisionGoggles{true};
+    bool isLooted{false};
+    std::string accessCode{"1984-PUNISHER"};
+    uint32 lootedByPlayerGoId{0};
+};
+
+struct SafehouseFortification {
+    uint32 safehouseId{0};
+    bool steelDoorsReinforced{false};     // -75% breach damage taken
+    bool cctvTelemetryActive{false};       // 150m perimeter threat surveillance
+    bool tripwireShotgunTrapArmed{false};  // 450 kinetic damage to hostile breach attempts
+    uint32 lastSurveillancePulseMs{0};
+    uint32 intrudersRepelled{0};
+};
+
+struct SubwayDeadDrop {
+    uint32 dropId{0};
+    std::string stationName{"Adams Crest Terminal"};
+    LocationVector platformLocation;
+    float ctcssSubcarrierHz{131.8f};
+    std::string cipherPayload{"CYPHER-MICROCHIP-ALPHA-5"};
+    CastleTrustTier requiredTrustTier{TRUST_TIER_1_OBSERVED};
+    bool isRetrieved{false};
+    uint32 retrievedByPlayerGoId{0};
+    uint64 retrievedTimestampUtc{0};
+};
+
+// ============================================================================
 // Frank Castle Manager (Apex Singleton)
 // ============================================================================
 class FrankCastleManager : public Singleton<FrankCastleManager> {
@@ -489,6 +528,24 @@ public:
     std::vector<EncryptedBurstMessage> DispatchEncryptedTraumaBurstToTrusted(const std::vector<uint32>& onlinePlayerIds, uint64 currentUtcSec);
     std::string EvaluateSafehouseIntruder(uint32 playerGoId);
 
+    // Phase 9 / Epoch IV: Lore Realism Phase 2
+    void InitializeArmsBazaars();
+    const std::map<uint32, ArmsBazaarCrate>& GetArmsBazaars() const { return m_armsBazaars; }
+    ArmsBazaarCrate* GetArmsBazaar(uint32 crateId);
+    bool LootArmsBazaarCrate(uint32 crateId, uint32 playerGoId, const std::string& code, std::string& outLootReport);
+    bool TuneRadioToBazaarFrequency(float freqMhz, std::string& outMorseSignal);
+
+    void InitializeFortifications();
+    bool ReinforceSafehouseSteelDoors(uint32 safehouseId);
+    bool InstallCCTVTelemetry(uint32 safehouseId);
+    bool ArmTripwireShotgunTrap(uint32 safehouseId);
+    bool TriggerFortificationDefense(uint32 safehouseId, uint32 intruderGoId, uint32& outDamageDealt);
+    const SafehouseFortification* GetFortification(uint32 safehouseId) const;
+
+    void InitializeSubwayDeadDrops();
+    const std::vector<SubwayDeadDrop>& GetSubwayDeadDrops() const;
+    bool RetrieveSubwayDeadDrop(uint32 dropId, uint32 playerGoId, float ctcssToneHz, std::string& outPayload);
+
     // Administrative & Tactical Commands
     std::string GenerateStatusReport() const;
     void ScanForAgentsAndThreats();
@@ -578,6 +635,11 @@ private:
     // Phase 8 collections & state
     ConvalescenceState m_convalescenceState;
     std::unordered_map<uint32, int32> m_trustScores;
+
+    // Epoch IV collections
+    std::map<uint32, ArmsBazaarCrate> m_armsBazaars;
+    std::map<uint32, SafehouseFortification> m_fortifications;
+    std::vector<SubwayDeadDrop> m_subwayDeadDrops;
 
     mutable std::recursive_mutex m_mutex;
 };

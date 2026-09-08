@@ -67,6 +67,40 @@ public:
 		}
 		return tempVect;
 	}
+
+	std::vector<uint32> getHumanPlayerGOIds() const
+	{
+		std::shared_lock<std::shared_mutex> lock(m_objMutex);
+		return m_humanPlayerGoIds;
+	}
+
+	void RegisterHumanPlayerGOId(uint32 goId)
+	{
+		std::unique_lock<std::shared_mutex> lock(m_objMutex);
+		m_humanPlayerGoIds.push_back(goId);
+	}
+
+	template<typename Func>
+	void ForEachHumanPlayer(Func&& func)
+	{
+		std::vector<std::shared_ptr<PlayerObject>> humans;
+		{
+			std::shared_lock<std::shared_mutex> lock(m_objMutex);
+			humans.reserve(m_humanPlayerGoIds.size());
+			for (uint32 id : m_humanPlayerGoIds)
+			{
+				auto it = m_objects.find(id);
+				if (it != m_objects.end() && it->second)
+					humans.push_back(it->second);
+			}
+		}
+		for (auto& p : humans)
+		{
+			if (p) {
+				func(p.get());
+			}
+		}
+	}
 	void OpenDoor(uint32 doorId, class GameClient *requester);
 	vector<msgBaseClassPtr> GetAllOpenDoors(class GameClient *requester);
 
@@ -93,6 +127,7 @@ private:
 	mutable std::shared_mutex m_objMutex;
 	std::unique_ptr<ObjectPool<PlayerObject>> m_playerPool;
 	std::vector<uint32> m_pendingDeletions;
+	std::vector<uint32> m_humanPlayerGoIds;
 public:
     void QueueDeletion(uint32 goId) {
         std::unique_lock<std::shared_mutex> lock(m_objMutex);
