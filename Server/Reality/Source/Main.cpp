@@ -94,6 +94,8 @@ void RunCastleLoreRealismTestSuite();
 void RunEpochIVMasteryTestSuite();
 void RunNeuralSwarmTestSuite();
 void RunStructuralVoxelTestSuite();
+void RunNeuralAudioTestSuite();
+void RunSharedMemoryShardTestSuite();
 
 static bool g_testUnderworld = false;
 static bool g_testSimulation = false;
@@ -122,6 +124,8 @@ static bool g_testCastleLore = false;
 static bool g_testEpoch4 = false;
 static bool g_testNeuralSwarm = false;
 static bool g_testStructuralVoxel = false;
+static bool g_testNeuralAudio = false;
+static bool g_testShardFabric = false;
 
 int main(int argc, char* argv[])
 {
@@ -193,6 +197,10 @@ int main(int argc, char* argv[])
             g_testNeuralSwarm = true;
         } else if (arg == "--test-structural-voxel" || arg == "--test-voxel-rupture" || arg == "--test-structural-rupture") {
             g_testStructuralVoxel = true;
+        } else if (arg == "--test-audio" || arg == "--test-neural-audio" || arg == "--test-dsp") {
+            g_testNeuralAudio = true;
+        } else if (arg == "--test-shard" || arg == "--test-multi-shard" || arg == "--test-fabric" || arg == "--test-construct-shard") {
+            g_testShardFabric = true;
         } else if (arg == "--test-all") {
             g_testFrank = true;
             g_testUnderworld = true;
@@ -222,13 +230,15 @@ int main(int argc, char* argv[])
             g_testEpoch4 = true;
             g_testNeuralSwarm = true;
             g_testStructuralVoxel = true;
+            g_testNeuralAudio = true;
+            g_testShardFabric = true;
         }
     }
 
 #ifndef UNITTEST
-    if (g_testFrank && g_testUnderworld && g_testSimulation && g_testEmergentAI && g_testPolice && g_testBiography && g_testSocial && g_testFamily && g_testEmergentLife && g_testSLM && g_testMafia && g_testExiles && g_testPossession && g_testFreeway && g_testConstruct && g_testAPU && g_testHovercraft && g_testBackdoor && g_testMobilAve && g_testCorruptCops && g_testOperatorBridge && g_testCyberdeck && g_testMegacityDestruction && g_testMatrixReboot && g_testCastleLore && g_testEpoch4 && g_testNeuralSwarm && g_testStructuralVoxel) {
+    if (g_testFrank && g_testUnderworld && g_testSimulation && g_testEmergentAI && g_testPolice && g_testBiography && g_testSocial && g_testFamily && g_testEmergentLife && g_testSLM && g_testMafia && g_testExiles && g_testPossession && g_testFreeway && g_testConstruct && g_testAPU && g_testHovercraft && g_testBackdoor && g_testMobilAve && g_testCorruptCops && g_testOperatorBridge && g_testCyberdeck && g_testMegacityDestruction && g_testMatrixReboot && g_testCastleLore && g_testEpoch4 && g_testNeuralSwarm && g_testStructuralVoxel && g_testNeuralAudio && g_testShardFabric) {
         std::cout << "\n============================================================" << std::endl;
-        std::cout << "  RUNNING COMPLETE MEGACITY & TACTICAL TEST SUITE (28 SUITES)" << std::endl;
+        std::cout << "  RUNNING COMPLETE MEGACITY & TACTICAL TEST SUITE (30 SUITES)" << std::endl;
         std::cout << "============================================================\n" << std::endl;
         RunFrankCastleTestSuite();
         RunUnderworldTestSuite();
@@ -258,9 +268,15 @@ int main(int argc, char* argv[])
         RunEpochIVMasteryTestSuite();
         RunNeuralSwarmTestSuite();
         RunStructuralVoxelTestSuite();
+        RunNeuralAudioTestSuite();
+        RunSharedMemoryShardTestSuite();
         std::cout << "\n============================================================" << std::endl;
-        std::cout << "  ALL 28 MEGACITY EMERGENCE & TACTICAL SUITES PASSED 100%!  " << std::endl;
+        std::cout << "  ALL 30 MEGACITY EMERGENCE & TACTICAL SUITES PASSED 100%!  " << std::endl;
         std::cout << "============================================================\n" << std::endl;
+    } else if (g_testShardFabric) {
+        RunSharedMemoryShardTestSuite();
+    } else if (g_testNeuralAudio) {
+        RunNeuralAudioTestSuite();
     } else if (g_testStructuralVoxel) {
         RunStructuralVoxelTestSuite();
     } else if (g_testNeuralSwarm) {
