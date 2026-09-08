@@ -427,8 +427,10 @@ void PlayerObject::PopulateWorld()
 
 	// Dynamic Area-of-Interest (AoI) Streaming: query SpatialGrid within 250m for initial world population
 	auto nearbyClients = sSpatialGrid.GetClientsInAoI(m_pos.x, m_pos.z, 25000.0f);
+	size_t spawnedCount = 0;
 	for (GameClient* client : nearbyClients)
 	{
+		if (spawnedCount >= 5) break;
 		if (!client || client == &m_parent) continue;
 		uint32 otherGoId = client->GetPlayerGoId();
 		if (otherGoId == 0 || otherGoId == m_goId) continue;
@@ -445,6 +447,7 @@ void PlayerObject::PopulateWorld()
 				else
 					m_sendAfterSpawn.push(*it2);
 			}
+			spawnedCount++;
 		}
 	}
 

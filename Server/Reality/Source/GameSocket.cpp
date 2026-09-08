@@ -115,7 +115,7 @@ void GameSocket::PruneDeadClients()
 		for (GClientList::iterator it=m_clients.begin();it!=m_clients.end();)
 		{
 			std::shared_ptr<GameClient> Client = it->second;
-			if (!Client || !Client->IsValid() || (m_currTime - Client->LastActive()) >= 20)
+			if (!Client || !Client->IsValid() || (m_currTime - Client->LastActive()) >= 120)
 			{
 				if (!Client)
 				{

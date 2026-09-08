@@ -49,6 +49,21 @@ static LONG WINAPI CrashHandler(PEXCEPTION_POINTERS pExc) {
                     ctx->Eip, ctx->Eax, ctx->Ebx, ctx->Ecx, ctx->Edx);
                 Log("[mxohax] ESI: 0x%08X, EDI: 0x%08X, ESP: 0x%08X, EBP: 0x%08X\n",
                     ctx->Esi, ctx->Edi, ctx->Esp, ctx->Ebp);
+                if (ctx->Esp) {
+                    DWORD* pStack = reinterpret_cast<DWORD*>(ctx->Esp);
+                    for (int i = 0; i < 32; ++i) {
+                        if (!IsBadReadPtr(pStack + i, 4)) {
+                            DWORD val = pStack[i];
+                            if (clientBase && val >= clientBase && val < clientBase + 0x1000000) {
+                                Log("[mxohax] STACK[%02d]: 0x%08X (client.dll + 0x%08X)\n", i, val, val - clientBase);
+                            } else if (matrixBase && val >= matrixBase && val < matrixBase + 0x1000000) {
+                                Log("[mxohax] STACK[%02d]: 0x%08X (matrix.exe + 0x%08X)\n", i, val, val - matrixBase);
+                            } else {
+                                Log("[mxohax] STACK[%02d]: 0x%08X\n", i, val);
+                            }
+                        }
+                    }
+                }
             }
             if (clientBase && (uintptr_t)addr == clientBase + 0x0016D495 && ctx) {
                 Log("[mxohax] Recovering from crash at client.dll + 0x0016D495: jumping to epilogue (0x%p)\n", (void*)(clientBase + 0x0016D4DD));
@@ -59,6 +74,22 @@ static LONG WINAPI CrashHandler(PEXCEPTION_POINTERS pExc) {
                 Log("[mxohax] Recovering from crash at client.dll + 0x%08X: jumping to epilogue (0x%p)\n", (uintptr_t)addr - clientBase, (void*)(clientBase + 0x001622DC));
                 ctx->Eip = static_cast<DWORD>(clientBase + 0x001622DC);
                 return EXCEPTION_CONTINUE_EXECUTION;
+            }
+            // Guard against memcpy crash in 0x10255710 (client.dll + 0x0025581B)
+            if (ctx && ctx->Esp) {
+                DWORD* pStack = reinterpret_cast<DWORD*>(ctx->Esp);
+                for (int i = 0; i < 8; ++i) {
+                    if (!IsBadReadPtr(pStack + i, 4)) {
+                        DWORD retAddr = pStack[i];
+                        if (clientBase && retAddr >= clientBase + 0x0025581B && retAddr <= clientBase + 0x00255825) {
+                            Log("[mxohax] Recovering from memcpy crash in 0x10255710: jumping to epilogue (0x%p)\n",
+                                (void*)(clientBase + 0x00255920));
+                            ctx->Eip = static_cast<DWORD>(clientBase + 0x00255920);
+                            ctx->Eax = 190;
+                            return EXCEPTION_CONTINUE_EXECUTION;
+                        }
+                    }
+                }
             }
         }
     }
@@ -233,10 +264,14 @@ int PASCAL DetourRecvFrom(SOCKET s, char *buf, int len, int flags, struct sockad
         struct sockaddr_in* sin = (struct sockaddr_in*)from;
         u_short port = ntohs(sin->sin_port);
         if (port == 10000) {
-            static bool s_loggedRecv = false;
-            if (!s_loggedRecv) {
-                s_loggedRecv = true;
-                Log("[mxohax] recvfrom() UDP received %d bytes from port 10000\n", res);
+            static int s_recvCount = 0;
+            s_recvCount++;
+            if (s_recvCount <= 30) {
+                char hex[128] = {0};
+                for (int i = 0; i < res && i < 32; ++i) {
+                    sprintf(hex + i * 3, "%02X ", (unsigned char)buf[i]);
+                }
+                Log("[mxohax] recvfrom(#%d) UDP: %d bytes. Hex: %s\n", s_recvCount, res, hex);
             }
         }
     }
@@ -514,6 +549,8 @@ static void __fastcall DetourFrameTick(void* pThis, void* /*edx*/) {
     DWORD pShell = clientBase + 0x00896A38;
     BYTE inWorld = *reinterpret_cast<BYTE*>(pShell + 0x20);
     static BYTE s_lastInWorld = 0xFF;
+    static bool s_inWorldSticky = false;
+
     // Log WorldMgr state transitions
     void* pWorldMgr = *reinterpret_cast<void**>(clientBase + 0x0089DD68);
     if (pWorldMgr) {
@@ -522,6 +559,31 @@ static void __fastcall DetourFrameTick(void* pThis, void* /*edx*/) {
         if (pState && *pState != s_lastState) {
             s_lastState = *pState;
             Log("[mxohax] *** WorldMgr State transitioned to %u ***\n", s_lastState);
+            if (s_lastState == 3) {
+                s_inWorldSticky = true;
+            }
+        }
+    }
+
+    if (inWorld == 1) {
+        s_inWorldSticky = true;
+    }
+
+    if (s_inWorldSticky) {
+        *reinterpret_cast<BYTE*>(pShell + 0x20) = 1;
+        inWorld = 1;
+        if (pWorldMgr) {
+            *reinterpret_cast<BYTE*>(reinterpret_cast<DWORD>(pWorldMgr) + 0x20) = 1;
+            DWORD* pState = reinterpret_cast<DWORD*>(reinterpret_cast<DWORD>(pWorldMgr) + 0x1C);
+            if (pState && *pState != 3) {
+                *pState = 3;
+            }
+        }
+        void* pUI = *reinterpret_cast<void**>(clientBase + 0x00898C54);
+        if (pUI && OriginalHideControl) {
+            OriginalHideControl(pUI, 0x04);
+            OriginalHideControl(pUI, 0x57);
+            OriginalHideControl(pUI, 0x30);
         }
     }
 
@@ -536,13 +598,14 @@ static void __fastcall DetourFrameTick(void* pThis, void* /*edx*/) {
             if (pUI && OriginalHideControl) {
                 OriginalHideControl(pUI, 0x04);
                 OriginalHideControl(pUI, 0x57);
-                Log("[mxohax] Dismissed loading screens 0x04 and 0x57 upon entering world!\n");
+                OriginalHideControl(pUI, 0x30);
+                Log("[mxohax] Dismissed loading screens 0x04, 0x57 and 0x30 upon entering world!\n");
             }
         }
     }
 
     if (s_tickCount % 50 == 0) {
-        Log("[mxohax] DetourFrameTick: Frame #%d active (inWorld=%u)\n", s_tickCount, inWorld);
+        Log("[mxohax] DetourFrameTick: Frame #%d active (inWorld=%u, sticky=%d)\n", s_tickCount, inWorld, s_inWorldSticky ? 1 : 0);
     }
 
     if (!s_autoJackInDone) {
@@ -705,6 +768,30 @@ __declspec(naked) void Hook_Abb90Check() {
     }
 }
 
+typedef int (__thiscall *ParseSubpacket_t)(void* pThis, const byte* pData, int len);
+static ParseSubpacket_t OriginalParseSubpacket = nullptr;
+
+static int __fastcall DetourParseSubpacket(void* pThis, void* /*edx*/, const byte* pData, int len) {
+    if (pData && len >= 4) {
+        char hex[128] = {0};
+        for (int i = 0; i < len && i < 24; ++i) {
+            sprintf(hex + i * 3, "%02X ", pData[i]);
+        }
+        WORD count = *reinterpret_cast<const WORD*>(pData + 2);
+        Log("[mxohax] ParseSubpacket(0x10255710): len=%d, count=%u, hex: %s\n", len, count, hex);
+
+        if (count > 256 || (len > 4 && (DWORD)count * 8 > (DWORD)len)) {
+            Log("[mxohax] WARNING: ParseSubpacket invalid property count %u (len=%d)! Intercepting to prevent crash.\n", count, len);
+            if (pData[0] == 0xCD && pData[1] == 0xAB && len >= 190) {
+                Log("[mxohax] Sanitizing 202-byte sampleSpawnPacket: advancing 190 bytes directly to viewId.\n");
+                return 190;
+            }
+            return 4;
+        }
+    }
+    return OriginalParseSubpacket ? OriginalParseSubpacket(pThis, pData, len) : 0;
+}
+
 static void ApplyClientPatches(HMODULE hClient) {
     static bool s_clientPatched = false;
     if (s_clientPatched || !hClient) return;
@@ -712,6 +799,13 @@ static void ApplyClientPatches(HMODULE hClient) {
 
     DWORD clientBase = reinterpret_cast<DWORD>(hClient);
     Log("[mxohax] Applying client.dll hooks at base 0x%p...\n", (void*)clientBase);
+
+    // Hook ParseSubpacket at 0x00255710
+    LPVOID pParseSub = reinterpret_cast<LPVOID>(clientBase + 0x00255710);
+    if (MH_CreateHook(pParseSub, &DetourParseSubpacket, reinterpret_cast<LPVOID*>(&OriginalParseSubpacket)) == MH_OK) {
+        MH_EnableHook(pParseSub);
+        Log("[mxohax] SUCCESS: client.dll ParseSubpacket hooked at 0x%p!\n", pParseSub);
+    }
 
     // 1. Hook CryptoPP::PK_Verifier::VerifyMessage in client.dll at RVA 0x0047E010
     uintptr_t clientVerifyAddr = clientBase + 0x0047E010;
@@ -810,6 +904,27 @@ static void ApplyClientPatches(HMODULE hClient) {
         VirtualProtect(pSavePatch, 3, oldProt, &oldProt);
         FlushInstructionCache(GetCurrentProcess(), pSavePatch, 3);
         Log("[mxohax] SUCCESS: Patched client.dll + 0x00162270 (ret 4) to guard against vector save crash!\n");
+    }
+
+    // Patch G: 0x0022CF56: 2 bytes: mov al, 1 (B0 01)
+    // Prevents Subpacket 0x0C failure when dynamic object creation returns NULL
+    LPVOID pSub0cFail1 = reinterpret_cast<LPVOID>(clientBase + 0x0022CF56);
+    if (VirtualProtect(pSub0cFail1, 2, PAGE_EXECUTE_READWRITE, &oldProt)) {
+        BYTE patch[2] = { 0xB0, 0x01 }; // mov al, 1
+        memcpy(pSub0cFail1, patch, 2);
+        VirtualProtect(pSub0cFail1, 2, oldProt, &oldProt);
+        FlushInstructionCache(GetCurrentProcess(), pSub0cFail1, 2);
+        Log("[mxohax] SUCCESS: Patched client.dll + 0x0022CF56 (mov al, 1) to prevent subpacket 0x0C abort!\n");
+    }
+
+    // Patch H: 0x0022D215: 2 bytes: mov al, 1 (B0 01)
+    LPVOID pSub0cFail2 = reinterpret_cast<LPVOID>(clientBase + 0x0022D215);
+    if (VirtualProtect(pSub0cFail2, 2, PAGE_EXECUTE_READWRITE, &oldProt)) {
+        BYTE patch[2] = { 0xB0, 0x01 }; // mov al, 1
+        memcpy(pSub0cFail2, patch, 2);
+        VirtualProtect(pSub0cFail2, 2, oldProt, &oldProt);
+        FlushInstructionCache(GetCurrentProcess(), pSub0cFail2, 2);
+        Log("[mxohax] SUCCESS: Patched client.dll + 0x0022D215 (mov al, 1) to prevent subpacket 0x0C abort!\n");
     }
 }
 
