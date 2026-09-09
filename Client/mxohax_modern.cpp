@@ -3,12 +3,14 @@
 #include <winsock2.h>
 #include <ws2tcpip.h>
 #include <windows.h>
+#include <d3d9.h>
 #include <stdio.h>
 #include <stdint.h>
 #include <intrin.h>
 #include "minhook/include/MinHook.h"
 
 #pragma comment(lib, "ws2_32.lib")
+#pragma comment(lib, "d3d9.lib")
 
 typedef unsigned char byte;
 
@@ -133,6 +135,10 @@ static void LoadTargetServerIp() {
         fclose(f);
     }
     Log("[mxohax] Active Target Server IP: %s\n", g_TargetServerIp);
+    HDESK hCurDesk = GetThreadDesktop(GetCurrentThreadId());
+    char deskBuf[128] = {0};
+    GetUserObjectInformationA(hCurDesk, 2, deskBuf, sizeof(deskBuf), NULL);
+    Log("[mxohax] Process Thread Desktop: '%s'\n", deskBuf);
 }
 
 // ============================================================================
@@ -531,11 +537,8 @@ int __cdecl DetourInitClientDLL(
     DWORD worldCharPacked,
     BOOL autoJackIn
 ) {
-    DWORD forcedWorldCharPacked = (0 << 24) | (worldCharPacked & 0x00FFFFFF);
-    BOOL forcedAutoJackIn = 1;
-    Log("[mxohax] DetourInitClientDLL: Forcing worldCharPacked=0x%08X, autoJackIn=1 (original: 0x%08X, %d)\n",
-        forcedWorldCharPacked, autoJackIn, worldCharPacked, autoJackIn);
-    int res = OriginalInitClientDLL ? OriginalInitClientDLL(p1, p2, p3, p4, p5, p6, forcedWorldCharPacked, forcedAutoJackIn) : 1;
+    Log("[mxohax] DetourInitClientDLL: worldCharPacked=0x%08X, autoJackIn=%d\n", worldCharPacked, autoJackIn);
+    int res = OriginalInitClientDLL ? OriginalInitClientDLL(p1, p2, p3, p4, p5, p6, worldCharPacked, autoJackIn) : 1;
     Log("[mxohax] DetourInitClientDLL returned %d\n", res);
     return res;
 }
@@ -562,18 +565,9 @@ static bool TryAutoJackIn(DWORD clientBase) {
         Log("[mxohax] [AutoJackIn] Ensured CNetClient at 0x%08X (m_state=2 CONNECTED)\n", pNetClient);
     }
 
-    // 3. Mark character selected in client.dll WorldMgr so it transitions to State 2 naturally
+    // 3. Mark character selected in client.dll WorldMgr
     *reinterpret_cast<BYTE*>(clientBase + 0x0089DD5D) = 1;
     *reinterpret_cast<BYTE*>(reinterpret_cast<DWORD>(pWorldMgr) + 0x25) = 1;
-    DWORD* pState = reinterpret_cast<DWORD*>(reinterpret_cast<DWORD>(pWorldMgr) + 0x1C);
-    if (pState && *pState == 1) {
-        *pState = 0; // Reset State 1 -> State 0 so 0x10120060 branches to 0x10120180 (CWorldMgr::LoadWorld)
-        Log("[mxohax] [AutoJackIn] Reset pWorldMgr State from 1 -> 0, calling AdvanceState (0x10120060)...\n");
-        typedef char (__thiscall *AdvanceState_t)(void* pMgr);
-        AdvanceState_t pAdvance = reinterpret_cast<AdvanceState_t>(clientBase + 0x00120060);
-        char res = pAdvance(pWorldMgr);
-        Log("[mxohax] [AutoJackIn] AdvanceState(0x10120060) returned %d! pWorldMgr State is now %u\n", res, *pState);
-    }
     Log("[mxohax] [AutoJackIn] Set WorldMgr character select flags (0x0089DD5D and pWorldMgr+0x25)\n");
 
     // 4. Transition matrix.exe Margin State Machine to State 9 (Connecting)
@@ -602,7 +596,7 @@ static bool TryAutoJackIn(DWORD clientBase) {
     };
     #pragma pack(pop)
 
-    static char s_worldFileName[] = "slums.cnb";
+    static char s_worldFileName[] = "resource/worlds/final_world/slums_barrens_full.metr";
     static char s_charHandleStr[] = "s1acker";
     static MxoLocalCharEntry s_localCharEntry;
     s_localCharEntry.pWorldFirst  = s_worldFileName;
@@ -613,6 +607,9 @@ static bool TryAutoJackIn(DWORD clientBase) {
     s_localCharEntry.pHandleEnd   = s_localCharEntry.pHandleLast;
     s_localCharEntry.charId       = 360;
     s_localCharEntry.worldId      = 1;
+
+    // Ensure fallback world pointer at 0x00896E4C points to real slums METR
+    *reinterpret_cast<const char**>(clientBase + 0x00896E4C) = s_worldFileName;
 
     DWORD* ppCharBegin = reinterpret_cast<DWORD*>(clientBase + 0x00899B4C);
     DWORD* ppCharEnd   = reinterpret_cast<DWORD*>(clientBase + 0x00899B50);
@@ -626,7 +623,7 @@ static bool TryAutoJackIn(DWORD clientBase) {
             *ppCharBegin = reinterpret_cast<DWORD>(&s_localCharEntry);
             *ppCharEnd   = reinterpret_cast<DWORD>(&s_localCharEntry) + sizeof(s_localCharEntry);
             pCharToEnter = &s_localCharEntry;
-            Log("[mxohax] [AutoJackIn] Mounted synthetic operative s1acker (slums.cnb) into vector at 0x00899B4C\n");
+            Log("[mxohax] [AutoJackIn] Mounted operative s1acker (slums_barrens_full.metr) into vector at 0x00899B4C\n");
         }
     } else {
         pCharToEnter = &s_localCharEntry;
@@ -638,22 +635,213 @@ static bool TryAutoJackIn(DWORD clientBase) {
         typedef void (__thiscall *EnterWorld_t)(void* pMgr, void* pChar);
         EnterWorld_t pEnterWorld = reinterpret_cast<EnterWorld_t>(clientBase + 0x00124070);
         pEnterWorld(pWorldMgr, pCharToEnter);
+        DWORD* pCurState = reinterpret_cast<DWORD*>(reinterpret_cast<DWORD>(pWorldMgr) + 0x1C);
         Log("[mxohax] [AutoJackIn] EnterWorldWithCharacter dispatched successfully! pWorldMgr State is now %u\n",
-            pState ? *pState : 0);
+            pCurState ? *pCurState : 0);
     }
 
     return true;
 }
 
+// Direct3D 9 Backbuffer Capture & Hooks
+typedef HRESULT (WINAPI *Direct3DCreate9Ex_t)(UINT SDKVersion, IDirect3D9Ex** ppD3D);
+static Direct3DCreate9Ex_t OriginalDirect3DCreate9Ex = nullptr;
+
+typedef IDirect3D9* (WINAPI *Direct3DCreate9_t)(UINT SDKVersion);
+static Direct3DCreate9_t OriginalDirect3DCreate9 = nullptr;
+
+typedef HRESULT (STDMETHODCALLTYPE *Present_t)(IDirect3DDevice9* pDevice, const RECT* pSourceRect, const RECT* pDestRect, HWND hDestWindowOverride, const RGNDATA* pDirtyRegion);
+static Present_t OriginalPresent = nullptr;
+
+typedef HRESULT (STDMETHODCALLTYPE *PresentEx_t)(IDirect3DDevice9Ex* pDevice, const RECT* pSourceRect, const RECT* pDestRect, HWND hDestWindowOverride, const RGNDATA* pDirtyRegion, DWORD dwFlags);
+static PresentEx_t OriginalPresentEx = nullptr;
+
+typedef HRESULT (STDMETHODCALLTYPE *CreateDevice_t)(IDirect3D9* pD3D, UINT Adapter, D3DDEVTYPE DeviceType, HWND hFocusWindow, DWORD BehaviorFlags, D3DPRESENT_PARAMETERS* pPresentationParameters, IDirect3DDevice9** ppReturnedDeviceInterface);
+static CreateDevice_t OriginalCreateDevice = nullptr;
+
+typedef HRESULT (STDMETHODCALLTYPE *CreateDeviceEx_t)(IDirect3D9Ex* pD3D, UINT Adapter, D3DDEVTYPE DeviceType, HWND hFocusWindow, DWORD BehaviorFlags, D3DPRESENT_PARAMETERS* pPresentationParameters, D3DDISPLAYMODEEX* pFullscreenDisplayMode, IDirect3DDevice9Ex** ppReturnedDeviceInterface);
+static CreateDeviceEx_t OriginalCreateDeviceEx = nullptr;
+
+static void CaptureD3D9Backbuffer(IDirect3DDevice9* pDevice, const char* outBmpPath) {
+    if (!pDevice) return;
+    IDirect3DSurface9* pBackBuffer = nullptr;
+    HRESULT hr = pDevice->GetBackBuffer(0, 0, D3DBACKBUFFER_TYPE_MONO, &pBackBuffer);
+    if (FAILED(hr) || !pBackBuffer) {
+        Log("[mxohax] CaptureD3D9: GetBackBuffer failed (hr=0x%08X)\n", hr);
+        return;
+    }
+    D3DSURFACE_DESC desc;
+    pBackBuffer->GetDesc(&desc);
+
+    IDirect3DSurface9* pOffscreen = nullptr;
+    hr = pDevice->CreateOffscreenPlainSurface(desc.Width, desc.Height, desc.Format, D3DPOOL_SYSTEMMEM, &pOffscreen, nullptr);
+    if (FAILED(hr) || !pOffscreen) {
+        Log("[mxohax] CaptureD3D9: CreateOffscreenPlainSurface failed (hr=0x%08X)\n", hr);
+        pBackBuffer->Release();
+        return;
+    }
+
+    hr = pDevice->GetRenderTargetData(pBackBuffer, pOffscreen);
+    pBackBuffer->Release();
+    if (FAILED(hr)) {
+        Log("[mxohax] CaptureD3D9: GetRenderTargetData failed (hr=0x%08X)\n", hr);
+        pOffscreen->Release();
+        return;
+    }
+
+    D3DLOCKED_RECT lr;
+    hr = pOffscreen->LockRect(&lr, nullptr, D3DLOCK_READONLY);
+    if (SUCCEEDED(hr)) {
+        DWORD bmpSize = desc.Width * desc.Height * 4;
+        BITMAPFILEHEADER bfh = { 0x4D42, sizeof(BITMAPFILEHEADER) + sizeof(BITMAPINFOHEADER) + bmpSize, 0, 0, sizeof(BITMAPFILEHEADER) + sizeof(BITMAPINFOHEADER) };
+        BITMAPINFOHEADER bi = { sizeof(BITMAPINFOHEADER), (LONG)desc.Width, -((LONG)desc.Height), 1, 32, BI_RGB, bmpSize, 0, 0, 0, 0 };
+
+        FILE* fp = fopen(outBmpPath, "wb");
+        if (fp) {
+            fwrite(&bfh, sizeof(bfh), 1, fp);
+            fwrite(&bi, sizeof(bi), 1, fp);
+            for (UINT y = 0; y < desc.Height; ++y) {
+                BYTE* pSrcRow = (BYTE*)lr.pBits + (y * lr.Pitch);
+                fwrite(pSrcRow, desc.Width * 4, 1, fp);
+            }
+            fclose(fp);
+            Log("[mxohax] CaptureD3D9: SUCCESS! Saved hardware backbuffer to %s (%ux%u format=%u)!\n",
+                outBmpPath, desc.Width, desc.Height, desc.Format);
+        }
+        pOffscreen->UnlockRect();
+    } else {
+        Log("[mxohax] CaptureD3D9: LockRect failed (hr=0x%08X)\n", hr);
+    }
+    pOffscreen->Release();
+}
+
+static int s_presentCount = 0;
+static int s_inWorldPresents = 0;
+
+static HRESULT STDMETHODCALLTYPE DetourPresent(IDirect3DDevice9* pDevice, const RECT* pSourceRect, const RECT* pDestRect, HWND hDestWindowOverride, const RGNDATA* pDirtyRegion) {
+    s_presentCount++;
+
+    if (s_inWorldSticky && pDevice) {
+        s_inWorldPresents++;
+        if (s_inWorldPresents == 30 || s_inWorldPresents == 60 || s_inWorldPresents == 120 || (s_inWorldPresents > 120 && s_inWorldPresents % 300 == 0)) {
+            CaptureD3D9Backbuffer(pDevice, "inworld_render.bmp");
+        }
+    }
+
+    return OriginalPresent(pDevice, pSourceRect, pDestRect, hDestWindowOverride, pDirtyRegion);
+}
+
+static HRESULT STDMETHODCALLTYPE DetourPresentEx(IDirect3DDevice9Ex* pDevice, const RECT* pSourceRect, const RECT* pDestRect, HWND hDestWindowOverride, const RGNDATA* pDirtyRegion, DWORD dwFlags) {
+    s_presentCount++;
+
+    if (s_inWorldSticky && pDevice) {
+        s_inWorldPresents++;
+        if (s_inWorldPresents == 30 || s_inWorldPresents == 60 || s_inWorldPresents == 120 || (s_inWorldPresents > 120 && s_inWorldPresents % 300 == 0)) {
+            CaptureD3D9Backbuffer(pDevice, "inworld_render.bmp");
+        }
+    }
+
+    return OriginalPresentEx(pDevice, pSourceRect, pDestRect, hDestWindowOverride, pDirtyRegion, dwFlags);
+}
+
+static void HookDeviceVtable(void* pDevice, bool isEx) {
+    if (!pDevice) return;
+    void** devVtbl = *reinterpret_cast<void***>(pDevice);
+    if (!devVtbl) return;
+
+    if (!OriginalPresent) {
+        if (MH_CreateHook(devVtbl[17], &DetourPresent, reinterpret_cast<LPVOID*>(&OriginalPresent)) == MH_OK) {
+            MH_EnableHook(devVtbl[17]);
+            Log("[mxohax] Hooked IDirect3DDevice9::Present (vtbl[17]) at 0x%p!\n", devVtbl[17]);
+        }
+    }
+    if (isEx && !OriginalPresentEx) {
+        if (MH_CreateHook(devVtbl[121], &DetourPresentEx, reinterpret_cast<LPVOID*>(&OriginalPresentEx)) == MH_OK) {
+            MH_EnableHook(devVtbl[121]);
+            Log("[mxohax] Hooked IDirect3DDevice9Ex::PresentEx (vtbl[121]) at 0x%p!\n", devVtbl[121]);
+        }
+    }
+}
+
+static HRESULT STDMETHODCALLTYPE DetourCreateDevice(IDirect3D9* pD3D, UINT Adapter, D3DDEVTYPE DeviceType, HWND hFocusWindow, DWORD BehaviorFlags, D3DPRESENT_PARAMETERS* pPresentationParameters, IDirect3DDevice9** ppReturnedDeviceInterface) {
+    HRESULT hr = OriginalCreateDevice(pD3D, Adapter, DeviceType, hFocusWindow, BehaviorFlags, pPresentationParameters, ppReturnedDeviceInterface);
+    if (SUCCEEDED(hr) && ppReturnedDeviceInterface && *ppReturnedDeviceInterface) {
+        Log("[mxohax] CreateDevice: pDevice=0x%p, FocusWindow=0x%p\n", *ppReturnedDeviceInterface, hFocusWindow);
+        HookDeviceVtable(*ppReturnedDeviceInterface, false);
+    }
+    return hr;
+}
+
+static HRESULT STDMETHODCALLTYPE DetourCreateDeviceEx(IDirect3D9Ex* pD3D, UINT Adapter, D3DDEVTYPE DeviceType, HWND hFocusWindow, DWORD BehaviorFlags, D3DPRESENT_PARAMETERS* pPresentationParameters, D3DDISPLAYMODEEX* pFullscreenDisplayMode, IDirect3DDevice9Ex** ppReturnedDeviceInterface) {
+    HRESULT hr = OriginalCreateDeviceEx(pD3D, Adapter, DeviceType, hFocusWindow, BehaviorFlags, pPresentationParameters, pFullscreenDisplayMode, ppReturnedDeviceInterface);
+    if (SUCCEEDED(hr) && ppReturnedDeviceInterface && *ppReturnedDeviceInterface) {
+        Log("[mxohax] CreateDeviceEx: pDevice=0x%p, FocusWindow=0x%p\n", *ppReturnedDeviceInterface, hFocusWindow);
+        HookDeviceVtable(*ppReturnedDeviceInterface, true);
+    }
+    return hr;
+}
+
+static IDirect3D9* WINAPI DetourDirect3DCreate9(UINT SDKVersion) {
+    IDirect3D9* pD3D = OriginalDirect3DCreate9(SDKVersion);
+    if (pD3D) {
+        Log("[mxohax] Direct3DCreate9 intercepted: pD3D=0x%p\n", pD3D);
+        void** vtbl = *reinterpret_cast<void***>(pD3D);
+        if (!OriginalCreateDevice && vtbl) {
+            if (MH_CreateHook(vtbl[16], &DetourCreateDevice, reinterpret_cast<LPVOID*>(&OriginalCreateDevice)) == MH_OK) {
+                MH_EnableHook(vtbl[16]);
+                Log("[mxohax] Hooked IDirect3D9::CreateDevice at 0x%p!\n", vtbl[16]);
+            }
+        }
+    }
+    return pD3D;
+}
+
+static HRESULT WINAPI DetourDirect3DCreate9Ex(UINT SDKVersion, IDirect3D9Ex** ppD3D) {
+    HRESULT hr = OriginalDirect3DCreate9Ex(SDKVersion, ppD3D);
+    if (SUCCEEDED(hr) && ppD3D && *ppD3D) {
+        IDirect3D9Ex* pD3D = *ppD3D;
+        Log("[mxohax] Direct3DCreate9Ex intercepted: pD3D=0x%p\n", pD3D);
+        void** vtbl = *reinterpret_cast<void***>(pD3D);
+        if (!OriginalCreateDeviceEx && vtbl) {
+            if (MH_CreateHook(vtbl[20], &DetourCreateDeviceEx, reinterpret_cast<LPVOID*>(&OriginalCreateDeviceEx)) == MH_OK) {
+                MH_EnableHook(vtbl[20]);
+                Log("[mxohax] Hooked IDirect3D9Ex::CreateDeviceEx at 0x%p!\n", vtbl[20]);
+            }
+        }
+        if (!OriginalCreateDevice && vtbl) {
+            if (MH_CreateHook(vtbl[16], &DetourCreateDevice, reinterpret_cast<LPVOID*>(&OriginalCreateDevice)) == MH_OK) {
+                MH_EnableHook(vtbl[16]);
+                Log("[mxohax] Hooked IDirect3D9Ex::CreateDevice at 0x%p!\n", vtbl[16]);
+            }
+        }
+    }
+    return hr;
+}
+
 static void EnsureInWorldRendering(uintptr_t clientBase, void* pWorldMgr, DWORD pShell) {
     if (!pWorldMgr) return;
 
-    // Step 1: Ensure PlayerObject is allocated and in world
+    // Step 0: Ensure fallback world pointer points to actual Slums METR world
+    static const char s_defaultMetrPath[] = "resource/worlds/final_world/slums_barrens_full.metr";
+    *reinterpret_cast<const char**>(clientBase + 0x00896E4C) = s_defaultMetrPath;
+
+    // Step 1: Ensure World is loaded via CWorldMgr::LoadWorldFile (0x10121110) BEFORE Player enters world
+    BYTE* pWorldLoaded = reinterpret_cast<BYTE*>(reinterpret_cast<DWORD>(pWorldMgr) + 0x27);
+    if (pWorldLoaded && *pWorldLoaded == 0) {
+        Log("[mxohax] EnsureInWorld: Calling CWorldMgr::LoadWorldFile (0x10121110) for %s...\n", s_defaultMetrPath);
+        typedef char (__thiscall *LoadWorldFile_t)(void* pMgr);
+        LoadWorldFile_t pLoadWorld = reinterpret_cast<LoadWorldFile_t>(clientBase + 0x00121110);
+        char lres = pLoadWorld(pWorldMgr);
+        Log("[mxohax] EnsureInWorld: LoadWorldFile returned %d (worldLoaded=%d)\n", lres, *pWorldLoaded);
+    }
+
+    // Step 2: Ensure PlayerObject is allocated, positioned in Slums, and enters world
     void** ppPlayerGlobal = reinterpret_cast<void**>(clientBase + 0x008A4378);
-    if (!*ppPlayerGlobal) {
+    void* pPlayer = *ppPlayerGlobal;
+    if (!pPlayer) {
         typedef void* (__cdecl *AllocPlayer_t)();
         AllocPlayer_t pAlloc = reinterpret_cast<AllocPlayer_t>(clientBase + 0x001D2370);
-        void* pPlayer = pAlloc();
+        pPlayer = pAlloc();
         Log("[mxohax] EnsureInWorld: AllocPlayer(0x101d2370) -> 0x%p\n", pPlayer);
 
         if (pPlayer) {
@@ -663,6 +851,24 @@ static void EnsureInWorldRendering(uintptr_t clientBase, void* pWorldMgr, DWORD 
             pCtor(pPlayer, &flag, nullptr);
             Log("[mxohax] EnsureInWorld: PlayerCtor(0x101d17c0) initialized PlayerObject at 0x%p\n", pPlayer);
 
+            // Set coordinates for operative s1acker in Slums: (16802.3f, 495.0f, 3237.01f)
+            // Allocate full 64 bytes (16 floats) for 4x4 matrix/coords
+            float* pPos = *reinterpret_cast<float**>(reinterpret_cast<DWORD>(pPlayer) + 0x94);
+            if (!pPos) {
+                pPos = reinterpret_cast<float*>(calloc(16, sizeof(float)));
+                *reinterpret_cast<float**>(reinterpret_cast<DWORD>(pPlayer) + 0x94) = pPos;
+            }
+            if (pPos) {
+                pPos[0] = 16802.3f;
+                pPos[1] = 495.0f;
+                pPos[2] = 3237.01f;
+                pPos[3] = 1.0f;
+                pPos[4] = 0.0f;
+                pPos[5] = 1.0f;
+                pPos[15] = 1.0f;
+                Log("[mxohax] EnsureInWorld: Set Player coordinates to Slums (%.1f, %.1f, %.1f)\n", pPos[0], pPos[1], pPos[2]);
+            }
+
             typedef void (__thiscall *PlayerEnterWorld_t)(void* pPlayer);
             PlayerEnterWorld_t pEnter = reinterpret_cast<PlayerEnterWorld_t>(clientBase + 0x001D2180);
             pEnter(pPlayer);
@@ -671,23 +877,103 @@ static void EnsureInWorldRendering(uintptr_t clientBase, void* pWorldMgr, DWORD 
         }
     } else {
         s_playerEnteredWorld = true;
-    }
-
-    // Step 2: Ensure Camera is instantiated at [0x1089edf8]
-    void** ppCamera = reinterpret_cast<void**>(clientBase + 0x0089EDF8);
-    if (ppCamera && !*ppCamera) {
-        void* pCam = malloc(0x118);
-        if (pCam) {
-            memset(pCam, 0, 0x118);
-            typedef void (__thiscall *CamCtor_t)(void*);
-            CamCtor_t pCamCtor = reinterpret_cast<CamCtor_t>(clientBase + 0x0012F020);
-            pCamCtor(pCam);
-            *ppCamera = pCam;
-            Log("[mxohax] EnsureInWorld: Instantiated world camera at 0x%p into [0x1089edf8]!\n", pCam);
+        float* pPos = *reinterpret_cast<float**>(reinterpret_cast<DWORD>(pPlayer) + 0x94);
+        if (!pPos) {
+            pPos = reinterpret_cast<float*>(calloc(16, sizeof(float)));
+            *reinterpret_cast<float**>(reinterpret_cast<DWORD>(pPlayer) + 0x94) = pPos;
+        }
+        if (pPos && (pPos[0] == 0.0f && pPos[2] == 0.0f)) {
+            pPos[0] = 16802.3f;
+            pPos[1] = 495.0f;
+            pPos[2] = 3237.01f;
+            pPos[3] = 1.0f;
+            pPos[4] = 0.0f;
+            pPos[5] = 1.0f;
+            pPos[15] = 1.0f;
+            Log("[mxohax] EnsureInWorld: Updated existing Player coordinates to Slums (%.1f, %.1f, %.1f)\n", pPos[0], pPos[1], pPos[2]);
         }
     }
 
-    // Step 3: Activate in-world display & viewport via official UI SetControlVisible(0x1B, 1)
+    // Step 2b: Invoke native AdvanceToState3 (0x10121B50) to attach camera, bind scene, and start 3D simulation!
+    static bool s_advanceToState3Done = false;
+    if (pPlayer && !s_advanceToState3Done) {
+        s_advanceToState3Done = true;
+        Log("[mxohax] EnsureInWorld: Invoking native AdvanceToState3 (0x10121B50) on pWorldMgr=0x%p, pPlayer=0x%p...\n", pWorldMgr, pPlayer);
+        typedef void (__thiscall *AdvanceToState3_t)(void* pMgr, void* pPlayer);
+        AdvanceToState3_t pAdv3 = reinterpret_cast<AdvanceToState3_t>(clientBase + 0x00121B50);
+        pAdv3(pWorldMgr, pPlayer);
+        DWORD* pCurState = reinterpret_cast<DWORD*>(reinterpret_cast<DWORD>(pWorldMgr) + 0x1C);
+        Log("[mxohax] EnsureInWorld: AdvanceToState3 dispatched! State is now %u\n", pCurState ? *pCurState : 0);
+    }
+
+    // Step 3: Guaranteed World Engine and World Instance creation for [0x1089DD6C]
+    void** ppWorldInst = reinterpret_cast<void**>(clientBase + 0x0089DD6C);
+    typedef void* (__cdecl *GetWorldEngine_t)(DWORD);
+    GetWorldEngine_t pGetEngine = reinterpret_cast<GetWorldEngine_t>(clientBase + 0x003A5F30);
+    DWORD engArg = *reinterpret_cast<DWORD*>(clientBase + 0x00897F90);
+    void* pWorldEngine = pGetEngine(engArg);
+    Log("[mxohax] EnsureInWorld: Initial pWorldEngine=0x%p, [0x1089DD6C]=0x%p\n",
+        pWorldEngine, ppWorldInst ? *ppWorldInst : nullptr);
+
+    if (!pWorldEngine) {
+        Log("[mxohax] EnsureInWorld: Calling InitWorldEngine (0x103A5AC0)...\n");
+        typedef void (__cdecl *InitWorldEngine_t)();
+        InitWorldEngine_t pInitEngine = reinterpret_cast<InitWorldEngine_t>(clientBase + 0x003A5AC0);
+        pInitEngine();
+        pWorldEngine = pGetEngine(engArg);
+        Log("[mxohax] EnsureInWorld: Post-init pWorldEngine=0x%p\n", pWorldEngine);
+    }
+
+    if (pWorldEngine && ppWorldInst && !*ppWorldInst) {
+        float dummyMat[16] = {
+            16802.3f, 495.0f, 3237.01f, 1.0f,
+            0.0f, 1.0f, 0.0f, 0.0f,
+            0.0f, 0.0f, 1.0f, 0.0f,
+            0.0f, 0.0f, 0.0f, 1.0f
+        };
+        float* pMat = dummyMat;
+        if (pPlayer) {
+            float* pPlayerPos = *reinterpret_cast<float**>(reinterpret_cast<DWORD>(pPlayer) + 0x94);
+            if (pPlayerPos) pMat = pPlayerPos;
+        }
+        Log("[mxohax] EnsureInWorld: Invoking pWorldEngine->vtable[0](pMat, 0x1011FF10, 0) to instantiate World...\n", pWorldEngine);
+        typedef void* (__thiscall *CreateWorldInst_t)(void* pEng, void* pMatrix, void* pFn, int flag);
+        CreateWorldInst_t* vtable = *reinterpret_cast<CreateWorldInst_t**>(pWorldEngine);
+        if (vtable && vtable[0]) {
+            void* pInst = vtable[0](pWorldEngine, pMat, reinterpret_cast<void*>(clientBase + 0x0011FF10), 0);
+            *ppWorldInst = pInst;
+            Log("[mxohax] EnsureInWorld: SUCCESS! Instantiated World Instance 0x%p into [0x1089DD6C]!\n", pInst);
+        }
+    }
+
+    // Step 4: Ensure Camera is instantiated and oriented in Slums
+    void** ppCamera = reinterpret_cast<void**>(clientBase + 0x0089EDF8);
+    if (ppCamera) {
+        if (!*ppCamera) {
+            void* pCam = malloc(0x118);
+            if (pCam) {
+                memset(pCam, 0, 0x118);
+                typedef void (__thiscall *CamCtor_t)(void*);
+                CamCtor_t pCamCtor = reinterpret_cast<CamCtor_t>(clientBase + 0x0012F020);
+                pCamCtor(pCam);
+                *ppCamera = pCam;
+                Log("[mxohax] EnsureInWorld: Instantiated fallback camera at 0x%p into [0x1089edf8]!\n", pCam);
+            }
+        }
+        if (*ppCamera) {
+            DWORD pCamAddr = reinterpret_cast<DWORD>(*ppCamera);
+            float* pCamPos = reinterpret_cast<float*>(pCamAddr + 0x30);
+            if (pCamPos && (pCamPos[0] == 0.0f && pCamPos[2] == 0.0f)) {
+                pCamPos[0] = 16802.3f;
+                pCamPos[1] = 515.0f;
+                pCamPos[2] = 3180.0f;
+                Log("[mxohax] EnsureInWorld: Set camera position at +0x30 to Slums street view (%.1f, %.1f, %.1f)\n",
+                    pCamPos[0], pCamPos[1], pCamPos[2]);
+            }
+        }
+    }
+
+    // Step 5: Activate in-world display & viewport via official UI SetControlVisible(0x1B, 1)
     void* pUI = *reinterpret_cast<void**>(clientBase + 0x00898C54);
     if (pUI) {
         SetControlVisible_t pSetVisible = reinterpret_cast<SetControlVisible_t>(clientBase + 0x0001DB80);
@@ -695,7 +981,7 @@ static void EnsureInWorldRendering(uintptr_t clientBase, void* pWorldMgr, DWORD 
         Log("[mxohax] EnsureInWorld: Dispatched pUI->SetControlVisible(0x1B, 1)!\n");
     }
 
-    // Step 4: Ensure pWorldMgr + 0xC (viewport list) has a valid Viewport object
+    // Step 6: Ensure pWorldMgr + 0xC (viewport list) has a valid Viewport object
     void** ppListHead = reinterpret_cast<void**>(reinterpret_cast<DWORD>(pWorldMgr) + 0xC);
     if (ppListHead && *ppListHead) {
         void* head = *ppListHead;
@@ -737,7 +1023,7 @@ static void EnsureInWorldRendering(uintptr_t clientBase, void* pWorldMgr, DWORD 
         }
     }
 
-    // Step 4: Ensure pWorldMgr + 8 (viewport count) is 1
+    // Step 7: Ensure pWorldMgr + 8 (viewport count) is 1
     DWORD* pVpCount = reinterpret_cast<DWORD*>(reinterpret_cast<DWORD>(pWorldMgr) + 8);
     if (pVpCount && *pVpCount == 0) {
         DWORD one = 1;
@@ -747,12 +1033,18 @@ static void EnsureInWorldRendering(uintptr_t clientBase, void* pWorldMgr, DWORD 
         Log("[mxohax] EnsureInWorld: SetViewportCount(0x10114680) called -> pWorldMgr+8 is %u\n", *pVpCount);
     }
 
-    // Step 5: Set render & in-world flags
+    // Step 8: Set render & in-world flags
     *reinterpret_cast<BYTE*>(reinterpret_cast<DWORD>(pWorldMgr) + 0x20) = 1;
     *reinterpret_cast<BYTE*>(reinterpret_cast<DWORD>(pWorldMgr) + 0x22) = 1;
     *reinterpret_cast<BYTE*>(reinterpret_cast<DWORD>(pWorldMgr) + 0x27) = 1;
     if (pShell) {
         *reinterpret_cast<BYTE*>(pShell + 0x20) = 1; // CClientShell::m_inWorld = 1
+        HWND hWnd = *reinterpret_cast<HWND*>(pShell + 0x14);
+        if (hWnd) {
+            ShowWindow(hWnd, SW_RESTORE);
+            SetWindowPos(hWnd, HWND_TOPMOST, 0, 0, 1920, 1080, SWP_SHOWWINDOW | SWP_NOMOVE | SWP_NOSIZE);
+            SetForegroundWindow(hWnd);
+        }
     }
 
     DWORD* pState = reinterpret_cast<DWORD*>(reinterpret_cast<DWORD>(pWorldMgr) + 0x1C);
@@ -847,6 +1139,35 @@ static void __fastcall DetourFrameTick(void* pThis, void* /*edx*/) {
             }
         }
 
+        // Ensure World Instance remains valid in [0x1089DD6C]
+        void** ppWorldInstSticky = reinterpret_cast<void**>(clientBase + 0x0089DD6C);
+        if (ppWorldInstSticky && !*ppWorldInstSticky) {
+            typedef void* (__cdecl *GetWorldEngine_t)(DWORD);
+            GetWorldEngine_t pGetEngine = reinterpret_cast<GetWorldEngine_t>(clientBase + 0x003A5F30);
+            DWORD engArg = *reinterpret_cast<DWORD*>(clientBase + 0x00897F90);
+            void* pWorldEngine = pGetEngine(engArg);
+            if (!pWorldEngine) {
+                typedef void (__cdecl *InitWorldEngine_t)();
+                InitWorldEngine_t pInitEngine = reinterpret_cast<InitWorldEngine_t>(clientBase + 0x003A5AC0);
+                pInitEngine();
+                pWorldEngine = pGetEngine(engArg);
+            }
+            if (pWorldEngine) {
+                typedef void* (__thiscall *CreateWorldInst_t)(void* pEng, void* pMatrix, void* pFn, int flag);
+                CreateWorldInst_t* vtable = *reinterpret_cast<CreateWorldInst_t**>(pWorldEngine);
+                if (vtable && vtable[0]) {
+                    float dummyMat[16] = {
+                        16802.3f, 495.0f, 3237.01f, 1.0f,
+                        0.0f, 1.0f, 0.0f, 0.0f,
+                        0.0f, 0.0f, 1.0f, 0.0f,
+                        0.0f, 0.0f, 0.0f, 1.0f
+                    };
+                    *ppWorldInstSticky = vtable[0](pWorldEngine, dummyMat, reinterpret_cast<void*>(clientBase + 0x0011FF10), 0);
+                    Log("[mxohax] DetourFrameTick: Re-ensured [0x1089DD6C] = 0x%p\n", *ppWorldInstSticky);
+                }
+            }
+        }
+
         // Capture in-world screenshot verification after entering world
         static bool s_savedScreenshot = false;
         if (!s_savedScreenshot && s_tickCount >= 100) {
@@ -931,8 +1252,14 @@ static void __fastcall DetourFrameTick(void* pThis, void* /*edx*/) {
         }
     }
 
-    if (s_tickCount % 5000 == 0) {
-        Log("[mxohax] DetourFrameTick: Tick #%d active (inWorld=%u, sticky=%d)\n", s_tickCount, inWorld, s_inWorldSticky ? 1 : 0);
+    if (s_tickCount % 500 == 0) {
+        void* curWorldInst = *reinterpret_cast<void**>(clientBase + 0x0089DD6C);
+        void* curPlayer = *reinterpret_cast<void**>(clientBase + 0x008A4378);
+        void* curCam = *reinterpret_cast<void**>(clientBase + 0x0089EDF8);
+        DWORD curState = pWorldMgr ? *reinterpret_cast<DWORD*>(reinterpret_cast<DWORD>(pWorldMgr) + 0x1C) : 0;
+        BYTE curRenderFlag = pWorldMgr ? *reinterpret_cast<BYTE*>(reinterpret_cast<DWORD>(pWorldMgr) + 0x20) : 0;
+        Log("[mxohax] DetourFrameTick: Tick #%d active (State=%u, renderFlag=%d, inWorld=%u, sticky=%d, WorldInst=0x%p, Player=0x%p, Cam=0x%p)\n",
+            s_tickCount, curState, curRenderFlag, inWorld, s_inWorldSticky ? 1 : 0, curWorldInst, curPlayer, curCam);
     }
 
     // State machine management
@@ -944,30 +1271,22 @@ static void __fastcall DetourFrameTick(void* pThis, void* /*edx*/) {
         if (pState) {
             if (*pState == 1) {
                 s_state1Ticks++;
-                if (s_state1Ticks >= 5) {
-                    Log("[mxohax] DetourFrameTick: State 1 detected (tick %d)! Setting flags (0x25=1, 0x0089DD5D=1, *pState=0) and calling AdvanceState (0x10120060)...\n", s_state1Ticks);
-                    *reinterpret_cast<BYTE*>(reinterpret_cast<DWORD>(pWorldMgr) + 0x25) = 1;
-                    *reinterpret_cast<BYTE*>(clientBase + 0x0089DD5D) = 1;
-                    *pState = 0;
-
-                    typedef char (__thiscall *AdvanceState_t)(void* pMgr);
-                    AdvanceState_t pAdvance = reinterpret_cast<AdvanceState_t>(clientBase + 0x00120060);
-                    char res = pAdvance(pWorldMgr);
-                    Log("[mxohax] DetourFrameTick: AdvanceState returned %d! pWorldMgr State is now %u\n", res, *pState);
+                // Allow Margin auth and Screen 0x5D to execute naturally!
+                // Only trigger fallback AutoJackIn if stuck in State 1 for > 500 ticks
+                if (s_state1Ticks >= 500 && !s_autoJackInDone) {
+                    Log("[mxohax] DetourFrameTick: State 1 safety threshold reached (tick %d) -> triggering AutoJackIn...\n", s_state1Ticks);
+                    if (TryAutoJackIn(clientBase)) {
+                        s_autoJackInDone = true;
+                    }
                 }
-            } else if (*pState == 0 && *reinterpret_cast<BYTE*>(reinterpret_cast<DWORD>(pWorldMgr) + 0x25) == 1) {
-                Log("[mxohax] DetourFrameTick: State 0 with 0x25=1 detected! Calling AdvanceState to enter world...\n");
-                typedef char (__thiscall *AdvanceState_t)(void* pMgr);
-                AdvanceState_t pAdvance = reinterpret_cast<AdvanceState_t>(clientBase + 0x00120060);
-                char res = pAdvance(pWorldMgr);
-                Log("[mxohax] DetourFrameTick: AdvanceState returned %d! pWorldMgr State is now %u\n", res, *pState);
             } else if (*pState == 2) {
                 s_state2Ticks++;
                 if (s_state2Ticks % 50 == 0) {
-                    Log("[mxohax] DetourFrameTick: State 2 active (tick %d). Waiting for EnterWorldWithCharacter / streaming...\n", s_state2Ticks);
+                    Log("[mxohax] DetourFrameTick: State 2 active (tick %d). Waiting for world loading / streaming...\n", s_state2Ticks);
                 }
-                if (s_state2Ticks >= 120 && !s_playerEnteredWorld) {
-                    Log("[mxohax] DetourFrameTick: State 2 threshold reached (tick %d) -> ensuring in-world rendering...\n", s_state2Ticks);
+                // Safety fallback if State 2 never transitions to State 4
+                if (s_state2Ticks >= 600 && !s_playerEnteredWorld) {
+                    Log("[mxohax] DetourFrameTick: State 2 safety threshold reached (tick %d) -> ensuring in-world rendering...\n", s_state2Ticks);
                     EnsureInWorldRendering(clientBase, pWorldMgr, pShell);
                 }
             } else if (*pState == 4) {
@@ -984,13 +1303,9 @@ static void __fastcall DetourFrameTick(void* pThis, void* /*edx*/) {
                     IsFinished_t pIsFinished = reinterpret_cast<IsFinished_t>(clientBase + 0x002066C0);
                     finished = pIsFinished(pLevelSys);
                 }
-                if ((finished && s_state4Ticks >= 10) || s_state4Ticks >= 200) {
-                    Log("[mxohax] DetourFrameTick: Streaming complete (finished=%d, ticks=%d)! Calling OnStreamingDone (0x1012A3D0)...\n",
+                if ((finished && s_state4Ticks >= 10) || s_state4Ticks >= 150) {
+                    Log("[mxohax] DetourFrameTick: Streaming complete (finished=%d, ticks=%d)!\n",
                         finished, s_state4Ticks);
-                    typedef void (__thiscall *StreamingDone_t)(void* pMgr);
-                    StreamingDone_t pDone = reinterpret_cast<StreamingDone_t>(clientBase + 0x0012A3D0);
-                    pDone(pWorldMgr);
-                    Log("[mxohax] DetourFrameTick: Streaming callback completed! State is now %u\n", *pState);
 
                     // Ensure active world geometry buffer is ready (0xE0 = 1, 0xB9 = 1)
                     if (pLevelSys) {
@@ -1266,6 +1581,12 @@ static void ApplyClientPatches(HMODULE hClient) {
     // 5. Preserving native render display resolution and mode parameters (0x00896CCC - 0x00896D74)
     Log("[mxohax] Preserved native client.dll display resolution globals.\n");
 
+    // 5.5 Set default fallback world file pointer at clientBase + 0x00896E4C to slums METR world
+    static const char s_initMetrPath[] = "resource/worlds/final_world/slums_barrens_full.metr";
+    *reinterpret_cast<const char**>(clientBase + 0x00896E4C) = s_initMetrPath;
+    Log("[mxohax] SUCCESS: Configured fallback world file pointer [0x%08X] -> %s\n",
+        clientBase + 0x00896E4C, s_initMetrPath);
+
     // 6. Direct World Load Patches:
     // Patch A: Preserved native client.dll + 0x0012196E (movzx esi, bl) so character selection and auto-login operate naturally.
     Log("[mxohax] Preserved native character select logic at client.dll + 0x0012196E.\n");
@@ -1273,12 +1594,22 @@ static void ApplyClientPatches(HMODULE hClient) {
     // Patch B: Removed. Leaving native clean ret 0x14 at 0x10121AE6 so the function epilogue executes cleanly.
     Log("[mxohax] Preserved native clean character load epilogue at client.dll + 0x00121AE6.\n");
 
+    // Patch J: 0x0012B388: 2 bytes (EB 09 instead of 74 09)
+    // Bypasses destructive LeaveWorld(0x1012A3D0) when CLevelSystem::IsFinished returns 1 in State 4
+    DWORD oldProt = 0;
+    LPVOID pLeaveWorldBypass = reinterpret_cast<LPVOID>(clientBase + 0x0012B388);
+    if (VirtualProtect(pLeaveWorldBypass, 2, PAGE_EXECUTE_READWRITE, &oldProt)) {
+        BYTE patchJ[2] = { 0xEB, 0x09 }; // jmp short +0x09
+        memcpy(pLeaveWorldBypass, patchJ, 2);
+        VirtualProtect(pLeaveWorldBypass, 2, oldProt, &oldProt);
+        FlushInstructionCache(GetCurrentProcess(), pLeaveWorldBypass, 2);
+        Log("[mxohax] SUCCESS: Patched client.dll + 0x0012B388 (EB 09) to bypass premature LeaveWorld in State 4!\n");
+    }
+
     // Patch C: 0x0012B3EE: 16 bytes safe camera check
     g_pEdf8Addr = clientBase + 0x0089EDF8;
     g_retCameraNormal = clientBase + 0x0012B3FE;
     g_retCameraSkip = clientBase + 0x0012B4F1;
-
-    DWORD oldProt = 0;
     LPVOID pCamPatch = reinterpret_cast<LPVOID>(clientBase + 0x0012B3EE);
     if (VirtualProtect(pCamPatch, 16, PAGE_EXECUTE_READWRITE, &oldProt)) {
         BYTE patch[16];
@@ -1384,6 +1715,17 @@ HMODULE WINAPI DetourLoadLibraryA(LPCSTR lpLibFileName) {
             Log("[mxohax] DetourLoadLibraryA intercepted client.dll loaded at 0x%p! Applying patches synchronously...\n", (void*)hMod);
             ApplyClientPatches(hMod);
         }
+        if (_stricmp(name, "d3d9.dll") == 0) {
+            LPVOID pTarget = nullptr;
+            if (!OriginalDirect3DCreate9 && MH_CreateHookApiEx(L"d3d9.dll", "Direct3DCreate9", (LPVOID)&DetourDirect3DCreate9, (LPVOID*)&OriginalDirect3DCreate9, &pTarget) == MH_OK) {
+                MH_EnableHook(pTarget);
+                Log("[mxohax] DetourLoadLibraryA: hooked d3d9.dll Direct3DCreate9 at 0x%p\n", pTarget);
+            }
+            if (!OriginalDirect3DCreate9Ex && MH_CreateHookApiEx(L"d3d9.dll", "Direct3DCreate9Ex", (LPVOID)&DetourDirect3DCreate9Ex, (LPVOID*)&OriginalDirect3DCreate9Ex, &pTarget) == MH_OK) {
+                MH_EnableHook(pTarget);
+                Log("[mxohax] DetourLoadLibraryA: hooked d3d9.dll Direct3DCreate9Ex at 0x%p\n", pTarget);
+            }
+        }
     }
     return hMod;
 }
@@ -1429,6 +1771,19 @@ static void InitializeMxOHaxSynchronous() {
     if (MH_CreateHookApiEx(L"kernel32.dll", "LoadLibraryA", (LPVOID)&DetourLoadLibraryA, (LPVOID*)&OriginalLoadLibraryA, &pTarget) == MH_OK) {
         MH_EnableHook(pTarget);
         Log("[mxohax] SUCCESS: kernel32.dll LoadLibraryA hooked at 0x%p\n", pTarget);
+    }
+
+    // 1b. Hook Direct3D 9 creation
+    HMODULE hD3D9 = LoadLibraryA("d3d9.dll");
+    if (hD3D9) {
+        if (!OriginalDirect3DCreate9 && MH_CreateHookApiEx(L"d3d9.dll", "Direct3DCreate9", (LPVOID)&DetourDirect3DCreate9, (LPVOID*)&OriginalDirect3DCreate9, &pTarget) == MH_OK) {
+            MH_EnableHook(pTarget);
+            Log("[mxohax] SUCCESS: d3d9.dll Direct3DCreate9 hooked at 0x%p\n", pTarget);
+        }
+        if (!OriginalDirect3DCreate9Ex && MH_CreateHookApiEx(L"d3d9.dll", "Direct3DCreate9Ex", (LPVOID)&DetourDirect3DCreate9Ex, (LPVOID*)&OriginalDirect3DCreate9Ex, &pTarget) == MH_OK) {
+            MH_EnableHook(pTarget);
+            Log("[mxohax] SUCCESS: d3d9.dll Direct3DCreate9Ex hooked at 0x%p\n", pTarget);
+        }
     }
 
     // 2. Hook WinSock functions (ws2_32.dll)
@@ -1518,7 +1873,8 @@ static void InitializeMxOHaxSynchronous() {
         Log("[mxohax] SUCCESS: Patched matrix.exe + 0x0000977A (mov dl, 1) to force autoJackIn parameter!\n");
     }
 
-    // 8. Patch matrix.exe 0x00407161 (NOP * 5) to force Margin State 8 auto-transition directly to State 10 (Jack In)
+    // 8. Patch matrix.exe 0x00407161 - DISABLED: allow matrix.exe Margin State machine to execute naturally
+    /*
     LPVOID pState8Patch = reinterpret_cast<LPVOID>(0x00407161);
     if (VirtualProtect(pState8Patch, 5, PAGE_EXECUTE_READWRITE, &oldProt)) {
         BYTE nop5[5] = { 0x90, 0x90, 0x90, 0x90, 0x90 };
@@ -1527,6 +1883,7 @@ static void InitializeMxOHaxSynchronous() {
         FlushInstructionCache(GetCurrentProcess(), pState8Patch, 5);
         Log("[mxohax] SUCCESS: Patched matrix.exe + 0x00007161 (NOP * 5) to bypass Margin State 8 check and jump to State 10!\n");
     }
+    */
 
     // 9. Set matrix.exe autoJackIn global at 0x004AFDA9 to 1
     LPVOID pGlobalAutoJackIn = reinterpret_cast<LPVOID>(0x004AFDA9);
