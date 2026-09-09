@@ -80,6 +80,11 @@ static LONG WINAPI CrashHandler(PEXCEPTION_POINTERS pExc) {
                 ctx->Eip = static_cast<DWORD>(clientBase + 0x000A2213);
                 return EXCEPTION_CONTINUE_EXECUTION;
             }
+            if (clientBase && (uintptr_t)addr == clientBase + 0x001152D7 && ctx) {
+                Log("[mxohax] Recovering from crash at client.dll + 0x001152D7 (Viewport vtable). Jumping to safe return (0x%p)\n", (void*)(clientBase + 0x001155A9));
+                ctx->Eip = static_cast<DWORD>(clientBase + 0x001155A9);
+                return EXCEPTION_CONTINUE_EXECUTION;
+            }
             if (clientBase && ((uintptr_t)addr == clientBase + 0x00001C1C || (uintptr_t)addr == clientBase + 0x00001C10) && ctx) {
                 Log("[mxohax] Recovering from invalid pointer write at client.dll + 0x%08X (eax=0x%08X): skipping 2 bytes\n",
                     (uintptr_t)addr - clientBase, ctx->Eax);
@@ -231,10 +236,10 @@ int PASCAL DetourConnect(SOCKET s, const struct sockaddr *name, int namelen) {
         u_short port = ntohs(sin->sin_port);
         char* ip = inet_ntoa(sin->sin_addr);
         Log("[mxohax] connect() called: dest=%s:%u\n", ip ? ip : "unknown", port);
-        if (port == 10000 || port == 11000 || port == 80) {
+        if (port == 10000 || port == 11000 || port == 80 || (ip && strcmp(ip, "127.0.0.1") == 0)) {
             struct sockaddr_in redirected = *sin;
             redirected.sin_addr.s_addr = inet_addr(g_TargetServerIp);
-            Log("[mxohax] connect() redirected for port %u -> routing to %s:%u\n", port, g_TargetServerIp, port);
+            Log("[mxohax] connect() redirected dest=%s:%u -> routing to %s:%u\n", ip ? ip : "unknown", port, g_TargetServerIp, port);
             return OriginalConnect ? OriginalConnect(s, (struct sockaddr*)&redirected, namelen) : SOCKET_ERROR;
         }
     }
@@ -248,7 +253,8 @@ int PASCAL DetourSendTo(SOCKET s, const char *buf, int len, int flags, const str
     if (to && to->sa_family == AF_INET && tolen >= sizeof(struct sockaddr_in)) {
         struct sockaddr_in* sin = (struct sockaddr_in*)to;
         u_short port = ntohs(sin->sin_port);
-        if (port == 10000) {
+        char* ip = inet_ntoa(sin->sin_addr);
+        if (port == 10000 || port == 11000 || (ip && strcmp(ip, "127.0.0.1") == 0)) {
             struct sockaddr_in redirected = *sin;
             redirected.sin_addr.s_addr = inet_addr(g_TargetServerIp);
             static bool s_loggedSend = false;
@@ -258,7 +264,7 @@ int PASCAL DetourSendTo(SOCKET s, const char *buf, int len, int flags, const str
                 for (int i = 0; i < len && i < 64; ++i) {
                     sprintf(hexBuf + i * 3, "%02X ", (unsigned char)buf[i]);
                 }
-                Log("[mxohax] sendto() UDP transmitting %d bytes to port 10000 at %s. Hex: %s\n", len, g_TargetServerIp, hexBuf);
+                Log("[mxohax] sendto() UDP transmitting %d bytes to port %u at %s. Hex: %s\n", len, port, g_TargetServerIp, hexBuf);
             }
             return OriginalSendTo ? OriginalSendTo(s, buf, len, flags, (struct sockaddr*)&redirected, tolen) : SOCKET_ERROR;
         }
@@ -477,7 +483,9 @@ static void __fastcall DetourClearCharObjects(void* pThis, void* /*edx*/) {
 // UI Tracing Hooks
 typedef void (__thiscall *Control_t)(void* pUI, DWORD ctrlId);
 static Control_t OriginalHideControl = nullptr;
-static Control_t OriginalShowControl = nullptr;
+
+typedef void (__thiscall *SetControlVisible_t)(void* pUI, DWORD ctrlId, BOOL bVisible);
+static SetControlVisible_t OriginalSetControlVisible = nullptr;
 
 static void __fastcall DetourHideControl(void* pUI, void* /*edx*/, DWORD ctrlId) {
     if (ctrlId != 0x1A) {
@@ -487,22 +495,25 @@ static void __fastcall DetourHideControl(void* pUI, void* /*edx*/, DWORD ctrlId)
 }
 
 static bool s_inWorldSticky = false;
+static bool s_playerEnteredWorld = false;
 static bool s_screen5DActive = false;
 static bool s_autoJackInDone = false;
 static int  s_screen5DFrames = 0;
 
-static void __fastcall DetourShowControl(void* pUI, void* /*edx*/, DWORD ctrlId) {
-    Log("[mxohax] ShowControl: 0x%02X\n", ctrlId);
-    if (s_inWorldSticky && (ctrlId == 0x30 || ctrlId == 0x5D || ctrlId == 0x04 || ctrlId == 0x57)) {
-        Log("[mxohax] ShowControl: 0x%02X suppressed while in-world!\n", ctrlId);
-        return;
+static void __fastcall DetourSetControlVisible(void* pUI, void* /*edx*/, DWORD ctrlId, BOOL bVisible) {
+    if (ctrlId != 0x1A) {
+        Log("[mxohax] SetControlVisible: 0x%02X (bVisible=%d)\n", ctrlId, bVisible ? 1 : 0);
     }
-    if (ctrlId == 0x5D) {
+    if (ctrlId == 0x5D && bVisible) {
         s_screen5DActive = true;
         s_screen5DFrames = 0;
         Log("[mxohax] Screen 0x5D (Character Selection) became active! AutoJackIn engaged.\n");
     }
-    if (OriginalShowControl) OriginalShowControl(pUI, ctrlId);
+    if (s_inWorldSticky && bVisible && (ctrlId == 0x30 || ctrlId == 0x5D || ctrlId == 0x04 || ctrlId == 0x57)) {
+        Log("[mxohax] SetControlVisible: 0x%02X suppressed while in-world!\n", ctrlId);
+        return;
+    }
+    if (OriginalSetControlVisible) OriginalSetControlVisible(pUI, ctrlId, bVisible);
 }
 
 // Hook for client.dll export InitClientDLL (client.dll + 0x00001270)
@@ -535,7 +546,7 @@ static bool TryAutoJackIn(DWORD clientBase) {
     void* pWorldMgr = *reinterpret_cast<void**>(clientBase + 0x0089DD68);
     if (!pWorldMgr) return false;
 
-    // 1. Dismiss Screen 0x30 (Login screen), but do NOT hide Screen 0x5D yet (avoid black window)
+    // 1. Dismiss Screen 0x30 (Login screen), but do NOT hide Screen 0x5D yet
     if (OriginalHideControl) {
         void* pUI = *reinterpret_cast<void**>(clientBase + 0x00898C54);
         if (pUI) {
@@ -577,20 +588,190 @@ static bool TryAutoJackIn(DWORD clientBase) {
         Log("[mxohax] [AutoJackIn] Margin State 9 transition invoked successfully!\n");
     }
 
-    // 5. Invoke EnterWorldWithCharacter if character vector is ready
-    DWORD pCharBegin = *reinterpret_cast<DWORD*>(clientBase + 0x00899B4C);
-    DWORD pCharEnd   = *reinterpret_cast<DWORD*>(clientBase + 0x00899B50);
-    if (pCharBegin && pCharEnd > pCharBegin) {
-        void* pChar = reinterpret_cast<void*>(pCharBegin);
-        Log("[mxohax] [AutoJackIn] Operative #0 ready at 0x%p! Invoking EnterWorldWithCharacter(pMgr=0x%p, pChar=0x%p)...\n",
-            pChar, pWorldMgr, pChar);
+    // 5. Populate character vector and invoke EnterWorldWithCharacter
+    #pragma pack(push, 1)
+    struct MxoLocalCharEntry {
+        char* pWorldFirst;
+        char* pWorldLast;
+        char* pWorldEnd;
+        char* pHandleFirst;
+        char* pHandleLast;
+        char* pHandleEnd;
+        uint32_t charId;  // 0x18: 360
+        uint32_t worldId; // 0x1C: 1
+    };
+    #pragma pack(pop)
+
+    static char s_worldFileName[] = "slums.cnb";
+    static char s_charHandleStr[] = "s1acker";
+    static MxoLocalCharEntry s_localCharEntry;
+    s_localCharEntry.pWorldFirst  = s_worldFileName;
+    s_localCharEntry.pWorldLast   = s_worldFileName + strlen(s_worldFileName);
+    s_localCharEntry.pWorldEnd    = s_localCharEntry.pWorldLast;
+    s_localCharEntry.pHandleFirst = s_charHandleStr;
+    s_localCharEntry.pHandleLast  = s_charHandleStr + strlen(s_charHandleStr);
+    s_localCharEntry.pHandleEnd   = s_localCharEntry.pHandleLast;
+    s_localCharEntry.charId       = 360;
+    s_localCharEntry.worldId      = 1;
+
+    DWORD* ppCharBegin = reinterpret_cast<DWORD*>(clientBase + 0x00899B4C);
+    DWORD* ppCharEnd   = reinterpret_cast<DWORD*>(clientBase + 0x00899B50);
+    void* pCharToEnter = nullptr;
+    if (ppCharBegin && ppCharEnd) {
+        if (*ppCharEnd > *ppCharBegin) {
+            pCharToEnter = reinterpret_cast<void*>(*ppCharBegin);
+            Log("[mxohax] [AutoJackIn] Found %d existing operative entries in 0x00899B4C! Using entry #0 at 0x%p\n",
+                (*ppCharEnd - *ppCharBegin) / 32, pCharToEnter);
+        } else {
+            *ppCharBegin = reinterpret_cast<DWORD>(&s_localCharEntry);
+            *ppCharEnd   = reinterpret_cast<DWORD>(&s_localCharEntry) + sizeof(s_localCharEntry);
+            pCharToEnter = &s_localCharEntry;
+            Log("[mxohax] [AutoJackIn] Mounted synthetic operative s1acker (slums.cnb) into vector at 0x00899B4C\n");
+        }
+    } else {
+        pCharToEnter = &s_localCharEntry;
+    }
+
+    if (pCharToEnter) {
+        Log("[mxohax] [AutoJackIn] Invoking EnterWorldWithCharacter(pWorldMgr=0x%p, pChar=0x%p)...\n",
+            pWorldMgr, pCharToEnter);
         typedef void (__thiscall *EnterWorld_t)(void* pMgr, void* pChar);
         EnterWorld_t pEnterWorld = reinterpret_cast<EnterWorld_t>(clientBase + 0x00124070);
-        pEnterWorld(pWorldMgr, pChar);
-        Log("[mxohax] [AutoJackIn] EnterWorldWithCharacter dispatched successfully!\n");
+        pEnterWorld(pWorldMgr, pCharToEnter);
+        Log("[mxohax] [AutoJackIn] EnterWorldWithCharacter dispatched successfully! pWorldMgr State is now %u\n",
+            pState ? *pState : 0);
     }
 
     return true;
+}
+
+static void EnsureInWorldRendering(uintptr_t clientBase, void* pWorldMgr, DWORD pShell) {
+    if (!pWorldMgr) return;
+
+    // Step 1: Ensure PlayerObject is allocated and in world
+    void** ppPlayerGlobal = reinterpret_cast<void**>(clientBase + 0x008A4378);
+    if (!*ppPlayerGlobal) {
+        typedef void* (__cdecl *AllocPlayer_t)();
+        AllocPlayer_t pAlloc = reinterpret_cast<AllocPlayer_t>(clientBase + 0x001D2370);
+        void* pPlayer = pAlloc();
+        Log("[mxohax] EnsureInWorld: AllocPlayer(0x101d2370) -> 0x%p\n", pPlayer);
+
+        if (pPlayer) {
+            BYTE flag = 0;
+            typedef void (__thiscall *PlayerCtor_t)(void* pThis, BYTE* pFlag, void* pExtraObj);
+            PlayerCtor_t pCtor = reinterpret_cast<PlayerCtor_t>(clientBase + 0x001D17C0);
+            pCtor(pPlayer, &flag, nullptr);
+            Log("[mxohax] EnsureInWorld: PlayerCtor(0x101d17c0) initialized PlayerObject at 0x%p\n", pPlayer);
+
+            typedef void (__thiscall *PlayerEnterWorld_t)(void* pPlayer);
+            PlayerEnterWorld_t pEnter = reinterpret_cast<PlayerEnterWorld_t>(clientBase + 0x001D2180);
+            pEnter(pPlayer);
+            s_playerEnteredWorld = true;
+            Log("[mxohax] EnsureInWorld: PlayerEnterWorld(0x101d2180) executed! [0x108a4378]=0x%p\n", *ppPlayerGlobal);
+        }
+    } else {
+        s_playerEnteredWorld = true;
+    }
+
+    // Step 2: Ensure Camera is instantiated at [0x1089edf8]
+    void** ppCamera = reinterpret_cast<void**>(clientBase + 0x0089EDF8);
+    if (ppCamera && !*ppCamera) {
+        void* pCam = malloc(0x118);
+        if (pCam) {
+            memset(pCam, 0, 0x118);
+            typedef void (__thiscall *CamCtor_t)(void*);
+            CamCtor_t pCamCtor = reinterpret_cast<CamCtor_t>(clientBase + 0x0012F020);
+            pCamCtor(pCam);
+            *ppCamera = pCam;
+            Log("[mxohax] EnsureInWorld: Instantiated world camera at 0x%p into [0x1089edf8]!\n", pCam);
+        }
+    }
+
+    // Step 3: Activate in-world display & viewport via official UI SetControlVisible(0x1B, 1)
+    void* pUI = *reinterpret_cast<void**>(clientBase + 0x00898C54);
+    if (pUI) {
+        SetControlVisible_t pSetVisible = reinterpret_cast<SetControlVisible_t>(clientBase + 0x0001DB80);
+        pSetVisible(pUI, 0x1B, 1);
+        Log("[mxohax] EnsureInWorld: Dispatched pUI->SetControlVisible(0x1B, 1)!\n");
+    }
+
+    // Step 4: Ensure pWorldMgr + 0xC (viewport list) has a valid Viewport object
+    void** ppListHead = reinterpret_cast<void**>(reinterpret_cast<DWORD>(pWorldMgr) + 0xC);
+    if (ppListHead && *ppListHead) {
+        void* head = *ppListHead;
+        void* first = *reinterpret_cast<void**>(head);
+        if (first == head) {
+            // Viewport list empty -> call CWorldMgr::CreateViewport(0x1011EAD0)
+            int width = *reinterpret_cast<int*>(clientBase + 0x00896CCC);
+            int height = *reinterpret_cast<int*>(clientBase + 0x00896D04);
+            if (width <= 0 || height <= 0) {
+                width = 1024;
+                height = 768;
+            }
+            Log("[mxohax] EnsureInWorld: Calling CWorldMgr::CreateViewport(0x1011EAD0) with %dx%d (pCam=0x%p)...\n",
+                width, height, ppCamera ? *ppCamera : nullptr);
+            typedef void (__thiscall *CreateViewport_t)(void* pMgr, int w, int h);
+            CreateViewport_t pCreateVp = reinterpret_cast<CreateViewport_t>(clientBase + 0x0011EAD0);
+            pCreateVp(pWorldMgr, width, height);
+
+            void* newFirst = *reinterpret_cast<void**>(head);
+            Log("[mxohax] EnsureInWorld: CreateViewport returned. List head->next is now 0x%p\n", newFirst);
+
+            if (newFirst == head) {
+                // Fallback: instantiate Viewport via Engine Object Factory (0x1023f3e0) with Class ID 0x28000831
+                void* pFactory = *reinterpret_cast<void**>(clientBase + 0x008A9180);
+                if (pFactory) {
+                    DWORD classId = 0x28000831;
+                    typedef void* (__thiscall *CreateObj_t)(void* pFac, DWORD* pId);
+                    CreateObj_t pCreateObj = reinterpret_cast<CreateObj_t>(clientBase + 0x0023F3E0);
+                    void* pVp = pCreateObj(pFactory, &classId);
+                    Log("[mxohax] EnsureInWorld: Factory::CreateObject(0x28000831) -> 0x%p\n", pVp);
+                    if (pVp) {
+                        typedef void (__thiscall *ListPushBack_t)(void* pList, void** ppItem);
+                        ListPushBack_t pPush = reinterpret_cast<ListPushBack_t>(clientBase + 0x00045A60);
+                        pPush(ppListHead, &pVp);
+                        Log("[mxohax] EnsureInWorld: Pushed factory viewport 0x%p into pWorldMgr+0xC list!\n", pVp);
+                    }
+                }
+            }
+        }
+    }
+
+    // Step 4: Ensure pWorldMgr + 8 (viewport count) is 1
+    DWORD* pVpCount = reinterpret_cast<DWORD*>(reinterpret_cast<DWORD>(pWorldMgr) + 8);
+    if (pVpCount && *pVpCount == 0) {
+        DWORD one = 1;
+        typedef void (__thiscall *SetVpCount_t)(void* pMgr, DWORD* pCount);
+        SetVpCount_t pSetVp = reinterpret_cast<SetVpCount_t>(clientBase + 0x00114680);
+        pSetVp(pWorldMgr, &one);
+        Log("[mxohax] EnsureInWorld: SetViewportCount(0x10114680) called -> pWorldMgr+8 is %u\n", *pVpCount);
+    }
+
+    // Step 5: Set render & in-world flags
+    *reinterpret_cast<BYTE*>(reinterpret_cast<DWORD>(pWorldMgr) + 0x20) = 1;
+    *reinterpret_cast<BYTE*>(reinterpret_cast<DWORD>(pWorldMgr) + 0x22) = 1;
+    *reinterpret_cast<BYTE*>(reinterpret_cast<DWORD>(pWorldMgr) + 0x27) = 1;
+    if (pShell) {
+        *reinterpret_cast<BYTE*>(pShell + 0x20) = 1; // CClientShell::m_inWorld = 1
+    }
+
+    DWORD* pState = reinterpret_cast<DWORD*>(reinterpret_cast<DWORD>(pWorldMgr) + 0x1C);
+    if (pState) {
+        *pState = 3;
+    }
+    s_inWorldSticky = true;
+    Log("[mxohax] ******************************************************\n");
+    Log("[mxohax] *** PROMOTED TO STATE 3 (IN-WORLD)! 3D SIMULATION ACTIVE! ***\n");
+    Log("[mxohax] ******************************************************\n");
+
+    // Dismiss 2D loading screens
+    if (pUI && OriginalHideControl) {
+        OriginalHideControl(pUI, 0x04);
+        OriginalHideControl(pUI, 0x57);
+        OriginalHideControl(pUI, 0x30);
+        OriginalHideControl(pUI, 0x5D);
+        Log("[mxohax] EnsureInWorld: Dismissed loading screens 0x04, 0x57, 0x30 and 0x5D!\n");
+    }
 }
 
 // 0x001F9140: True per-frame tick on main thread (called inside RunClientDLL 0x10006640)
@@ -637,7 +818,7 @@ static void __fastcall DetourFrameTick(void* pThis, void* /*edx*/) {
             *reinterpret_cast<BYTE*>(reinterpret_cast<DWORD>(pWorldMgr) + 0x22) = 1;
             *reinterpret_cast<BYTE*>(reinterpret_cast<DWORD>(pWorldMgr) + 0x27) = 1;
             DWORD* pState = reinterpret_cast<DWORD*>(reinterpret_cast<DWORD>(pWorldMgr) + 0x1C);
-            if (pState && *pState != 3) {
+            if (pState && *pState != 3 && *pState != 4) {
                 *pState = 3;
             }
         }
@@ -647,6 +828,88 @@ static void __fastcall DetourFrameTick(void* pThis, void* /*edx*/) {
             OriginalHideControl(pUI, 0x57);
             OriginalHideControl(pUI, 0x30);
             OriginalHideControl(pUI, 0x5D);
+        }
+
+        // Keep Viewport list and count active for 3D rendering
+        if (pWorldMgr) {
+            void** ppListHead = reinterpret_cast<void**>(reinterpret_cast<DWORD>(pWorldMgr) + 0xC);
+            if (ppListHead && *ppListHead) {
+                void* head = *ppListHead;
+                void* first = *reinterpret_cast<void**>(head);
+                if (first == head && pUI) {
+                    SetControlVisible_t pSetVisible = reinterpret_cast<SetControlVisible_t>(clientBase + 0x0001DB80);
+                    pSetVisible(pUI, 0x1B, 1);
+                }
+            }
+            DWORD* pVpCount = reinterpret_cast<DWORD*>(reinterpret_cast<DWORD>(pWorldMgr) + 8);
+            if (pVpCount && *pVpCount == 0) {
+                *pVpCount = 1;
+            }
+        }
+
+        // Capture in-world screenshot verification after entering world
+        static bool s_savedScreenshot = false;
+        if (!s_savedScreenshot && s_tickCount >= 100) {
+            s_savedScreenshot = true;
+            HWND hWnd = *reinterpret_cast<HWND*>(pShell + 0x14);
+            if (!hWnd) hWnd = GetActiveWindow();
+            if (!hWnd) hWnd = GetForegroundWindow();
+            Log("[mxohax] In-world screenshot capture: HWND=0x%p\n", hWnd);
+            if (hWnd) {
+                RECT rc;
+                GetClientRect(hWnd, &rc);
+                int w = rc.right - rc.left;
+                int h = rc.bottom - rc.top;
+                Log("[mxohax] In-world HWND client rect: %dx%d\n", w, h);
+                if (w > 0 && h > 0) {
+                    HDC hdcWnd = GetDC(hWnd);
+                    if (hdcWnd) {
+                        HDC hdcMem = CreateCompatibleDC(hdcWnd);
+                        HBITMAP hbm = CreateCompatibleBitmap(hdcWnd, w, h);
+                        HGDIOBJ oldBm = SelectObject(hdcMem, hbm);
+                        PrintWindow(hWnd, hdcMem, 2);
+                        BITMAPINFOHEADER bi = { sizeof(BITMAPINFOHEADER), w, h, 1, 32, BI_RGB, 0, 0, 0, 0, 0 };
+                        DWORD bmpSize = w * h * 4;
+                        BYTE* pPixels = (BYTE*)malloc(bmpSize);
+                        if (pPixels) {
+                            GetDIBits(hdcMem, hbm, 0, h, pPixels, (BITMAPINFO*)&bi, DIB_RGB_COLORS);
+                            BITMAPFILEHEADER bfh = { 0x4D42, sizeof(BITMAPFILEHEADER) + sizeof(BITMAPINFOHEADER) + bmpSize, 0, 0, sizeof(BITMAPFILEHEADER) + sizeof(BITMAPINFOHEADER) };
+                            FILE* fp = fopen("inworld_render.bmp", "wb");
+                            if (fp) {
+                                fwrite(&bfh, sizeof(bfh), 1, fp);
+                                fwrite(&bi, sizeof(bi), 1, fp);
+                                fwrite(pPixels, bmpSize, 1, fp);
+                                fclose(fp);
+                                Log("[mxohax] Successfully saved in-world screenshot to inworld_render.bmp (%dx%d)!\n", w, h);
+                            }
+                            free(pPixels);
+                        }
+                        SelectObject(hdcMem, oldBm);
+                        DeleteObject(hbm);
+                        DeleteDC(hdcMem);
+                        ReleaseDC(hWnd, hdcWnd);
+                    }
+                }
+            }
+        }
+    }
+
+    // Instantiating world camera ONLY when in-world (State 3) and Camera is NULL
+    if (pWorldMgr) {
+        DWORD* pState = reinterpret_cast<DWORD*>(reinterpret_cast<DWORD>(pWorldMgr) + 0x1C);
+        if (pState && (*pState == 3 || s_inWorldSticky)) {
+            void** ppCamera = reinterpret_cast<void**>(clientBase + 0x0089EDF8);
+            if (ppCamera && !*ppCamera) {
+                void* pCam = malloc(0x118);
+                if (pCam) {
+                    memset(pCam, 0, 0x118);
+                    typedef void (__thiscall *CamCtor_t)(void*);
+                    CamCtor_t pCamCtor = reinterpret_cast<CamCtor_t>(clientBase + 0x0012F020);
+                    pCamCtor(pCam);
+                    *ppCamera = pCam;
+                    Log("[mxohax] Instantiated world camera at 0x%p into [0x1089edf8]!\n", pCam);
+                }
+            }
         }
     }
 
@@ -672,9 +935,10 @@ static void __fastcall DetourFrameTick(void* pThis, void* /*edx*/) {
         Log("[mxohax] DetourFrameTick: Tick #%d active (inWorld=%u, sticky=%d)\n", s_tickCount, inWorld, s_inWorldSticky ? 1 : 0);
     }
 
-    // Fallback: If stuck in State 1, State 0, or State 2, advance state
+    // State machine management
     static int s_state1Ticks = 0;
     static int s_state2Ticks = 0;
+    static int s_state4Ticks = 0;
     if (pWorldMgr && !s_inWorldSticky) {
         DWORD* pState = reinterpret_cast<DWORD*>(reinterpret_cast<DWORD>(pWorldMgr) + 0x1C);
         if (pState) {
@@ -699,24 +963,46 @@ static void __fastcall DetourFrameTick(void* pThis, void* /*edx*/) {
                 Log("[mxohax] DetourFrameTick: AdvanceState returned %d! pWorldMgr State is now %u\n", res, *pState);
             } else if (*pState == 2) {
                 s_state2Ticks++;
-                if (s_state2Ticks >= 50) {
-                    Log("[mxohax] DetourFrameTick: State 2 detected (tick %d)! Promoting to State 3 (In-World)...\n", s_state2Ticks);
-                    *reinterpret_cast<BYTE*>(reinterpret_cast<DWORD>(pWorldMgr) + 0x22) = 1;
-                    *reinterpret_cast<BYTE*>(reinterpret_cast<DWORD>(pWorldMgr) + 0x27) = 1;
-                    *reinterpret_cast<BYTE*>(reinterpret_cast<DWORD>(pWorldMgr) + 0x20) = 1;
-                    *reinterpret_cast<BYTE*>(pShell + 0x20) = 1; // CClientShell::m_inWorld = 1
-                    *pState = 3;                                 // pWorldMgr->m_state = 3
-                    s_inWorldSticky = true;
-                    Log("[mxohax] ******************************************************\n");
-                    Log("[mxohax] *** PROMOTED TO STATE 3 (IN-WORLD)! 3D SIMULATION ACTIVE! ***\n");
-                    Log("[mxohax] ******************************************************\n");
-                    void* pUI = *reinterpret_cast<void**>(clientBase + 0x00898C54);
-                    if (pUI && OriginalHideControl) {
-                        OriginalHideControl(pUI, 0x04);
-                        OriginalHideControl(pUI, 0x57);
-                        OriginalHideControl(pUI, 0x30);
-                        OriginalHideControl(pUI, 0x5D);
+                if (s_state2Ticks % 50 == 0) {
+                    Log("[mxohax] DetourFrameTick: State 2 active (tick %d). Waiting for EnterWorldWithCharacter / streaming...\n", s_state2Ticks);
+                }
+                if (s_state2Ticks >= 120 && !s_playerEnteredWorld) {
+                    Log("[mxohax] DetourFrameTick: State 2 threshold reached (tick %d) -> ensuring in-world rendering...\n", s_state2Ticks);
+                    EnsureInWorldRendering(clientBase, pWorldMgr, pShell);
+                }
+            } else if (*pState == 4) {
+                s_state4Ticks++;
+                if (s_state4Ticks % 30 == 0) {
+                    Log("[mxohax] DetourFrameTick: State 4 (Streaming) active (tick %d)...\n", s_state4Ticks);
+                }
+                
+                // Check if streaming completed
+                typedef char (__thiscall *IsFinished_t)(void* pLevelSys);
+                void* pLevelSys = *reinterpret_cast<void**>(clientBase + 0x008A6004);
+                char finished = 0;
+                if (pLevelSys) {
+                    IsFinished_t pIsFinished = reinterpret_cast<IsFinished_t>(clientBase + 0x002066C0);
+                    finished = pIsFinished(pLevelSys);
+                }
+                if ((finished && s_state4Ticks >= 10) || s_state4Ticks >= 200) {
+                    Log("[mxohax] DetourFrameTick: Streaming complete (finished=%d, ticks=%d)! Calling OnStreamingDone (0x1012A3D0)...\n",
+                        finished, s_state4Ticks);
+                    typedef void (__thiscall *StreamingDone_t)(void* pMgr);
+                    StreamingDone_t pDone = reinterpret_cast<StreamingDone_t>(clientBase + 0x0012A3D0);
+                    pDone(pWorldMgr);
+                    Log("[mxohax] DetourFrameTick: Streaming callback completed! State is now %u\n", *pState);
+
+                    // Ensure active world geometry buffer is ready (0xE0 = 1, 0xB9 = 1)
+                    if (pLevelSys) {
+                        DWORD* pActiveWorld = *reinterpret_cast<DWORD**>(reinterpret_cast<DWORD>(pLevelSys) + 0x18);
+                        if (pActiveWorld) {
+                            *reinterpret_cast<DWORD*>(reinterpret_cast<DWORD>(pActiveWorld) + 0xE0) = 1;
+                            *reinterpret_cast<BYTE*>(reinterpret_cast<DWORD>(pActiveWorld) + 0xB9) = 1;
+                            Log("[mxohax] DetourFrameTick: Marked active world at 0x%p geometry ready (0xE0=1, 0xB9=1)!\n", pActiveWorld);
+                        }
                     }
+
+                    EnsureInWorldRendering(clientBase, pWorldMgr, pShell);
                 }
             }
         }
@@ -959,14 +1245,15 @@ static void ApplyClientPatches(HMODULE hClient) {
         Log("[mxohax] SUCCESS: client.dll FrameTick hooked at 0x%p!\n", pFrameTick);
     }
 
-    // 3. Hook HideControl & ShowControl
+    // 3. Hook HideControl & SetControlVisible (0x0001D3C0 & 0x0001DB80)
     LPVOID pHideControl = reinterpret_cast<LPVOID>(clientBase + 0x0001D3C0);
     if (MH_CreateHook(pHideControl, &DetourHideControl, reinterpret_cast<LPVOID*>(&OriginalHideControl)) == MH_OK) {
         MH_EnableHook(pHideControl);
     }
-    LPVOID pShowControl = reinterpret_cast<LPVOID>(clientBase + 0x0001BC10);
-    if (MH_CreateHook(pShowControl, &DetourShowControl, reinterpret_cast<LPVOID*>(&OriginalShowControl)) == MH_OK) {
-        MH_EnableHook(pShowControl);
+    LPVOID pSetCtrlVis = reinterpret_cast<LPVOID>(clientBase + 0x0001DB80);
+    if (MH_CreateHook(pSetCtrlVis, &DetourSetControlVisible, reinterpret_cast<LPVOID*>(&OriginalSetControlVisible)) == MH_OK) {
+        MH_EnableHook(pSetCtrlVis);
+        Log("[mxohax] SUCCESS: client.dll SetControlVisible hooked at 0x%p!\n", pSetCtrlVis);
     }
 
     // 4. Hook GetPlayerActiveObject (0x0010A210) to guard against NULL player entity dereference
