@@ -80,6 +80,12 @@ static LONG WINAPI CrashHandler(PEXCEPTION_POINTERS pExc) {
                 ctx->Eip = static_cast<DWORD>(clientBase + 0x000A2213);
                 return EXCEPTION_CONTINUE_EXECUTION;
             }
+            if (clientBase && ((uintptr_t)addr == clientBase + 0x00001C1C || (uintptr_t)addr == clientBase + 0x00001C10) && ctx) {
+                Log("[mxohax] Recovering from invalid pointer write at client.dll + 0x%08X (eax=0x%08X): skipping 2 bytes\n",
+                    (uintptr_t)addr - clientBase, ctx->Eax);
+                ctx->Eip += 2;
+                return EXCEPTION_CONTINUE_EXECUTION;
+            }
             // Guard against memcpy crash in 0x10255710 (client.dll + 0x0025581B)
             if (ctx && ctx->Esp) {
                 DWORD* pStack = reinterpret_cast<DWORD*>(ctx->Esp);
@@ -480,12 +486,17 @@ static void __fastcall DetourHideControl(void* pUI, void* /*edx*/, DWORD ctrlId)
     if (OriginalHideControl) OriginalHideControl(pUI, ctrlId);
 }
 
+static bool s_inWorldSticky = false;
 static bool s_screen5DActive = false;
 static bool s_autoJackInDone = false;
 static int  s_screen5DFrames = 0;
 
 static void __fastcall DetourShowControl(void* pUI, void* /*edx*/, DWORD ctrlId) {
     Log("[mxohax] ShowControl: 0x%02X\n", ctrlId);
+    if (s_inWorldSticky && (ctrlId == 0x30 || ctrlId == 0x5D || ctrlId == 0x04 || ctrlId == 0x57)) {
+        Log("[mxohax] ShowControl: 0x%02X suppressed while in-world!\n", ctrlId);
+        return;
+    }
     if (ctrlId == 0x5D) {
         s_screen5DActive = true;
         s_screen5DFrames = 0;
@@ -494,19 +505,42 @@ static void __fastcall DetourShowControl(void* pUI, void* /*edx*/, DWORD ctrlId)
     if (OriginalShowControl) OriginalShowControl(pUI, ctrlId);
 }
 
+// Hook for client.dll export InitClientDLL (client.dll + 0x00001270)
+typedef int (__cdecl *InitClientDLL_t)(
+    void* p1, void* p2, void* p3, void* p4,
+    void* p5, void* p6,
+    DWORD worldCharPacked,
+    BOOL autoJackIn
+);
+static InitClientDLL_t OriginalInitClientDLL = nullptr;
+
+int __cdecl DetourInitClientDLL(
+    void* p1, void* p2, void* p3, void* p4,
+    void* p5, void* p6,
+    DWORD worldCharPacked,
+    BOOL autoJackIn
+) {
+    DWORD forcedWorldCharPacked = (0 << 24) | (worldCharPacked & 0x00FFFFFF);
+    BOOL forcedAutoJackIn = 1;
+    Log("[mxohax] DetourInitClientDLL: Forcing worldCharPacked=0x%08X, autoJackIn=1 (original: 0x%08X, %d)\n",
+        forcedWorldCharPacked, autoJackIn, worldCharPacked, autoJackIn);
+    int res = OriginalInitClientDLL ? OriginalInitClientDLL(p1, p2, p3, p4, p5, p6, forcedWorldCharPacked, forcedAutoJackIn) : 1;
+    Log("[mxohax] DetourInitClientDLL returned %d\n", res);
+    return res;
+}
+
 static bool TryAutoJackIn(DWORD clientBase) {
     if (!clientBase) return false;
 
     void* pWorldMgr = *reinterpret_cast<void**>(clientBase + 0x0089DD68);
     if (!pWorldMgr) return false;
 
-    // 1. Hide Login Screen (0x30) and CharSelect Screen (0x5D)
+    // 1. Dismiss Screen 0x30 (Login screen), but do NOT hide Screen 0x5D yet (avoid black window)
     if (OriginalHideControl) {
         void* pUI = *reinterpret_cast<void**>(clientBase + 0x00898C54);
         if (pUI) {
             OriginalHideControl(pUI, 0x30);
-            OriginalHideControl(pUI, 0x5D);
-            Log("[mxohax] [AutoJackIn] Successfully dismissed Screen 0x30 and 0x5D!\n");
+            Log("[mxohax] [AutoJackIn] Dismissed Screen 0x30\n");
         }
     }
 
@@ -520,6 +554,15 @@ static bool TryAutoJackIn(DWORD clientBase) {
     // 3. Mark character selected in client.dll WorldMgr so it transitions to State 2 naturally
     *reinterpret_cast<BYTE*>(clientBase + 0x0089DD5D) = 1;
     *reinterpret_cast<BYTE*>(reinterpret_cast<DWORD>(pWorldMgr) + 0x25) = 1;
+    DWORD* pState = reinterpret_cast<DWORD*>(reinterpret_cast<DWORD>(pWorldMgr) + 0x1C);
+    if (pState && *pState == 1) {
+        *pState = 0; // Reset State 1 -> State 0 so 0x10120060 branches to 0x10120180 (CWorldMgr::LoadWorld)
+        Log("[mxohax] [AutoJackIn] Reset pWorldMgr State from 1 -> 0, calling AdvanceState (0x10120060)...\n");
+        typedef char (__thiscall *AdvanceState_t)(void* pMgr);
+        AdvanceState_t pAdvance = reinterpret_cast<AdvanceState_t>(clientBase + 0x00120060);
+        char res = pAdvance(pWorldMgr);
+        Log("[mxohax] [AutoJackIn] AdvanceState(0x10120060) returned %d! pWorldMgr State is now %u\n", res, *pState);
+    }
     Log("[mxohax] [AutoJackIn] Set WorldMgr character select flags (0x0089DD5D and pWorldMgr+0x25)\n");
 
     // 4. Transition matrix.exe Margin State Machine to State 9 (Connecting)
@@ -532,6 +575,19 @@ static bool TryAutoJackIn(DWORD clientBase) {
         Log("[mxohax] [AutoJackIn] Invoking matrix.exe Margin State transition to State 9 (0x00428FF0)...\n");
         Transition(pMarginMgr, 9);
         Log("[mxohax] [AutoJackIn] Margin State 9 transition invoked successfully!\n");
+    }
+
+    // 5. Invoke EnterWorldWithCharacter if character vector is ready
+    DWORD pCharBegin = *reinterpret_cast<DWORD*>(clientBase + 0x00899B4C);
+    DWORD pCharEnd   = *reinterpret_cast<DWORD*>(clientBase + 0x00899B50);
+    if (pCharBegin && pCharEnd > pCharBegin) {
+        void* pChar = reinterpret_cast<void*>(pCharBegin);
+        Log("[mxohax] [AutoJackIn] Operative #0 ready at 0x%p! Invoking EnterWorldWithCharacter(pMgr=0x%p, pChar=0x%p)...\n",
+            pChar, pWorldMgr, pChar);
+        typedef void (__thiscall *EnterWorld_t)(void* pMgr, void* pChar);
+        EnterWorld_t pEnterWorld = reinterpret_cast<EnterWorld_t>(clientBase + 0x00124070);
+        pEnterWorld(pWorldMgr, pChar);
+        Log("[mxohax] [AutoJackIn] EnterWorldWithCharacter dispatched successfully!\n");
     }
 
     return true;
@@ -554,7 +610,6 @@ static void __fastcall DetourFrameTick(void* pThis, void* /*edx*/) {
     DWORD pShell = clientBase + 0x00896A38;
     BYTE inWorld = *reinterpret_cast<BYTE*>(pShell + 0x20);
     static BYTE s_lastInWorld = 0xFF;
-    static bool s_inWorldSticky = false;
 
     // Log WorldMgr state transitions
     void* pWorldMgr = *reinterpret_cast<void**>(clientBase + 0x0089DD68);
@@ -579,6 +634,8 @@ static void __fastcall DetourFrameTick(void* pThis, void* /*edx*/) {
         inWorld = 1;
         if (pWorldMgr) {
             *reinterpret_cast<BYTE*>(reinterpret_cast<DWORD>(pWorldMgr) + 0x20) = 1;
+            *reinterpret_cast<BYTE*>(reinterpret_cast<DWORD>(pWorldMgr) + 0x22) = 1;
+            *reinterpret_cast<BYTE*>(reinterpret_cast<DWORD>(pWorldMgr) + 0x27) = 1;
             DWORD* pState = reinterpret_cast<DWORD*>(reinterpret_cast<DWORD>(pWorldMgr) + 0x1C);
             if (pState && *pState != 3) {
                 *pState = 3;
@@ -589,6 +646,7 @@ static void __fastcall DetourFrameTick(void* pThis, void* /*edx*/) {
             OriginalHideControl(pUI, 0x04);
             OriginalHideControl(pUI, 0x57);
             OriginalHideControl(pUI, 0x30);
+            OriginalHideControl(pUI, 0x5D);
         }
     }
 
@@ -604,13 +662,64 @@ static void __fastcall DetourFrameTick(void* pThis, void* /*edx*/) {
                 OriginalHideControl(pUI, 0x04);
                 OriginalHideControl(pUI, 0x57);
                 OriginalHideControl(pUI, 0x30);
-                Log("[mxohax] Dismissed loading screens 0x04, 0x57 and 0x30 upon entering world!\n");
+                OriginalHideControl(pUI, 0x5D);
+                Log("[mxohax] Dismissed loading screens 0x04, 0x57, 0x30 and 0x5D upon entering world!\n");
             }
         }
     }
 
-    if (s_tickCount % 50 == 0) {
-        Log("[mxohax] DetourFrameTick: Frame #%d active (inWorld=%u, sticky=%d)\n", s_tickCount, inWorld, s_inWorldSticky ? 1 : 0);
+    if (s_tickCount % 5000 == 0) {
+        Log("[mxohax] DetourFrameTick: Tick #%d active (inWorld=%u, sticky=%d)\n", s_tickCount, inWorld, s_inWorldSticky ? 1 : 0);
+    }
+
+    // Fallback: If stuck in State 1, State 0, or State 2, advance state
+    static int s_state1Ticks = 0;
+    static int s_state2Ticks = 0;
+    if (pWorldMgr && !s_inWorldSticky) {
+        DWORD* pState = reinterpret_cast<DWORD*>(reinterpret_cast<DWORD>(pWorldMgr) + 0x1C);
+        if (pState) {
+            if (*pState == 1) {
+                s_state1Ticks++;
+                if (s_state1Ticks >= 5) {
+                    Log("[mxohax] DetourFrameTick: State 1 detected (tick %d)! Setting flags (0x25=1, 0x0089DD5D=1, *pState=0) and calling AdvanceState (0x10120060)...\n", s_state1Ticks);
+                    *reinterpret_cast<BYTE*>(reinterpret_cast<DWORD>(pWorldMgr) + 0x25) = 1;
+                    *reinterpret_cast<BYTE*>(clientBase + 0x0089DD5D) = 1;
+                    *pState = 0;
+
+                    typedef char (__thiscall *AdvanceState_t)(void* pMgr);
+                    AdvanceState_t pAdvance = reinterpret_cast<AdvanceState_t>(clientBase + 0x00120060);
+                    char res = pAdvance(pWorldMgr);
+                    Log("[mxohax] DetourFrameTick: AdvanceState returned %d! pWorldMgr State is now %u\n", res, *pState);
+                }
+            } else if (*pState == 0 && *reinterpret_cast<BYTE*>(reinterpret_cast<DWORD>(pWorldMgr) + 0x25) == 1) {
+                Log("[mxohax] DetourFrameTick: State 0 with 0x25=1 detected! Calling AdvanceState to enter world...\n");
+                typedef char (__thiscall *AdvanceState_t)(void* pMgr);
+                AdvanceState_t pAdvance = reinterpret_cast<AdvanceState_t>(clientBase + 0x00120060);
+                char res = pAdvance(pWorldMgr);
+                Log("[mxohax] DetourFrameTick: AdvanceState returned %d! pWorldMgr State is now %u\n", res, *pState);
+            } else if (*pState == 2) {
+                s_state2Ticks++;
+                if (s_state2Ticks >= 50) {
+                    Log("[mxohax] DetourFrameTick: State 2 detected (tick %d)! Promoting to State 3 (In-World)...\n", s_state2Ticks);
+                    *reinterpret_cast<BYTE*>(reinterpret_cast<DWORD>(pWorldMgr) + 0x22) = 1;
+                    *reinterpret_cast<BYTE*>(reinterpret_cast<DWORD>(pWorldMgr) + 0x27) = 1;
+                    *reinterpret_cast<BYTE*>(reinterpret_cast<DWORD>(pWorldMgr) + 0x20) = 1;
+                    *reinterpret_cast<BYTE*>(pShell + 0x20) = 1; // CClientShell::m_inWorld = 1
+                    *pState = 3;                                 // pWorldMgr->m_state = 3
+                    s_inWorldSticky = true;
+                    Log("[mxohax] ******************************************************\n");
+                    Log("[mxohax] *** PROMOTED TO STATE 3 (IN-WORLD)! 3D SIMULATION ACTIVE! ***\n");
+                    Log("[mxohax] ******************************************************\n");
+                    void* pUI = *reinterpret_cast<void**>(clientBase + 0x00898C54);
+                    if (pUI && OriginalHideControl) {
+                        OriginalHideControl(pUI, 0x04);
+                        OriginalHideControl(pUI, 0x57);
+                        OriginalHideControl(pUI, 0x30);
+                        OriginalHideControl(pUI, 0x5D);
+                    }
+                }
+            }
+        }
     }
 
     if (!s_autoJackInDone) {
@@ -827,6 +936,13 @@ static void ApplyClientPatches(HMODULE hClient) {
     if (MH_CreateHook(pParseSub, &DetourParseSubpacket, reinterpret_cast<LPVOID*>(&OriginalParseSubpacket)) == MH_OK) {
         MH_EnableHook(pParseSub);
         Log("[mxohax] SUCCESS: client.dll ParseSubpacket hooked at 0x%p!\n", pParseSub);
+    }
+
+    // Hook InitClientDLL at 0x00001270 to enforce autoJackIn=1
+    LPVOID pInitClient = reinterpret_cast<LPVOID>(clientBase + 0x00001270);
+    if (MH_CreateHook(pInitClient, &DetourInitClientDLL, reinterpret_cast<LPVOID*>(&OriginalInitClientDLL)) == MH_OK) {
+        MH_EnableHook(pInitClient);
+        Log("[mxohax] SUCCESS: client.dll InitClientDLL hooked at 0x%p!\n", pInitClient);
     }
 
     // 1. Hook CryptoPP::PK_Verifier::VerifyMessage in client.dll at RVA 0x0047E010
@@ -1103,6 +1219,34 @@ static void InitializeMxOHaxSynchronous() {
         VirtualProtect(pCountPatch, 2, oldProt, &oldProt);
         FlushInstructionCache(GetCurrentProcess(), pCountPatch, 2);
         Log("[mxohax] SUCCESS: Patched matrix.exe + 0x0003D1D6 (NOP mov byte ptr [esi], al) to preserve character count!\n");
+    }
+
+    // 7. Patch matrix.exe 0x0040977A (mov dl, 1; nop * 4) to force autoJackIn=1 passed to InitClientDLL
+    LPVOID pAutoJackInArgPatch = reinterpret_cast<LPVOID>(0x0040977A);
+    if (VirtualProtect(pAutoJackInArgPatch, 6, PAGE_EXECUTE_READWRITE, &oldProt)) {
+        BYTE patchAuto[6] = { 0xB2, 0x01, 0x90, 0x90, 0x90, 0x90 };
+        memcpy(pAutoJackInArgPatch, patchAuto, 6);
+        VirtualProtect(pAutoJackInArgPatch, 6, oldProt, &oldProt);
+        FlushInstructionCache(GetCurrentProcess(), pAutoJackInArgPatch, 6);
+        Log("[mxohax] SUCCESS: Patched matrix.exe + 0x0000977A (mov dl, 1) to force autoJackIn parameter!\n");
+    }
+
+    // 8. Patch matrix.exe 0x00407161 (NOP * 5) to force Margin State 8 auto-transition directly to State 10 (Jack In)
+    LPVOID pState8Patch = reinterpret_cast<LPVOID>(0x00407161);
+    if (VirtualProtect(pState8Patch, 5, PAGE_EXECUTE_READWRITE, &oldProt)) {
+        BYTE nop5[5] = { 0x90, 0x90, 0x90, 0x90, 0x90 };
+        memcpy(pState8Patch, nop5, 5);
+        VirtualProtect(pState8Patch, 5, oldProt, &oldProt);
+        FlushInstructionCache(GetCurrentProcess(), pState8Patch, 5);
+        Log("[mxohax] SUCCESS: Patched matrix.exe + 0x00007161 (NOP * 5) to bypass Margin State 8 check and jump to State 10!\n");
+    }
+
+    // 9. Set matrix.exe autoJackIn global at 0x004AFDA9 to 1
+    LPVOID pGlobalAutoJackIn = reinterpret_cast<LPVOID>(0x004AFDA9);
+    if (VirtualProtect(pGlobalAutoJackIn, 1, PAGE_EXECUTE_READWRITE, &oldProt)) {
+        *reinterpret_cast<BYTE*>(pGlobalAutoJackIn) = 1;
+        VirtualProtect(pGlobalAutoJackIn, 1, oldProt, &oldProt);
+        Log("[mxohax] SUCCESS: Set matrix.exe autoJackIn global at 0x004AFDA9 = 1!\n");
     }
 }
 
