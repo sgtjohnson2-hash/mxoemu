@@ -122,9 +122,12 @@ void PlayerObject::loadFromDB( bool updatePos )
 
 		if (updatePos)
 		{
-			m_pos.ChangeCoords(	field[4].GetDouble(),
-				field[5].GetDouble(),
-				field[6].GetDouble());
+			double px = field[4].GetDouble();
+			double py = field[5].GetDouble();
+			double pz = field[6].GetDouble();
+			if (py < 520.0)
+				py = 520.0;
+			m_pos.ChangeCoords(px, py, pz);
 			m_pos.rot = field[7].GetDouble();
 			m_savedPos = m_pos;
 		}
@@ -711,6 +714,8 @@ void PlayerObject::HandleCommand( ByteBuffer &srcCmd )
 		m_RPCshort[0x8151] = &PlayerObject::RPC_HandleObjectSelected;
 		m_RPCshort[0x80fc] = &PlayerObject::RPC_HandleJackoutRequest;
 		m_RPCshort[0x80fe] = &PlayerObject::RPC_HandleJackoutFinished;
+		m_RPCshort[0x8090] = &PlayerObject::RPC_HandleCallContact;
+		m_RPCshort[0x9080] = &PlayerObject::RPC_HandleCallContact;
 	}
 
 	uint8 firstByte = srcCmd.read<uint8>();

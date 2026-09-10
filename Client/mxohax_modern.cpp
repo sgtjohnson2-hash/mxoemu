@@ -111,6 +111,31 @@ static LONG WINAPI CrashHandler(PEXCEPTION_POINTERS pExc) {
                     }
                 }
             }
+            // Guard against crashes in Contact / Mission / PDA UI (e.g. CViewMissionContact 0x000AC000-0x000ACD00, CViewContact 0x0018C000-0x0018D000, CViewPDA 0x000BF000-0x000C1000)
+            if (clientBase && (
+                ((uintptr_t)addr >= clientBase + 0x000AC000 && (uintptr_t)addr <= clientBase + 0x000ACD00) ||
+                ((uintptr_t)addr >= clientBase + 0x0018C000 && (uintptr_t)addr <= clientBase + 0x0018D000) ||
+                ((uintptr_t)addr >= clientBase + 0x000BF000 && (uintptr_t)addr <= clientBase + 0x000C1000)
+            ) && ctx) {
+                Log("[mxohax] Recovering from crash in Contact/PDA UI at client.dll + 0x%08X: unwinding frame safely\n", (uintptr_t)addr - clientBase);
+                if (ctx->Ebp && !IsBadReadPtr((void*)(ctx->Ebp + 4), 4)) {
+                    DWORD retAddr = *reinterpret_cast<DWORD*>(ctx->Ebp + 4);
+                    if (retAddr >= clientBase && retAddr < clientBase + 0x1000000) {
+                        ctx->Eip = retAddr;
+                        ctx->Esp = ctx->Ebp + 8;
+                        ctx->Ebp = *reinterpret_cast<DWORD*>(ctx->Ebp);
+                        return EXCEPTION_CONTINUE_EXECUTION;
+                    }
+                }
+                if (ctx->Esp && !IsBadReadPtr((void*)ctx->Esp, 4)) {
+                    DWORD retAddr = *reinterpret_cast<DWORD*>(ctx->Esp);
+                    if (retAddr >= clientBase && retAddr < clientBase + 0x1000000) {
+                        ctx->Eip = retAddr;
+                        ctx->Esp += 4;
+                        return EXCEPTION_CONTINUE_EXECUTION;
+                    }
+                }
+            }
             // Guard against memcpy crash in 0x10255710 (client.dll + 0x0025581B)
             if (ctx && ctx->Esp) {
                 DWORD* pStack = reinterpret_cast<DWORD*>(ctx->Esp);
@@ -739,6 +764,15 @@ static int s_inWorldPresents = 0;
 static HRESULT STDMETHODCALLTYPE DetourPresent(IDirect3DDevice9* pDevice, const RECT* pSourceRect, const RECT* pDestRect, HWND hDestWindowOverride, const RGNDATA* pDirtyRegion) {
     s_presentCount++;
 
+    if (pDevice) {
+        for (DWORD stage = 0; stage < 8; ++stage) {
+            pDevice->SetSamplerState(stage, D3DSAMP_MAGFILTER, D3DTEXF_ANISOTROPIC);
+            pDevice->SetSamplerState(stage, D3DSAMP_MINFILTER, D3DTEXF_ANISOTROPIC);
+            pDevice->SetSamplerState(stage, D3DSAMP_MIPFILTER, D3DTEXF_LINEAR);
+            pDevice->SetSamplerState(stage, D3DSAMP_MAXANISOTROPY, 16);
+        }
+    }
+
     if (s_inWorldSticky && pDevice) {
         s_inWorldPresents++;
         if (s_inWorldPresents == 30 || s_inWorldPresents == 60) {
@@ -751,6 +785,15 @@ static HRESULT STDMETHODCALLTYPE DetourPresent(IDirect3DDevice9* pDevice, const 
 
 static HRESULT STDMETHODCALLTYPE DetourPresentEx(IDirect3DDevice9Ex* pDevice, const RECT* pSourceRect, const RECT* pDestRect, HWND hDestWindowOverride, const RGNDATA* pDirtyRegion, DWORD dwFlags) {
     s_presentCount++;
+
+    if (pDevice) {
+        for (DWORD stage = 0; stage < 8; ++stage) {
+            pDevice->SetSamplerState(stage, D3DSAMP_MAGFILTER, D3DTEXF_ANISOTROPIC);
+            pDevice->SetSamplerState(stage, D3DSAMP_MINFILTER, D3DTEXF_ANISOTROPIC);
+            pDevice->SetSamplerState(stage, D3DSAMP_MIPFILTER, D3DTEXF_LINEAR);
+            pDevice->SetSamplerState(stage, D3DSAMP_MAXANISOTROPY, 16);
+        }
+    }
 
     if (s_inWorldSticky && pDevice) {
         s_inWorldPresents++;
@@ -782,6 +825,12 @@ static void HookDeviceVtable(void* pDevice, bool isEx) {
 }
 
 static HRESULT STDMETHODCALLTYPE DetourCreateDevice(IDirect3D9* pD3D, UINT Adapter, D3DDEVTYPE DeviceType, HWND hFocusWindow, DWORD BehaviorFlags, D3DPRESENT_PARAMETERS* pPresentationParameters, IDirect3DDevice9** ppReturnedDeviceInterface) {
+    if (pPresentationParameters) {
+        Log("[mxohax] CreateDevice: original %ux%u (windowed=%d) -> enforcing 1920x1080\n",
+            pPresentationParameters->BackBufferWidth, pPresentationParameters->BackBufferHeight, pPresentationParameters->Windowed);
+        pPresentationParameters->BackBufferWidth = 1920;
+        pPresentationParameters->BackBufferHeight = 1080;
+    }
     HRESULT hr = OriginalCreateDevice(pD3D, Adapter, DeviceType, hFocusWindow, BehaviorFlags, pPresentationParameters, ppReturnedDeviceInterface);
     if (SUCCEEDED(hr) && ppReturnedDeviceInterface && *ppReturnedDeviceInterface) {
         Log("[mxohax] CreateDevice: pDevice=0x%p, FocusWindow=0x%p\n", *ppReturnedDeviceInterface, hFocusWindow);
@@ -791,6 +840,12 @@ static HRESULT STDMETHODCALLTYPE DetourCreateDevice(IDirect3D9* pD3D, UINT Adapt
 }
 
 static HRESULT STDMETHODCALLTYPE DetourCreateDeviceEx(IDirect3D9Ex* pD3D, UINT Adapter, D3DDEVTYPE DeviceType, HWND hFocusWindow, DWORD BehaviorFlags, D3DPRESENT_PARAMETERS* pPresentationParameters, D3DDISPLAYMODEEX* pFullscreenDisplayMode, IDirect3DDevice9Ex** ppReturnedDeviceInterface) {
+    if (pPresentationParameters) {
+        Log("[mxohax] CreateDeviceEx: original %ux%u (windowed=%d) -> enforcing 1920x1080\n",
+            pPresentationParameters->BackBufferWidth, pPresentationParameters->BackBufferHeight, pPresentationParameters->Windowed);
+        pPresentationParameters->BackBufferWidth = 1920;
+        pPresentationParameters->BackBufferHeight = 1080;
+    }
     HRESULT hr = OriginalCreateDeviceEx(pD3D, Adapter, DeviceType, hFocusWindow, BehaviorFlags, pPresentationParameters, pFullscreenDisplayMode, ppReturnedDeviceInterface);
     if (SUCCEEDED(hr) && ppReturnedDeviceInterface && *ppReturnedDeviceInterface) {
         Log("[mxohax] CreateDeviceEx: pDevice=0x%p, FocusWindow=0x%p\n", *ppReturnedDeviceInterface, hFocusWindow);
@@ -836,6 +891,162 @@ static HRESULT WINAPI DetourDirect3DCreate9Ex(UINT SDKVersion, IDirect3D9Ex** pp
     return hr;
 }
 
+// ============================================================================
+// Safe CViewMissionContact and Phone Call Hooks
+// ============================================================================
+typedef void (__thiscall *ViewMissionContactDtor_t)(void* pThis);
+static ViewMissionContactDtor_t OriginalViewMissionContactDtor = nullptr;
+
+static void __fastcall Safe_ViewMissionContact_Dtor(void* pThis, void* /*edx*/) {
+    if (!pThis || IsBadReadPtr(pThis, 0x80)) return;
+    HMODULE hClient = GetModuleHandleA("client.dll");
+    if (!hClient) return;
+    uintptr_t clientBase = reinterpret_cast<uintptr_t>(hClient);
+    *reinterpret_cast<void**>(pThis) = reinterpret_cast<void*>(clientBase + 0x00757F4C);
+
+    void* p64 = *reinterpret_cast<void**>(reinterpret_cast<uintptr_t>(pThis) + 0x64);
+    if (p64) {
+        void** ppMgr = *reinterpret_cast<void***>(clientBase + 0x008C3CE8);
+        if (ppMgr && !IsBadReadPtr(ppMgr, sizeof(void*)) && *ppMgr) {
+            void** vtbl = *reinterpret_cast<void***>(*ppMgr);
+            if (vtbl && !IsBadReadPtr(vtbl, 0x20)) {
+                typedef void (__thiscall *Fn18)(void* pMgr, void* pArg);
+                Fn18 fn = reinterpret_cast<Fn18>(vtbl[0x18 / 4]);
+                if (fn) fn(*ppMgr, p64);
+            }
+        }
+    }
+
+    void* p70 = *reinterpret_cast<void**>(reinterpret_cast<uintptr_t>(pThis) + 0x70);
+    if (p70 && !IsBadReadPtr(p70, 0x20)) {
+        *reinterpret_cast<DWORD*>(reinterpret_cast<uintptr_t>(p70) + 0x18) = 0;
+    }
+
+    typedef void (__thiscall *BaseDtor_t)(void* pThis);
+    BaseDtor_t pBaseDtor = reinterpret_cast<BaseDtor_t>(clientBase + 0x00016690);
+    pBaseDtor(pThis);
+}
+
+typedef void (__thiscall *MissionContactCallFn)(void* pThis);
+static MissionContactCallFn Original_MissionContact_Button_Call = nullptr;
+
+typedef void (__thiscall *SendCallContactFn)(void* pThis, DWORD contactId);
+static SendCallContactFn Original_SendCallContactPacket = nullptr;
+
+static void __fastcall Safe_MissionContact_Button_Call(void* pThis, void* /*edx*/) {
+    Log("[mxohax] Safe_MissionContact_Button_Call called (pThis=0x%p)\n", pThis);
+    if (!pThis || IsBadReadPtr(pThis, 0x100)) return;
+    HMODULE hClient = GetModuleHandleA("client.dll");
+    if (!hClient) return;
+    uintptr_t clientBase = reinterpret_cast<uintptr_t>(hClient);
+
+    // 1. Dispatch SendCallContactPacket (opcode 0x8090)
+    SendCallContactFn pSendCall = Original_SendCallContactPacket ? Original_SendCallContactPacket : reinterpret_cast<SendCallContactFn>(clientBase + 0x0018C3A0);
+    void* pContactMgr = reinterpret_cast<void*>(clientBase + 0x008A2440);
+    __try {
+        if (pContactMgr && !IsBadReadPtr(pContactMgr, 4)) {
+            pSendCall(pContactMgr, 1);
+            Log("[mxohax] Safe_MissionContact_Button_Call: dispatched SendCallContactPacket(contactId=1)\n");
+        }
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        Log("[mxohax] Safe_MissionContact_Button_Call: exception in SendCallContactPacket!\n");
+    }
+
+    // 2. Safe handle +0x8C
+    __try {
+        void* p8C = *reinterpret_cast<void**>(reinterpret_cast<uintptr_t>(pThis) + 0x8C);
+        if (p8C && !IsBadReadPtr(p8C, sizeof(void*))) {
+            void** vtbl8C = *reinterpret_cast<void***>(p8C);
+            if (vtbl8C && !IsBadReadPtr(vtbl8C, 0xA0)) {
+                typedef void (__thiscall *Fn98)(void*, int);
+                Fn98 fn98 = reinterpret_cast<Fn98>(vtbl8C[0x98 / 4]);
+                if (fn98) fn98(p8C, 2);
+            }
+        }
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        Log("[mxohax] Safe_MissionContact_Button_Call: exception handling +0x8C\n");
+    }
+
+    // 3. Safe handle +0x70
+    __try {
+        void* p70 = *reinterpret_cast<void**>(reinterpret_cast<uintptr_t>(pThis) + 0x70);
+        if (p70 && !IsBadReadPtr(p70, 0x20)) {
+            *reinterpret_cast<DWORD*>(reinterpret_cast<uintptr_t>(p70) + 0x18) = 0;
+            void** vtbl70 = *reinterpret_cast<void***>(p70);
+            if (vtbl70 && !IsBadReadPtr(vtbl70, 0x150)) {
+                typedef void (__thiscall *Fn144)(void*, int);
+                Fn144 fn144 = reinterpret_cast<Fn144>(vtbl70[0x144 / 4]);
+                if (fn144) fn144(p70, 0x1000003);
+            }
+        }
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        Log("[mxohax] Safe_MissionContact_Button_Call: exception handling +0x70\n");
+    }
+}
+
+static void __fastcall Safe_SendCallPacket(void* pThis, void* /*edx*/, DWORD contactId) {
+    Log("[mxohax] Safe_SendCallPacket called: pThis=0x%p, contactId=%u\n", pThis, contactId);
+    if (!pThis || IsBadReadPtr(pThis, 0x20)) return;
+    __try {
+        if (Original_SendCallContactPacket) {
+            Original_SendCallContactPacket(pThis, contactId);
+        }
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        Log("[mxohax] Safe_SendCallPacket: exception caught safely!\n");
+    }
+}
+
+// ============================================================================
+// Operative RSI Appearance Applier (Trenchcoat, sunglasses, hair, clothes)
+// ============================================================================
+static void ApplyOperativeAppearance(uintptr_t clientBase, void* pPlayer) {
+    if (!pPlayer || IsBadReadPtr(pPlayer, 0xB0)) return;
+    void* pRSI = *reinterpret_cast<void**>(reinterpret_cast<uintptr_t>(pPlayer) + 0xAC);
+    if (!pRSI || IsBadReadPtr(pRSI, 0xB0)) {
+        Log("[mxohax] ApplyOperativeAppearance: pRSI is null or invalid\n");
+        return;
+    }
+
+    Log("[mxohax] Applying Operative RSI appearance (pPlayer=0x%p, pRSI=0x%p)...\n", pPlayer, pRSI);
+    __try {
+        typedef void (__thiscall *SetBodyType_t)(void* pRSI, int val);
+        typedef void (__thiscall *SetHeadType_t)(void* pRSI, int val);
+        typedef void (__thiscall *SetHairType_t)(void* pRSI, int val);
+        typedef void (__thiscall *SetHat_t)(void* pRSI, int val);
+        typedef void (__thiscall *EquipArticle_t)(void* pRSI, int slot, int articleId, int color);
+        typedef void (__thiscall *RebuildRSI_t)(void* pRSI);
+        typedef char (__cdecl *ApplyRSI_t)();
+
+        SetBodyType_t pSetBody = reinterpret_cast<SetBodyType_t>(clientBase + 0x0051B490);
+        SetHeadType_t pSetHead = reinterpret_cast<SetHeadType_t>(clientBase + 0x0051B4F0);
+        SetHairType_t pSetHair = reinterpret_cast<SetHairType_t>(clientBase + 0x0051B4B0);
+        SetHat_t pSetHat = reinterpret_cast<SetHat_t>(clientBase + 0x0051B4D0);
+        EquipArticle_t pEquip = reinterpret_cast<EquipArticle_t>(clientBase + 0x0051B1E0);
+        RebuildRSI_t pRebuild = reinterpret_cast<RebuildRSI_t>(clientBase + 0x0051B370);
+        ApplyRSI_t pApply = reinterpret_cast<ApplyRSI_t>(clientBase + 0x000EE270);
+
+        pSetBody(pRSI, 100);
+        pSetHead(pRSI, 100);
+        pSetHair(pRSI, 101);
+        pSetHat(pRSI, 0);
+
+        // Equip Operative Attire:
+        pEquip(pRSI, 0, 0, 0);     // Hat (None)
+        pEquip(pRSI, 1, 106, 41);  // Shirt (106, 41)
+        pEquip(pRSI, 2, 110, 8);   // Coat (110, 8 - Black Trenchcoat)
+        pEquip(pRSI, 3, 103, 16);  // Pants (103, 16)
+        pEquip(pRSI, 4, 100, 10);  // Shoes (100, 10 - Boots)
+        pEquip(pRSI, 5, 101, 0);   // Gloves (101, 0)
+        pEquip(pRSI, 6, 100, 1);   // Glasses (100, 1 - Sunglasses)
+
+        pRebuild(pRSI);
+        pApply();
+        Log("[mxohax] SUCCESS: Operative RSI fully equipped (Trenchcoat, sunglasses, boots, clothes, hair)!\n");
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        Log("[mxohax] Exception in ApplyOperativeAppearance caught safely!\n");
+    }
+}
+
 static void EnsureInWorldRendering(uintptr_t clientBase, void* pWorldMgr, DWORD pShell) {
     if (!pWorldMgr) return;
 
@@ -869,7 +1080,7 @@ static void EnsureInWorldRendering(uintptr_t clientBase, void* pWorldMgr, DWORD 
             pCtor(pPlayer, &flag, nullptr);
             Log("[mxohax] EnsureInWorld: PlayerCtor(0x101d17c0) initialized PlayerObject at 0x%p\n", pPlayer);
 
-            // Set coordinates for operative s1acker in Slums: (16802.3f, 495.0f, 3237.01f)
+            // Set coordinates for operative s1acker in Slums: (16802.3f, 520.0f, 3237.01f)
             // Allocate full 64 bytes (16 floats) for 4x4 matrix/coords
             float* pPos = *reinterpret_cast<float**>(reinterpret_cast<DWORD>(pPlayer) + 0x94);
             if (!pPos) {
@@ -878,7 +1089,7 @@ static void EnsureInWorldRendering(uintptr_t clientBase, void* pWorldMgr, DWORD 
             }
             if (pPos) {
                 pPos[0] = 16802.3f;
-                pPos[1] = 495.0f;
+                pPos[1] = 520.0f;
                 pPos[2] = 3237.01f;
                 pPos[3] = 1.0f;
                 pPos[4] = 0.0f;
@@ -892,6 +1103,7 @@ static void EnsureInWorldRendering(uintptr_t clientBase, void* pWorldMgr, DWORD 
             pEnter(pPlayer);
             s_playerEnteredWorld = true;
             Log("[mxohax] EnsureInWorld: PlayerEnterWorld(0x101d2180) executed! [0x108a4378]=0x%p\n", *ppPlayerGlobal);
+            ApplyOperativeAppearance(clientBase, pPlayer);
         }
     } else {
         s_playerEnteredWorld = true;
@@ -900,16 +1112,19 @@ static void EnsureInWorldRendering(uintptr_t clientBase, void* pWorldMgr, DWORD 
             pPos = reinterpret_cast<float*>(calloc(16, sizeof(float)));
             *reinterpret_cast<float**>(reinterpret_cast<DWORD>(pPlayer) + 0x94) = pPos;
         }
-        if (pPos && (pPos[0] == 0.0f && pPos[2] == 0.0f)) {
-            pPos[0] = 16802.3f;
-            pPos[1] = 495.0f;
-            pPos[2] = 3237.01f;
-            pPos[3] = 1.0f;
-            pPos[4] = 0.0f;
-            pPos[5] = 1.0f;
-            pPos[15] = 1.0f;
-            Log("[mxohax] EnsureInWorld: Updated existing Player coordinates to Slums (%.1f, %.1f, %.1f)\n", pPos[0], pPos[1], pPos[2]);
+        if (pPos) {
+            if (pPos[1] < 520.0f || (pPos[0] == 0.0f && pPos[2] == 0.0f)) {
+                pPos[0] = 16802.3f;
+                pPos[1] = 520.0f;
+                pPos[2] = 3237.01f;
+                pPos[3] = 1.0f;
+                pPos[4] = 0.0f;
+                pPos[5] = 1.0f;
+                pPos[15] = 1.0f;
+                Log("[mxohax] EnsureInWorld: Updated existing Player coordinates to Slums (%.1f, %.1f, %.1f)\n", pPos[0], pPos[1], pPos[2]);
+            }
         }
+        ApplyOperativeAppearance(clientBase, pPlayer);
     }
 
     // Step 2b: Invoke native AdvanceToState3 (0x10121B50) to attach camera, bind scene, and start 3D simulation!
@@ -944,7 +1159,7 @@ static void EnsureInWorldRendering(uintptr_t clientBase, void* pWorldMgr, DWORD 
 
     if (pWorldEngine && ppWorldInst && !*ppWorldInst) {
         float dummyMat[16] = {
-            16802.3f, 495.0f, 3237.01f, 1.0f,
+            16802.3f, 520.0f, 3237.01f, 1.0f,
             0.0f, 1.0f, 0.0f, 0.0f,
             0.0f, 0.0f, 1.0f, 0.0f,
             0.0f, 0.0f, 0.0f, 1.0f
@@ -981,9 +1196,9 @@ static void EnsureInWorldRendering(uintptr_t clientBase, void* pWorldMgr, DWORD 
         if (*ppCamera) {
             DWORD pCamAddr = reinterpret_cast<DWORD>(*ppCamera);
             float* pCamPos = reinterpret_cast<float*>(pCamAddr + 0x30);
-            if (pCamPos && (pCamPos[0] == 0.0f && pCamPos[2] == 0.0f)) {
+            if (pCamPos && ((pCamPos[0] == 0.0f && pCamPos[2] == 0.0f) || pCamPos[1] < 525.0f)) {
                 pCamPos[0] = 16802.3f;
-                pCamPos[1] = 515.0f;
+                pCamPos[1] = 535.0f;
                 pCamPos[2] = 3180.0f;
                 Log("[mxohax] EnsureInWorld: Set camera position at +0x30 to Slums street view (%.1f, %.1f, %.1f)\n",
                     pCamPos[0], pCamPos[1], pCamPos[2]);
@@ -1146,6 +1361,10 @@ static void __fastcall DetourFrameTick(void* pThis, void* /*edx*/) {
                 SetControlVisible_t pSetVisible = reinterpret_cast<SetControlVisible_t>(clientBase + 0x0001DB80);
                 pSetVisible(pUI, 0x1B, 1);
             }
+            void* curPlayer = *reinterpret_cast<void**>(clientBase + 0x008A4378);
+            if (curPlayer) {
+                ApplyOperativeAppearance(clientBase, curPlayer);
+            }
             Log("[mxohax] In-world UI initialized and loading screens dismissed once.\n");
         }
 
@@ -1175,7 +1394,7 @@ static void __fastcall DetourFrameTick(void* pThis, void* /*edx*/) {
                 CreateWorldInst_t* vtable = *reinterpret_cast<CreateWorldInst_t**>(pWorldEngine);
                 if (vtable && vtable[0]) {
                     float dummyMat[16] = {
-                        16802.3f, 495.0f, 3237.01f, 1.0f,
+                        16802.3f, 520.0f, 3237.01f, 1.0f,
                         0.0f, 1.0f, 0.0f, 0.0f,
                         0.0f, 0.0f, 1.0f, 0.0f,
                         0.0f, 0.0f, 0.0f, 1.0f
@@ -1702,8 +1921,14 @@ static void ApplyClientPatches(HMODULE hClient) {
         Log("[mxohax] SUCCESS: client.dll GetPlayerActiveObject hooked at 0x%p! Null dereference guarded.\n", pGetActiveObj);
     }
 
-    // 5. Preserving native render display resolution and mode parameters (0x00896CCC - 0x00896D74)
-    Log("[mxohax] Preserved native client.dll display resolution globals.\n");
+    // 5. Enforce 1920x1080 render display resolution and disable blurry glow globals
+    *reinterpret_cast<int*>(clientBase + 0x00896CCC) = 1920;
+    *reinterpret_cast<int*>(clientBase + 0x00896D04) = 1080;
+    Log("[mxohax] Enforced 1920x1080 resolution globals in client.dll.\n");
+
+    *reinterpret_cast<int*>(clientBase + 0x008A342C) = 0;      // ScreenFilters_Screen_Glow_Just_Glow = 0
+    *reinterpret_cast<float*>(clientBase + 0x008A3508) = 0.0f; // ScreenFilters_Screen_Glow_BlurScale = 0.0
+    Log("[mxohax] Disabled blurry Just_Glow post-process globals in client.dll.\n");
 
     // 5.5 Set default fallback world file pointer at clientBase + 0x00896E4C to slums METR world
     static const char s_initMetrPath[] = "resource/worlds/final_world/slums_barrens_full.metr";
@@ -1847,6 +2072,25 @@ static void ApplyClientPatches(HMODULE hClient) {
     if (MH_CreateHook(pSpeed, reinterpret_cast<LPVOID>(&Safe_Interlock_Speed_Button), reinterpret_cast<LPVOID*>(&Original_Interlock_Speed_Button)) == MH_OK) {
         MH_EnableHook(pSpeed);
         Log("[mxohax] SUCCESS: client.dll Interlock_Speed_Button hooked at 0x%p!\n", pSpeed);
+    }
+
+    // Patch K: Safe CViewMissionContact & Phone Call hooks
+    LPVOID pDtor = reinterpret_cast<LPVOID>(clientBase + 0x000ACAF0);
+    if (MH_CreateHook(pDtor, reinterpret_cast<LPVOID>(&Safe_ViewMissionContact_Dtor), reinterpret_cast<LPVOID*>(&OriginalViewMissionContactDtor)) == MH_OK) {
+        MH_EnableHook(pDtor);
+        Log("[mxohax] SUCCESS: client.dll ViewMissionContact destructor hooked at 0x%p!\n", pDtor);
+    }
+
+    LPVOID pCallBtn = reinterpret_cast<LPVOID>(clientBase + 0x000ACB30);
+    if (MH_CreateHook(pCallBtn, reinterpret_cast<LPVOID>(&Safe_MissionContact_Button_Call), reinterpret_cast<LPVOID*>(&Original_MissionContact_Button_Call)) == MH_OK) {
+        MH_EnableHook(pCallBtn);
+        Log("[mxohax] SUCCESS: client.dll MissionContact_Button_Call hooked at 0x%p!\n", pCallBtn);
+    }
+
+    LPVOID pSendCall = reinterpret_cast<LPVOID>(clientBase + 0x0018C3A0);
+    if (MH_CreateHook(pSendCall, reinterpret_cast<LPVOID>(&Safe_SendCallPacket), reinterpret_cast<LPVOID*>(&Original_SendCallContactPacket)) == MH_OK) {
+        MH_EnableHook(pSendCall);
+        Log("[mxohax] SUCCESS: client.dll SendCallContactPacket hooked at 0x%p!\n", pSendCall);
     }
 }
 

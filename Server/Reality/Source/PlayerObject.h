@@ -243,6 +243,7 @@ private:
 	void RPC_HandleMissionAccept( ByteBuffer &srcCmd );
 	void RPC_HandleMissionInfo( ByteBuffer &srcCmd );
 	void RPC_HandleMissionRequest( ByteBuffer &srcCmd );
+	void RPC_HandleCallContact( ByteBuffer &srcCmd );
 	void RPC_HandleItemMoveSlot( ByteBuffer &srcCmd );
 	void RPC_HandleItemUnmountRSI( ByteBuffer &srcCmd );
 	void RPC_HandleItemMountRSI( ByteBuffer &srcCmd );

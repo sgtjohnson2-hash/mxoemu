@@ -3522,3 +3522,17 @@ void PlayerObject::RPC_HandleMissionRequest(ByteBuffer&) {}
 void PlayerObject::RPC_HandleItemMoveSlot(ByteBuffer&) {}
 void PlayerObject::RPC_HandleItemUnmountRSI(ByteBuffer&) {}
 void PlayerObject::RPC_HandleItemMountRSI(ByteBuffer&) {}
+
+void PlayerObject::RPC_HandleCallContact( ByteBuffer &srcCmd )
+{
+	uint32 contactId = 1;
+	if (srcCmd.remaining() >= 4)
+		contactId = srcCmd.read<uint32>();
+	else if (srcCmd.remaining() >= 2)
+		contactId = srcCmd.read<uint16>();
+	else if (srcCmd.remaining() >= 1)
+		contactId = srcCmd.read<uint8>();
+
+	DEBUG_LOG(format("(%1%) RPC_HandleCallContact: contactId=%2%") % m_parent.Address() % contactId);
+	m_parent.QueueCommand(make_shared<SystemChatMsg>((format("{c:00FF00}[Operator] Operator online. I read you, %1%.{/c}") % m_handle).str()));
+}
