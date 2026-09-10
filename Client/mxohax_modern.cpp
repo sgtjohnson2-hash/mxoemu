@@ -775,8 +775,8 @@ static HRESULT STDMETHODCALLTYPE DetourPresent(IDirect3DDevice9* pDevice, const 
 
     if (s_inWorldSticky && pDevice) {
         s_inWorldPresents++;
-        if (s_inWorldPresents == 30 || s_inWorldPresents == 60) {
-            CaptureD3D9Backbuffer(pDevice, "inworld_render.bmp");
+        if (s_inWorldPresents == 30 || s_inWorldPresents == 60 || s_inWorldPresents == 90) {
+            CaptureD3D9Backbuffer(pDevice, "E:\\Games\\The Matrix Online\\inworld_render.bmp");
         }
     }
 
@@ -797,8 +797,8 @@ static HRESULT STDMETHODCALLTYPE DetourPresentEx(IDirect3DDevice9Ex* pDevice, co
 
     if (s_inWorldSticky && pDevice) {
         s_inWorldPresents++;
-        if (s_inWorldPresents == 30 || s_inWorldPresents == 60) {
-            CaptureD3D9Backbuffer(pDevice, "inworld_render.bmp");
+        if (s_inWorldPresents == 30 || s_inWorldPresents == 60 || s_inWorldPresents == 90) {
+            CaptureD3D9Backbuffer(pDevice, "E:\\Games\\The Matrix Online\\inworld_render.bmp");
         }
     }
 
@@ -1025,12 +1025,40 @@ static void ApplyOperativeAppearance(uintptr_t clientBase, void* pPlayer) {
         RebuildRSI_t pRebuild = reinterpret_cast<RebuildRSI_t>(clientBase + 0x0051B370);
         ApplyRSI_t pApply = reinterpret_cast<ApplyRSI_t>(clientBase + 0x000EE270);
 
+        // 1. Populate the client.dll character appearance global tables
+        // so that native client routines and future calls preserve the operative look
+        *reinterpret_cast<short*>(clientBase + 0x0089E37C) = 100; // Body
+        *reinterpret_cast<short*>(clientBase + 0x0089E3B4) = 100; // Head
+        *reinterpret_cast<short*>(clientBase + 0x0089E3EC) = 101; // Hair (Operative Hair)
+        *reinterpret_cast<short*>(clientBase + 0x0089E424) = 0;   // Hat
+
+        struct OperativeItemDef {
+            DWORD slot;
+            DWORD articleId;
+            BYTE color;
+        };
+        static const OperativeItemDef items[6] = {
+            { 1, 106, 41 }, // Shirt
+            { 2, 110, 8  }, // Coat (Black Trenchcoat)
+            { 3, 103, 16 }, // Pants
+            { 4, 100, 10 }, // Shoes (Boots)
+            { 5, 101, 0  }, // Gloves
+            { 6, 100, 1  }  // Glasses (Sunglasses)
+        };
+        for (int i = 0; i < 6; ++i) {
+            uintptr_t entry = clientBase + 0x0089E760 + (i * 0x74);
+            *reinterpret_cast<DWORD*>(entry) = items[i].slot;
+            *reinterpret_cast<DWORD*>(entry + 0x34) = items[i].articleId;
+            *reinterpret_cast<BYTE*>(entry + 0x6C) = items[i].color;
+        }
+
+        // 2. Set the operative components directly on pRSI
         pSetBody(pRSI, 100);
         pSetHead(pRSI, 100);
         pSetHair(pRSI, 101);
         pSetHat(pRSI, 0);
 
-        // Equip Operative Attire:
+        // 3. Equip Operative Attire on pRSI:
         pEquip(pRSI, 0, 0, 0);     // Hat (None)
         pEquip(pRSI, 1, 106, 41);  // Shirt (106, 41)
         pEquip(pRSI, 2, 110, 8);   // Coat (110, 8 - Black Trenchcoat)
@@ -1039,8 +1067,8 @@ static void ApplyOperativeAppearance(uintptr_t clientBase, void* pPlayer) {
         pEquip(pRSI, 5, 101, 0);   // Gloves (101, 0)
         pEquip(pRSI, 6, 100, 1);   // Glasses (100, 1 - Sunglasses)
 
+        // 4. Rebuild RSI visual mesh and textures with the operative configuration
         pRebuild(pRSI);
-        pApply();
         Log("[mxohax] SUCCESS: Operative RSI fully equipped (Trenchcoat, sunglasses, boots, clothes, hair)!\n");
     } __except (EXCEPTION_EXECUTE_HANDLER) {
         Log("[mxohax] Exception in ApplyOperativeAppearance caught safely!\n");
