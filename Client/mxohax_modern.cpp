@@ -90,8 +90,26 @@ static LONG WINAPI CrashHandler(PEXCEPTION_POINTERS pExc) {
             if (clientBase && ((uintptr_t)addr == clientBase + 0x00001C1C || (uintptr_t)addr == clientBase + 0x00001C10) && ctx) {
                 Log("[mxohax] Recovering from invalid pointer write at client.dll + 0x%08X (eax=0x%08X): skipping 2 bytes\n",
                     (uintptr_t)addr - clientBase, ctx->Eax);
-                ctx->Eip += 2;
-                return EXCEPTION_CONTINUE_EXECUTION;
+            }
+            if (clientBase && (uintptr_t)addr >= clientBase + 0x0009A000 && (uintptr_t)addr <= clientBase + 0x0009B000 && ctx) {
+                Log("[mxohax] Recovering from crash in viewinterlock UI at client.dll + 0x%08X: unwinding frame safely\n", (uintptr_t)addr - clientBase);
+                if (ctx->Ebp && !IsBadReadPtr((void*)(ctx->Ebp + 4), 4)) {
+                    DWORD retAddr = *reinterpret_cast<DWORD*>(ctx->Ebp + 4);
+                    if (retAddr >= clientBase && retAddr < clientBase + 0x1000000) {
+                        ctx->Eip = retAddr;
+                        ctx->Esp = ctx->Ebp + 8;
+                        ctx->Ebp = *reinterpret_cast<DWORD*>(ctx->Ebp);
+                        return EXCEPTION_CONTINUE_EXECUTION;
+                    }
+                }
+                if (ctx->Esp && !IsBadReadPtr((void*)ctx->Esp, 4)) {
+                    DWORD retAddr = *reinterpret_cast<DWORD*>(ctx->Esp);
+                    if (retAddr >= clientBase && retAddr < clientBase + 0x1000000) {
+                        ctx->Eip = retAddr;
+                        ctx->Esp += 4;
+                        return EXCEPTION_CONTINUE_EXECUTION;
+                    }
+                }
             }
             // Guard against memcpy crash in 0x10255710 (client.dll + 0x0025581B)
             if (ctx && ctx->Esp) {
@@ -723,7 +741,7 @@ static HRESULT STDMETHODCALLTYPE DetourPresent(IDirect3DDevice9* pDevice, const 
 
     if (s_inWorldSticky && pDevice) {
         s_inWorldPresents++;
-        if (s_inWorldPresents == 30 || s_inWorldPresents == 60 || s_inWorldPresents == 120 || (s_inWorldPresents > 120 && s_inWorldPresents % 300 == 0)) {
+        if (s_inWorldPresents == 30 || s_inWorldPresents == 60) {
             CaptureD3D9Backbuffer(pDevice, "inworld_render.bmp");
         }
     }
@@ -736,7 +754,7 @@ static HRESULT STDMETHODCALLTYPE DetourPresentEx(IDirect3DDevice9Ex* pDevice, co
 
     if (s_inWorldSticky && pDevice) {
         s_inWorldPresents++;
-        if (s_inWorldPresents == 30 || s_inWorldPresents == 60 || s_inWorldPresents == 120 || (s_inWorldPresents > 120 && s_inWorldPresents % 300 == 0)) {
+        if (s_inWorldPresents == 30 || s_inWorldPresents == 60) {
             CaptureD3D9Backbuffer(pDevice, "inworld_render.bmp");
         }
     }
@@ -1114,25 +1132,25 @@ static void __fastcall DetourFrameTick(void* pThis, void* /*edx*/) {
                 *pState = 3;
             }
         }
-        void* pUI = *reinterpret_cast<void**>(clientBase + 0x00898C54);
-        if (pUI && OriginalHideControl) {
-            OriginalHideControl(pUI, 0x04);
-            OriginalHideControl(pUI, 0x57);
-            OriginalHideControl(pUI, 0x30);
-            OriginalHideControl(pUI, 0x5D);
+        static bool s_inWorldDismissedOnce = false;
+        if (!s_inWorldDismissedOnce) {
+            s_inWorldDismissedOnce = true;
+            void* pUI = *reinterpret_cast<void**>(clientBase + 0x00898C54);
+            if (pUI && OriginalHideControl) {
+                OriginalHideControl(pUI, 0x04);
+                OriginalHideControl(pUI, 0x57);
+                OriginalHideControl(pUI, 0x30);
+                OriginalHideControl(pUI, 0x5D);
+            }
+            if (pUI) {
+                SetControlVisible_t pSetVisible = reinterpret_cast<SetControlVisible_t>(clientBase + 0x0001DB80);
+                pSetVisible(pUI, 0x1B, 1);
+            }
+            Log("[mxohax] In-world UI initialized and loading screens dismissed once.\n");
         }
 
-        // Keep Viewport list and count active for 3D rendering
+        // Keep Viewport count active for 3D rendering
         if (pWorldMgr) {
-            void** ppListHead = reinterpret_cast<void**>(reinterpret_cast<DWORD>(pWorldMgr) + 0xC);
-            if (ppListHead && *ppListHead) {
-                void* head = *ppListHead;
-                void* first = *reinterpret_cast<void**>(head);
-                if (first == head && pUI) {
-                    SetControlVisible_t pSetVisible = reinterpret_cast<SetControlVisible_t>(clientBase + 0x0001DB80);
-                    pSetVisible(pUI, 0x1B, 1);
-                }
-            }
             DWORD* pVpCount = reinterpret_cast<DWORD*>(reinterpret_cast<DWORD>(pWorldMgr) + 8);
             if (pVpCount && *pVpCount == 0) {
                 *pVpCount = 1;
@@ -1384,52 +1402,158 @@ static unsigned char __stdcall Safe_GetPlayerActiveObject(void** outObj, void** 
     if (outObj) *outObj = nullptr;
     if (outSubObj) *outSubObj = nullptr;
 
-    static bool s_logged = false;
-    if (!s_logged) {
-        s_logged = true;
-        Log("[mxohax] Safe_GetPlayerActiveObject called! First invocation intercepted.\n");
+    __try {
+        HMODULE hClient = GetModuleHandleA("client.dll");
+        if (!hClient) return 0;
+        uintptr_t clientBase = reinterpret_cast<uintptr_t>(hClient);
+
+        uintptr_t* ppGlobal = reinterpret_cast<uintptr_t*>(clientBase + 0x008A4378);
+        if (IsBadReadPtr(ppGlobal, sizeof(uintptr_t)) || !*ppGlobal) return 0;
+        uintptr_t pGlobal = *ppGlobal;
+
+        uintptr_t* ppA8 = reinterpret_cast<uintptr_t*>(pGlobal + 0xA8);
+        if (IsBadReadPtr(ppA8, sizeof(uintptr_t)) || !*ppA8) return 0;
+        uintptr_t pA8 = *ppA8;
+
+        uintptr_t* pp23C = reinterpret_cast<uintptr_t*>(pA8 + 0x23C);
+        if (IsBadReadPtr(pp23C, sizeof(uintptr_t)) || !*pp23C) return 0;
+        uintptr_t p23C = *pp23C;
+
+        uintptr_t* ppESI = reinterpret_cast<uintptr_t*>(p23C);
+        if (IsBadReadPtr(ppESI, sizeof(uintptr_t)) || !*ppESI) return 0;
+        uintptr_t pESI = *ppESI;
+
+        if (IsBadReadPtr(reinterpret_cast<void*>(pESI), 6)) return 0;
+        if (*reinterpret_cast<uint16_t*>(pESI + 4) == 0xFFFF) return 0;
+
+        uint16_t idx0 = *reinterpret_cast<uint16_t*>(pESI);
+        uintptr_t* ppMgr = reinterpret_cast<uintptr_t*>(clientBase + 0x00897F90);
+        if (IsBadReadPtr(ppMgr, sizeof(uintptr_t)) || !*ppMgr) return 0;
+        uintptr_t pMgr = *ppMgr;
+
+        typedef void* (__thiscall *FnGetObj)(void* thisPtr, uint32_t id);
+        FnGetObj pfnGetObj = reinterpret_cast<FnGetObj>(clientBase + 0x003A5CA0);
+        void* obj = pfnGetObj(reinterpret_cast<void*>(pMgr), idx0);
+        if (outObj) *outObj = obj;
+        if (!obj || IsBadReadPtr(obj, sizeof(void*))) return 0;
+
+        uint16_t idx1 = *reinterpret_cast<uint16_t*>(pESI + 2);
+        void*** pppVtable = reinterpret_cast<void***>(obj);
+        if (IsBadReadPtr(pppVtable, sizeof(void**)) || !*pppVtable) return 0;
+        void** vtable = *pppVtable;
+        if (IsBadReadPtr(vtable, 0x60)) return 0;
+
+        typedef void* (__thiscall *FnGetSubObj)(void* thisPtr, uint32_t id);
+        FnGetSubObj pfnGetSubObj = reinterpret_cast<FnGetSubObj>(vtable[0x58 / 4]);
+        if (!pfnGetSubObj) return 0;
+
+        void* subObj = pfnGetSubObj(obj, idx1);
+        if (outSubObj) *outSubObj = subObj;
+
+        return (subObj != nullptr) ? 1 : 0;
     }
+    __except (EXCEPTION_EXECUTE_HANDLER) {
+        return 0;
+    }
+}
 
-    HMODULE hClient = GetModuleHandleA("client.dll");
-    if (!hClient) return 0;
-    uintptr_t clientBase = reinterpret_cast<uintptr_t>(hClient);
+// ============================================================================
+// Safe CViewInterlock Tactic Button Hooks (client.dll + 0x0009A170 - 0x0009A260)
+// Guards against null/invalid button pointers and network exceptions
+// ============================================================================
+typedef void (__thiscall *InterlockButtonFn)(void* pThis);
 
-    uintptr_t pGlobal = *reinterpret_cast<uintptr_t*>(clientBase + 0x008A4378);
-    if (!pGlobal) return 0;
+static InterlockButtonFn Original_Interlock_Button_Withdraw = nullptr;
+static InterlockButtonFn Original_Interlock_Grab_Button = nullptr;
+static InterlockButtonFn Original_Interlock_Power_Button = nullptr;
+static InterlockButtonFn Original_Interlock_Speed_Button = nullptr;
 
-    uintptr_t pA8 = *reinterpret_cast<uintptr_t*>(pGlobal + 0xA8);
-    if (!pA8) return 0;
+static void __fastcall Safe_Interlock_Button_Withdraw(void* pThis, void* /*edx*/) {
+    Log("[mxohax] Safe_Interlock_Button_Withdraw called (pThis=0x%p)\n", pThis);
+    if (!pThis || IsBadReadPtr(pThis, 0x100)) return;
+    void* pBtn = *reinterpret_cast<void**>(reinterpret_cast<uintptr_t>(pThis) + 0x6C);
+    if (!pBtn || IsBadReadPtr(pBtn, sizeof(void*))) {
+        Log("[mxohax] Safe_Interlock_Button_Withdraw: button ptr (+0x6C) is null/invalid\n");
+        return;
+    }
+    void* vtbl = *reinterpret_cast<void**>(pBtn);
+    if (!vtbl || IsBadReadPtr(vtbl, 0xB0)) {
+        Log("[mxohax] Safe_Interlock_Button_Withdraw: button vtable is null/invalid\n");
+        return;
+    }
+    __try {
+        if (Original_Interlock_Button_Withdraw) {
+            Original_Interlock_Button_Withdraw(pThis);
+        }
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        Log("[mxohax] Exception caught safely in Safe_Interlock_Button_Withdraw!\n");
+    }
+}
 
-    uintptr_t p23C = *reinterpret_cast<uintptr_t*>(pA8 + 0x23C);
-    if (!p23C) return 0; // Essential null-check guarding against crash 0xC0000005!
+static void __fastcall Safe_Interlock_Grab_Button(void* pThis, void* /*edx*/) {
+    Log("[mxohax] Safe_Interlock_Grab_Button called (pThis=0x%p)\n", pThis);
+    if (!pThis || IsBadReadPtr(pThis, 0x100)) return;
+    void* pBtn = *reinterpret_cast<void**>(reinterpret_cast<uintptr_t>(pThis) + 0x80);
+    if (!pBtn || IsBadReadPtr(pBtn, sizeof(void*))) {
+        Log("[mxohax] Safe_Interlock_Grab_Button: button ptr (+0x80) is null/invalid\n");
+        return;
+    }
+    void* vtbl = *reinterpret_cast<void**>(pBtn);
+    if (!vtbl || IsBadReadPtr(vtbl, 0xB0)) {
+        Log("[mxohax] Safe_Interlock_Grab_Button: button vtable is null/invalid\n");
+        return;
+    }
+    __try {
+        if (Original_Interlock_Grab_Button) {
+            Original_Interlock_Grab_Button(pThis);
+        }
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        Log("[mxohax] Exception caught safely in Safe_Interlock_Grab_Button!\n");
+    }
+}
 
-    uintptr_t pESI = *reinterpret_cast<uintptr_t*>(p23C);
-    if (!pESI) return 0;
+static void __fastcall Safe_Interlock_Power_Button(void* pThis, void* /*edx*/) {
+    Log("[mxohax] Safe_Interlock_Power_Button called (pThis=0x%p)\n", pThis);
+    if (!pThis || IsBadReadPtr(pThis, 0x100)) return;
+    void* pBtn = *reinterpret_cast<void**>(reinterpret_cast<uintptr_t>(pThis) + 0x74);
+    if (!pBtn || IsBadReadPtr(pBtn, sizeof(void*))) {
+        Log("[mxohax] Safe_Interlock_Power_Button: button ptr (+0x74) is null/invalid\n");
+        return;
+    }
+    void* vtbl = *reinterpret_cast<void**>(pBtn);
+    if (!vtbl || IsBadReadPtr(vtbl, 0xB0)) {
+        Log("[mxohax] Safe_Interlock_Power_Button: button vtable is null/invalid\n");
+        return;
+    }
+    __try {
+        if (Original_Interlock_Power_Button) {
+            Original_Interlock_Power_Button(pThis);
+        }
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        Log("[mxohax] Exception caught safely in Safe_Interlock_Power_Button!\n");
+    }
+}
 
-    if (*reinterpret_cast<uint16_t*>(pESI + 4) == 0xFFFF) return 0;
-
-    uint16_t idx0 = *reinterpret_cast<uint16_t*>(pESI);
-    uintptr_t pMgr = *reinterpret_cast<uintptr_t*>(clientBase + 0x00897F90);
-    if (!pMgr) return 0;
-
-    typedef void* (__thiscall *FnGetObj)(void* thisPtr, uint32_t id);
-    FnGetObj pfnGetObj = reinterpret_cast<FnGetObj>(clientBase + 0x003A5CA0);
-    void* obj = pfnGetObj(reinterpret_cast<void*>(pMgr), idx0);
-    if (outObj) *outObj = obj;
-    if (!obj) return 0;
-
-    uint16_t idx1 = *reinterpret_cast<uint16_t*>(pESI + 2);
-    void** vtable = *reinterpret_cast<void***>(obj);
-    if (!vtable) return 0;
-
-    typedef void* (__thiscall *FnGetSubObj)(void* thisPtr, uint32_t id);
-    FnGetSubObj pfnGetSubObj = reinterpret_cast<FnGetSubObj>(vtable[0x58 / 4]);
-    if (!pfnGetSubObj) return 0;
-
-    void* subObj = pfnGetSubObj(obj, idx1);
-    if (outSubObj) *outSubObj = subObj;
-
-    return (subObj != nullptr) ? 1 : 0;
+static void __fastcall Safe_Interlock_Speed_Button(void* pThis, void* /*edx*/) {
+    Log("[mxohax] Safe_Interlock_Speed_Button called (pThis=0x%p)\n", pThis);
+    if (!pThis || IsBadReadPtr(pThis, 0x100)) return;
+    void* pBtn = *reinterpret_cast<void**>(reinterpret_cast<uintptr_t>(pThis) + 0x70);
+    if (!pBtn || IsBadReadPtr(pBtn, sizeof(void*))) {
+        Log("[mxohax] Safe_Interlock_Speed_Button: button ptr (+0x70) is null/invalid\n");
+        return;
+    }
+    void* vtbl = *reinterpret_cast<void**>(pBtn);
+    if (!vtbl || IsBadReadPtr(vtbl, 0xB0)) {
+        Log("[mxohax] Safe_Interlock_Speed_Button: button vtable is null/invalid\n");
+        return;
+    }
+    __try {
+        if (Original_Interlock_Speed_Button) {
+            Original_Interlock_Speed_Button(pThis);
+        }
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        Log("[mxohax] Exception caught safely in Safe_Interlock_Speed_Button!\n");
+    }
 }
 
 // ============================================================================
@@ -1698,6 +1822,31 @@ static void ApplyClientPatches(HMODULE hClient) {
         VirtualProtect(pWmPatch, 14, oldProt, &oldProt);
         FlushInstructionCache(GetCurrentProcess(), pWmPatch, 14);
         Log("[mxohax] SUCCESS: Patched client.dll + 0x000A20C6 for safe WorldMgr+0xCC check!\n");
+    }
+
+    // Patch J: Safe CViewInterlock tactic button handlers
+    LPVOID pWithdraw = reinterpret_cast<LPVOID>(clientBase + 0x0009A170);
+    if (MH_CreateHook(pWithdraw, reinterpret_cast<LPVOID>(&Safe_Interlock_Button_Withdraw), reinterpret_cast<LPVOID*>(&Original_Interlock_Button_Withdraw)) == MH_OK) {
+        MH_EnableHook(pWithdraw);
+        Log("[mxohax] SUCCESS: client.dll Interlock_Button_Withdraw hooked at 0x%p!\n", pWithdraw);
+    }
+
+    LPVOID pGrab = reinterpret_cast<LPVOID>(clientBase + 0x0009A1C0);
+    if (MH_CreateHook(pGrab, reinterpret_cast<LPVOID>(&Safe_Interlock_Grab_Button), reinterpret_cast<LPVOID*>(&Original_Interlock_Grab_Button)) == MH_OK) {
+        MH_EnableHook(pGrab);
+        Log("[mxohax] SUCCESS: client.dll Interlock_Grab_Button hooked at 0x%p!\n", pGrab);
+    }
+
+    LPVOID pPower = reinterpret_cast<LPVOID>(clientBase + 0x0009A210);
+    if (MH_CreateHook(pPower, reinterpret_cast<LPVOID>(&Safe_Interlock_Power_Button), reinterpret_cast<LPVOID*>(&Original_Interlock_Power_Button)) == MH_OK) {
+        MH_EnableHook(pPower);
+        Log("[mxohax] SUCCESS: client.dll Interlock_Power_Button hooked at 0x%p!\n", pPower);
+    }
+
+    LPVOID pSpeed = reinterpret_cast<LPVOID>(clientBase + 0x0009A260);
+    if (MH_CreateHook(pSpeed, reinterpret_cast<LPVOID>(&Safe_Interlock_Speed_Button), reinterpret_cast<LPVOID*>(&Original_Interlock_Speed_Button)) == MH_OK) {
+        MH_EnableHook(pSpeed);
+        Log("[mxohax] SUCCESS: client.dll Interlock_Speed_Button hooked at 0x%p!\n", pSpeed);
     }
 }
 
