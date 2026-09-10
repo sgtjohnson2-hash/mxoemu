@@ -2294,8 +2294,7 @@ static void InitializeMxOHaxSynchronous() {
         Log("[mxohax] SUCCESS: Patched matrix.exe + 0x0000977A (mov dl, 1) to force autoJackIn parameter!\n");
     }
 
-    // 8. Patch matrix.exe 0x00407161 - DISABLED: allow matrix.exe Margin State machine to execute naturally
-    /*
+    // 8. Patch matrix.exe 0x00407161 to bypass Margin State 8 check and jump to State 10
     LPVOID pState8Patch = reinterpret_cast<LPVOID>(0x00407161);
     if (VirtualProtect(pState8Patch, 5, PAGE_EXECUTE_READWRITE, &oldProt)) {
         BYTE nop5[5] = { 0x90, 0x90, 0x90, 0x90, 0x90 };
@@ -2304,7 +2303,6 @@ static void InitializeMxOHaxSynchronous() {
         FlushInstructionCache(GetCurrentProcess(), pState8Patch, 5);
         Log("[mxohax] SUCCESS: Patched matrix.exe + 0x00007161 (NOP * 5) to bypass Margin State 8 check and jump to State 10!\n");
     }
-    */
 
     // 9. Set matrix.exe autoJackIn global at 0x004AFDA9 to 1
     LPVOID pGlobalAutoJackIn = reinterpret_cast<LPVOID>(0x004AFDA9);
