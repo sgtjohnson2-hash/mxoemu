@@ -146,6 +146,11 @@ public:
     bool ProgressContactQuest(PlayerObject* player, uint32 questId, uint32 stepIndex);
     bool CompleteContactQuest(PlayerObject* player, uint32 questId);
 
+    bool HasActiveMission(uint32 playerGoId) {
+        std::lock_guard<std::recursive_mutex> lock(m_missionMutex);
+        return m_activeMissions.find(playerGoId) != m_activeMissions.end();
+    }
+
     // For test purposes
     const std::map<uint32, MissionTemplate>& GetMissionTemplates() const { return m_missions; }
 
