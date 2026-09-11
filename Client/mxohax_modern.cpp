@@ -240,12 +240,43 @@ struct MxoConnObj {
 };
 #pragma pack(pop)
 
+static char               g_ActiveCharName[64] = "TestCharacter";
+static uint32_t           g_ActiveCharId = 35;
+static bool               g_CommandLineParsed = false;
+
+static void ParseClientCommandLine() {
+    if (g_CommandLineParsed) return;
+    g_CommandLineParsed = true;
+    const char* cmd = GetCommandLineA();
+    if (!cmd) return;
+    const char* pChar = strstr(cmd, "-char");
+    if (pChar) {
+        pChar += 5;
+        while (*pChar == ' ' || *pChar == '\t' || *pChar == '\"') pChar++;
+        char buf[64] = {0};
+        int i = 0;
+        while (*pChar && *pChar != ' ' && *pChar != '\t' && *pChar != '\"' && i < 63) {
+            buf[i++] = *pChar++;
+        }
+        buf[i] = '\0';
+        if (strlen(buf) > 0) {
+            strncpy_s(g_ActiveCharName, sizeof(g_ActiveCharName), buf, _TRUNCATE);
+            if (_stricmp(buf, "TestCharacter") == 0) g_ActiveCharId = 35;
+            else if (_stricmp(buf, "TestChar2") == 0) g_ActiveCharId = 354;
+            else if (_stricmp(buf, "NeoOperative") == 0) g_ActiveCharId = 357;
+            else if (_stricmp(buf, "RedDawn141") == 0) g_ActiveCharId = 358;
+            else if (_stricmp(buf, "Slacker") == 0) g_ActiveCharId = 359;
+            else if (_stricmp(buf, "s1acker") == 0) g_ActiveCharId = 360;
+            Log("[mxohax] Parsed command-line target character: '%s' (charId=%u)\n", g_ActiveCharName, g_ActiveCharId);
+        }
+    }
+}
+
 static MxoCharacterData   g_SyntheticChar = {
-    360, 0, 0, 0, 0,
-    "s1acker", "",
-    100, 100, 101, 1, 360
+    35, 0, 0, 0, 0,
+    "TestCharacter", "",
+    100, 100, 101, 1, 35
 };
-static const char         g_SyntheticCharName[] = "s1acker";
 static MxoCharRecord      g_SyntheticCharRecord;
 static MxoConnParams      g_SyntheticConnParams;
 static MxoCharObj         g_SyntheticCharObj;
@@ -360,6 +391,8 @@ bool __stdcall DetourVerifyMessage(void* p1, void* p2, void* p3, void* p4, void*
 // matrix.exe Character Manager Hooks
 // ============================================================================
 static void SetupSyntheticCharManager(DWORD pThisDword) {
+    ParseClientCommandLine();
+
     // 1. Initialize vtable
     for (int i = 0; i < 64; ++i) {
         g_SyntheticVtbl[i] = (void*)&DummyDestructor;
@@ -367,7 +400,7 @@ static void SetupSyntheticCharManager(DWORD pThisDword) {
 
     // 2. Character record (for matrix.exe 0x0043C650 MS_LoadCharacterRequest packet building)
     memset(&g_SyntheticCharRecord, 0, sizeof(g_SyntheticCharRecord));
-    g_SyntheticCharRecord.charIdLow = 360;
+    g_SyntheticCharRecord.charIdLow = g_ActiveCharId;
     g_SyntheticCharRecord.charIdHigh = 0;
     g_SyntheticCharRecord.worldId = 1;
 
@@ -380,10 +413,15 @@ static void SetupSyntheticCharManager(DWORD pThisDword) {
     // 4. Character and Connection objects
     g_SyntheticCharObj.pVtbl = g_SyntheticVtbl;
     g_SyntheticCharObj.pRecord = &g_SyntheticCharRecord;
-    g_SyntheticCharObj.pCharName = g_SyntheticCharName;
+    g_SyntheticCharObj.pCharName = g_ActiveCharName;
 
     g_SyntheticConnObj.pVtbl = g_SyntheticVtbl;
     g_SyntheticConnObj.pConnParams = &g_SyntheticConnParams;
+
+    // Update synthetic character structure
+    g_SyntheticChar.charId = g_ActiveCharId;
+    g_SyntheticChar.handle = g_ActiveCharId;
+    strncpy_s(g_SyntheticChar.firstName, sizeof(g_SyntheticChar.firstName), g_ActiveCharName, _TRUNCATE);
 
     // 5. Populate matrix.exe Character Manager
     *reinterpret_cast<BYTE*>(pThisDword + 0x640) = 1;                              // Character count = 1
@@ -402,7 +440,7 @@ static GetCharacterCount_t OriginalGetCharacterCount = nullptr;
 int __fastcall DetourGetCharacterCount(void* pThis, void* /*edx*/) {
     DWORD pThisDword = reinterpret_cast<DWORD>(pThis);
     SetupSyntheticCharManager(pThisDword);
-    Log("[mxohax] [matrix.exe] GetCharacterCount called -> returning 1 (operative s1acker mounted)\n");
+    Log("[mxohax] [matrix.exe] GetCharacterCount called -> returning 1 (operative %s mounted, charId=%u)\n", g_ActiveCharName, g_ActiveCharId);
     return 1;
 }
 
@@ -415,7 +453,7 @@ void* __fastcall DetourGetCharacterByIndex(void* pThis, void* /*edx*/, int idx) 
     if (idx == 0) {
         DWORD pThisDword = reinterpret_cast<DWORD>(pThis);
         SetupSyntheticCharManager(pThisDword);
-        Log("[mxohax] [matrix.exe] Returning synthetic operative s1acker (charId=360) at 0x%p\n", &g_SyntheticChar);
+        Log("[mxohax] [matrix.exe] Returning synthetic operative %s (charId=%u) at 0x%p\n", g_ActiveCharName, g_ActiveCharId, &g_SyntheticChar);
         return &g_SyntheticChar;
     }
     return nullptr;
@@ -640,7 +678,8 @@ static bool TryAutoJackIn(DWORD clientBase) {
     #pragma pack(pop)
 
     static char s_worldFileName[] = "resource/worlds/final_world/slums_barrens_full.metr";
-    static char s_charHandleStr[] = "s1acker";
+    static char s_charHandleStr[64] = "TestCharacter";
+    strncpy_s(s_charHandleStr, sizeof(s_charHandleStr), g_ActiveCharName, _TRUNCATE);
     static MxoLocalCharEntry s_localCharEntry;
     s_localCharEntry.pWorldFirst  = s_worldFileName;
     s_localCharEntry.pWorldLast   = s_worldFileName + strlen(s_worldFileName);
@@ -648,7 +687,7 @@ static bool TryAutoJackIn(DWORD clientBase) {
     s_localCharEntry.pHandleFirst = s_charHandleStr;
     s_localCharEntry.pHandleLast  = s_charHandleStr + strlen(s_charHandleStr);
     s_localCharEntry.pHandleEnd   = s_localCharEntry.pHandleLast;
-    s_localCharEntry.charId       = 360;
+    s_localCharEntry.charId       = g_ActiveCharId;
     s_localCharEntry.worldId      = 1;
 
     // Ensure fallback world pointer at 0x00896E4C points to real slums METR
@@ -666,7 +705,7 @@ static bool TryAutoJackIn(DWORD clientBase) {
             *ppCharBegin = reinterpret_cast<DWORD>(&s_localCharEntry);
             *ppCharEnd   = reinterpret_cast<DWORD>(&s_localCharEntry) + sizeof(s_localCharEntry);
             pCharToEnter = &s_localCharEntry;
-            Log("[mxohax] [AutoJackIn] Mounted operative s1acker (slums_barrens_full.metr) into vector at 0x00899B4C\n");
+            Log("[mxohax] [AutoJackIn] Mounted operative %s (slums_barrens_full.metr, charId=%u) into vector at 0x00899B4C\n", g_ActiveCharName, g_ActiveCharId);
         }
     } else {
         pCharToEnter = &s_localCharEntry;
@@ -775,7 +814,7 @@ static HRESULT STDMETHODCALLTYPE DetourPresent(IDirect3DDevice9* pDevice, const 
 
     if (s_inWorldSticky && pDevice) {
         s_inWorldPresents++;
-        if (s_inWorldPresents == 30 || s_inWorldPresents == 60 || s_inWorldPresents == 90) {
+        if (s_inWorldPresents == 60 || s_inWorldPresents == 120 || s_inWorldPresents == 180 || s_inWorldPresents == 240) {
             CaptureD3D9Backbuffer(pDevice, "E:\\Games\\The Matrix Online\\inworld_render.bmp");
         }
     }
@@ -797,7 +836,7 @@ static HRESULT STDMETHODCALLTYPE DetourPresentEx(IDirect3DDevice9Ex* pDevice, co
 
     if (s_inWorldSticky && pDevice) {
         s_inWorldPresents++;
-        if (s_inWorldPresents == 30 || s_inWorldPresents == 60 || s_inWorldPresents == 90) {
+        if (s_inWorldPresents == 60 || s_inWorldPresents == 120 || s_inWorldPresents == 180 || s_inWorldPresents == 240) {
             CaptureD3D9Backbuffer(pDevice, "E:\\Games\\The Matrix Online\\inworld_render.bmp");
         }
     }
@@ -1187,10 +1226,10 @@ static void EnsureInWorldRendering(uintptr_t clientBase, void* pWorldMgr, DWORD 
 
     if (pWorldEngine && ppWorldInst && !*ppWorldInst) {
         float dummyMat[16] = {
-            16802.3f, 572.0f, 3237.01f, 1.0f,
+            1.0f, 0.0f, 0.0f, 0.0f,
             0.0f, 1.0f, 0.0f, 0.0f,
             0.0f, 0.0f, 1.0f, 0.0f,
-            0.0f, 0.0f, 0.0f, 1.0f
+            16802.3f, 572.0f, 3237.01f, 1.0f
         };
         float* pMat = dummyMat;
         if (pPlayer) {
@@ -1223,12 +1262,19 @@ static void EnsureInWorldRendering(uintptr_t clientBase, void* pWorldMgr, DWORD 
         }
         if (*ppCamera) {
             DWORD pCamAddr = reinterpret_cast<DWORD>(*ppCamera);
+            float* pCamRot = reinterpret_cast<float*>(pCamAddr + 0x20); // (qx, qy, qz, qw)
+            if (pCamRot) {
+                pCamRot[0] = -0.1305f; // Pitch down ~15 degrees
+                pCamRot[1] = 0.0f;
+                pCamRot[2] = 0.0f;
+                pCamRot[3] = 0.9914f;
+            }
             float* pCamPos = reinterpret_cast<float*>(pCamAddr + 0x30);
             if (pCamPos && ((pCamPos[0] == 0.0f && pCamPos[2] == 0.0f) || pCamPos[1] < 575.0f)) {
                 pCamPos[0] = 16802.3f;
-                pCamPos[1] = 615.0f;
-                pCamPos[2] = 3180.0f;
-                Log("[mxohax] EnsureInWorld: Set camera position at +0x30 to Slums street view (%.1f, %.1f, %.1f)\n",
+                pCamPos[1] = 595.0f;  // Eye/head level above pavement
+                pCamPos[2] = 3080.0f; // Behind operative facing forward towards 3237.0f
+                Log("[mxohax] EnsureInWorld: Set 3rd person chase camera position (%.1f, %.1f, %.1f) with -15 deg pitch\n",
                     pCamPos[0], pCamPos[1], pCamPos[2]);
             }
         }
@@ -1422,10 +1468,10 @@ static void __fastcall DetourFrameTick(void* pThis, void* /*edx*/) {
                 CreateWorldInst_t* vtable = *reinterpret_cast<CreateWorldInst_t**>(pWorldEngine);
                 if (vtable && vtable[0]) {
                     float dummyMat[16] = {
-                        16802.3f, 572.0f, 3237.01f, 1.0f,
+                        1.0f, 0.0f, 0.0f, 0.0f,
                         0.0f, 1.0f, 0.0f, 0.0f,
                         0.0f, 0.0f, 1.0f, 0.0f,
-                        0.0f, 0.0f, 0.0f, 1.0f
+                        16802.3f, 572.0f, 3237.01f, 1.0f
                     };
                     *ppWorldInstSticky = vtable[0](pWorldEngine, dummyMat, reinterpret_cast<void*>(clientBase + 0x0011FF10), 0);
                     Log("[mxohax] DetourFrameTick: Re-ensured [0x1089DD6C] = 0x%p\n", *ppWorldInstSticky);
@@ -1435,7 +1481,11 @@ static void __fastcall DetourFrameTick(void* pThis, void* /*edx*/) {
 
         // Capture in-world screenshot verification after entering world
         static bool s_savedScreenshot = false;
-        if (!s_savedScreenshot && s_tickCount >= 100) {
+        static int s_inWorldTickCounter = 0;
+        if (s_inWorldSticky || inWorld == 1) {
+            s_inWorldTickCounter++;
+        }
+        if (!s_savedScreenshot && s_inWorldTickCounter >= 150) {
             s_savedScreenshot = true;
             HWND hWnd = *reinterpret_cast<HWND*>(pShell + 0x14);
             if (!hWnd) hWnd = GetActiveWindow();
@@ -2164,7 +2214,8 @@ static void InitializeMxOHaxSynchronous() {
 
     // Initialize synthetic structures
     memset(&g_SyntheticCharRecord, 0, sizeof(g_SyntheticCharRecord));
-    g_SyntheticCharRecord.charIdLow = 360;
+    ParseClientCommandLine();
+    g_SyntheticCharRecord.charIdLow = g_ActiveCharId;
     g_SyntheticCharRecord.charIdHigh = 0;
     g_SyntheticCharRecord.worldId = 1;
 
@@ -2176,7 +2227,7 @@ static void InitializeMxOHaxSynchronous() {
     memset(&g_SyntheticCharObj, 0, sizeof(g_SyntheticCharObj));
     g_SyntheticCharObj.pVtbl = g_SyntheticVtbl;
     g_SyntheticCharObj.pRecord = &g_SyntheticCharRecord;
-    g_SyntheticCharObj.pCharName = g_SyntheticCharName;
+    g_SyntheticCharObj.pCharName = g_ActiveCharName;
 
     memset(&g_SyntheticConnObj, 0, sizeof(g_SyntheticConnObj));
     g_SyntheticConnObj.pVtbl = g_SyntheticVtbl;
