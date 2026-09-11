@@ -1147,8 +1147,8 @@ static void EnsureInWorldRendering(uintptr_t clientBase, void* pWorldMgr, DWORD 
             pCtor(pPlayer, &flag, nullptr);
             Log("[mxohax] EnsureInWorld: PlayerCtor(0x101d17c0) initialized PlayerObject at 0x%p\n", pPlayer);
 
-            // Set coordinates for operative in Slums: (16802.3f, 572.0f, 3237.01f)
-            // 520.0f pavement level + 52.0f half-extent clearance ensures boots rest on ground
+            // Set coordinates for operative in Slums: (16802.3f, 665.0f, 3237.01f)
+            // 572.0f pavement level + 93.0f leg clearance ensures boots rest firmly on pavement
             float* pPos = *reinterpret_cast<float**>(reinterpret_cast<DWORD>(pPlayer) + 0x94);
             if (!pPos) {
                 pPos = reinterpret_cast<float*>(calloc(16, sizeof(float)));
@@ -1156,7 +1156,7 @@ static void EnsureInWorldRendering(uintptr_t clientBase, void* pWorldMgr, DWORD 
             }
             if (pPos) {
                 pPos[0] = 16802.3f;
-                pPos[1] = 572.0f;
+                pPos[1] = 665.0f;
                 pPos[2] = 3237.01f;
                 pPos[3] = 1.0f;
                 pPos[4] = 0.0f;
@@ -1180,9 +1180,9 @@ static void EnsureInWorldRendering(uintptr_t clientBase, void* pWorldMgr, DWORD 
             *reinterpret_cast<float**>(reinterpret_cast<DWORD>(pPlayer) + 0x94) = pPos;
         }
         if (pPos) {
-            if (pPos[1] < 570.0f || (pPos[0] == 0.0f && pPos[2] == 0.0f)) {
+            if (pPos[1] < 660.0f || (pPos[0] == 0.0f && pPos[2] == 0.0f)) {
                 pPos[0] = 16802.3f;
-                pPos[1] = 572.0f;
+                pPos[1] = 665.0f;
                 pPos[2] = 3237.01f;
                 pPos[3] = 1.0f;
                 pPos[4] = 0.0f;
@@ -1229,7 +1229,7 @@ static void EnsureInWorldRendering(uintptr_t clientBase, void* pWorldMgr, DWORD 
             1.0f, 0.0f, 0.0f, 0.0f,
             0.0f, 1.0f, 0.0f, 0.0f,
             0.0f, 0.0f, 1.0f, 0.0f,
-            16802.3f, 572.0f, 3237.01f, 1.0f
+            16802.3f, 665.0f, 3237.01f, 1.0f
         };
         float* pMat = dummyMat;
         if (pPlayer) {
@@ -1264,17 +1264,17 @@ static void EnsureInWorldRendering(uintptr_t clientBase, void* pWorldMgr, DWORD 
             DWORD pCamAddr = reinterpret_cast<DWORD>(*ppCamera);
             float* pCamRot = reinterpret_cast<float*>(pCamAddr + 0x20); // (qx, qy, qz, qw)
             if (pCamRot) {
-                pCamRot[0] = -0.1305f; // Pitch down ~15 degrees
+                pCamRot[0] = -0.0523f; // Gentle downward pitch ~6 degrees
                 pCamRot[1] = 0.0f;
                 pCamRot[2] = 0.0f;
-                pCamRot[3] = 0.9914f;
+                pCamRot[3] = 0.9986f;
             }
             float* pCamPos = reinterpret_cast<float*>(pCamAddr + 0x30);
-            if (pCamPos && ((pCamPos[0] == 0.0f && pCamPos[2] == 0.0f) || pCamPos[1] < 575.0f)) {
+            if (pCamPos && ((pCamPos[0] == 0.0f && pCamPos[2] == 0.0f) || pCamPos[1] < 670.0f)) {
                 pCamPos[0] = 16802.3f;
-                pCamPos[1] = 595.0f;  // Eye/head level above pavement
-                pCamPos[2] = 3080.0f; // Behind operative facing forward towards 3237.0f
-                Log("[mxohax] EnsureInWorld: Set 3rd person chase camera position (%.1f, %.1f, %.1f) with -15 deg pitch\n",
+                pCamPos[1] = 720.0f;  // Eye level behind operative
+                pCamPos[2] = 2950.0f; // Behind operative facing forward towards 3237.0f
+                Log("[mxohax] EnsureInWorld: Set 3rd person chase camera position (%.1f, %.1f, %.1f) with -6 deg pitch\n",
                     pCamPos[0], pCamPos[1], pCamPos[2]);
             }
         }
@@ -1471,7 +1471,7 @@ static void __fastcall DetourFrameTick(void* pThis, void* /*edx*/) {
                         1.0f, 0.0f, 0.0f, 0.0f,
                         0.0f, 1.0f, 0.0f, 0.0f,
                         0.0f, 0.0f, 1.0f, 0.0f,
-                        16802.3f, 572.0f, 3237.01f, 1.0f
+                        16802.3f, 665.0f, 3237.01f, 1.0f
                     };
                     *ppWorldInstSticky = vtable[0](pWorldEngine, dummyMat, reinterpret_cast<void*>(clientBase + 0x0011FF10), 0);
                     Log("[mxohax] DetourFrameTick: Re-ensured [0x1089DD6C] = 0x%p\n", *ppWorldInstSticky);

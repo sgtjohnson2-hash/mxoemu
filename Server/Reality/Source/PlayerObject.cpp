@@ -127,8 +127,8 @@ void PlayerObject::loadFromDB( bool updatePos )
 			double px = field[4].GetDouble();
 			double py = field[5].GetDouble();
 			double pz = field[6].GetDouble();
-			if (py < 572.0)
-				py = 572.0;
+			if (py < 665.0)
+				py = 665.0;
 			m_pos.ChangeCoords(px, py, pz);
 			m_pos.rot = field[7].GetDouble();
 			m_savedPos = m_pos;

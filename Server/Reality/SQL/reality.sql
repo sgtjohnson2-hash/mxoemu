@@ -21,7 +21,7 @@ CREATE TABLE `characters` (
   `lastName` varchar(32) NOT NULL,
   `background` varchar(1024) DEFAULT NULL,
   `x` double NOT NULL DEFAULT '16802.3',
-  `y` double NOT NULL DEFAULT '572.0',
+  `y` double NOT NULL DEFAULT '665.0',
   `z` double NOT NULL DEFAULT '3237.01',
   `rot` double NOT NULL DEFAULT '0.0245437',
   `healthC` mediumint(11) unsigned NOT NULL DEFAULT '250',

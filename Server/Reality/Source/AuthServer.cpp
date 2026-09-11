@@ -590,7 +590,7 @@ bool AuthServer::CreateCharacter( const string& worldName, const string& userNam
 	if (getCharIdForHandle(charHandle) != 0)
 		return false;
 
-	PreparedStatement stmt("INSERT INTO `characters` SET `userId`=?0, `worldId`=?1, `handle`=?2, `firstName`=?3, `lastName`=?4, `x`=16802.3, `y`=572.0, `z`=3237.01, `rot`=0.0245437, `healthC`=250, `healthM`=250, `innerStrC`=100, `innerStrM`=100, `level`=1, `profession`=1, `exp`=0, `cash`=250");
+	PreparedStatement stmt("INSERT INTO `characters` SET `userId`=?0, `worldId`=?1, `handle`=?2, `firstName`=?3, `lastName`=?4, `x`=16802.3, `y`=665.0, `z`=3237.01, `rot`=0.0245437, `healthC`=250, `healthM`=250, `innerStrC`=100, `innerStrM`=100, `level`=1, `profession`=1, `exp`=0, `cash`=250");
 	stmt.SetUInt32(0, userId);
 	stmt.SetUInt32(1, worldId);
 	stmt.SetString(2, charHandle);
