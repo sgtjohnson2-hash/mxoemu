@@ -13,6 +13,7 @@
 
 #include "AbilitySystem.h"
 #include "PlayerObject.h"
+#include "GameClient.h"
 #include "Database/Database.h"
 #include "Database/PreparedStatement.h"
 #include "Log.h"
