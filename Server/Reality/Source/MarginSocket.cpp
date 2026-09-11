@@ -1135,7 +1135,7 @@ void MarginSocket::HandleClaimCharacterNameRequest(ByteBuffer &packetData)
 	else
 	{
 		PreparedStatement insStmt("INSERT INTO `characters` (`userId`, `worldId`, `status`, `handle`, `firstName`, `lastName`, `x`, `y`, `z`, `rot`, `healthC`, `healthM`, `innerStrC`, `innerStrM`, `level`, `profession`, `alignment`, `pvpflag`, `exp`, `cash`, `district`, `adminFlags`) "
-			"VALUES (?0, 1, 0, ?1, ?1, 'Operative', 16802.3, 495.0, 3237.01, 0.0245437, 500, 500, 200, 200, 50, 2, 0, 0, 1000000000, 10000, 1, 0)");
+			"VALUES (?0, 1, 0, ?1, ?1, 'Operative', 16802.3, 572.0, 3237.01, 0.0245437, 250, 250, 100, 100, 1, 1, 0, 0, 0, 250, 1, 0)");
 		insStmt.SetUInt32(0, m_userId);
 		insStmt.SetString(1, handleStr);
 		sDatabase.ExecutePrepared(&insStmt);
@@ -1330,7 +1330,7 @@ void MarginSocket::HandleCreateCharacterRequest(ByteBuffer &packetData)
 
 		uint32 profId = (profession > 0) ? profession : 2;
 		PreparedStatement insStmt("INSERT INTO `characters` (`userId`, `worldId`, `status`, `handle`, `firstName`, `lastName`, `background`, `x`, `y`, `z`, `rot`, `healthC`, `healthM`, `innerStrC`, `innerStrM`, `level`, `profession`, `alignment`, `pvpflag`, `exp`, `cash`, `district`, `adminFlags`) "
-			"VALUES (?0, 1, 0, ?1, ?2, ?3, ?4, 16802.3, 495.0, 3237.01, 0.0245437, 500, 500, 200, 200, 50, ?5, 0, 0, 1000000000, 10000, 1, 0)");
+			"VALUES (?0, 1, 0, ?1, ?2, ?3, ?4, 16802.3, 572.0, 3237.01, 0.0245437, 250, 250, 100, 100, 1, ?5, 0, 0, 0, 250, 1, 0)");
 		insStmt.SetUInt32(0, m_userId);
 		insStmt.SetString(1, handleToUse);
 		insStmt.SetString(2, firstName);

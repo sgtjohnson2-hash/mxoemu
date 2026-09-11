@@ -37,6 +37,7 @@
 #include "Timer.h"
 #include "ObjectMgr.h"
 #include "SpatialGrid.h"
+#include "CombatSystem.h"
 #include <iomanip>
 #include "GameServer.h"
 #include "GameClient.h"
@@ -1079,7 +1080,46 @@ void PlayerObject::ParsePlayerCommand( string theCmd )
 		return;
 
 	using boost::erase_all;
-	if (iequals(command, "dojo"))
+	if (iequals(command, "attack") || iequals(command, "interlock"))
+	{
+		if (m_targetGoId == 0)
+		{
+			m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FF0000}No valid target selected.{/c}"));
+			return;
+		}
+		if (!sCombatSys.RequestInterlock(m_goId, m_targetGoId))
+		{
+			m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FF0000}Interlock request failed (out of range or already in combat).{/c}"));
+		}
+		return;
+	}
+	else if (iequals(command, "tactic"))
+	{
+		string tacStr;
+		cmdStream >> tacStr;
+		uint8 tac = TACTIC_NORMAL;
+		if (iequals(tacStr, "power")) tac = TACTIC_POWER;
+		else if (iequals(tacStr, "speed")) tac = TACTIC_SPEED;
+		else if (iequals(tacStr, "grab") || iequals(tacStr, "retaliate")) tac = TACTIC_RETALIATE;
+		else if (iequals(tacStr, "block") || iequals(tacStr, "defense")) tac = TACTIC_DEFENSE;
+		else
+		{
+			m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FF0000}Usage: &tactic <power|speed|grab|block>{/c}"));
+			return;
+		}
+		m_tactic = tac;
+		sCombatSys.SetTactic(m_goId, tac);
+		m_parent.QueueCommand(make_shared<SystemChatMsg>((format("{c:00FF00}Combat tactic set to %1%.{/c}") % tacStr).str()));
+		return;
+	}
+	else if (iequals(command, "withdraw") || iequals(command, "escape"))
+	{
+		sCombatSys.StopFreeFire(m_goId);
+		sCombatSys.LeaveInterlock(m_goId);
+		m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FFFF00}Withdrew from combat.{/c}"));
+		return;
+	}
+	else if (iequals(command, "dojo"))
 	{
 		string subCommand;
 		cmdStream >> subCommand;

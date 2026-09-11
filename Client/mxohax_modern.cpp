@@ -1108,8 +1108,8 @@ static void EnsureInWorldRendering(uintptr_t clientBase, void* pWorldMgr, DWORD 
             pCtor(pPlayer, &flag, nullptr);
             Log("[mxohax] EnsureInWorld: PlayerCtor(0x101d17c0) initialized PlayerObject at 0x%p\n", pPlayer);
 
-            // Set coordinates for operative s1acker in Slums: (16802.3f, 520.0f, 3237.01f)
-            // Allocate full 64 bytes (16 floats) for 4x4 matrix/coords
+            // Set coordinates for operative in Slums: (16802.3f, 572.0f, 3237.01f)
+            // 520.0f pavement level + 52.0f half-extent clearance ensures boots rest on ground
             float* pPos = *reinterpret_cast<float**>(reinterpret_cast<DWORD>(pPlayer) + 0x94);
             if (!pPos) {
                 pPos = reinterpret_cast<float*>(calloc(16, sizeof(float)));
@@ -1117,7 +1117,7 @@ static void EnsureInWorldRendering(uintptr_t clientBase, void* pWorldMgr, DWORD 
             }
             if (pPos) {
                 pPos[0] = 16802.3f;
-                pPos[1] = 520.0f;
+                pPos[1] = 572.0f;
                 pPos[2] = 3237.01f;
                 pPos[3] = 1.0f;
                 pPos[4] = 0.0f;
@@ -1141,9 +1141,9 @@ static void EnsureInWorldRendering(uintptr_t clientBase, void* pWorldMgr, DWORD 
             *reinterpret_cast<float**>(reinterpret_cast<DWORD>(pPlayer) + 0x94) = pPos;
         }
         if (pPos) {
-            if (pPos[1] < 520.0f || (pPos[0] == 0.0f && pPos[2] == 0.0f)) {
+            if (pPos[1] < 570.0f || (pPos[0] == 0.0f && pPos[2] == 0.0f)) {
                 pPos[0] = 16802.3f;
-                pPos[1] = 520.0f;
+                pPos[1] = 572.0f;
                 pPos[2] = 3237.01f;
                 pPos[3] = 1.0f;
                 pPos[4] = 0.0f;
@@ -1187,7 +1187,7 @@ static void EnsureInWorldRendering(uintptr_t clientBase, void* pWorldMgr, DWORD 
 
     if (pWorldEngine && ppWorldInst && !*ppWorldInst) {
         float dummyMat[16] = {
-            16802.3f, 520.0f, 3237.01f, 1.0f,
+            16802.3f, 572.0f, 3237.01f, 1.0f,
             0.0f, 1.0f, 0.0f, 0.0f,
             0.0f, 0.0f, 1.0f, 0.0f,
             0.0f, 0.0f, 0.0f, 1.0f
@@ -1224,9 +1224,9 @@ static void EnsureInWorldRendering(uintptr_t clientBase, void* pWorldMgr, DWORD 
         if (*ppCamera) {
             DWORD pCamAddr = reinterpret_cast<DWORD>(*ppCamera);
             float* pCamPos = reinterpret_cast<float*>(pCamAddr + 0x30);
-            if (pCamPos && ((pCamPos[0] == 0.0f && pCamPos[2] == 0.0f) || pCamPos[1] < 525.0f)) {
+            if (pCamPos && ((pCamPos[0] == 0.0f && pCamPos[2] == 0.0f) || pCamPos[1] < 575.0f)) {
                 pCamPos[0] = 16802.3f;
-                pCamPos[1] = 535.0f;
+                pCamPos[1] = 615.0f;
                 pCamPos[2] = 3180.0f;
                 Log("[mxohax] EnsureInWorld: Set camera position at +0x30 to Slums street view (%.1f, %.1f, %.1f)\n",
                     pCamPos[0], pCamPos[1], pCamPos[2]);
@@ -1422,7 +1422,7 @@ static void __fastcall DetourFrameTick(void* pThis, void* /*edx*/) {
                 CreateWorldInst_t* vtable = *reinterpret_cast<CreateWorldInst_t**>(pWorldEngine);
                 if (vtable && vtable[0]) {
                     float dummyMat[16] = {
-                        16802.3f, 520.0f, 3237.01f, 1.0f,
+                        16802.3f, 572.0f, 3237.01f, 1.0f,
                         0.0f, 1.0f, 0.0f, 0.0f,
                         0.0f, 0.0f, 1.0f, 0.0f,
                         0.0f, 0.0f, 0.0f, 1.0f

@@ -56,6 +56,16 @@ void AbilitySystem::loadFromDB()
         
         INFO_LOG(format("Loaded %1% abilities for %2%") % m_loadedAbilities.size() % m_owner->getHandle());
     }
+
+    if (m_loadedAbilities.empty() && m_owner && !m_owner->getClient().isBot())
+    {
+        // Grant authentic Level 1 baseline operative abilities
+        m_loadedAbilities[1] = make_shared<Ability>(1, 1, 0); // Generic Strike
+        m_loadedAbilities[2] = make_shared<Ability>(2, 1, 1); // Heavy Kick
+        m_loadedAbilities[3] = make_shared<Ability>(3, 1, 2); // Viral Injection
+        saveToDB();
+        INFO_LOG(format("Granted default Level 1 abilities (Strike, Kick, Virus) for %1%") % m_owner->getHandle());
+    }
 }
 
 void AbilitySystem::saveToDB()

@@ -321,6 +321,8 @@ void PlayerObject::RPC_HandleCloseCombatRequest( ByteBuffer &srcCmd )
 		spawnCounter = srcCmd.read<uint16>();
 
 	uint32 targetGoId = sObjMgr.getGOForView(&m_parent,targetViewId);
+	if (targetGoId == 0)
+		targetGoId = m_targetGoId;
 
 	DEBUG_LOG(format("(%1%) %2%:%3% close combat request view %4% spawn %5% -> target go %6%")
 		% m_parent.Address() % m_handle % m_goId % targetViewId % spawnCounter % targetGoId);

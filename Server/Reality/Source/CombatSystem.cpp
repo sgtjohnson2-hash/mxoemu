@@ -472,11 +472,17 @@ void CombatSystem::RemoveCombatant(uint32 goId)
 
 float CombatSystem::TacticModifier(uint8 attackerTactic, uint8 targetTactic)
 {
-	//classic interlock triangle: Power beats Grab, Grab beats Speed, Speed beats Power
+	// Authentic Matrix Online martial arts counter matrix:
+	// Power beats Grab (1.30x)
+	// Grab beats Defense/Block (1.40x throw/block break)
+	// Grab beats Speed (1.25x intercept)
+	// Speed beats Power (1.30x fast interrupt)
+	// Defense absorbs Power/Speed (handled in ResolveAttack)
 	if (attackerTactic == TACTIC_POWER && targetTactic == TACTIC_RETALIATE) return 1.30f;
-	if (attackerTactic == TACTIC_RETALIATE && targetTactic == TACTIC_SPEED) return 1.30f;
+	if (attackerTactic == TACTIC_RETALIATE && targetTactic == TACTIC_DEFENSE) return 1.40f;
+	if (attackerTactic == TACTIC_RETALIATE && targetTactic == TACTIC_SPEED) return 1.25f;
 	if (attackerTactic == TACTIC_SPEED && targetTactic == TACTIC_POWER) return 1.30f;
-	if (attackerTactic == targetTactic && attackerTactic != TACTIC_NORMAL) return 0.90f; //mirrored tactics glance off
+	if (attackerTactic == targetTactic && attackerTactic != TACTIC_NORMAL) return 0.90f; // Mirrored tactics glance off
 	return 1.0f;
 }
 
@@ -641,8 +647,16 @@ CombatSystem::AttackResult CombatSystem::ResolveAttack(PlayerObject* attacker, P
 		float absorbed = float(target->getLevel()) * 0.5f;
 		if (targetTactic == TACTIC_DEFENSE)
 		{
-			dmg *= 0.5f;
-			target->restoreIS(5);
+			if (attackerTactic == TACTIC_RETALIATE)
+			{
+				if (!target->getClient().isBot())
+					target->getClient().QueueCommand(std::make_shared<SystemChatMsg>("{c:FF0000}[COMBAT] Your Block was broken by a Grab!{/c}"));
+			}
+			else
+			{
+				dmg *= 0.5f;
+				target->restoreIS(5);
+			}
 		}
 		dmg = (dmg > absorbed) ? (dmg - absorbed) : 0.0f;
 	}

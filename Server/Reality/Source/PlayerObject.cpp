@@ -37,6 +37,8 @@
 #include "Item.h"
 #include "ObjectMgr.h"
 #include "SpatialGrid.h"
+#include "MissionSystem.h"
+#include "AbilitySystem.h"
 #include <boost/algorithm/string.hpp>
 
 PlayerObject::PlayerObject( GameClient &parent,uint64 charUID, bool isBot ) :m_parent(parent),m_characterUID(charUID),m_spawnedInWorld(false),m_worldPopulated(false)
@@ -125,8 +127,8 @@ void PlayerObject::loadFromDB( bool updatePos )
 			double px = field[4].GetDouble();
 			double py = field[5].GetDouble();
 			double pz = field[6].GetDouble();
-			if (py < 520.0)
-				py = 520.0;
+			if (py < 572.0)
+				py = 572.0;
 			m_pos.ChangeCoords(px, py, pz);
 			m_pos.rot = field[7].GetDouble();
 			m_savedPos = m_pos;
@@ -212,6 +214,19 @@ void PlayerObject::initGoId(uint32 theGoId)
 		m_parent.QueueCommand(make_shared<SystemChatMsg>((format("Your Object Id is %1%")%m_goId).str()));
 		if (GameServer::getSingletonPtr()) {
 			sGame.AnnounceCommand(&m_parent,make_shared<SystemChatMsg>((format("Player %1% connected with object id %2%")%m_handle%m_goId).str()));
+		}
+
+		// Authentic launch onboarding experience: Operator transmission & initial abilities
+		m_parent.QueueCommand(make_shared<SystemChatMsg>(
+			(format("{c:00FF00}[Operator] Welcome to the real world, %1%. Your signal is locked in. Training begins now. Check your mission log for instructions.{/c}") % m_handle).str()
+		));
+
+		if (m_abilitySystem) {
+			m_abilitySystem->sendFullLoadout();
+		}
+
+		if (m_currMissionId == 0) {
+			sMissionSystem.AssignMission(this, 10111); // Chapter 1.1: Intelligence Gathering / Awakening
 		}
 	}
 }
