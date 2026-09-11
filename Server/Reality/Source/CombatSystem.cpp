@@ -854,12 +854,7 @@ void CombatSystem::AwardKill(PlayerObject* killer, PlayerObject* victim)
         killer->getClient().QueueCommand(std::make_shared<SystemChatMsg>(
             (format("{c:00FF00}[COMBAT] Defeated %1%! Looted %2% $Info.{/c}") % victim->getHandle() % infoAmount).str()
         ));
-        if (killer->getClient().GetCharacterId() < 9000000) {
-            PreparedStatement stmt("UPDATE `characters` SET `cash` = ?0 WHERE `charId` = ?1");
-            stmt.SetUInt64(0, killer->getInformation());
-            stmt.SetUInt64(1, killer->getClient().GetCharacterId());
-            sDatabase.ExecutePrepared(&stmt);
-        }
+        killer->saveCashToDB();
     }
 }
 

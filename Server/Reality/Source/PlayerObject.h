@@ -197,6 +197,7 @@ public:
 
     // LootManager
     void addInformation(uint32 amount) { m_cash += amount; }
+    void saveCashToDB();
 
 	typedef enum
 	{

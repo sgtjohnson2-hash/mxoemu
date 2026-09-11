@@ -942,6 +942,11 @@ void PlayerObject::degradeEquippedWeapon(uint16 degradationAmount) {
 }
 void PlayerObject::addInfo(uint64 amount) { m_cash += amount; }
 void PlayerObject::removeInfo(uint64 amount) { if(m_cash >= amount) m_cash -= amount; }
+void PlayerObject::saveCashToDB()
+{
+	if (m_characterUID >= 9000000) return;
+	sDatabase.Execute(format("UPDATE `characters` SET `cash` = '%1%' WHERE `charId` = '%2%'") % m_cash % m_characterUID);
+}
 void PlayerObject::addExp(uint64 amount) { m_exp += amount; }
 std::shared_ptr<class InventorySystem> PlayerObject::getInventory() { return m_inventorySystem; }
 
