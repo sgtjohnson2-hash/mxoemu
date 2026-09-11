@@ -237,6 +237,7 @@ bool CombatSystem::RequestInterlock(uint32 attackerGoId, uint32 targetGoId)
 	PlayerObject* pA = getPlayerSafe(attackerGoId);
 	PlayerObject* pB = getPlayerSafe(targetGoId);
 	if (!pA || !pB || pA->isDead() || pB->isDead()) return false;
+	if (pA->getPosition().Distance(pB->getPosition()) > 1500.0f) return false;
 
     // Bystander Panic (15-20m radius = 1500-2000 units, SpatialGrid accelerated)
     const float panicRadius = 2000.0f;
@@ -301,6 +302,18 @@ bool CombatSystem::RequestInterlock(uint32 attackerGoId, uint32 targetGoId)
 	}
 
 	m_interlocks.push_back(session);
+
+	// Turn combatants to face each other squarely upon interlock initiation
+	LocationVector posA = pA->getPosition();
+	LocationVector posB = pB->getPosition();
+	posA.rot = posA.CalcAngTo(posB);
+	pA->setPosition(posA);
+	sGame.AnnounceStateUpdate(NULL, std::make_shared<PositionStateMsg>(pA->getGoId()));
+
+	posB.rot = posB.CalcAngTo(posA);
+	pB->setPosition(posB);
+	sGame.AnnounceStateUpdate(NULL, std::make_shared<PositionStateMsg>(pB->getGoId()));
+
 	pA->enterInterlock(targetGoId);
 	pB->enterInterlock(attackerGoId);
 	return true;
@@ -559,6 +572,16 @@ CombatSystem::AttackResult CombatSystem::ResolveAttack(PlayerObject* attacker, P
 		if (attackRoll < defenseRoll)
 		{
 			res.hit = false;
+			if (!attacker->getClient().isBot()) {
+				attacker->getClient().QueueCommand(std::make_shared<SystemChatMsg>(
+					(format("{c:FFFF00}[COMBAT] You missed %1%!{/c}") % target->getHandle()).str()
+				));
+			}
+			if (!target->getClient().isBot()) {
+				target->getClient().QueueCommand(std::make_shared<SystemChatMsg>(
+					(format("{c:00FFFF}[COMBAT] You evaded %1%'s attack!{/c}") % attacker->getHandle()).str()
+				));
+			}
 			return res;
 		}
 	}
@@ -683,6 +706,20 @@ CombatSystem::AttackResult CombatSystem::ResolveAttack(PlayerObject* attacker, P
 		bool wasAlive = !target->isDead();
 		target->takeDamage(attacker->getGoId(), res.damageTaken, move.hitFxId);
         target->recordIncomingAttack(move.id);
+
+		if (!attacker->getClient().isBot()) {
+			attacker->getClient().QueueCommand(std::make_shared<SystemChatMsg>(
+				(format("{c:00FF00}[COMBAT] You hit %1% for %2% damage with %3%!{/c}")
+				 % target->getHandle() % res.damageTaken % move.name).str()
+			));
+		}
+		if (!target->getClient().isBot()) {
+			target->getClient().QueueCommand(std::make_shared<SystemChatMsg>(
+				(format("{c:FF4444}[COMBAT] %1% hits you for %2% damage with %3%! (%4%/%5% HP){/c}")
+				 % attacker->getHandle() % res.damageTaken % move.name % target->getCurrentHealth() % target->getMaximumHealth()).str()
+			));
+		}
+
 		if (wasAlive && target->isDead())
 			AwardKill(attacker, target);
 	}
@@ -811,9 +848,19 @@ void CombatSystem::AwardKill(PlayerObject* killer, PlayerObject* victim)
     // Logistics courier ambush check
     sLogisticsMgr.OnCourierDestroyed(victim->getGoId(), killer->getGoId());
 
-    killer->getClient().QueueCommand(std::make_shared<SystemChatMsg>(
-        (format("{c:00FF00}Looted %1% $Info!{/c}") % infoAmount).str()
-    ));
+    killer->addInformation(infoAmount);
+    if (!killer->getClient().isBot()) {
+        killer->getClient().QueueCommand(std::make_shared<SetInformationCmd>(killer->getInformation()));
+        killer->getClient().QueueCommand(std::make_shared<SystemChatMsg>(
+            (format("{c:00FF00}[COMBAT] Defeated %1%! Looted %2% $Info.{/c}") % victim->getHandle() % infoAmount).str()
+        ));
+        if (killer->getClient().GetCharacterId() < 9000000) {
+            PreparedStatement stmt("UPDATE `characters` SET `cash` = ?0 WHERE `charId` = ?1");
+            stmt.SetUInt64(0, killer->getInformation());
+            stmt.SetUInt64(1, killer->getClient().GetCharacterId());
+            sDatabase.ExecutePrepared(&stmt);
+        }
+    }
 }
 
 

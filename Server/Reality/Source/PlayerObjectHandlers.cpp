@@ -1897,7 +1897,12 @@ void PlayerObject::RPC_HandleChat( ByteBuffer &srcCmd )
 		ParseAdminCommand(theMessage.substr(1));
 		return;
 	}
-	else if (theMessage[0] == '&')
+	else if (theMessage[0] == '&' ||
+			 (theMessage[0] == '/' && (boost::istarts_with(theMessage, "/attack") ||
+									  boost::istarts_with(theMessage, "/interlock") ||
+									  boost::istarts_with(theMessage, "/tactic") ||
+									  boost::istarts_with(theMessage, "/withdraw") ||
+									  boost::istarts_with(theMessage, "/escape"))))
 	{
 		ParsePlayerCommand(theMessage.substr(1));
 		return;
@@ -2106,6 +2111,9 @@ void PlayerObject::RPC_HandleChat( ByteBuffer &srcCmd )
 
     if (boost::iequals(theMessage, "/help") || boost::iequals(theMessage, "/?")) {
         m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:00FF00}=== THE MATRIX ONLINE: REMASTER COMMANDS ==={/c}"));
+        m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:00FFFF}/attack | &attack{/c} - Engage selected target in melee interlock"));
+        m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:00FFFF}/tactic <power|speed|grab|block>{/c} - Set combat martial arts tactic"));
+        m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:00FFFF}/withdraw | &withdraw{/c} - Disengage from interlock"));
         m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FFFF55}/clock{/c} - Current Matrix time & circadian cycle"));
         m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FFFF55}/heat{/c} - Threat heatmap & law enforcement tier"));
         m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FFFF55}/rep{/c} - Player notoriety & faction standing"));
