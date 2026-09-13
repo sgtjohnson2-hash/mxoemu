@@ -1462,29 +1462,52 @@ static void ApplyOperativeAppearance(uintptr_t clientBase, void* pPlayer) {
 // ============================================================================
 // Locomotion, Physics, Camera Orbiting & Combat Systems
 // ============================================================================
-static const double GROUND_ELEVATION = 625.0; // Calibrated ground elevation flush with Slums pavement tiles
+static const double SPAWN_GROUND_ELEVATION = 637.5; // Calibrated ground elevation flush with Slums pavement tiles
+
+static double GetCalibratedGroundElevation(double x, double z) {
+    // 1. Elevated platform / overpass walkway (where operative spawns at 16710, 3230)
+    // Runs from X: 16560 to 16830, Z: 2850 to 3720
+    if (x >= 16560.0 && x <= 16830.0 && z >= 2850.0 && z <= 3720.0) {
+        return 637.5; // True pavement tile surface (soles flush)
+    }
+
+    // 2. Ledge / curb concrete barrier bordering the platform
+    if (x > 16830.0 && x <= 16845.0 && z >= 2850.0 && z <= 3720.0) {
+        return 645.0; // Raised curb barrier
+    }
+
+    // 3. North ramp / stairs transition leading down to church / street level
+    if (z > 3720.0 && z <= 3850.0 && x >= 16650.0 && x <= 16840.0) {
+        double t = (z - 3720.0) / 130.0;
+        return 637.5 - t * (637.5 - 572.0); // Smooth ramp transition down to 572.0
+    }
+
+    // 4. Church courtyard and street sidewalk / roadway level
+    return 572.0; // Street sidewalk level
+}
+
 static double g_playerX = 16710.0;
-static double g_playerY = GROUND_ELEVATION;
+static double g_playerY = SPAWN_GROUND_ELEVATION;
 static double g_playerZ = 3230.0;
-static float  g_playerYaw = 4.712389f; // Facing West (towards camera)
+static float  g_playerYaw = 0.0f; // Facing North (+Z)
 static double g_velY = 0.0;
 static bool   g_isJumping = false;
 
-static float  g_camPitch = 8.0f * 0.0174532925f;  // ~8 degrees downward
-static float  g_camYaw = 1.5707963f;              // facing East (towards brick building & operative)
-static float  g_camDist = 380.0f;                 // 380 units back to frame head to toe and boots contact
+static float  g_camPitch = 12.0f * 0.0174532925f; // ~12 degrees downward
+static float  g_camYaw = 0.0f;                   // Facing North (+Z, behind player)
+static float  g_camDist = 280.0f;                // 280 units behind player framing full body & feet
 static int    g_lastMouseX = -1;
 static int    g_lastMouseY = -1;
 static bool   g_bRightMouseDown = false;
 static bool   g_bLeftMouseDown = false;
 static bool   g_bHumanInputActive = false;
 
-// Targeting system (Nearby Operative NPC P: charId=393 at 16802.3, 635.0, 3237.01)
+// Targeting system (Nearby Operative NPC P: charId=393 at 16802.3, 637.5, 3237.01)
 static bool   g_hasTarget = false;
 static DWORD  g_targetCharId = 393;
 static char   g_targetName[64] = "P";
 static double g_targetX = 16802.3;
-static double g_targetY = GROUND_ELEVATION;
+static double g_targetY = SPAWN_GROUND_ELEVATION;
 static double g_targetZ = 3237.01;
 
 // Combat tactics stance
@@ -1613,7 +1636,7 @@ static LRESULT CALLBACK SubclassWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPA
             if (wParam == 'P') {
                 TriggerPhoneCall(clientBase);
             } else if (wParam == VK_TAB) {
-                SetTargetOperative(clientBase, "P", 393, 16802.3, GROUND_ELEVATION, 3237.01);
+                SetTargetOperative(clientBase, "P", 393, 16802.3, SPAWN_GROUND_ELEVATION, 3237.01);
             } else if (wParam >= VK_F1 && wParam <= VK_F5) {
                 SetTacticsStance(clientBase, (StanceType)(wParam - VK_F1));
             } else if (wParam >= '1' && wParam <= '9') {
@@ -1630,31 +1653,34 @@ static LRESULT CALLBACK SubclassWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPA
 static void UpdatePlayerPositionAndPhysics(uintptr_t clientBase, void* curPlayer, double dt, bool isMoving, double actVelX, double actVelZ) {
     if (!curPlayer || IsBadReadPtr(curPlayer, 0xB0)) return;
 
+    double groundElev = GetCalibratedGroundElevation(g_playerX, g_playerZ);
+
     // Apply jumping physics and gravity
     if (g_isJumping) {
         g_playerY += g_velY * dt;
         g_velY -= 950.0 * dt;
-        if (g_playerY <= GROUND_ELEVATION) {
-            g_playerY = GROUND_ELEVATION;
+        if (g_playerY <= groundElev) {
+            g_playerY = groundElev;
             g_velY = 0.0;
             g_isJumping = false;
         }
     } else {
-        if (g_playerY > GROUND_ELEVATION) {
-            g_playerY -= 950.0 * dt;
-            if (g_playerY <= GROUND_ELEVATION) {
-                g_playerY = GROUND_ELEVATION;
+        if (g_playerY > groundElev) {
+            // Smooth gravity drop when stepping off ledges down to street level
+            g_playerY -= 800.0 * dt;
+            if (g_playerY <= groundElev) {
+                g_playerY = groundElev;
             }
-        } else if (g_playerY < GROUND_ELEVATION) {
-            g_playerY = GROUND_ELEVATION;
+        } else if (g_playerY < groundElev) {
+            g_playerY = groundElev;
         }
     }
 
-    // Walkway boundary collision: keep player safely on the barrens walkway
-    if (g_playerX < 16560.0) g_playerX = 16560.0;
-    if (g_playerX > 16860.0) g_playerX = 16860.0;
-    if (g_playerZ < 2850.0)  g_playerZ = 2850.0;
-    if (g_playerZ > 3750.0)  g_playerZ = 3750.0;
+    // Expanded roaming boundary: allows exploring platform, curb, stairs, and church courtyard
+    if (g_playerX < 16400.0) g_playerX = 16400.0;
+    if (g_playerX > 17200.0) g_playerX = 17200.0;
+    if (g_playerZ < 2700.0)  g_playerZ = 2700.0;
+    if (g_playerZ > 4200.0)  g_playerZ = 4200.0;
 
     // 1. Update player float position buffer
     float* pPos = *reinterpret_cast<float**>(reinterpret_cast<uintptr_t>(curPlayer) + 0x94);
@@ -1746,13 +1772,13 @@ static void UpdateCamera(uintptr_t clientBase, void* pCam) {
     double* pTargetPosC8 = reinterpret_cast<double*>(reinterpret_cast<uintptr_t>(pCam) + 0xC8);
     if (pTargetPosC8) {
         pTargetPosC8[0] = g_playerX;
-        pTargetPosC8[1] = g_playerY + 28.0;
+        pTargetPosC8[1] = g_playerY + 32.0;
         pTargetPosC8[2] = g_playerZ;
     }
     double* pCamPos8 = reinterpret_cast<double*>(reinterpret_cast<uintptr_t>(pCam) + 8);
     if (pCamPos8) {
         pCamPos8[0] = g_playerX;
-        pCamPos8[1] = g_playerY + 28.0;
+        pCamPos8[1] = g_playerY + 32.0;
         pCamPos8[2] = g_playerZ;
     }
 
@@ -1766,7 +1792,7 @@ static void UpdateCamera(uintptr_t clientBase, void* pCam) {
 
     // Centered camera framing entire operative and ground contact
     double camX = g_playerX - camFwdX * g_camDist;
-    double camY = g_playerY + 28.0 - camFwdY * g_camDist;
+    double camY = g_playerY + 32.0 - camFwdY * g_camDist;
     double camZ = g_playerZ - camFwdZ * g_camDist;
 
     float sp = sinf(g_camPitch * 0.5f);
@@ -1832,7 +1858,7 @@ static void EnsureInWorldRendering(uintptr_t clientBase, void* pWorldMgr, DWORD 
 
         // 2. Set default spawn coordinates at clientBase + 0x008BA5E8 to Slums Barrens walkway
         *reinterpret_cast<float*>(clientBase + 0x008BA5E8) = 16710.0f;
-        *reinterpret_cast<float*>(clientBase + 0x008BA5EC) = (float)GROUND_ELEVATION;
+        *reinterpret_cast<float*>(clientBase + 0x008BA5EC) = (float)SPAWN_GROUND_ELEVATION;
         *reinterpret_cast<float*>(clientBase + 0x008BA5F0) = 3230.0f;
         *reinterpret_cast<float*>(clientBase + 0x008BA5F4) = 0.0f;
         *reinterpret_cast<WORD*>(clientBase + 0x008BA5F8) = 0;
@@ -1849,7 +1875,7 @@ static void EnsureInWorldRendering(uintptr_t clientBase, void* pWorldMgr, DWORD 
             pCtor(pPlayer, &flag, nullptr);
             Log("[mxohax] EnsureInWorld: PlayerCtor(0x101d17c0) initialized PlayerObject at 0x%p\n", pPlayer);
 
-            // Coordinates for operative s1acker on Slums Barrens walkway: (16710.0f, 635.0f, 3230.0f)
+            // Coordinates for operative s1acker on Slums Barrens walkway: (16710.0f, 637.5f, 3230.0f)
             // Allocate full 64 bytes (16 floats) for 4x4 matrix/coords
             float* pPos = *reinterpret_cast<float**>(reinterpret_cast<DWORD>(pPlayer) + 0x94);
             if (!pPos) {
@@ -1858,7 +1884,7 @@ static void EnsureInWorldRendering(uintptr_t clientBase, void* pWorldMgr, DWORD 
             }
             if (pPos) {
                 pPos[0] = 16710.0f;
-                pPos[1] = (float)GROUND_ELEVATION;
+                pPos[1] = (float)SPAWN_GROUND_ELEVATION;
                 pPos[2] = 3230.0f;
                 pPos[3] = 1.0f;
                 pPos[4] = 0.0f;
@@ -1890,7 +1916,7 @@ static void EnsureInWorldRendering(uintptr_t clientBase, void* pWorldMgr, DWORD 
             pPos = *reinterpret_cast<float**>(reinterpret_cast<DWORD>(pPlayer) + 0x94);
             if (pPos) {
                 pPos[0] = 16710.0f;
-                pPos[1] = (float)GROUND_ELEVATION;
+                pPos[1] = (float)SPAWN_GROUND_ELEVATION;
                 pPos[2] = 3230.0f;
                 pPos[3] = 1.0f;
                 pPos[4] = 0.0f;
@@ -1908,7 +1934,7 @@ static void EnsureInWorldRendering(uintptr_t clientBase, void* pWorldMgr, DWORD 
         }
         if (pPos) {
             pPos[0] = 16710.0f;
-            pPos[1] = (float)GROUND_ELEVATION;
+            pPos[1] = (float)SPAWN_GROUND_ELEVATION;
             pPos[2] = 3230.0f;
             pPos[3] = 1.0f;
             pPos[4] = 0.0f;
@@ -1944,7 +1970,7 @@ static void EnsureInWorldRendering(uintptr_t clientBase, void* pWorldMgr, DWORD 
         void* pActor = *reinterpret_cast<void**>(reinterpret_cast<uintptr_t>(pPlayer) + 0xA8);
         if (pActor && !IsBadReadPtr(pActor, 0x40)) {
             __try {
-                SyncActorPosition(clientBase, pPlayer, pActor, 16710.0, GROUND_ELEVATION, 3230.0);
+                SyncActorPosition(clientBase, pPlayer, pActor, 16710.0, SPAWN_GROUND_ELEVATION, 3230.0);
             } __except (EXCEPTION_EXECUTE_HANDLER) {}
         }
     }
@@ -2011,9 +2037,9 @@ static void EnsureInWorldRendering(uintptr_t clientBase, void* pWorldMgr, DWORD 
     }
 
     // Configure Camera CVars
-    *reinterpret_cast<float*>(clientBase + 0x0089F2D0) = 8.0f;   // Pitch = 8 degrees down
-    *reinterpret_cast<float*>(clientBase + 0x0089F304) = 90.0f;  // Yaw = 90 degrees
-    *reinterpret_cast<float*>(clientBase + 0x0089F338) = 380.0f; // Chase distance = 380.0 units
+    *reinterpret_cast<float*>(clientBase + 0x0089F2D0) = 12.0f;  // Pitch = 12 degrees down
+    *reinterpret_cast<float*>(clientBase + 0x0089F304) = 0.0f;   // Yaw = 0 degrees (North)
+    *reinterpret_cast<float*>(clientBase + 0x0089F338) = 280.0f; // Chase distance = 280.0 units
     *reinterpret_cast<DWORD*>(clientBase + 0x0089EFAC) = 2;      // Default Camera Mode = 2 (Chase Cam)
     *reinterpret_cast<DWORD*>(clientBase + 0x008971C8) = 2;      // Enforce Camera_Mode = 2 (Third Person)
 
@@ -2026,12 +2052,12 @@ static void EnsureInWorldRendering(uintptr_t clientBase, void* pWorldMgr, DWORD 
             pSetMode(pCam, 2);
 
             g_playerX = 16710.0;
-            g_playerY = GROUND_ELEVATION;
+            g_playerY = SPAWN_GROUND_ELEVATION;
             g_playerZ = 3230.0;
-            g_playerYaw = 4.712389f;
-            g_camYaw = 1.5707963f;
-            g_camPitch = 8.0f * 0.0174532925f;
-            g_camDist = 380.0f;
+            g_playerYaw = 0.0f;
+            g_camYaw = 0.0f;
+            g_camPitch = 12.0f * 0.0174532925f;
+            g_camDist = 280.0f;
 
             if (pPlayer) {
                 float* pPos = *reinterpret_cast<float**>(reinterpret_cast<DWORD>(pPlayer) + 0x94);
@@ -2178,7 +2204,11 @@ static void EnsureInWorldRendering(uintptr_t clientBase, void* pWorldMgr, DWORD 
     // Turn off Matrix View for solid world gameplay
     *reinterpret_cast<float*>(clientBase + 0x008E357C) = 0.0f;
     *reinterpret_cast<BYTE*>(clientBase + 0x0085EBA8) = 0;
+    *reinterpret_cast<BYTE*>(clientBase + 0x0085EBA9) = 0;
+    *reinterpret_cast<BYTE*>(clientBase + 0x0085EBAA) = 0;
     *reinterpret_cast<BYTE*>(clientBase + 0x008E3590) = 0;
+    *reinterpret_cast<BYTE*>(clientBase + 0x008AACC8) = 0;
+    *reinterpret_cast<BYTE*>(clientBase + 0x008AACC9) = 0;
 
     // Dismiss 2D loading screens
     if (pUI && OriginalHideControl) {
@@ -2339,8 +2369,9 @@ static void __fastcall DetourFrameTick(void* pThis, void* /*edx*/) {
             }
         }
 
-        if (keySpace && !g_isJumping && g_playerY <= GROUND_ELEVATION + 0.1) {
-            g_velY = 520.0;
+        double curGround = GetCalibratedGroundElevation(g_playerX, g_playerZ);
+        if (keySpace && !g_isJumping && g_playerY <= curGround + 2.0) {
+            g_velY = 560.0;
             g_isJumping = true;
             Log("[mxohax] Live Human Input: Wire-Fu Jump launched!\n");
         }
@@ -2382,10 +2413,26 @@ static void __fastcall DetourFrameTick(void* pThis, void* /*edx*/) {
             }
         }
 
+        // Suppress blinking / pending withdraw exit loop on CViewInterlock (Control 0x0E)
+        void* pUI = *reinterpret_cast<void**>(clientBase + 0x00898C54);
+        if (pUI && !IsBadReadPtr(pUI, 0x70)) {
+            void** ppInterlock = reinterpret_cast<void**>(reinterpret_cast<uintptr_t>(pUI) + 0x28 + (0x0E * 4));
+            if (ppInterlock && !IsBadReadPtr(ppInterlock, sizeof(void*)) && *ppInterlock) {
+                void* pInterlock = *ppInterlock;
+                if (!IsBadReadPtr(pInterlock, 0x250)) {
+                    DWORD* pAnimState = reinterpret_cast<DWORD*>(reinterpret_cast<uintptr_t>(pInterlock) + 0x238);
+                    if (pAnimState && (*pAnimState == 2 || *pAnimState == 3)) {
+                        *pAnimState = 0;
+                        *reinterpret_cast<float*>(reinterpret_cast<uintptr_t>(pInterlock) + 0x1A4) = 0.0f;
+                        Log("[mxohax] DetourFrameTick: Suppressed blinking animState on CViewInterlock (0x0E)!\n");
+                    }
+                }
+            }
+        }
+
         // Periodic HUD visibility re-assertion & Chat Window activation
         static int s_hudTickCheck = 0;
         if (++s_hudTickCheck % 60 == 0) {
-            void* pUI = *reinterpret_cast<void**>(clientBase + 0x00898C54);
             if (pUI) {
                 SetControlVisible_t pSetVisible = reinterpret_cast<SetControlVisible_t>(clientBase + 0x0001DB80);
                 static const DWORD hudControls[] = { 0x1B, 0x27, 0x24, 0x02, 0x03, 0x22, 0x23, 0x3D, 0x4D };
@@ -2514,6 +2561,8 @@ static void __fastcall DetourFrameTick(void* pThis, void* /*edx*/) {
                         CreateControl_t pCreateControl = reinterpret_cast<CreateControl_t>(clientBase + 0x0001BC10);
                         SetControlVisible_t pSetVisible = reinterpret_cast<SetControlVisible_t>(clientBase + 0x0001DB80);
                         __try {
+                            pCreateControl(pUI, 0x04);
+                            pSetVisible(pUI, 0x04, 1);
                             pCreateControl(pUI, 0x57);
                             pSetVisible(pUI, 0x57, 1);
                         } __except (EXCEPTION_EXECUTE_HANDLER) {}
@@ -2523,6 +2572,8 @@ static void __fastcall DetourFrameTick(void* pThis, void* /*edx*/) {
                     *reinterpret_cast<BYTE*>(clientBase + 0x0085EBA9) = 0;
                     *reinterpret_cast<BYTE*>(clientBase + 0x0085EBAA) = 0;
                     *reinterpret_cast<BYTE*>(clientBase + 0x008E3590) = 0;
+                    *reinterpret_cast<BYTE*>(clientBase + 0x008AACC8) = 0;
+                    *reinterpret_cast<BYTE*>(clientBase + 0x008AACC9) = 0;
                     *reinterpret_cast<float*>(clientBase + 0x008E357C) = 0.0f;
                 }
                 // ============================================================
@@ -2547,6 +2598,8 @@ static void __fastcall DetourFrameTick(void* pThis, void* /*edx*/) {
                     *reinterpret_cast<BYTE*>(clientBase + 0x0085EBA9) = 1;
                     *reinterpret_cast<BYTE*>(clientBase + 0x0085EBAA) = 1;
                     *reinterpret_cast<BYTE*>(clientBase + 0x008E3590) = 1;
+                    *reinterpret_cast<BYTE*>(clientBase + 0x008AACC8) = 1;
+                    *reinterpret_cast<BYTE*>(clientBase + 0x008AACC9) = 1;
 
                     // 4. Calculate smooth rez-in ease-out dissolve: starts at 1.0f (pure code) and dissolves to 0.0f
                     float rezProgress = (float)(s_state4Ticks - 75) / 85.0f;
@@ -2578,6 +2631,15 @@ static void __fastcall DetourFrameTick(void* pThis, void* /*edx*/) {
                         }
                     }
 
+                    // Turn off Matrix Rain Shaders
+                    *reinterpret_cast<BYTE*>(clientBase + 0x0085EBA8) = 0;
+                    *reinterpret_cast<BYTE*>(clientBase + 0x0085EBA9) = 0;
+                    *reinterpret_cast<BYTE*>(clientBase + 0x0085EBAA) = 0;
+                    *reinterpret_cast<BYTE*>(clientBase + 0x008E3590) = 0;
+                    *reinterpret_cast<BYTE*>(clientBase + 0x008AACC8) = 0;
+                    *reinterpret_cast<BYTE*>(clientBase + 0x008AACC9) = 0;
+                    *reinterpret_cast<float*>(clientBase + 0x008E357C) = 0.0f;
+
                     s_inStreamingState4 = false;
                     EnsureInWorldRendering(clientBase, pWorldMgr, pShell, true /* promoteToState3 */);
                 }
@@ -2605,6 +2667,14 @@ static ExitProcess_t OriginalExitProcess = nullptr;
 void WINAPI DetourExitProcess(UINT uExitCode) {
     void* caller = _ReturnAddress();
     Log("[mxohax] ExitProcess(%u) called! ReturnAddress: 0x%p\n", uExitCode, caller);
+    HMODULE hClient = GetModuleHandleA("client.dll");
+    uintptr_t clientBase = (uintptr_t)hClient;
+    if (s_inWorldSticky && clientBase && (uintptr_t)caller >= clientBase && (uintptr_t)caller < clientBase + 0x1000000) {
+        if ((uintptr_t)caller >= clientBase + 0x000EA000 && (uintptr_t)caller <= clientBase + 0x000EB000) {
+            Log("[mxohax] DetourExitProcess: SUPPRESSED exit call from client.dll + 0x%08X (in-world sticky session active)!\n", (uintptr_t)caller - clientBase);
+            return;
+        }
+    }
     if (OriginalExitProcess) OriginalExitProcess(uExitCode);
 }
 
@@ -2614,6 +2684,14 @@ static PostQuitMessage_t OriginalPostQuitMessage = nullptr;
 void WINAPI DetourPostQuitMessage(int nExitCode) {
     void* caller = _ReturnAddress();
     Log("[mxohax] PostQuitMessage(%d) called! ReturnAddress: 0x%p\n", nExitCode, caller);
+    HMODULE hClient = GetModuleHandleA("client.dll");
+    uintptr_t clientBase = (uintptr_t)hClient;
+    if (s_inWorldSticky && clientBase && (uintptr_t)caller >= clientBase && (uintptr_t)caller < clientBase + 0x1000000) {
+        if ((uintptr_t)caller >= clientBase + 0x000EA000 && (uintptr_t)caller <= clientBase + 0x000EB000) {
+            Log("[mxohax] DetourPostQuitMessage: SUPPRESSED exit loop call from client.dll + 0x%08X (in-world sticky session active)!\n", (uintptr_t)caller - clientBase);
+            return;
+        }
+    }
     if (OriginalPostQuitMessage) OriginalPostQuitMessage(nExitCode);
 }
 
@@ -2723,25 +2801,17 @@ static InterlockButtonFn Original_Interlock_Power_Button = nullptr;
 static InterlockButtonFn Original_Interlock_Speed_Button = nullptr;
 
 static void __fastcall Safe_Interlock_Button_Withdraw(void* pThis, void* /*edx*/) {
-    Log("[mxohax] Safe_Interlock_Button_Withdraw called (pThis=0x%p)\n", pThis);
-    if (!pThis || IsBadReadPtr(pThis, 0x100)) return;
-    void* pBtn = *reinterpret_cast<void**>(reinterpret_cast<uintptr_t>(pThis) + 0x6C);
-    if (!pBtn || IsBadReadPtr(pBtn, sizeof(void*))) {
-        Log("[mxohax] Safe_Interlock_Button_Withdraw: button ptr (+0x6C) is null/invalid\n");
-        return;
-    }
-    void* vtbl = *reinterpret_cast<void**>(pBtn);
-    if (!vtbl || IsBadReadPtr(vtbl, 0xB0)) {
-        Log("[mxohax] Safe_Interlock_Button_Withdraw: button vtable is null/invalid\n");
-        return;
-    }
-    __try {
-        if (Original_Interlock_Button_Withdraw) {
-            Original_Interlock_Button_Withdraw(pThis);
-        }
-    } __except (EXCEPTION_EXECUTE_HANDLER) {
-        Log("[mxohax] Exception caught safely in Safe_Interlock_Button_Withdraw!\n");
-    }
+    Log("[mxohax] Safe_Interlock_Button_Withdraw called (pThis=0x%p) -> Neutralizing exit/withdraw trigger!\n", pThis);
+    if (!pThis || IsBadReadPtr(pThis, 0x250)) return;
+
+    // Reset stance to FREE
+    g_currentStance = STANCE_FREE;
+
+    // Clear animState and timer so button does not blink red or flash
+    *reinterpret_cast<DWORD*>(reinterpret_cast<uintptr_t>(pThis) + 0x238) = 0;
+    *reinterpret_cast<float*>(reinterpret_cast<uintptr_t>(pThis) + 0x1A4) = 0.0f;
+
+    Log("[mxohax] Safe_Interlock_Button_Withdraw: Stance set to FREE, animState cleared.\n");
 }
 
 static void __fastcall Safe_Interlock_Grab_Button(void* pThis, void* /*edx*/) {
