@@ -6,6 +6,7 @@
 #include <d3d9.h>
 #include <stdio.h>
 #include <stdint.h>
+#include <math.h>
 #include <intrin.h>
 #include "minhook/include/MinHook.h"
 
@@ -82,14 +83,36 @@ static LONG WINAPI CrashHandler(PEXCEPTION_POINTERS pExc) {
                 ctx->Eip = static_cast<DWORD>(clientBase + 0x000A2213);
                 return EXCEPTION_CONTINUE_EXECUTION;
             }
+            if (clientBase && (uintptr_t)addr == clientBase + 0x0033FB13 && ctx) {
+                Log("[mxohax] Recovering from null deref at client.dll + 0x0033FB13 (eax=0x%08X): returning NULL\n", ctx->Eax);
+                ctx->Eax = 0;
+                ctx->Eip = static_cast<DWORD>(clientBase + 0x0033FB19);
+                return EXCEPTION_CONTINUE_EXECUTION;
+            }
             if (clientBase && (uintptr_t)addr == clientBase + 0x001152D7 && ctx) {
                 Log("[mxohax] Recovering from crash at client.dll + 0x001152D7 (Viewport vtable). Jumping to safe return (0x%p)\n", (void*)(clientBase + 0x001155A9));
                 ctx->Eip = static_cast<DWORD>(clientBase + 0x001155A9);
                 return EXCEPTION_CONTINUE_EXECUTION;
             }
+            if (clientBase && (uintptr_t)addr >= clientBase + 0x0012F020 && (uintptr_t)addr <= clientBase + 0x0012F350 && ctx) {
+                Log("[mxohax] Recovering from crash in CamCtor at client.dll + 0x%08X: jumping to safe ret\n", (uintptr_t)addr - clientBase);
+                if (ctx->Ebp && !IsBadReadPtr((void*)(ctx->Ebp + 4), 4)) {
+                    DWORD retAddr = *reinterpret_cast<DWORD*>(ctx->Ebp + 4);
+                    ctx->Eip = retAddr;
+                    ctx->Esp = ctx->Ebp + 8;
+                    ctx->Ebp = *reinterpret_cast<DWORD*>(ctx->Ebp);
+                    return EXCEPTION_CONTINUE_EXECUTION;
+                }
+            }
             if (clientBase && ((uintptr_t)addr == clientBase + 0x00001C1C || (uintptr_t)addr == clientBase + 0x00001C10) && ctx) {
                 Log("[mxohax] Recovering from invalid pointer write at client.dll + 0x%08X (eax=0x%08X): skipping 2 bytes\n",
                     (uintptr_t)addr - clientBase, ctx->Eax);
+            }
+            if (clientBase && (uintptr_t)addr >= clientBase + 0x0009B9B0 && (uintptr_t)addr <= clientBase + 0x0009BB10 && ctx) {
+                Log("[mxohax] Recovering from null player deref in HUD UpdateControls at client.dll + 0x%08X: jumping to epilogue (0x%p)\n",
+                    (uintptr_t)addr - clientBase, (void*)(clientBase + 0x0009BB0A));
+                ctx->Eip = static_cast<DWORD>(clientBase + 0x0009BB0A);
+                return EXCEPTION_CONTINUE_EXECUTION;
             }
             if (clientBase && (uintptr_t)addr >= clientBase + 0x0009A000 && (uintptr_t)addr <= clientBase + 0x0009B000 && ctx) {
                 Log("[mxohax] Recovering from crash in viewinterlock UI at client.dll + 0x%08X: unwinding frame safely\n", (uintptr_t)addr - clientBase);
@@ -185,28 +208,28 @@ static void LoadTargetServerIp() {
 }
 
 // ============================================================================
-// Synthetic Operative Data for s1acker (charId = 360)
+// Synthetic Operative Data for S1acker (charId = 359)
 // ============================================================================
 #pragma pack(push, 1)
 struct MxoCharacterData {
-    DWORD charId;             // 0x00: 360
+    DWORD charId;             // 0x00: 359
     DWORD unknown04;          // 0x04: 0
     DWORD unknown08;          // 0x08: 0
     DWORD unknown0C;          // 0x0C: 0
     DWORD unknown10;          // 0x10: 0
-    char  firstName[32];      // 0x14: "s1acker"
+    char  firstName[32];      // 0x14: "S1acker"
     char  lastName[32];       // 0x34: ""
-    DWORD bodyType;           // 0x54: 100
-    DWORD headType;           // 0x58: 100
-    DWORD hairType;           // 0x5C: 101
+    DWORD bodyType;           // 0x54: 106 (RSIMBody001 Male Operative)
+    DWORD headType;           // 0x58: 103 (RSIMHead001 Male Head)
+    DWORD hairType;           // 0x5C: 105 (RSIMHair001 Male Hair)
     DWORD worldId;            // 0x60: 1
-    DWORD handle;             // 0x64: 360
+    DWORD handle;             // 0x64: 359
     BYTE  padding[256];
 };
 
 struct MxoCharRecord {
     BYTE     pad[3];          // 0x00..0x02
-    uint32_t charIdLow;       // 0x03..0x06: 360 (read at matrix.exe 0x0043C653)
+    uint32_t charIdLow;       // 0x03..0x06: 359 (read at matrix.exe 0x0043C653)
     uint32_t charIdHigh;      // 0x07..0x0A: 0   (read at matrix.exe 0x0043C65C)
     BYTE     pad2;            // 0x0B
     uint16_t worldId;         // 0x0C..0x0D: 1   (read at matrix.exe 0x0043D269)
@@ -240,8 +263,8 @@ struct MxoConnObj {
 };
 #pragma pack(pop)
 
-static char               g_ActiveCharName[64] = "TestCharacter";
-static uint32_t           g_ActiveCharId = 35;
+static char               g_ActiveCharName[64] = "S1acker";
+static uint32_t           g_ActiveCharId = 359;
 static bool               g_CommandLineParsed = false;
 
 static void ParseClientCommandLine() {
@@ -265,17 +288,48 @@ static void ParseClientCommandLine() {
             else if (_stricmp(buf, "TestChar2") == 0) g_ActiveCharId = 354;
             else if (_stricmp(buf, "NeoOperative") == 0) g_ActiveCharId = 357;
             else if (_stricmp(buf, "RedDawn141") == 0) g_ActiveCharId = 358;
-            else if (_stricmp(buf, "Slacker") == 0) g_ActiveCharId = 359;
-            else if (_stricmp(buf, "s1acker") == 0) g_ActiveCharId = 360;
+            else if (_stricmp(buf, "s1acker") == 0) {
+                g_ActiveCharId = 359;
+                strncpy_s(g_ActiveCharName, sizeof(g_ActiveCharName), "S1acker", _TRUNCATE);
+            }
+            else if (_stricmp(buf, "slacker") == 0) {
+                g_ActiveCharId = 360;
+                strncpy_s(g_ActiveCharName, sizeof(g_ActiveCharName), "Slacker", _TRUNCATE);
+            }
             Log("[mxohax] Parsed command-line target character: '%s' (charId=%u)\n", g_ActiveCharName, g_ActiveCharId);
         }
+    }
+    const char* pUser = strstr(cmd, "-user");
+    if (pUser) {
+        pUser += 5;
+        while (*pUser == ' ' || *pUser == '\t' || *pUser == '\"') pUser++;
+        char ubuf[64] = {0};
+        int i = 0;
+        while (*pUser && *pUser != ' ' && *pUser != '\t' && *pUser != '\"' && i < 63) {
+            ubuf[i++] = *pUser++;
+        }
+        ubuf[i] = '\0';
+        if (_stricmp(ubuf, "s1acker") == 0) {
+            g_ActiveCharId = 359;
+            strncpy_s(g_ActiveCharName, sizeof(g_ActiveCharName), "S1acker", _TRUNCATE);
+            Log("[mxohax] Parsed command-line target user: '%s' -> mapped to operative '%s' (charId=%u)\n", ubuf, g_ActiveCharName, g_ActiveCharId);
+        } else if (_stricmp(ubuf, "slacker") == 0) {
+            g_ActiveCharId = 360;
+            strncpy_s(g_ActiveCharName, sizeof(g_ActiveCharName), "Slacker", _TRUNCATE);
+            Log("[mxohax] Parsed command-line target user: '%s' -> mapped to operative '%s' (charId=%u)\n", ubuf, g_ActiveCharName, g_ActiveCharId);
+        }
+    }
+    if (strstr(cmd, "s1acker") || strstr(cmd, "S1acker")) {
+        g_ActiveCharId = 359;
+        strncpy_s(g_ActiveCharName, sizeof(g_ActiveCharName), "S1acker", _TRUNCATE);
+        Log("[mxohax] Parsed command-line target: '%s' (charId=%u)\n", g_ActiveCharName, g_ActiveCharId);
     }
 }
 
 static MxoCharacterData   g_SyntheticChar = {
-    35, 0, 0, 0, 0,
-    "TestCharacter", "",
-    100, 100, 101, 1, 35
+    359, 0, 0, 0, 0,
+    "S1acker", "",
+    106, 103, 101, 1, 359
 };
 static MxoCharRecord      g_SyntheticCharRecord;
 static MxoConnParams      g_SyntheticConnParams;
@@ -422,6 +476,9 @@ static void SetupSyntheticCharManager(DWORD pThisDword) {
     g_SyntheticChar.charId = g_ActiveCharId;
     g_SyntheticChar.handle = g_ActiveCharId;
     strncpy_s(g_SyntheticChar.firstName, sizeof(g_SyntheticChar.firstName), g_ActiveCharName, _TRUNCATE);
+    g_SyntheticChar.bodyType = 106;
+    g_SyntheticChar.headType = 103;
+    g_SyntheticChar.hairType = 101;
 
     // 5. Populate matrix.exe Character Manager
     *reinterpret_cast<BYTE*>(pThisDword + 0x640) = 1;                              // Character count = 1
@@ -582,13 +639,15 @@ static void __fastcall DetourHideControl(void* pUI, void* /*edx*/, DWORD ctrlId)
 }
 
 static bool s_inWorldSticky = false;
+static volatile bool s_inStreamingState4 = false;
+static volatile int  s_state4Ticks = 0;
 static bool s_playerEnteredWorld = false;
 static bool s_screen5DActive = false;
 static bool s_autoJackInDone = false;
 static int  s_screen5DFrames = 0;
 
 static void __fastcall DetourSetControlVisible(void* pUI, void* /*edx*/, DWORD ctrlId, BOOL bVisible) {
-    if (ctrlId != 0x1A) {
+    if (ctrlId == 0x5D || ctrlId == 0x30 || ctrlId == 0x04 || ctrlId == 0x57) {
         Log("[mxohax] SetControlVisible: 0x%02X (bVisible=%d)\n", ctrlId, bVisible ? 1 : 0);
     }
     if (ctrlId == 0x5D && bVisible) {
@@ -621,6 +680,10 @@ int __cdecl DetourInitClientDLL(
     Log("[mxohax] DetourInitClientDLL: worldCharPacked=0x%08X, autoJackIn=%d\n", worldCharPacked, autoJackIn);
     int res = OriginalInitClientDLL ? OriginalInitClientDLL(p1, p2, p3, p4, p5, p6, worldCharPacked, autoJackIn) : 1;
     Log("[mxohax] DetourInitClientDLL returned %d\n", res);
+    if (res <= 0) {
+        res = 1; // Enforce return code 1 (> 0) so matrix.exe passes 'jg 0x40982f' and calls RunClientDLL!
+        Log("[mxohax] DetourInitClientDLL: Enforced return code 1 to invoke RunClientDLL!\n");
+    }
     return res;
 }
 
@@ -699,8 +762,9 @@ static bool TryAutoJackIn(DWORD clientBase) {
     if (ppCharBegin && ppCharEnd) {
         if (*ppCharEnd > *ppCharBegin) {
             pCharToEnter = reinterpret_cast<void*>(*ppCharBegin);
-            Log("[mxohax] [AutoJackIn] Found %d existing operative entries in 0x00899B4C! Using entry #0 at 0x%p\n",
-                (*ppCharEnd - *ppCharBegin) / 32, pCharToEnter);
+            *reinterpret_cast<uint32_t*>(reinterpret_cast<uintptr_t>(pCharToEnter) + 0x18) = g_ActiveCharId;
+            Log("[mxohax] [AutoJackIn] Found %d existing operative entries in 0x00899B4C! Using entry #0 at 0x%p (charId=%u)\n",
+                (*ppCharEnd - *ppCharBegin) / 32, pCharToEnter, g_ActiveCharId);
         } else {
             *ppCharBegin = reinterpret_cast<DWORD>(&s_localCharEntry);
             *ppCharEnd   = reinterpret_cast<DWORD>(&s_localCharEntry) + sizeof(s_localCharEntry);
@@ -812,6 +876,16 @@ static HRESULT STDMETHODCALLTYPE DetourPresent(IDirect3DDevice9* pDevice, const 
         }
     }
 
+    static int s_streamingPresents = 0;
+    static bool s_capturedStreamBmp = false;
+    if (s_inStreamingState4 && pDevice) {
+        s_streamingPresents++;
+        if (s_state4Ticks >= 40 && !s_capturedStreamBmp) {
+            s_capturedStreamBmp = true;
+            CaptureD3D9Backbuffer(pDevice, "E:\\Games\\The Matrix Online\\matrix_streaming_render.bmp");
+        }
+    }
+
     if (s_inWorldSticky && pDevice) {
         s_inWorldPresents++;
         if (s_inWorldPresents == 60 || s_inWorldPresents == 120 || s_inWorldPresents == 180 || s_inWorldPresents == 240) {
@@ -831,6 +905,16 @@ static HRESULT STDMETHODCALLTYPE DetourPresentEx(IDirect3DDevice9Ex* pDevice, co
             pDevice->SetSamplerState(stage, D3DSAMP_MINFILTER, D3DTEXF_ANISOTROPIC);
             pDevice->SetSamplerState(stage, D3DSAMP_MIPFILTER, D3DTEXF_LINEAR);
             pDevice->SetSamplerState(stage, D3DSAMP_MAXANISOTROPY, 16);
+        }
+    }
+
+    static int s_streamingPresentsEx = 0;
+    static bool s_capturedStreamBmpEx = false;
+    if (s_inStreamingState4 && pDevice) {
+        s_streamingPresentsEx++;
+        if (s_state4Ticks >= 40 && !s_capturedStreamBmpEx) {
+            s_capturedStreamBmpEx = true;
+            CaptureD3D9Backbuffer(pDevice, "E:\\Games\\The Matrix Online\\matrix_streaming_render.bmp");
         }
     }
 
@@ -1036,6 +1120,84 @@ static void __fastcall Safe_SendCallPacket(void* pThis, void* /*edx*/, DWORD con
 }
 
 // ============================================================================
+// CActor 3D Scene Transform & Coordinates Synchronizer (Extents & Position Queue)
+// ============================================================================
+static void SyncActorPosition(uintptr_t clientBase, void* pPlayer, void* pActor, double x, double y, double z) {
+    if (!pActor || IsBadReadPtr(pActor, 0x40)) return;
+
+    if (pPlayer && !IsBadReadPtr(pPlayer, 0xB0)) {
+        float* pRot = *reinterpret_cast<float**>(reinterpret_cast<uintptr_t>(pPlayer) + 0x98);
+        if (!pRot) {
+            pRot = reinterpret_cast<float*>(calloc(4, sizeof(float)));
+            if (pRot) {
+                pRot[0] = 0.0f; pRot[1] = 0.0f; pRot[2] = 0.0f; pRot[3] = 1.0f;
+                *reinterpret_cast<float**>(reinterpret_cast<uintptr_t>(pPlayer) + 0x98) = pRot;
+            }
+        }
+        *reinterpret_cast<void**>(reinterpret_cast<uintptr_t>(pActor) + 0x28) = pPlayer;
+        if (!IsBadReadPtr(pPlayer, 0xC8)) {
+            void* pRSI = *reinterpret_cast<void**>(reinterpret_cast<uintptr_t>(pPlayer) + 0xAC);
+            void* pInv = *reinterpret_cast<void**>(reinterpret_cast<uintptr_t>(pPlayer) + 0xA4);
+            void* pSim = *reinterpret_cast<void**>(reinterpret_cast<uintptr_t>(pPlayer) + 0xC4);
+            if (pRSI) *reinterpret_cast<void**>(reinterpret_cast<uintptr_t>(pActor) + 0x298) = pRSI;
+            if (pInv) *reinterpret_cast<void**>(reinterpret_cast<uintptr_t>(pActor) + 0x29C) = pInv;
+            if (pSim) *reinterpret_cast<void**>(reinterpret_cast<uintptr_t>(pActor) + 0x2A4) = pSim;
+            *reinterpret_cast<BYTE*>(reinterpret_cast<uintptr_t>(pActor) + 0x2C) = 1;
+        }
+    }
+
+    // Direct write to double coordinates and velocities on CActor
+    *reinterpret_cast<double*>(reinterpret_cast<uintptr_t>(pActor) + 0x528) = x;
+    *reinterpret_cast<double*>(reinterpret_cast<uintptr_t>(pActor) + 0x530) = y;
+    *reinterpret_cast<double*>(reinterpret_cast<uintptr_t>(pActor) + 0x538) = z;
+    *reinterpret_cast<double*>(reinterpret_cast<uintptr_t>(pActor) + 0x510) = 0.0;
+    *reinterpret_cast<double*>(reinterpret_cast<uintptr_t>(pActor) + 0x518) = 0.0;
+    *reinterpret_cast<double*>(reinterpret_cast<uintptr_t>(pActor) + 0x520) = 0.0;
+
+    float* pActorRot = reinterpret_cast<float*>(reinterpret_cast<uintptr_t>(pActor) + 0x4FC);
+    if (pActorRot && !IsBadReadPtr(pActorRot, 16)) {
+        pActorRot[0] = 0.0f;
+        pActorRot[1] = 0.0f;
+        pActorRot[2] = 0.0f;
+        pActorRot[3] = 1.0f;
+    }
+
+    // Prepare 120-byte position sample for the movement interpolation queue at [pActor + 0x5F0]
+    BYTE sample[128] = {0};
+    *reinterpret_cast<DWORD*>(sample + 0x00) = GetTickCount();
+    *reinterpret_cast<double*>(sample + 0x08) = x;
+    *reinterpret_cast<double*>(sample + 0x10) = y;
+    *reinterpret_cast<double*>(sample + 0x18) = z;
+    *reinterpret_cast<float*>(sample + 0x20) = 0.0f;
+    *reinterpret_cast<float*>(sample + 0x24) = 0.0f;
+    *reinterpret_cast<float*>(sample + 0x28) = 0.0f;
+    *reinterpret_cast<float*>(sample + 0x2C) = 1.0f;
+
+    typedef void (__thiscall *AddPosSample_t)(void* pActor, const void* pSample);
+    AddPosSample_t pAddSample = reinterpret_cast<AddPosSample_t>(clientBase + 0x004F3920);
+    __try {
+        pAddSample(pActor, sample);
+    } __except (EXCEPTION_EXECUTE_HANDLER) {}
+
+    // Recalculate spatial extents now that [pActor + 0x528] has been set!
+    typedef void (__thiscall *CalcExtents_t)(void* pActor);
+    CalcExtents_t pCalcExtents = reinterpret_cast<CalcExtents_t>(clientBase + 0x004E9BF0);
+    __try {
+        pCalcExtents(pActor);
+    } __except (EXCEPTION_EXECUTE_HANDLER) {}
+
+    // Enforce visibility flags
+    *reinterpret_cast<BYTE*>(reinterpret_cast<uintptr_t>(pActor) + 0x374) = 0; // 0 = Render local player
+    *reinterpret_cast<BYTE*>(reinterpret_cast<uintptr_t>(pActor) + 0x375) = 1; // 1 = Visible property
+    *reinterpret_cast<BYTE*>(reinterpret_cast<uintptr_t>(pActor) + 0x2DD) = 0; // 0 = Not culled (CActor::IsVisible at 0x104E2C30 checks 0x2DD == 0)
+    *reinterpret_cast<BYTE*>(reinterpret_cast<uintptr_t>(pActor) + 0x684) = 0; // 0 = In world
+    *reinterpret_cast<BYTE*>(reinterpret_cast<uintptr_t>(pActor) + 0x385) = 3; // 3 = Scene node transform valid
+    *reinterpret_cast<BYTE*>(reinterpret_cast<uintptr_t>(pActor) + 0x290) = 0; // 0 = Normal extents
+    *reinterpret_cast<float*>(reinterpret_cast<uintptr_t>(pActor) + 0x56C) = 0.0f; // 0.0f = No LOD/distance hide
+}
+
+
+// ============================================================================
 // Operative RSI Appearance Applier (Trenchcoat, sunglasses, hair, clothes)
 // ============================================================================
 static void ApplyOperativeAppearance(uintptr_t clientBase, void* pPlayer) {
@@ -1046,6 +1208,15 @@ static void ApplyOperativeAppearance(uintptr_t clientBase, void* pPlayer) {
         return;
     }
 
+    static void* s_lastPlayer = nullptr;
+    static bool s_applied = false;
+    if (s_lastPlayer != pPlayer) {
+        s_lastPlayer = pPlayer;
+        s_applied = false;
+    }
+    if (s_applied) return;
+    s_applied = true;
+
     Log("[mxohax] Applying Operative RSI appearance (pPlayer=0x%p, pRSI=0x%p)...\n", pPlayer, pRSI);
     __try {
         typedef void (__thiscall *SetBodyType_t)(void* pRSI, int val);
@@ -1054,7 +1225,6 @@ static void ApplyOperativeAppearance(uintptr_t clientBase, void* pPlayer) {
         typedef void (__thiscall *SetHat_t)(void* pRSI, int val);
         typedef void (__thiscall *EquipArticle_t)(void* pRSI, int slot, int articleId, int color);
         typedef void (__thiscall *RebuildRSI_t)(void* pRSI);
-        typedef char (__cdecl *ApplyRSI_t)();
 
         SetBodyType_t pSetBody = reinterpret_cast<SetBodyType_t>(clientBase + 0x0051B490);
         SetHeadType_t pSetHead = reinterpret_cast<SetHeadType_t>(clientBase + 0x0051B4F0);
@@ -1062,27 +1232,35 @@ static void ApplyOperativeAppearance(uintptr_t clientBase, void* pPlayer) {
         SetHat_t pSetHat = reinterpret_cast<SetHat_t>(clientBase + 0x0051B4D0);
         EquipArticle_t pEquip = reinterpret_cast<EquipArticle_t>(clientBase + 0x0051B1E0);
         RebuildRSI_t pRebuild = reinterpret_cast<RebuildRSI_t>(clientBase + 0x0051B370);
-        ApplyRSI_t pApply = reinterpret_cast<ApplyRSI_t>(clientBase + 0x000EE270);
 
-        // 1. Populate the client.dll character appearance global tables
-        // so that native client routines and future calls preserve the operative look
-        *reinterpret_cast<short*>(clientBase + 0x0089E37C) = 100; // Body
-        *reinterpret_cast<short*>(clientBase + 0x0089E3B4) = 100; // Head
-        *reinterpret_cast<short*>(clientBase + 0x0089E3EC) = 101; // Hair (Operative Hair)
-        *reinterpret_cast<short*>(clientBase + 0x0089E424) = 0;   // Hat
+        uint16_t maleBody = 106;  // RSIMBody001 Male Body
+        uint16_t maleHead = 103;  // RSIMHead001 Male Head
+        uint16_t maleHair = 105;  // RSIMHair001 Male Hair
+        uint16_t maleShirt = 105; // RSIMShirt001 Male Shirt
+        uint16_t maleCoat = 120;  // RSIMCoat001 Black Trenchcoat
+        uint16_t malePants = 102; // RSIMPants001 Jeans
+        uint16_t maleShoes = 111; // RSIMShoes001 Boots
+        uint16_t maleGloves = 107;// RSIMGloves001 Gloves
+        uint16_t maleGlasses = 109;// RSIMGlasses001 Sunglasses
+
+        // 1. Populate the client.dll character appearance global tables (0x1089E760)
+        *reinterpret_cast<short*>(clientBase + 0x0089E37C) = maleBody;
+        *reinterpret_cast<short*>(clientBase + 0x0089E3B4) = maleHead;
+        *reinterpret_cast<short*>(clientBase + 0x0089E3EC) = maleHair;
+        *reinterpret_cast<short*>(clientBase + 0x0089E424) = 0;   // Hat: 0
 
         struct OperativeItemDef {
             DWORD slot;
             DWORD articleId;
             BYTE color;
         };
-        static const OperativeItemDef items[6] = {
-            { 1, 106, 41 }, // Shirt
-            { 2, 110, 8  }, // Coat (Black Trenchcoat)
-            { 3, 103, 16 }, // Pants
-            { 4, 100, 10 }, // Shoes (Boots)
-            { 5, 101, 0  }, // Gloves
-            { 6, 100, 1  }  // Glasses (Sunglasses)
+        const OperativeItemDef items[6] = {
+            { 2, maleShirt,   41 }, // Slot 2: Shirt
+            { 3, maleCoat,    0  }, // Slot 3: Coat (Black Trenchcoat)
+            { 4, malePants,   16 }, // Slot 4: Pants (Jeans)
+            { 5, maleShoes,   0  }, // Slot 5: Shoes (Boots)
+            { 6, maleGloves,  0  }, // Slot 6: Gloves
+            { 7, maleGlasses, 15 }  // Slot 7: Glasses (Sunglasses)
         };
         for (int i = 0; i < 6; ++i) {
             uintptr_t entry = clientBase + 0x0089E760 + (i * 0x74);
@@ -1092,29 +1270,108 @@ static void ApplyOperativeAppearance(uintptr_t clientBase, void* pPlayer) {
         }
 
         // 2. Set the operative components directly on pRSI
-        pSetBody(pRSI, 100);
-        pSetHead(pRSI, 100);
-        pSetHair(pRSI, 101);
+        pSetBody(pRSI, maleBody);
+        pSetHead(pRSI, maleHead);
+        pSetHair(pRSI, maleHair);
         pSetHat(pRSI, 0);
 
         // 3. Equip Operative Attire on pRSI:
-        pEquip(pRSI, 0, 0, 0);     // Hat (None)
-        pEquip(pRSI, 1, 106, 41);  // Shirt (106, 41)
-        pEquip(pRSI, 2, 110, 8);   // Coat (110, 8 - Black Trenchcoat)
-        pEquip(pRSI, 3, 103, 16);  // Pants (103, 16)
-        pEquip(pRSI, 4, 100, 10);  // Shoes (100, 10 - Boots)
-        pEquip(pRSI, 5, 101, 0);   // Gloves (101, 0)
-        pEquip(pRSI, 6, 100, 1);   // Glasses (100, 1 - Sunglasses)
+        pEquip(pRSI, 0, 0, 0);
+        pEquip(pRSI, 2, maleShirt,   41);
+        pEquip(pRSI, 3, maleCoat,    0);
+        pEquip(pRSI, 4, malePants,   16);
+        pEquip(pRSI, 5, maleShoes,   0);
+        pEquip(pRSI, 6, maleGloves,  0);
+        pEquip(pRSI, 7, maleGlasses, 15);
 
-        // 4. Rebuild RSI visual mesh and textures with the operative configuration
+        // 3b. Directly populate the internal 34-byte RSI appearance table ([pRSI + 0x90] to [pRSI + 0xAE])
+        if (pRSI && !IsBadReadPtr(pRSI, 0xC0)) {
+            *reinterpret_cast<uint16_t*>(reinterpret_cast<uintptr_t>(pRSI) + 0x90) = maleBody;
+            *reinterpret_cast<uint16_t*>(reinterpret_cast<uintptr_t>(pRSI) + 0x92) = 0;           // Hat: 0
+            *reinterpret_cast<uint16_t*>(reinterpret_cast<uintptr_t>(pRSI) + 0x94) = maleHead;    // Head: 103
+            *reinterpret_cast<uint16_t*>(reinterpret_cast<uintptr_t>(pRSI) + 0x96) = maleShirt;   // Shirt: 105
+            *reinterpret_cast<uint16_t*>(reinterpret_cast<uintptr_t>(pRSI) + 0x98) = maleCoat;    // Coat: 120
+            *reinterpret_cast<uint16_t*>(reinterpret_cast<uintptr_t>(pRSI) + 0x9A) = malePants;   // Pants: 102
+            *reinterpret_cast<uint16_t*>(reinterpret_cast<uintptr_t>(pRSI) + 0x9C) = maleShoes;   // Shoes: 111
+            *reinterpret_cast<uint16_t*>(reinterpret_cast<uintptr_t>(pRSI) + 0x9E) = maleGloves;  // Gloves: 107
+            *reinterpret_cast<uint16_t*>(reinterpret_cast<uintptr_t>(pRSI) + 0xA0) = maleGlasses; // Glasses: 109
+            *reinterpret_cast<uint16_t*>(reinterpret_cast<uintptr_t>(pRSI) + 0xA2) = maleHair;    // Hair: 105
+            *reinterpret_cast<uint16_t*>(reinterpret_cast<uintptr_t>(pRSI) + 0xA4) = 0;
+            *reinterpret_cast<uint16_t*>(reinterpret_cast<uintptr_t>(pRSI) + 0xA6) = 0;
+
+            *reinterpret_cast<uint8_t*>(reinterpret_cast<uintptr_t>(pRSI) + 0xA8) = 41;  // Shirt Color: 41
+            *reinterpret_cast<uint8_t*>(reinterpret_cast<uintptr_t>(pRSI) + 0xA9) = 16;  // Pants Color: 16
+            *reinterpret_cast<uint8_t*>(reinterpret_cast<uintptr_t>(pRSI) + 0xAA) = 0;   // Coat Color: 0 (Black)
+            *reinterpret_cast<uint8_t*>(reinterpret_cast<uintptr_t>(pRSI) + 0xAB) = 0;   // Shoes Color: 0
+            *reinterpret_cast<uint8_t*>(reinterpret_cast<uintptr_t>(pRSI) + 0xAC) = 15;  // Glasses Color: 15
+            *reinterpret_cast<uint8_t*>(reinterpret_cast<uintptr_t>(pRSI) + 0xAD) = 0;   // Hair Color: 0
+            *reinterpret_cast<uint8_t*>(reinterpret_cast<uintptr_t>(pRSI) + 0xAE) = 0;   // Hat Color: 0
+        }
+
+        // 4. Rebuild RSI visual mesh
         pRebuild(pRSI);
-        Log("[mxohax] SUCCESS: Operative RSI fully equipped (Trenchcoat, sunglasses, boots, clothes, hair)!\n");
+
+        // 5. Apply the 15-byte attire bitstream to CActor (Coat, Jeans, Boots, Sunglasses, Gloves, Hair, Shirt)
+        void* pActor = *reinterpret_cast<void**>(reinterpret_cast<uintptr_t>(pPlayer) + 0xA8);
+        if (pActor && !IsBadReadPtr(pActor, 0x40)) {
+            static const uint8_t s_s1ackerBitstream[16] = {
+                0x00, 0x00, 0x22, 0x82, 0x31, 0x88, 0x10, 0xa6, 0x00, 0x0f, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00
+            };
+
+            void* p1DC = *reinterpret_cast<void**>(reinterpret_cast<uintptr_t>(pActor) + 0x1DC);
+            if (!p1DC) {
+                static void* s_dummy1DC[4] = { nullptr };
+                *reinterpret_cast<void**>(reinterpret_cast<uintptr_t>(pActor) + 0x1DC) = s_dummy1DC;
+            }
+
+            void* p14C = *reinterpret_cast<void**>(reinterpret_cast<uintptr_t>(pActor) + 0x14C);
+            if (!p14C) {
+                static DWORD s_dummyObj = 0;
+                static void* s_dummy14C[4] = { &s_dummyObj, nullptr, nullptr, nullptr };
+                *reinterpret_cast<void**>(reinterpret_cast<uintptr_t>(pActor) + 0x14C) = s_dummy14C;
+            }
+
+            // Ensure pActor has visual property at +0x1E4
+            void* pActorMesh = *reinterpret_cast<void**>(reinterpret_cast<uintptr_t>(pActor) + 0x1E4);
+            if (!pActorMesh) {
+                void* pRSIMesh = *reinterpret_cast<void**>(reinterpret_cast<uintptr_t>(pRSI) + 0x68);
+                if (pRSIMesh) {
+                    *reinterpret_cast<void**>(reinterpret_cast<uintptr_t>(pActor) + 0x1E4) = pRSIMesh;
+                    pActorMesh = pRSIMesh;
+                }
+            }
+
+            Log("[mxohax] pActor=0x%p mesh=0x%p 1DC=0x%p 14C=0x%p. Calling CActor::SetAppearanceFromBitstream...\n",
+                pActor, pActorMesh, *reinterpret_cast<void**>(reinterpret_cast<uintptr_t>(pActor) + 0x1DC),
+                *reinterpret_cast<void**>(reinterpret_cast<uintptr_t>(pActor) + 0x14C));
+
+            typedef void (__thiscall *SetActorAppearance_t)(void* pActor, const void* pBitstream);
+            SetActorAppearance_t pSetActorApp = reinterpret_cast<SetActorAppearance_t>(clientBase + 0x004F2F60);
+            pSetActorApp(pActor, s_s1ackerBitstream);
+            Log("[mxohax] SUCCESS: SetActorAppearance(0x104F2F60) executed with S1acker bitstream!\n");
+
+            // Direct AttachMesh (0x102592E0) invocation
+            if (pActorMesh && !IsBadReadPtr(pActorMesh, 8)) {
+                void* pEdx = *reinterpret_cast<void**>(pActorMesh);
+                void* arg1 = pEdx ? *reinterpret_cast<void**>(pEdx) : nullptr;
+                void* pThis = *reinterpret_cast<void**>(reinterpret_cast<uintptr_t>(pActorMesh) + 4);
+                if (pThis && !IsBadReadPtr(pThis, 0x30)) {
+                    typedef void (__thiscall *AttachMesh_t)(void* pThis, void* arg1, const void* pBitstream);
+                    AttachMesh_t pAttachMesh = reinterpret_cast<AttachMesh_t>(clientBase + 0x002592E0);
+                    pAttachMesh(pThis, arg1, s_s1ackerBitstream);
+                    Log("[mxohax] SUCCESS: Direct AttachMesh(0x102592E0) executed!\n");
+                }
+            }
+        }
+
+        Log("[mxohax] SUCCESS: Operative RSI fully equipped (Male Body %u, Head %u, Hair %u, Coat %u, Shirt %u, Pants %u, Shoes %u, Glasses %u)!\n",
+            maleBody, maleHead, maleHair, maleCoat, maleShirt, malePants, maleShoes, maleGlasses);
     } __except (EXCEPTION_EXECUTE_HANDLER) {
         Log("[mxohax] Exception in ApplyOperativeAppearance caught safely!\n");
     }
 }
 
-static void EnsureInWorldRendering(uintptr_t clientBase, void* pWorldMgr, DWORD pShell) {
+static void EnsureInWorldRendering(uintptr_t clientBase, void* pWorldMgr, DWORD pShell, bool promoteToState3 = true) {
     if (!pWorldMgr) return;
 
     // Step 0: Ensure fallback world pointer points to actual Slums METR world
@@ -1122,19 +1379,38 @@ static void EnsureInWorldRendering(uintptr_t clientBase, void* pWorldMgr, DWORD 
     *reinterpret_cast<const char**>(clientBase + 0x00896E4C) = s_defaultMetrPath;
 
     // Step 1: Ensure World is loaded via CWorldMgr::LoadWorldFile (0x10121110) BEFORE Player enters world
-    BYTE* pWorldLoaded = reinterpret_cast<BYTE*>(reinterpret_cast<DWORD>(pWorldMgr) + 0x27);
-    if (pWorldLoaded && *pWorldLoaded == 0) {
+    void** ppWorldInst = reinterpret_cast<void**>(clientBase + 0x0089DD6C);
+    static bool s_worldLoadedOnce = false;
+    if (!s_worldLoadedOnce || (ppWorldInst && !*ppWorldInst)) {
+        s_worldLoadedOnce = true;
         Log("[mxohax] EnsureInWorld: Calling CWorldMgr::LoadWorldFile (0x10121110) for %s...\n", s_defaultMetrPath);
         typedef char (__thiscall *LoadWorldFile_t)(void* pMgr);
         LoadWorldFile_t pLoadWorld = reinterpret_cast<LoadWorldFile_t>(clientBase + 0x00121110);
         char lres = pLoadWorld(pWorldMgr);
-        Log("[mxohax] EnsureInWorld: LoadWorldFile returned %d (worldLoaded=%d)\n", lres, *pWorldLoaded);
+        BYTE* pWorldLoaded = reinterpret_cast<BYTE*>(reinterpret_cast<DWORD>(pWorldMgr) + 0x27);
+        Log("[mxohax] EnsureInWorld: LoadWorldFile returned %d (worldLoaded=%d, [0x1089DD6C]=0x%p)\n",
+            lres, pWorldLoaded ? *pWorldLoaded : 0, ppWorldInst ? *ppWorldInst : nullptr);
     }
 
     // Step 2: Ensure PlayerObject is allocated, positioned in Slums, and enters world
     void** ppPlayerGlobal = reinterpret_cast<void**>(clientBase + 0x008A4378);
     void* pPlayer = *ppPlayerGlobal;
     if (!pPlayer) {
+        Log("[mxohax] EnsureInWorld: Player is null! Calling native CreateObject(0x0C) to create 3D character...\n");
+        BYTE flag = 0x21;
+
+        // 1. Get model definition
+        typedef void* (__cdecl *GetModelDef_t)(int a, int b);
+        GetModelDef_t pGetModelDef = reinterpret_cast<GetModelDef_t>(clientBase + 0x001D27C0);
+        void* pModelDef = pGetModelDef(1, 0);
+
+        // 2. Set default spawn coordinates at clientBase + 0x008BA5E8 to Slums Barrens walkway
+        *reinterpret_cast<float*>(clientBase + 0x008BA5E8) = 16710.0f;
+        *reinterpret_cast<float*>(clientBase + 0x008BA5EC) = 665.0f;
+        *reinterpret_cast<float*>(clientBase + 0x008BA5F0) = 3230.0f;
+        *reinterpret_cast<float*>(clientBase + 0x008BA5F4) = 0.0f;
+        *reinterpret_cast<WORD*>(clientBase + 0x008BA5F8) = 0;
+
         typedef void* (__cdecl *AllocPlayer_t)();
         AllocPlayer_t pAlloc = reinterpret_cast<AllocPlayer_t>(clientBase + 0x001D2370);
         pPlayer = pAlloc();
@@ -1147,30 +1423,55 @@ static void EnsureInWorldRendering(uintptr_t clientBase, void* pWorldMgr, DWORD 
             pCtor(pPlayer, &flag, nullptr);
             Log("[mxohax] EnsureInWorld: PlayerCtor(0x101d17c0) initialized PlayerObject at 0x%p\n", pPlayer);
 
-            // Set coordinates for operative in Slums: (16802.3f, 665.0f, 3237.01f)
-            // 572.0f pavement level + 93.0f leg clearance ensures boots rest firmly on pavement
+            // Coordinates for operative s1acker on Slums Barrens walkway: (16710.0f, 665.0f, 3230.0f)
+            // Allocate full 64 bytes (16 floats) for 4x4 matrix/coords
             float* pPos = *reinterpret_cast<float**>(reinterpret_cast<DWORD>(pPlayer) + 0x94);
             if (!pPos) {
                 pPos = reinterpret_cast<float*>(calloc(16, sizeof(float)));
                 *reinterpret_cast<float**>(reinterpret_cast<DWORD>(pPlayer) + 0x94) = pPos;
             }
             if (pPos) {
-                pPos[0] = 16802.3f;
+                pPos[0] = 16710.0f;
                 pPos[1] = 665.0f;
-                pPos[2] = 3237.01f;
+                pPos[2] = 3230.0f;
                 pPos[3] = 1.0f;
                 pPos[4] = 0.0f;
                 pPos[5] = 1.0f;
                 pPos[15] = 1.0f;
-                Log("[mxohax] EnsureInWorld: Set Player coordinates to Slums (%.1f, %.1f, %.1f)\n", pPos[0], pPos[1], pPos[2]);
+                Log("[mxohax] EnsureInWorld: Set Player coordinates to Slums walkway (%.1f, %.1f, %.1f)\n", pPos[0], pPos[1], pPos[2]);
             }
 
+            float* pRot = *reinterpret_cast<float**>(reinterpret_cast<DWORD>(pPlayer) + 0x98);
+            if (!pRot) {
+                pRot = reinterpret_cast<float*>(calloc(4, sizeof(float)));
+                if (pRot) {
+                    pRot[0] = 0.0f; pRot[1] = 0.0f; pRot[2] = 0.0f; pRot[3] = 1.0f;
+                    *reinterpret_cast<float**>(reinterpret_cast<DWORD>(pPlayer) + 0x98) = pRot;
+                }
+            }
+
+            *ppPlayerGlobal = nullptr;
             typedef void (__thiscall *PlayerEnterWorld_t)(void* pPlayer);
             PlayerEnterWorld_t pEnter = reinterpret_cast<PlayerEnterWorld_t>(clientBase + 0x001D2180);
             pEnter(pPlayer);
             s_playerEnteredWorld = true;
+            *ppPlayerGlobal = pPlayer;
+            *reinterpret_cast<BYTE*>(reinterpret_cast<uintptr_t>(pPlayer) + 0xC) |= 0x20;
+
             Log("[mxohax] EnsureInWorld: PlayerEnterWorld(0x101d2180) executed! [0x108a4378]=0x%p\n", *ppPlayerGlobal);
             ApplyOperativeAppearance(clientBase, pPlayer);
+
+            pPos = *reinterpret_cast<float**>(reinterpret_cast<DWORD>(pPlayer) + 0x94);
+            if (pPos) {
+                pPos[0] = 16710.0f;
+                pPos[1] = 665.0f;
+                pPos[2] = 3230.0f;
+                pPos[3] = 1.0f;
+                pPos[4] = 0.0f;
+                pPos[5] = 1.0f;
+                pPos[15] = 1.0f;
+                Log("[mxohax] EnsureInWorld: Re-applied float street coordinates to [pPlayer+0x94] (%.1f, %.1f, %.1f)\n", pPos[0], pPos[1], pPos[2]);
+            }
         }
     } else {
         s_playerEnteredWorld = true;
@@ -1180,126 +1481,286 @@ static void EnsureInWorldRendering(uintptr_t clientBase, void* pWorldMgr, DWORD 
             *reinterpret_cast<float**>(reinterpret_cast<DWORD>(pPlayer) + 0x94) = pPos;
         }
         if (pPos) {
-            if (pPos[1] < 660.0f || (pPos[0] == 0.0f && pPos[2] == 0.0f)) {
-                pPos[0] = 16802.3f;
+            if (pPos[1] < 600.0f || (pPos[0] == 0.0f && pPos[2] == 0.0f) || fabsf(pPos[0] - 16710.0f) > 300.0f || fabsf(pPos[2] - 3230.0f) > 300.0f) {
+                pPos[0] = 16710.0f;
                 pPos[1] = 665.0f;
-                pPos[2] = 3237.01f;
+                pPos[2] = 3230.0f;
                 pPos[3] = 1.0f;
                 pPos[4] = 0.0f;
                 pPos[5] = 1.0f;
                 pPos[15] = 1.0f;
-                Log("[mxohax] EnsureInWorld: Updated existing Player coordinates to Slums (%.1f, %.1f, %.1f)\n", pPos[0], pPos[1], pPos[2]);
+                Log("[mxohax] EnsureInWorld: Updated existing Player coordinates to Slums walkway (%.1f, %.1f, %.1f)\n", pPos[0], pPos[1], pPos[2]);
+            }
+        }
+        float* pRot = *reinterpret_cast<float**>(reinterpret_cast<DWORD>(pPlayer) + 0x98);
+        if (!pRot) {
+            pRot = reinterpret_cast<float*>(calloc(4, sizeof(float)));
+            if (pRot) {
+                pRot[0] = 0.0f; pRot[1] = 0.0f; pRot[2] = 0.0f; pRot[3] = 1.0f;
+                *reinterpret_cast<float**>(reinterpret_cast<DWORD>(pPlayer) + 0x98) = pRot;
             }
         }
         ApplyOperativeAppearance(clientBase, pPlayer);
     }
 
-    // Step 2b: Invoke native AdvanceToState3 (0x10121B50) to attach camera, bind scene, and start 3D simulation!
+    // Patch CActor::HideLocalPlayer entry at clientBase + 0x004ECDB0 with ret 8 (C2 08 00)
+    // Permanently prevents CActor::HideLocalPlayer from ever stripping meshes or hiding operative
+    LPVOID pHideActorEntry = reinterpret_cast<LPVOID>(clientBase + 0x004ECDB0);
+    DWORD oldProtHide = 0;
+    if (VirtualProtect(pHideActorEntry, 3, PAGE_EXECUTE_READWRITE, &oldProtHide)) {
+        BYTE ret8[3] = { 0xC2, 0x08, 0x00 };
+        memcpy(pHideActorEntry, ret8, 3);
+        VirtualProtect(pHideActorEntry, 3, oldProtHide, &oldProtHide);
+        FlushInstructionCache(GetCurrentProcess(), pHideActorEntry, 3);
+        Log("[mxohax] EnsureInWorld: Neutralized CActor::HideLocalPlayer at client.dll + 0x004ECDB0 (ret 8)!\n");
+    }
+    *reinterpret_cast<DWORD*>(clientBase + 0x008971C8) = 1; // Enforce Camera_Mode = 1 (Third Person)
+
+    if (pPlayer) {
+        void* pActor = *reinterpret_cast<void**>(reinterpret_cast<uintptr_t>(pPlayer) + 0xA8);
+        if (pActor && !IsBadReadPtr(pActor, 0x40)) {
+            __try {
+                SyncActorPosition(clientBase, pPlayer, pActor, 16710.0, 665.0, 3230.0);
+            } __except (EXCEPTION_EXECUTE_HANDLER) {}
+        }
+    }
+
+    if (!promoteToState3) {
+        s_inStreamingState4 = true;
+        DWORD* pState = reinterpret_cast<DWORD*>(reinterpret_cast<DWORD>(pWorldMgr) + 0x1C);
+        if (pState) {
+            *pState = 4; // Keep State 4 active for Matrix code rain streaming!
+        }
+        void* pUI = *reinterpret_cast<void**>(clientBase + 0x00898C54);
+        if (pUI && OriginalHideControl) {
+            OriginalHideControl(pUI, 0x04);
+            OriginalHideControl(pUI, 0x57);
+            OriginalHideControl(pUI, 0x30);
+            OriginalHideControl(pUI, 0x5D);
+            Log("[mxohax] EnsureInWorld: Dismissed 2D loading screen 0x57 to reveal falling Matrix digital code rain!\n");
+        }
+        Log("[mxohax] EnsureInWorld: Scene and Player prepared in State 4 (Streaming with Matrix code rain)!\n");
+        return;
+    }
+
+    // Step 2b: Invoke native AdvanceToState3 (0x10121B50) ONLY when promoting to State 3!
     static bool s_advanceToState3Done = false;
     if (pPlayer && !s_advanceToState3Done) {
         s_advanceToState3Done = true;
-        Log("[mxohax] EnsureInWorld: Invoking native AdvanceToState3 (0x10121B50) on pWorldMgr=0x%p, pPlayer=0x%p...\n", pWorldMgr, pPlayer);
+        // Ensure state is 3 (not 4) so AdvanceToState3 does not take the State 4 streaming bypass branch!
+        DWORD* pState = reinterpret_cast<DWORD*>(reinterpret_cast<DWORD>(pWorldMgr) + 0x1C);
+        if (pState) *pState = 3;
+        // Ensure [pWorldMgr + 0x22] is 0 so AdvanceToState3 does not skip native HUD control creation!
+        *reinterpret_cast<BYTE*>(reinterpret_cast<DWORD>(pWorldMgr) + 0x22) = 0;
+        Log("[mxohax] EnsureInWorld: Invoking native AdvanceToState3 (0x10121B50) on pWorldMgr=0x%p, pPlayer=0x%p in State 3...\n", pWorldMgr, pPlayer);
         typedef void (__thiscall *AdvanceToState3_t)(void* pMgr, void* pPlayer);
         AdvanceToState3_t pAdv3 = reinterpret_cast<AdvanceToState3_t>(clientBase + 0x00121B50);
-        pAdv3(pWorldMgr, pPlayer);
+        __try {
+            pAdv3(pWorldMgr, pPlayer);
+        } __except (EXCEPTION_EXECUTE_HANDLER) {
+            Log("[mxohax] EnsureInWorld: Exception in AdvanceToState3 caught safely!\n");
+        }
         DWORD* pCurState = reinterpret_cast<DWORD*>(reinterpret_cast<DWORD>(pWorldMgr) + 0x1C);
         Log("[mxohax] EnsureInWorld: AdvanceToState3 dispatched! State is now %u\n", pCurState ? *pCurState : 0);
     }
 
-    // Step 3: Guaranteed World Engine and World Instance creation for [0x1089DD6C]
-    void** ppWorldInst = reinterpret_cast<void**>(clientBase + 0x0089DD6C);
-    typedef void* (__cdecl *GetWorldEngine_t)(DWORD);
-    GetWorldEngine_t pGetEngine = reinterpret_cast<GetWorldEngine_t>(clientBase + 0x003A5F30);
-    DWORD engArg = *reinterpret_cast<DWORD*>(clientBase + 0x00897F90);
-    void* pWorldEngine = pGetEngine(engArg);
-    Log("[mxohax] EnsureInWorld: Initial pWorldEngine=0x%p, [0x1089DD6C]=0x%p\n",
-        pWorldEngine, ppWorldInst ? *ppWorldInst : nullptr);
+    // Step 3: Verified World File and Instance loaded via Step 1
+    ppWorldInst = reinterpret_cast<void**>(clientBase + 0x0089DD6C);
 
-    if (!pWorldEngine) {
-        Log("[mxohax] EnsureInWorld: Calling InitWorldEngine (0x103A5AC0)...\n");
-        typedef void (__cdecl *InitWorldEngine_t)();
-        InitWorldEngine_t pInitEngine = reinterpret_cast<InitWorldEngine_t>(clientBase + 0x003A5AC0);
-        pInitEngine();
-        pWorldEngine = pGetEngine(engArg);
-        Log("[mxohax] EnsureInWorld: Post-init pWorldEngine=0x%p\n", pWorldEngine);
-    }
-
-    if (pWorldEngine && ppWorldInst && !*ppWorldInst) {
-        float dummyMat[16] = {
-            1.0f, 0.0f, 0.0f, 0.0f,
-            0.0f, 1.0f, 0.0f, 0.0f,
-            0.0f, 0.0f, 1.0f, 0.0f,
-            16802.3f, 665.0f, 3237.01f, 1.0f
-        };
-        float* pMat = dummyMat;
-        if (pPlayer) {
-            float* pPlayerPos = *reinterpret_cast<float**>(reinterpret_cast<DWORD>(pPlayer) + 0x94);
-            if (pPlayerPos) pMat = pPlayerPos;
-        }
-        Log("[mxohax] EnsureInWorld: Invoking pWorldEngine->vtable[0](pMat, 0x1011FF10, 0) to instantiate World...\n", pWorldEngine);
-        typedef void* (__thiscall *CreateWorldInst_t)(void* pEng, void* pMatrix, void* pFn, int flag);
-        CreateWorldInst_t* vtable = *reinterpret_cast<CreateWorldInst_t**>(pWorldEngine);
-        if (vtable && vtable[0]) {
-            void* pInst = vtable[0](pWorldEngine, pMat, reinterpret_cast<void*>(clientBase + 0x0011FF10), 0);
-            *ppWorldInst = pInst;
-            Log("[mxohax] EnsureInWorld: SUCCESS! Instantiated World Instance 0x%p into [0x1089DD6C]!\n", pInst);
-        }
-    }
-
-    // Step 4: Ensure Camera is instantiated and oriented in Slums
+    // Step 4: Ensure Camera is instantiated
     void** ppCamera = reinterpret_cast<void**>(clientBase + 0x0089EDF8);
-    if (ppCamera) {
-        if (!*ppCamera) {
-            void* pCam = malloc(0x118);
-            if (pCam) {
-                memset(pCam, 0, 0x118);
+    if (ppCamera && !*ppCamera) {
+        void* pCam = malloc(0x118);
+        if (pCam) {
+            memset(pCam, 0, 0x118);
+            __try {
                 typedef void (__thiscall *CamCtor_t)(void*);
                 CamCtor_t pCamCtor = reinterpret_cast<CamCtor_t>(clientBase + 0x0012F020);
                 pCamCtor(pCam);
                 *ppCamera = pCam;
                 Log("[mxohax] EnsureInWorld: Instantiated fallback camera at 0x%p into [0x1089edf8]!\n", pCam);
-            }
-        }
-        if (*ppCamera) {
-            DWORD pCamAddr = reinterpret_cast<DWORD>(*ppCamera);
-            float* pCamRot = reinterpret_cast<float*>(pCamAddr + 0x20); // (qx, qy, qz, qw)
-            if (pCamRot) {
-                pCamRot[0] = -0.0523f; // Gentle downward pitch ~6 degrees
-                pCamRot[1] = 0.0f;
-                pCamRot[2] = 0.0f;
-                pCamRot[3] = 0.9986f;
-            }
-            float* pCamPos = reinterpret_cast<float*>(pCamAddr + 0x30);
-            if (pCamPos && ((pCamPos[0] == 0.0f && pCamPos[2] == 0.0f) || pCamPos[1] < 670.0f)) {
-                pCamPos[0] = 16802.3f;
-                pCamPos[1] = 720.0f;  // Eye level behind operative
-                pCamPos[2] = 2950.0f; // Behind operative facing forward towards 3237.0f
-                Log("[mxohax] EnsureInWorld: Set 3rd person chase camera position (%.1f, %.1f, %.1f) with -6 deg pitch\n",
-                    pCamPos[0], pCamPos[1], pCamPos[2]);
+            } __except (EXCEPTION_EXECUTE_HANDLER) {
+                Log("[mxohax] EnsureInWorld: Fallback CamCtor exception caught safely.\n");
+                free(pCam);
             }
         }
     }
 
-    // Step 5: Activate in-world display & viewport via official UI SetControlVisible(0x1B, 1)
+    // Configure Camera CVars
+    *reinterpret_cast<float*>(clientBase + 0x0089F2D0) = 12.0f;  // Pitch = 12 degrees down
+    *reinterpret_cast<float*>(clientBase + 0x0089F304) = 180.0f; // Yaw = 180 degrees (facing South)
+    *reinterpret_cast<float*>(clientBase + 0x0089F338) = 190.0f; // Chase distance = 190.0 units
+    *reinterpret_cast<DWORD*>(clientBase + 0x0089EFAC) = 1;      // Default Camera Mode = 1 (Chase Cam)
+    *reinterpret_cast<DWORD*>(clientBase + 0x008971C8) = 1;      // Enforce Camera_Mode = 1 (Third Person)
+
+    if (ppCamera && *ppCamera) {
+        __try {
+            void* pCam = *ppCamera;
+            // 1. Switch CCameraManager mode to Mode 1 (Chase Camera)
+            typedef void (__thiscall *SetCameraMode_t)(void* pCamMgr, int mode);
+            SetCameraMode_t pSetMode = reinterpret_cast<SetCameraMode_t>(clientBase + 0x0012D200);
+            pSetMode(pCam, 1);
+
+            double targetX = 16710.0;
+            double targetY = 665.0;
+            double targetZ = 3230.0;
+            if (pPlayer) {
+                float* pPos = *reinterpret_cast<float**>(reinterpret_cast<DWORD>(pPlayer) + 0x94);
+                if (pPos) {
+                    if (pPos[1] < 600.0f || (pPos[0] == 0.0f && pPos[2] == 0.0f) || fabsf(pPos[0] - 16710.0f) > 300.0f || fabsf(pPos[2] - 3230.0f) > 300.0f) {
+                        pPos[0] = 16710.0f;
+                        pPos[1] = 665.0f;
+                        pPos[2] = 3230.0f;
+                        pPos[3] = 1.0f;
+                        pPos[4] = 0.0f;
+                        pPos[5] = 1.0f;
+                        pPos[15] = 1.0f;
+                    }
+                    targetX = pPos[0];
+                    targetY = pPos[1];
+                    targetZ = pPos[2];
+                }
+            }
+
+            // Target position in CCameraManager [pCam + 0xC8]
+            double* pTargetPos = reinterpret_cast<double*>(reinterpret_cast<uintptr_t>(pCam) + 0xC8);
+            if (pTargetPos) {
+                pTargetPos[0] = targetX;
+                pTargetPos[1] = targetY + 40.0;
+                pTargetPos[2] = targetZ;
+            }
+            float* pTargetRot = reinterpret_cast<float*>(reinterpret_cast<uintptr_t>(pCam) + 0xE0);
+            if (pTargetRot) {
+                pTargetRot[0] = 0.0f;
+                pTargetRot[1] = 0.0f;
+                pTargetRot[2] = 0.0f;
+                pTargetRot[3] = 1.0f;
+            }
+            void* pActor = pPlayer ? *reinterpret_cast<void**>(reinterpret_cast<uintptr_t>(pPlayer) + 0xA8) : nullptr;
+
+            // Position camera behind player along +Z (North of player, looking South -Z)
+            // Offset slightly to player's right (+X) for classic third-person chase camera
+            double camX = targetX + 20.0;
+            double camY = targetY + 45.0;
+            double camZ = targetZ + 130.0;
+
+            // Facing South (-Z) with ~12 deg downward pitch
+            // Quat = (0, cos(p/2), -sin(p/2), 0)
+            float sp = 0.104528f;
+            float cp = 0.994522f;
+            float camRotQ[4] = {
+                0.0f,
+                cp,
+                -sp,
+                0.0f
+            };
+
+            double* pCamOffset = reinterpret_cast<double*>(reinterpret_cast<uintptr_t>(pCam) + 8);
+            if (pCamOffset) {
+                pCamOffset[0] = targetX;
+                pCamOffset[1] = targetY + 40.0;
+                pCamOffset[2] = targetZ;
+            }
+            *reinterpret_cast<float*>(reinterpret_cast<uintptr_t>(pCam) + 0x30) = 12.0f * 0.0174532925f; // Pitch
+            *reinterpret_cast<float*>(reinterpret_cast<uintptr_t>(pCam) + 0x34) = 3.14159265f; // Yaw (180 deg South)
+            *reinterpret_cast<float*>(reinterpret_cast<uintptr_t>(pCam) + 0x38) = 190.0f; // Chase distance
+
+            // Update underlying pEngineCam directly
+            void* pEngineCam = *reinterpret_cast<void**>(pCam);
+            if (pEngineCam && !IsBadReadPtr(pEngineCam, 4)) {
+                void** pCamVtbl = *reinterpret_cast<void***>(pEngineCam);
+                if (pCamVtbl && !IsBadReadPtr(pCamVtbl, 0x40)) {
+                    typedef double* (__thiscall *GetPosFn)(void* pThis);
+                    GetPosFn pGetPos = reinterpret_cast<GetPosFn>(pCamVtbl[0x28 / 4]);
+                    double* pPos = pGetPos(pEngineCam);
+                    if (pPos) {
+                        pPos[0] = camX;
+                        pPos[1] = camY;
+                        pPos[2] = camZ;
+                    }
+                    typedef float* (__thiscall *GetRotFn)(void* pThis);
+                    GetRotFn pGetRot = reinterpret_cast<GetRotFn>(pCamVtbl[0x34 / 4]);
+                    float* pRot = pGetRot(pEngineCam);
+                    if (pRot) {
+                        memcpy(pRot, camRotQ, sizeof(camRotQ));
+                    }
+
+                    // Dispatch SetPosition & SetRotation to notify engine rasterizer
+                    typedef void (__thiscall *SetPosFn)(void* pThis, const double* pPos);
+                    SetPosFn pSetPos = reinterpret_cast<SetPosFn>(pCamVtbl[0x24 / 4]);
+                    double finalCamPos[3] = { camX, camY, camZ };
+                    pSetPos(pEngineCam, finalCamPos);
+
+                    typedef void (__thiscall *SetRotFn)(void* pThis, const float* pRot);
+                    SetRotFn pSetRot = reinterpret_cast<SetRotFn>(pCamVtbl[0x30 / 4]);
+                    pSetRot(pEngineCam, camRotQ);
+                }
+            }
+            Log("[mxohax] EnsureInWorld: Chase camera mode 1 activated with target (%.1f, %.1f, %.1f)!\n",
+                targetX, targetY, targetZ);
+        } __except (EXCEPTION_EXECUTE_HANDLER) {
+            Log("[mxohax] EnsureInWorld: Exception in Chase camera setup caught safely!\n");
+        }
+    }
+
+    // Step 5: Activate in-world display & viewport via official UI SetControlVisible for all HUD controls
     void* pUI = *reinterpret_cast<void**>(clientBase + 0x00898C54);
-    if (pUI) {
+    if (pUI && promoteToState3 && pPlayer) {
+        typedef void* (__thiscall *CreateControl_t)(void* pUI, DWORD ctrlId);
+        typedef void (__thiscall *SetControlVisible_t)(void* pUI, DWORD ctrlId, BOOL bVisible);
+        CreateControl_t pCreateControl = reinterpret_cast<CreateControl_t>(clientBase + 0x0001BC10);
         SetControlVisible_t pSetVisible = reinterpret_cast<SetControlVisible_t>(clientBase + 0x0001DB80);
-        pSetVisible(pUI, 0x1B, 1);
-        Log("[mxohax] EnsureInWorld: Dispatched pUI->SetControlVisible(0x1B, 1)!\n");
+
+        static const DWORD hudControls[] = {
+            0x1B, // Player Window (Quickbar, IS/Health meters, Combat tactics)
+            0x27, // Compass / Radar HUD
+            0x24, // Action Toolbar
+            0x02, // Main Chat Window
+            0x03, // Chat Toolbar
+            0x22, // Target Status Frame
+            0x23, // Tabs Parent
+            0x3D, // Active Buffs HUD
+            0x4D  // Latency Meter
+        };
+        for (DWORD id : hudControls) {
+            __try {
+                void** ppCtrl = reinterpret_cast<void**>(reinterpret_cast<uintptr_t>(pUI) + 0x28 + (id * 4));
+                if (!ppCtrl || !*ppCtrl) {
+                    pCreateControl(pUI, id);
+                    Log("[mxohax] EnsureInWorld: Instantiated HUD control 0x%02X\n", id);
+                }
+                pSetVisible(pUI, id, 1);
+                Log("[mxohax] EnsureInWorld: Dispatched pUI->SetControlVisible(0x%02X, 1)!\n", id);
+            } __except (EXCEPTION_EXECUTE_HANDLER) {
+                Log("[mxohax] EnsureInWorld: Exception on HUD control 0x%02X\n", id);
+            }
+        }
+
+        void* pChatMgr = *reinterpret_cast<void**>(reinterpret_cast<uintptr_t>(pUI) + 0x38);
+        if (pChatMgr && !IsBadReadPtr(pChatMgr, 0x60)) {
+            *reinterpret_cast<BYTE*>(reinterpret_cast<uintptr_t>(pChatMgr) + 0x58) = 1;
+            Log("[mxohax] EnsureInWorld: Activated Chat Manager tabs!\n");
+        }
     }
 
-    // Step 6: Ensure pWorldMgr + 0xC (viewport list) has a valid Viewport object
+    // Step 6: Ensure pWorldMgr + 0xC (viewport list) has a valid Viewport object bound to the active camera
     void** ppListHead = reinterpret_cast<void**>(reinterpret_cast<DWORD>(pWorldMgr) + 0xC);
     if (ppListHead && *ppListHead) {
         void* head = *ppListHead;
+        if (promoteToState3) {
+            // Reset circular list to bind to the active State 3 camera
+            *reinterpret_cast<void**>(head) = head;
+            *reinterpret_cast<void**>(reinterpret_cast<uintptr_t>(head) + 4) = head;
+            Log("[mxohax] EnsureInWorld: Reset viewport circular list head to rebind active camera upon State 3 promotion.\n");
+        }
         void* first = *reinterpret_cast<void**>(head);
         if (first == head) {
             // Viewport list empty -> call CWorldMgr::CreateViewport(0x1011EAD0)
             int width = *reinterpret_cast<int*>(clientBase + 0x00896CCC);
             int height = *reinterpret_cast<int*>(clientBase + 0x00896D04);
             if (width <= 0 || height <= 0) {
-                width = 1024;
-                height = 768;
+                width = 1920;
+                height = 1080;
             }
             Log("[mxohax] EnsureInWorld: Calling CWorldMgr::CreateViewport(0x1011EAD0) with %dx%d (pCam=0x%p)...\n",
                 width, height, ppCamera ? *ppCamera : nullptr);
@@ -1332,12 +1793,9 @@ static void EnsureInWorldRendering(uintptr_t clientBase, void* pWorldMgr, DWORD 
 
     // Step 7: Ensure pWorldMgr + 8 (viewport count) is 1
     DWORD* pVpCount = reinterpret_cast<DWORD*>(reinterpret_cast<DWORD>(pWorldMgr) + 8);
-    if (pVpCount && *pVpCount == 0) {
-        DWORD one = 1;
-        typedef void (__thiscall *SetVpCount_t)(void* pMgr, DWORD* pCount);
-        SetVpCount_t pSetVp = reinterpret_cast<SetVpCount_t>(clientBase + 0x00114680);
-        pSetVp(pWorldMgr, &one);
-        Log("[mxohax] EnsureInWorld: SetViewportCount(0x10114680) called -> pWorldMgr+8 is %u\n", *pVpCount);
+    if (pVpCount) {
+        *pVpCount = 1;
+        Log("[mxohax] EnsureInWorld: Set viewport count [pWorldMgr+8] to 1\n");
     }
 
     // Step 8: Set render & in-world flags
@@ -1345,7 +1803,6 @@ static void EnsureInWorldRendering(uintptr_t clientBase, void* pWorldMgr, DWORD 
     *reinterpret_cast<BYTE*>(reinterpret_cast<DWORD>(pWorldMgr) + 0x22) = 1;
     *reinterpret_cast<BYTE*>(reinterpret_cast<DWORD>(pWorldMgr) + 0x27) = 1;
     if (pShell) {
-        *reinterpret_cast<BYTE*>(pShell + 0x20) = 1; // CClientShell::m_inWorld = 1
         HWND hWnd = *reinterpret_cast<HWND*>(pShell + 0x14);
         if (hWnd) {
             ShowWindow(hWnd, SW_RESTORE);
@@ -1354,6 +1811,10 @@ static void EnsureInWorldRendering(uintptr_t clientBase, void* pWorldMgr, DWORD 
         }
     }
 
+    s_inStreamingState4 = false;
+    if (pShell) {
+        *reinterpret_cast<BYTE*>(pShell + 0x20) = 1; // CClientShell::m_inWorld = 1
+    }
     DWORD* pState = reinterpret_cast<DWORD*>(reinterpret_cast<DWORD>(pWorldMgr) + 0x1C);
     if (pState) {
         *pState = 3;
@@ -1362,6 +1823,11 @@ static void EnsureInWorldRendering(uintptr_t clientBase, void* pWorldMgr, DWORD 
     Log("[mxohax] ******************************************************\n");
     Log("[mxohax] *** PROMOTED TO STATE 3 (IN-WORLD)! 3D SIMULATION ACTIVE! ***\n");
     Log("[mxohax] ******************************************************\n");
+
+    // Turn off Matrix View for solid world gameplay
+    *reinterpret_cast<float*>(clientBase + 0x008E357C) = 0.0f;
+    *reinterpret_cast<BYTE*>(clientBase + 0x0085EBA8) = 0;
+    *reinterpret_cast<BYTE*>(clientBase + 0x008E3590) = 0;
 
     // Dismiss 2D loading screens
     if (pUI && OriginalHideControl) {
@@ -1372,6 +1838,9 @@ static void EnsureInWorldRendering(uintptr_t clientBase, void* pWorldMgr, DWORD 
         Log("[mxohax] EnsureInWorld: Dismissed loading screens 0x04, 0x57, 0x30 and 0x5D!\n");
     }
 }
+
+// Forward declarations
+static unsigned char __stdcall Safe_GetPlayerActiveObject(void** outObj, void** outSubObj);
 
 // 0x001F9140: True per-frame tick on main thread (called inside RunClientDLL 0x10006640)
 typedef void (__thiscall *FrameTick_t)(void* pThis);
@@ -1405,10 +1874,6 @@ static void __fastcall DetourFrameTick(void* pThis, void* /*edx*/) {
         }
     }
 
-    if (inWorld == 1) {
-        s_inWorldSticky = true;
-    }
-
     if (s_inWorldSticky) {
         *reinterpret_cast<BYTE*>(pShell + 0x20) = 1;
         inWorld = 1;
@@ -1422,7 +1887,8 @@ static void __fastcall DetourFrameTick(void* pThis, void* /*edx*/) {
             }
         }
         static bool s_inWorldDismissedOnce = false;
-        if (!s_inWorldDismissedOnce) {
+        void* curPlayer = *reinterpret_cast<void**>(clientBase + 0x008A4378);
+        if (!s_inWorldDismissedOnce && curPlayer) {
             s_inWorldDismissedOnce = true;
             void* pUI = *reinterpret_cast<void**>(clientBase + 0x00898C54);
             if (pUI && OriginalHideControl) {
@@ -1432,14 +1898,212 @@ static void __fastcall DetourFrameTick(void* pThis, void* /*edx*/) {
                 OriginalHideControl(pUI, 0x5D);
             }
             if (pUI) {
+                typedef void* (__thiscall *CreateControl_t)(void* pUI, DWORD ctrlId);
+                typedef void (__thiscall *SetControlVisible_t)(void* pUI, DWORD ctrlId, BOOL bVisible);
+                CreateControl_t pCreateControl = reinterpret_cast<CreateControl_t>(clientBase + 0x0001BC10);
                 SetControlVisible_t pSetVisible = reinterpret_cast<SetControlVisible_t>(clientBase + 0x0001DB80);
-                pSetVisible(pUI, 0x1B, 1);
+
+                static const DWORD hudControls[] = { 0x1B, 0x27, 0x24, 0x02, 0x03, 0x22, 0x23, 0x3D, 0x4D };
+                for (DWORD id : hudControls) {
+                    __try {
+                        void** ppCtrl = reinterpret_cast<void**>(reinterpret_cast<uintptr_t>(pUI) + 0x28 + (id * 4));
+                        if (!ppCtrl || !*ppCtrl) {
+                            pCreateControl(pUI, id);
+                        }
+                        pSetVisible(pUI, id, 1);
+                    } __except (EXCEPTION_EXECUTE_HANDLER) {}
+                }
             }
-            void* curPlayer = *reinterpret_cast<void**>(clientBase + 0x008A4378);
-            if (curPlayer) {
-                ApplyOperativeAppearance(clientBase, curPlayer);
-            }
+            ApplyOperativeAppearance(clientBase, curPlayer);
             Log("[mxohax] In-world UI initialized and loading screens dismissed once.\n");
+        }
+        if (curPlayer) {
+            float* pPos = *reinterpret_cast<float**>(reinterpret_cast<DWORD>(curPlayer) + 0x94);
+            if (pPos) {
+                if (pPos[1] < 600.0f || (pPos[0] == 0.0f && pPos[2] == 0.0f) || fabsf(pPos[0] - 16710.0f) > 300.0f || fabsf(pPos[2] - 3230.0f) > 300.0f) {
+                    pPos[0] = 16710.0f;
+                    pPos[1] = 665.0f;
+                    pPos[2] = 3230.0f;
+                    pPos[3] = 1.0f;
+                    pPos[4] = 0.0f;
+                    pPos[5] = 1.0f;
+                    pPos[15] = 1.0f;
+                }
+                static int s_posTickLog = 0;
+                if (++s_posTickLog % 60 == 0) {
+                    Log("[mxohax] DetourFrameTick: Player coords: (%.1f, %.1f, %.1f)\n", pPos[0], pPos[1], pPos[2]);
+                }
+            }
+        }
+
+        // Permanently enforce Third Person Chase Camera Mode CVar
+        *reinterpret_cast<DWORD*>(clientBase + 0x008971C8) = 1;
+
+        void** ppCamera = reinterpret_cast<void**>(clientBase + 0x0089EDF8);
+        if (ppCamera && *ppCamera) {
+            void* pCam = *ppCamera;
+
+            // 1. Ensure Camera Mode is 1 (Chase Cam)
+            DWORD* pMode = reinterpret_cast<DWORD*>(reinterpret_cast<uintptr_t>(pCam) + 0x8C);
+            if (pMode && *pMode != 1) {
+                typedef void (__thiscall *SetCameraMode_t)(void* pCamMgr, int mode);
+                SetCameraMode_t pSetMode = reinterpret_cast<SetCameraMode_t>(clientBase + 0x0012D200);
+                pSetMode(pCam, 1);
+                Log("[mxohax] DetourFrameTick: Switched CCameraManager mode to 1 (Chase Cam)!\n");
+            }
+
+            // 2. Camera CVars & Parameters: Initialize once with open street orientation, then allow interactive mouse-look
+            static bool s_camParamsInit = false;
+            if (!s_camParamsInit) {
+                s_camParamsInit = true;
+                *reinterpret_cast<float*>(clientBase + 0x0089F2D0) = 12.0f;  // Pitch = 12 deg down
+                *reinterpret_cast<float*>(clientBase + 0x0089F304) = 180.0f; // Yaw = 180 deg (facing South down open street)
+                *reinterpret_cast<float*>(clientBase + 0x0089F338) = 220.0f; // Chase Distance = 220.0 units
+                *reinterpret_cast<DWORD*>(clientBase + 0x0089EFAC) = 1;      // Default Mode = 1 (Chase Cam)
+                *reinterpret_cast<float*>(reinterpret_cast<uintptr_t>(pCam) + 0x30) = 12.0f * 0.0174532925f;
+                *reinterpret_cast<float*>(reinterpret_cast<uintptr_t>(pCam) + 0x34) = 3.14159265f; // 180 deg facing south
+                *reinterpret_cast<float*>(reinterpret_cast<uintptr_t>(pCam) + 0x38) = 220.0f;
+            }
+
+            double targetX = 16710.0;
+            double targetY = 665.0;
+            double targetZ = 3230.0;
+            if (curPlayer) {
+                float* pPos = *reinterpret_cast<float**>(reinterpret_cast<DWORD>(curPlayer) + 0x94);
+                if (pPos) {
+                    if (pPos[1] < 600.0f || (pPos[0] == 0.0f && pPos[2] == 0.0f) || fabsf(pPos[0] - 16710.0f) > 300.0f || fabsf(pPos[2] - 3230.0f) > 300.0f) {
+                        pPos[0] = 16710.0f;
+                        pPos[1] = 665.0f;
+                        pPos[2] = 3230.0f;
+                        pPos[3] = 1.0f;
+                        pPos[4] = 0.0f;
+                        pPos[5] = 1.0f;
+                        pPos[15] = 1.0f;
+                    }
+                    targetX = pPos[0];
+                    targetY = pPos[1];
+                    targetZ = pPos[2];
+                }
+            }
+
+            // Target position in CCameraManager at [pCam + 0xC8]
+            double* pTargetPosC8 = reinterpret_cast<double*>(reinterpret_cast<uintptr_t>(pCam) + 0xC8);
+            if (pTargetPosC8) {
+                pTargetPosC8[0] = targetX;
+                pTargetPosC8[1] = targetY + 40.0;
+                pTargetPosC8[2] = targetZ;
+            }
+
+            // Camera target / eye offset at [pCam + 8]
+            double* pCamPos8 = reinterpret_cast<double*>(reinterpret_cast<uintptr_t>(pCam) + 8);
+            if (pCamPos8) {
+                pCamPos8[0] = targetX;
+                pCamPos8[1] = targetY + 40.0;
+                pCamPos8[2] = targetZ;
+            }
+
+            // Keep targetHandle at 0 so CCameraManager uses [pCam + 8] directly and never queries unmapped handles
+            DWORD* pTargetHandle = reinterpret_cast<DWORD*>(reinterpret_cast<uintptr_t>(pCam) + 4);
+            if (pTargetHandle) *pTargetHandle = 0;
+
+            if (curPlayer) {
+                *reinterpret_cast<BYTE*>(reinterpret_cast<uintptr_t>(curPlayer) + 0xC) |= 0x20;
+                void* pActor = *reinterpret_cast<void**>(reinterpret_cast<uintptr_t>(curPlayer) + 0xA8);
+                if (pActor) {
+                    *reinterpret_cast<void**>(reinterpret_cast<uintptr_t>(pCam) + 0x108) = pActor;
+                    *reinterpret_cast<void**>(reinterpret_cast<uintptr_t>(pCam) + 0x10C) = pActor;
+                    if (!IsBadReadPtr(pActor, 0x690)) {
+                        SyncActorPosition(clientBase, curPlayer, pActor, targetX, targetY, targetZ);
+
+                        if (s_tickCount % 30 == 0) {
+                            typedef void (__thiscall *ShowLocalPlayer_t)(void* pActor);
+                            ShowLocalPlayer_t pShowActor = reinterpret_cast<ShowLocalPlayer_t>(clientBase + 0x004EAB80);
+                            pShowActor(pActor);
+                            SyncActorPosition(clientBase, curPlayer, pActor, targetX, targetY, targetZ);
+                        }
+                    }
+                }
+            }
+
+            // 3. Smooth chase camera initialization:
+            // Synchronize camera directly behind operative for the first 30 frames facing South down open street, then yield to native mouse/orbiting controls
+            static int s_camInitTicks = 0;
+            if (s_camInitTicks < 30) {
+                s_camInitTicks++;
+                void* pEngineCam = *reinterpret_cast<void**>(pCam);
+                if (pEngineCam && !IsBadReadPtr(pEngineCam, 4)) {
+                    void** pCamVtbl = *reinterpret_cast<void***>(pEngineCam);
+                    if (pCamVtbl && !IsBadReadPtr(pCamVtbl, 0x40)) {
+                        float camDist = 220.0f;
+                        // Position camera in open walkway along +Z (overlooking operative facing North)
+                        // Offset slightly to player's right (+X) for classic third-person perspective
+                        double camX = targetX + 20.0;
+                        double camY = targetY + 55.0;
+                        double camZ = targetZ + camDist;
+
+                        // Facing South (-Z) with ~12 deg downward pitch
+                        // Quat = (0, cos(p/2), -sin(p/2), 0)
+                        float sp = 0.104528f;
+                        float cp = 0.994522f;
+                        float camRotQ[4] = {
+                            0.0f,
+                            cp,
+                            -sp,
+                            0.0f
+                        };
+
+                        typedef void (__thiscall *SetPosFn)(void* pThis, const double* pPos);
+                        SetPosFn pSetPos = reinterpret_cast<SetPosFn>(pCamVtbl[0x24 / 4]);
+                        double finalCamPos[3] = { camX, camY, camZ };
+                        pSetPos(pEngineCam, finalCamPos);
+
+                        typedef void (__thiscall *SetRotFn)(void* pThis, const float* pRot);
+                        SetRotFn pSetRot = reinterpret_cast<SetRotFn>(pCamVtbl[0x30 / 4]);
+                        pSetRot(pEngineCam, camRotQ);
+                    }
+                }
+            }
+
+            static int s_camTickLog = 0;
+            if (++s_camTickLog % 60 == 0) {
+                void* pEngineCam = *reinterpret_cast<void**>(pCam);
+                double currCamPos[3] = {0};
+                if (pEngineCam && !IsBadReadPtr(pEngineCam, 4)) {
+                    void** pCamVtbl = *reinterpret_cast<void***>(pEngineCam);
+                    if (pCamVtbl && !IsBadReadPtr(pCamVtbl, 0x40)) {
+                        typedef double* (__thiscall *GetPosFn)(void* pThis);
+                        GetPosFn pGetPos = reinterpret_cast<GetPosFn>(pCamVtbl[0x28 / 4]);
+                        double* pPos = pGetPos(pEngineCam);
+                        if (pPos) {
+                            currCamPos[0] = pPos[0];
+                            currCamPos[1] = pPos[1];
+                            currCamPos[2] = pPos[2];
+                        }
+                    }
+                }
+                Log("[mxohax] DetourFrameTick: Cam=0x%p (mode=%u), pEngineCam=0x%p, targetHandle=0x%08X, NativeCamPos=(%.1f, %.1f, %.1f)\n",
+                    pCam, pMode ? *pMode : 0, pEngineCam, (pTargetHandle ? *pTargetHandle : 0),
+                    currCamPos[0], currCamPos[1], currCamPos[2]);
+            }
+        }
+
+        // Periodic HUD visibility re-assertion & Chat Window activation
+        static int s_hudTickCheck = 0;
+        if (++s_hudTickCheck % 60 == 0) {
+            void* pUI = *reinterpret_cast<void**>(clientBase + 0x00898C54);
+            if (pUI) {
+                SetControlVisible_t pSetVisible = reinterpret_cast<SetControlVisible_t>(clientBase + 0x0001DB80);
+                static const DWORD hudControls[] = { 0x1B, 0x27, 0x24, 0x02, 0x03, 0x22, 0x23, 0x3D, 0x4D };
+                for (DWORD id : hudControls) {
+                    __try {
+                        pSetVisible(pUI, id, 1);
+                    } __except (EXCEPTION_EXECUTE_HANDLER) {}
+                }
+                void* pChatMgr = *reinterpret_cast<void**>(reinterpret_cast<uintptr_t>(pUI) + 0x38);
+                if (pChatMgr && !IsBadReadPtr(pChatMgr, 0x60)) {
+                    *reinterpret_cast<BYTE*>(reinterpret_cast<uintptr_t>(pChatMgr) + 0x58) = 1;
+                }
+            }
         }
 
         // Keep Viewport count active for 3D rendering
@@ -1450,33 +2114,13 @@ static void __fastcall DetourFrameTick(void* pThis, void* /*edx*/) {
             }
         }
 
-        // Ensure World Instance remains valid in [0x1089DD6C]
+        // Ensure World Instance is loaded
         void** ppWorldInstSticky = reinterpret_cast<void**>(clientBase + 0x0089DD6C);
-        if (ppWorldInstSticky && !*ppWorldInstSticky) {
-            typedef void* (__cdecl *GetWorldEngine_t)(DWORD);
-            GetWorldEngine_t pGetEngine = reinterpret_cast<GetWorldEngine_t>(clientBase + 0x003A5F30);
-            DWORD engArg = *reinterpret_cast<DWORD*>(clientBase + 0x00897F90);
-            void* pWorldEngine = pGetEngine(engArg);
-            if (!pWorldEngine) {
-                typedef void (__cdecl *InitWorldEngine_t)();
-                InitWorldEngine_t pInitEngine = reinterpret_cast<InitWorldEngine_t>(clientBase + 0x003A5AC0);
-                pInitEngine();
-                pWorldEngine = pGetEngine(engArg);
-            }
-            if (pWorldEngine) {
-                typedef void* (__thiscall *CreateWorldInst_t)(void* pEng, void* pMatrix, void* pFn, int flag);
-                CreateWorldInst_t* vtable = *reinterpret_cast<CreateWorldInst_t**>(pWorldEngine);
-                if (vtable && vtable[0]) {
-                    float dummyMat[16] = {
-                        1.0f, 0.0f, 0.0f, 0.0f,
-                        0.0f, 1.0f, 0.0f, 0.0f,
-                        0.0f, 0.0f, 1.0f, 0.0f,
-                        16802.3f, 665.0f, 3237.01f, 1.0f
-                    };
-                    *ppWorldInstSticky = vtable[0](pWorldEngine, dummyMat, reinterpret_cast<void*>(clientBase + 0x0011FF10), 0);
-                    Log("[mxohax] DetourFrameTick: Re-ensured [0x1089DD6C] = 0x%p\n", *ppWorldInstSticky);
-                }
-            }
+        if (ppWorldInstSticky && !*ppWorldInstSticky && pWorldMgr) {
+            typedef char (__thiscall *LoadWorldFile_t)(void* pMgr);
+            LoadWorldFile_t pLoadWorld = reinterpret_cast<LoadWorldFile_t>(clientBase + 0x00121110);
+            pLoadWorld(pWorldMgr);
+            Log("[mxohax] DetourFrameTick: Fallback LoadWorldFile executed -> [0x1089DD6C]=0x%p\n", *ppWorldInstSticky);
         }
 
         // Capture in-world screenshot verification after entering world
@@ -1485,7 +2129,16 @@ static void __fastcall DetourFrameTick(void* pThis, void* /*edx*/) {
         if (s_inWorldSticky || inWorld == 1) {
             s_inWorldTickCounter++;
         }
-        if (!s_savedScreenshot && s_inWorldTickCounter >= 150) {
+        bool triggerCapture = (!s_savedScreenshot && s_inWorldTickCounter >= 150);
+        if (!triggerCapture && (s_inWorldTickCounter > 150) && (s_inWorldTickCounter % 30 == 0)) {
+            FILE* tf = fopen("capture_now.txt", "r");
+            if (tf) {
+                fclose(tf);
+                _unlink("capture_now.txt");
+                triggerCapture = true;
+            }
+        }
+        if (triggerCapture) {
             s_savedScreenshot = true;
             HWND hWnd = *reinterpret_cast<HWND*>(pShell + 0x14);
             if (!hWnd) hWnd = GetActiveWindow();
@@ -1580,7 +2233,7 @@ static void __fastcall DetourFrameTick(void* pThis, void* /*edx*/) {
     // State machine management
     static int s_state1Ticks = 0;
     static int s_state2Ticks = 0;
-    static int s_state4Ticks = 0;
+    // s_state4Ticks is global static volatile int
     if (pWorldMgr && !s_inWorldSticky) {
         DWORD* pState = reinterpret_cast<DWORD*>(reinterpret_cast<DWORD>(pWorldMgr) + 0x1C);
         if (pState) {
@@ -1605,11 +2258,44 @@ static void __fastcall DetourFrameTick(void* pThis, void* /*edx*/) {
                     EnsureInWorldRendering(clientBase, pWorldMgr, pShell);
                 }
             } else if (*pState == 4) {
+                s_inStreamingState4 = true;
                 s_state4Ticks++;
                 if (s_state4Ticks % 30 == 0) {
                     Log("[mxohax] DetourFrameTick: State 4 (Streaming) active (tick %d)...\n", s_state4Ticks);
                 }
-                
+
+                // Enable 3D scene rendering flags in WorldMgr so D3D9 renders during streaming
+                *reinterpret_cast<BYTE*>(reinterpret_cast<DWORD>(pWorldMgr) + 0x20) = 1;
+                *reinterpret_cast<BYTE*>(reinterpret_cast<DWORD>(pWorldMgr) + 0x22) = 1;
+
+                // Engage native Matrix View rez-in effect during State 4!
+                *reinterpret_cast<BYTE*>(clientBase + 0x0085EBA8) = 1;
+                *reinterpret_cast<BYTE*>(clientBase + 0x0085EBA9) = 1;
+                *reinterpret_cast<BYTE*>(clientBase + 0x0085EBAA) = 1;
+                *reinterpret_cast<BYTE*>(clientBase + 0x008E3590) = 1;
+
+                // Calculate smooth rez-in blend factor: starts at 1.0f (full green code) and smoothly dissolves to 0.0f
+                float rezProgress = (float)s_state4Ticks / 160.0f;
+                if (rezProgress > 1.0f) rezProgress = 1.0f;
+                float rezBlend = 1.0f - (rezProgress * rezProgress); // quadratic ease-out dissolve
+                *reinterpret_cast<float*>(clientBase + 0x008E357C) = rezBlend;
+
+                // Keep 2D loading screens dismissed once streaming begins so the 3D Matrix code rain is visible!
+                if (s_state4Ticks >= 15) {
+                    void* pUI = *reinterpret_cast<void**>(clientBase + 0x00898C54);
+                    if (pUI && OriginalHideControl) {
+                        OriginalHideControl(pUI, 0x57);
+                        OriginalHideControl(pUI, 0x04);
+                        OriginalHideControl(pUI, 0x30);
+                    }
+                }
+
+                // At tick 15, prepare scene and player in State 4 so the user sees the world rezzing in!
+                if (!s_playerEnteredWorld && s_state4Ticks >= 15) {
+                    Log("[mxohax] DetourFrameTick: Initializing in-world scene/player for State 4 streaming rez-in...\n");
+                    EnsureInWorldRendering(clientBase, pWorldMgr, pShell, false /* keepInState4 */);
+                }
+
                 // Check if streaming completed
                 typedef char (__thiscall *IsFinished_t)(void* pLevelSys);
                 void* pLevelSys = *reinterpret_cast<void**>(clientBase + 0x008A6004);
@@ -1618,8 +2304,10 @@ static void __fastcall DetourFrameTick(void* pThis, void* /*edx*/) {
                     IsFinished_t pIsFinished = reinterpret_cast<IsFinished_t>(clientBase + 0x002066C0);
                     finished = pIsFinished(pLevelSys);
                 }
-                if ((finished && s_state4Ticks >= 10) || s_state4Ticks >= 150) {
-                    Log("[mxohax] DetourFrameTick: Streaming complete (finished=%d, ticks=%d)!\n",
+
+                // Allow full dramatic Matrix code rain rez-in stream duration (~160 ticks / ~2.7s)
+                if (s_state4Ticks >= 160) {
+                    Log("[mxohax] DetourFrameTick: Matrix code streaming complete (finished=%d, ticks=%d)! Promoting to State 3...\n",
                         finished, s_state4Ticks);
 
                     // Ensure active world geometry buffer is ready (0xE0 = 1, 0xB9 = 1)
@@ -1632,7 +2320,8 @@ static void __fastcall DetourFrameTick(void* pThis, void* /*edx*/) {
                         }
                     }
 
-                    EnsureInWorldRendering(clientBase, pWorldMgr, pShell);
+                    s_inStreamingState4 = false;
+                    EnsureInWorldRendering(clientBase, pWorldMgr, pShell, true /* promoteToState3 */);
                 }
             }
         }
@@ -1690,7 +2379,9 @@ static uintptr_t PatternScan(uintptr_t base, size_t size, const char* pattern, c
 
 // ============================================================================
 // Safe GetPlayerActiveObject Hook (client.dll + 0x0010A210)
-// Guards against null pointer dereference at [0x108A4378 + 0xA8] + 0x23C
+// Resolves active player and sub-object for CWorldMgr::Update (0x1012A940)
+// Passes pPlayer as active world object to ensure in-world character rendering
+// (0x100EB090 and 0x100EE510) runs every frame!
 // ============================================================================
 typedef unsigned char (__stdcall *GetPlayerActiveObject_t)(void** outObj, void** outSubObj);
 static GetPlayerActiveObject_t OriginalGetPlayerActiveObject = nullptr;
@@ -1704,50 +2395,58 @@ static unsigned char __stdcall Safe_GetPlayerActiveObject(void** outObj, void** 
         if (!hClient) return 0;
         uintptr_t clientBase = reinterpret_cast<uintptr_t>(hClient);
 
+        void* pWorldMgr = *reinterpret_cast<void**>(clientBase + 0x0089DD68);
         uintptr_t* ppGlobal = reinterpret_cast<uintptr_t*>(clientBase + 0x008A4378);
-        if (IsBadReadPtr(ppGlobal, sizeof(uintptr_t)) || !*ppGlobal) return 0;
-        uintptr_t pGlobal = *ppGlobal;
+        if (!ppGlobal || IsBadReadPtr(ppGlobal, sizeof(uintptr_t)) || !*ppGlobal) return 0;
+        uintptr_t pPlayer = *ppGlobal;
 
-        uintptr_t* ppA8 = reinterpret_cast<uintptr_t*>(pGlobal + 0xA8);
-        if (IsBadReadPtr(ppA8, sizeof(uintptr_t)) || !*ppA8) return 0;
-        uintptr_t pA8 = *ppA8;
+        // 1. Attempt standard native object query via [pActor + 0x23C]
+        uintptr_t* ppA8 = reinterpret_cast<uintptr_t*>(pPlayer + 0xA8);
+        if (ppA8 && !IsBadReadPtr(ppA8, sizeof(uintptr_t)) && *ppA8) {
+            uintptr_t pA8 = *ppA8;
+            uintptr_t* pp23C = reinterpret_cast<uintptr_t*>(pA8 + 0x23C);
+            if (pp23C && !IsBadReadPtr(pp23C, sizeof(uintptr_t)) && *pp23C) {
+                uintptr_t p23C = *pp23C;
+                uintptr_t* ppESI = reinterpret_cast<uintptr_t*>(p23C);
+                if (ppESI && !IsBadReadPtr(ppESI, sizeof(uintptr_t)) && *ppESI) {
+                    uintptr_t pESI = *ppESI;
+                    if (!IsBadReadPtr(reinterpret_cast<void*>(pESI), 6) &&
+                        *reinterpret_cast<uint16_t*>(pESI + 4) != 0xFFFF) {
+                        uint16_t idx0 = *reinterpret_cast<uint16_t*>(pESI);
+                        uintptr_t* ppMgr = reinterpret_cast<uintptr_t*>(clientBase + 0x00897F90);
+                        if (ppMgr && !IsBadReadPtr(ppMgr, sizeof(uintptr_t)) && *ppMgr) {
+                            uintptr_t pMgr = *ppMgr;
+                            typedef void* (__thiscall *FnGetObj)(void* thisPtr, uint32_t id);
+                            FnGetObj pfnGetObj = reinterpret_cast<FnGetObj>(clientBase + 0x003A5CA0);
+                            void* obj = pfnGetObj(reinterpret_cast<void*>(pMgr), idx0);
+                            if (obj && !IsBadReadPtr(obj, sizeof(void*))) {
+                                uint16_t idx1 = *reinterpret_cast<uint16_t*>(pESI + 2);
+                                void*** pppVtable = reinterpret_cast<void***>(obj);
+                                if (pppVtable && !IsBadReadPtr(pppVtable, sizeof(void**)) && *pppVtable) {
+                                    void** vtable = *pppVtable;
+                                    if (!IsBadReadPtr(vtable, 0x60)) {
+                                        typedef void* (__thiscall *FnGetSubObj)(void* thisPtr, uint32_t id);
+                                        FnGetSubObj pfnGetSubObj = reinterpret_cast<FnGetSubObj>(vtable[0x58 / 4]);
+                                        if (pfnGetSubObj) {
+                                            void* subObj = pfnGetSubObj(obj, idx1);
+                                            if (outObj) *outObj = obj;
+                                            if (outSubObj) *outSubObj = subObj;
+                                            if (pWorldMgr) {
+                                                *reinterpret_cast<void**>(reinterpret_cast<uintptr_t>(pWorldMgr) + 0x90) = obj;
+                                                *reinterpret_cast<void**>(reinterpret_cast<uintptr_t>(pWorldMgr) + 0x94) = subObj;
+                                            }
+                                            return (subObj != nullptr) ? 1 : 0;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
 
-        uintptr_t* pp23C = reinterpret_cast<uintptr_t*>(pA8 + 0x23C);
-        if (IsBadReadPtr(pp23C, sizeof(uintptr_t)) || !*pp23C) return 0;
-        uintptr_t p23C = *pp23C;
-
-        uintptr_t* ppESI = reinterpret_cast<uintptr_t*>(p23C);
-        if (IsBadReadPtr(ppESI, sizeof(uintptr_t)) || !*ppESI) return 0;
-        uintptr_t pESI = *ppESI;
-
-        if (IsBadReadPtr(reinterpret_cast<void*>(pESI), 6)) return 0;
-        if (*reinterpret_cast<uint16_t*>(pESI + 4) == 0xFFFF) return 0;
-
-        uint16_t idx0 = *reinterpret_cast<uint16_t*>(pESI);
-        uintptr_t* ppMgr = reinterpret_cast<uintptr_t*>(clientBase + 0x00897F90);
-        if (IsBadReadPtr(ppMgr, sizeof(uintptr_t)) || !*ppMgr) return 0;
-        uintptr_t pMgr = *ppMgr;
-
-        typedef void* (__thiscall *FnGetObj)(void* thisPtr, uint32_t id);
-        FnGetObj pfnGetObj = reinterpret_cast<FnGetObj>(clientBase + 0x003A5CA0);
-        void* obj = pfnGetObj(reinterpret_cast<void*>(pMgr), idx0);
-        if (outObj) *outObj = obj;
-        if (!obj || IsBadReadPtr(obj, sizeof(void*))) return 0;
-
-        uint16_t idx1 = *reinterpret_cast<uint16_t*>(pESI + 2);
-        void*** pppVtable = reinterpret_cast<void***>(obj);
-        if (IsBadReadPtr(pppVtable, sizeof(void**)) || !*pppVtable) return 0;
-        void** vtable = *pppVtable;
-        if (IsBadReadPtr(vtable, 0x60)) return 0;
-
-        typedef void* (__thiscall *FnGetSubObj)(void* thisPtr, uint32_t id);
-        FnGetSubObj pfnGetSubObj = reinterpret_cast<FnGetSubObj>(vtable[0x58 / 4]);
-        if (!pfnGetSubObj) return 0;
-
-        void* subObj = pfnGetSubObj(obj, idx1);
-        if (outSubObj) *outSubObj = subObj;
-
-        return (subObj != nullptr) ? 1 : 0;
+        return 0;
     }
     __except (EXCEPTION_EXECUTE_HANDLER) {
         return 0;
@@ -1945,10 +2644,12 @@ static int __fastcall DetourParseSubpacket(void* pThis, void* /*edx*/, const byt
     return OriginalParseSubpacket ? OriginalParseSubpacket(pThis, pData, len) : 0;
 }
 
+// CActor visibility handled cleanly via native scene graph and HideLocalPlayer neutralization
+
+
 static void ApplyClientPatches(HMODULE hClient) {
-    static bool s_clientPatched = false;
-    if (s_clientPatched || !hClient) return;
-    s_clientPatched = true;
+    static LONG s_patchLock = 0;
+    if (InterlockedCompareExchange(&s_patchLock, 1, 0) != 0 || !hClient) return;
 
     DWORD clientBase = reinterpret_cast<DWORD>(hClient);
     Log("[mxohax] Applying client.dll hooks at base 0x%p...\n", (void*)clientBase);
@@ -1999,14 +2700,34 @@ static void ApplyClientPatches(HMODULE hClient) {
         Log("[mxohax] SUCCESS: client.dll GetPlayerActiveObject hooked at 0x%p! Null dereference guarded.\n", pGetActiveObj);
     }
 
-    // 5. Enforce 1920x1080 render display resolution and disable blurry glow globals
-    *reinterpret_cast<int*>(clientBase + 0x00896CCC) = 1920;
-    *reinterpret_cast<int*>(clientBase + 0x00896D04) = 1080;
-    Log("[mxohax] Enforced 1920x1080 resolution globals in client.dll.\n");
+    // 4c. Patch CActor::HideLocalPlayer entry (0x104ECDB0) with ret 8 (C2 08 00)
+    // Permanently prevents CActor::HideLocalPlayer from ever stripping meshes or hiding operative
+    LPVOID pHideActorEntry = reinterpret_cast<LPVOID>(clientBase + 0x004ECDB0);
+    DWORD oldProtHideL = 0;
+    if (VirtualProtect(pHideActorEntry, 3, PAGE_EXECUTE_READWRITE, &oldProtHideL)) {
+        BYTE ret8[3] = { 0xC2, 0x08, 0x00 };
+        memcpy(pHideActorEntry, ret8, 3);
+        VirtualProtect(pHideActorEntry, 3, oldProtHideL, &oldProtHideL);
+        FlushInstructionCache(GetCurrentProcess(), pHideActorEntry, 3);
+        Log("[mxohax] SUCCESS: Patched client.dll + 0x004ECDB0 (ret 8) to permanently neutralize CActor::HideLocalPlayer!\n");
+    }
 
-    *reinterpret_cast<int*>(clientBase + 0x008A342C) = 0;      // ScreenFilters_Screen_Glow_Just_Glow = 0
-    *reinterpret_cast<float*>(clientBase + 0x008A3508) = 0.0f; // ScreenFilters_Screen_Glow_BlurScale = 0.0
-    Log("[mxohax] Disabled blurry Just_Glow post-process globals in client.dll.\n");
+    // 4e. Patch CActor::ShowLocalPlayer visibility load (clientBase + 0x004EABCF)
+    // Overwrites 'mov dl, byte ptr [esi + 0x375]' (8A 96 75 03 00 00) with 'mov dl, 1; nop * 4' (B2 01 90 90 90 90)
+    // Guarantees ShowLocalPlayer unconditionally passes visibility=1 to SetProperty(0x102592E0)
+    LPVOID pShowVisLoad = reinterpret_cast<LPVOID>(clientBase + 0x004EABCF);
+    DWORD oldProtShowVis = 0;
+    if (VirtualProtect(pShowVisLoad, 6, PAGE_EXECUTE_READWRITE, &oldProtShowVis)) {
+        BYTE patchShowVis[6] = { 0xB2, 0x01, 0x90, 0x90, 0x90, 0x90 };
+        memcpy(pShowVisLoad, patchShowVis, 6);
+        VirtualProtect(pShowVisLoad, 6, oldProtShowVis, &oldProtShowVis);
+        FlushInstructionCache(GetCurrentProcess(), pShowVisLoad, 6);
+        Log("[mxohax] SUCCESS: Patched client.dll + 0x004EABCF (mov dl, 1) to enforce local player visibility!\n");
+    }
+
+    // 4d. Enforce Third Person Chase Camera Mode CVar at clientBase + 0x008971C8
+    *reinterpret_cast<DWORD*>(clientBase + 0x008971C8) = 1;
+    Log("[mxohax] SUCCESS: Enforced Camera_Mode [0x%08X] = 1 (Third Person Chase Camera)!\n", clientBase + 0x008971C8);
 
     // 5.5 Set default fallback world file pointer at clientBase + 0x00896E4C to slums METR world
     static const char s_initMetrPath[] = "resource/worlds/final_world/slums_barrens_full.metr";
@@ -2169,6 +2890,45 @@ static void ApplyClientPatches(HMODULE hClient) {
     if (MH_CreateHook(pSendCall, reinterpret_cast<LPVOID>(&Safe_SendCallPacket), reinterpret_cast<LPVOID*>(&Original_SendCallContactPacket)) == MH_OK) {
         MH_EnableHook(pSendCall);
         Log("[mxohax] SUCCESS: client.dll SendCallContactPacket hooked at 0x%p!\n", pSendCall);
+    }
+
+    // Patch L1: 0x0051B1EE: 2 bytes NOP NOP (90 90 instead of 74 2C)
+    // Prevents CRSIObject::EquipArticle from bailing out when [0x1099D1F4] is null,
+    // allowing unconditional writes of article IDs and colors to pRSI
+    LPVOID pEquipBypass = reinterpret_cast<LPVOID>(clientBase + 0x0051B1EE);
+    if (VirtualProtect(pEquipBypass, 2, PAGE_EXECUTE_READWRITE, &oldProt)) {
+        BYTE nop2[2] = { 0x90, 0x90 };
+        memcpy(pEquipBypass, nop2, 2);
+        VirtualProtect(pEquipBypass, 2, oldProt, &oldProt);
+        FlushInstructionCache(GetCurrentProcess(), pEquipBypass, 2);
+        Log("[mxohax] SUCCESS: Patched client.dll + 0x0051B1EE (NOP * 2) to bypass EquipArticle bailout!\n");
+    }
+
+    // Native chase camera update preserved without disruptive epilogue jumps
+
+
+    // Patch L6: 0x0051AFD4: 10 bytes NOPs (mov dword ptr [0x1099D1F4], 0 -> NOP * 10)
+    // Prevents GetRSIDatabase from wiping the RSIDatabase instance pointer back to NULL!
+    LPVOID pRsiDbWipePatch = reinterpret_cast<LPVOID>(clientBase + 0x0051AFD4);
+    if (VirtualProtect(pRsiDbWipePatch, 10, PAGE_EXECUTE_READWRITE, &oldProt)) {
+        BYTE nop10[10];
+        memset(nop10, 0x90, 10);
+        memcpy(pRsiDbWipePatch, nop10, 10);
+        VirtualProtect(pRsiDbWipePatch, 10, oldProt, &oldProt);
+        FlushInstructionCache(GetCurrentProcess(), pRsiDbWipePatch, 10);
+        Log("[mxohax] SUCCESS: Patched client.dll + 0x0051AFD4 (NOP * 10) to prevent RSIDatabase wipe!\n");
+    }
+
+    // Patch L7: 0x0052FD5C: 10 bytes NOPs (mov ecx, [esi+0x1DC] / cmp eax, [ecx] / je +0x36 -> NOP * 10)
+    // Prevents access violation on NULL [esi+0x1DC] and ensures unconditional mesh attachment in 0x1052FD50!
+    LPVOID pMeshAttachCheckPatch = reinterpret_cast<LPVOID>(clientBase + 0x0052FD5C);
+    if (VirtualProtect(pMeshAttachCheckPatch, 10, PAGE_EXECUTE_READWRITE, &oldProt)) {
+        BYTE nop10[10];
+        memset(nop10, 0x90, 10);
+        memcpy(pMeshAttachCheckPatch, nop10, 10);
+        VirtualProtect(pMeshAttachCheckPatch, 10, oldProt, &oldProt);
+        FlushInstructionCache(GetCurrentProcess(), pMeshAttachCheckPatch, 10);
+        Log("[mxohax] SUCCESS: Patched client.dll + 0x0052FD5C (NOP * 10) for safe unconditional mesh attachment!\n");
     }
 }
 
@@ -2368,10 +3128,7 @@ DWORD WINAPI WorkerThread(LPVOID lpParam) {
     HMODULE hClient = nullptr;
     for (int i = 0; i < 500 && !hClient; ++i) {
         hClient = GetModuleHandleA("client.dll");
-        if (hClient) {
-            ApplyClientPatches(hClient);
-            break;
-        }
+        if (hClient) break;
         Sleep(20);
     }
 
