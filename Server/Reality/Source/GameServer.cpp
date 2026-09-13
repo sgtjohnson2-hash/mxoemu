@@ -248,13 +248,8 @@ void GameServer::SimulationLoop()
 			uint32 aiDeltaMs = currentMs - m_lastSimMs;
 			m_lastSimMs = currentMs;
 				
-			// Persistent TaskScheduler: Dispatches into persistent worker pool (zero runtime thread allocations)
-			auto combatFuture = sTaskScheduler.Enqueue([]() { 
-				sCombatSys.Update(); 
-			});
-			auto aiFuture = sTaskScheduler.Enqueue([]() { 
-				sBotMgr.Update(); 
-			});
+			sCombatSys.Update(); 
+			sBotMgr.Update(); 
 
 			sFactionWarMgr.update(aiDeltaMs);
 			sAdaptiveMusicSystem.update(currentMs);
@@ -262,9 +257,6 @@ void GameServer::SimulationLoop()
 			sVehicleSys.Tick(currentMs);
 			sStatusEffectManager.Update(aiDeltaMs / 1000.0f);
 			sMissionSys.Update(aiDeltaMs);
-			
-			combatFuture.wait();
-			aiFuture.wait();
 
 			// Megacity Tactical & Emergent Simulation Engines Tick in 4 Parallel Batches
 			float dtSec = aiDeltaMs / 1000.0f;

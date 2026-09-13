@@ -113,16 +113,18 @@ NodeStatus ActionFindTarget::Tick(BotClient* bot)
 {
     if (!BotManager::getSingletonPtr()->IsAggroEnabled()) return NodeStatus::FAILURE;
 
-    PlayerObject* me = BotGetPlayer(bot->GetPlayerGoId());
+    PlayerObject* me = bot->getPlayer();
+    if (!me) me = BotGetPlayer(bot->GetPlayerGoId());
     if (!me) return NodeStatus::FAILURE;
     if (me->getFactionName() == "Civilian") return NodeStatus::FAILURE;
 
     std::vector<GameClient*> localClients = sSpatialGrid.GetClientsInRadius(me->getPosition().x, me->getPosition().z);
     for (GameClient* client : localClients)
     {
-        if (client->GetPlayerGoId() == bot->GetPlayerGoId()) continue;
+        if (client == bot || client->GetPlayerGoId() == bot->GetPlayerGoId()) continue;
         
-        PlayerObject* potentialTarget = BotGetPlayer(client->GetPlayerGoId());
+        PlayerObject* potentialTarget = client->getPlayer();
+        if (!potentialTarget) potentialTarget = BotGetPlayer(client->GetPlayerGoId());
         if (potentialTarget && !potentialTarget->isDead())
         {
             if (sStatusEffectManager.HasEffect(potentialTarget->getGoId(), EFFECT_FACTION_MASK)) continue; // Item 25: Simulacra Masking

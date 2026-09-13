@@ -55,6 +55,7 @@ uint32 ObjectMgr::constructPlayer( GameClient* requester, uint64 charUID, bool i
 
 	uint32 theNewObjectId = getNewObjectId();
 	newPlayerObj->initGoId(theNewObjectId);
+	requester->setPlayer(newPlayerObj);
 	
 	// Use custom deleter for shared_ptr to return memory to pool
 	auto customDeleter = [this](PlayerObject* p) {
@@ -78,6 +79,9 @@ void ObjectMgr::destroyObject( uint32 goId )
 	objectsMap::iterator it=m_objects.find(goId);
 	if (it!=m_objects.end())
 	{
+		if (it->second) {
+			it->second->getClient().setPlayer(nullptr);
+		}
 		it->second.reset();
 	}
 	if (it!=m_objects.end())

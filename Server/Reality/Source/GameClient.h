@@ -64,6 +64,8 @@ public:
 	uint32 GetWorldCharId() { return m_charWorldId; }
 	uint32 GetPlayerGoId() const { return m_playerGoId; }
 	void SetPlayerGoId(uint32 id) { m_playerGoId = id; }
+	class PlayerObject* getPlayer() const { return m_playerObject; }
+	void setPlayer(class PlayerObject* po) { m_playerObject = po; }
 public:
 	uint32 m_instanceId = 0; // Item 104: Instanced Mission Interiors
     std::atomic<uint64_t> m_spatialCellHash = 0xFFFFFFFFFFFFFFFF;
@@ -318,6 +320,7 @@ private:
 	uint32 m_lastServerMS = 0;
 
 	uint32 m_playerGoId = 0;
+	class PlayerObject* m_playerObject = nullptr;
 	class MarginSocket *m_marginConn = nullptr;
 	TwofishCryptEngine m_tfEngine;
 };

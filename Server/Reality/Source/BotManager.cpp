@@ -415,7 +415,7 @@ void BotManager::Update()
         else if (targetLOD == ExecutionLOD::APPROACH_AREA)
             tickRate = 500; // 2Hz for approach area
         else
-            tickRate = 2000; // 0.5Hz low-frequency for background area
+            tickRate = 0; // 0Hz (skip background area logic per ExecutionLOD specification)
 
         if (tickRate > 0 && (now - bot->GetLastLodTick() >= tickRate))
         {
