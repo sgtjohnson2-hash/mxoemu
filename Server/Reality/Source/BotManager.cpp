@@ -16,6 +16,7 @@
 #include "PlayerObject.h"
 #include "FactionWarManager.h"
 #include "MissionSystem.h"
+#include "Threading/TaskScheduler.h"
 #include <fstream>
 #include <memory>
 
@@ -352,8 +353,8 @@ void BotManager::Update()
         }
         else
         {
-            const double activeRadiusSq = 5000.0 * 5000.0;     // 50m
-            const double approachRadiusSq = 20000.0 * 20000.0; // 200m
+            const double activeRadiusSq = 10000.0 * 10000.0;   // 100m (Active Viewport)
+            const double approachRadiusSq = 25000.0 * 25000.0; // 250m (Approach Area)
 
             std::for_each(std::execution::par, botsSnapshot->begin(), botsSnapshot->end(), [&](const std::shared_ptr<BotClient>& bot)
             {
@@ -401,17 +402,20 @@ void BotManager::Update()
         }
     }
 
-    // Sequential bot update execution
-    for (size_t i = 0; i < botsSnapshot->size(); i++)
+    // Parallel bot update execution across persistent TaskScheduler workers
+    sTaskScheduler.ParallelFor(0, botsSnapshot->size(), [&](size_t i)
     {
         auto bot = (*botsSnapshot)[i];
+        if (!bot) return;
+
         ExecutionLOD targetLOD = bot->GetLOD();
         uint32 tickRate = 0;
         if (targetLOD == ExecutionLOD::ACTIVE_VIEWPORT)
-            tickRate = 250;
+            tickRate = 100; // 10Hz for active bots near players
         else if (targetLOD == ExecutionLOD::APPROACH_AREA)
-            tickRate = 1000;
-        // BACKGROUND_AREA: 0Hz (skip logic per ExecutionLOD specification)
+            tickRate = 500; // 2Hz for approach area
+        else
+            tickRate = 2000; // 0.5Hz low-frequency for background area
 
         if (tickRate > 0 && (now - bot->GetLastLodTick() >= tickRate))
         {
@@ -421,7 +425,7 @@ void BotManager::Update()
                 if (botDeltaSeconds > 3.5f) botDeltaSeconds = 3.5f;
             }
 
-            if (bot && bot->GetPlayerGoId() != 0)
+            if (bot->GetPlayerGoId() != 0)
             {
                 bot->SetLastLodTick(now);
                 try {
@@ -433,7 +437,7 @@ void BotManager::Update()
                 }
             }
         }
-    }
+    }, 32);
 }
 
 void BotManager::PopulateWorld()

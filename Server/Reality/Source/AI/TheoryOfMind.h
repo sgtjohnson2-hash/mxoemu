@@ -32,7 +32,7 @@ struct alignas(64) TheoryOfMindState {
 class TheoryOfMindSolver {
 public:
     static constexpr size_t MAX_TRACKED_TARGETS = 25;
-    static constexpr uint32_t INACTIVE_EVICTION_SECONDS = 300;
+    static constexpr uint32_t INACTIVE_EVICTION_SECONDS = 60;
 
 private:
     std::unordered_map<std::string, TheoryOfMindState> m_states;

@@ -25,6 +25,7 @@
 
 #include "Common.h"
 #include <future>
+#include "Threading/TaskScheduler.h"
 #include "GameServer.h"
 #include "GameClient.h"
 #include "MarginServer.h"
@@ -187,6 +188,9 @@ bool GameServer::Start()
 
 	m_serverStartMS = getMSTime();
 
+	// Initialize persistent worker pool (zero runtime allocations)
+	sTaskScheduler.Initialize();
+
 	// Mark server as "up"
 	{
 		sDatabase.WaitExecute(format("UPDATE `worlds` SET `status`='1' WHERE `name`='%1%' LIMIT 1")
@@ -215,6 +219,7 @@ void GameServer::Stop()
 		m_simulationThread.join();
 	}
 	
+	sTaskScheduler.Shutdown();
 	sAsyncDatabase.Shutdown(); // Flush remaining DB writes
 	
 	INFO_LOG("Game Server shutdown");
@@ -243,17 +248,11 @@ void GameServer::SimulationLoop()
 			uint32 aiDeltaMs = currentMs - m_lastSimMs;
 			m_lastSimMs = currentMs;
 				
-			// Item 53 & 59: Multi-Threaded Simulation Loop with Thread Affinity
-			auto combatFuture = std::async(std::launch::async, []() { 
-#if PLATFORM == PLATFORM_WIN32
-				SetThreadAffinityMask(GetCurrentThread(), 1 << 1); // Pin to Core 1
-#endif
+			// Persistent TaskScheduler: Dispatches into persistent worker pool (zero runtime thread allocations)
+			auto combatFuture = sTaskScheduler.Enqueue([]() { 
 				sCombatSys.Update(); 
 			});
-			auto aiFuture = std::async(std::launch::async, []() { 
-#if PLATFORM == PLATFORM_WIN32
-				SetThreadAffinityMask(GetCurrentThread(), 1 << 2); // Pin to Core 2
-#endif
+			auto aiFuture = sTaskScheduler.Enqueue([]() { 
 				sBotMgr.Update(); 
 			});
 
@@ -267,43 +266,64 @@ void GameServer::SimulationLoop()
 			combatFuture.wait();
 			aiFuture.wait();
 
-			// Megacity Tactical & Emergent Simulation Engines Tick
+			// Megacity Tactical & Emergent Simulation Engines Tick in 4 Parallel Batches
 			float dtSec = aiDeltaMs / 1000.0f;
-			sFrankCastleMgr.Update(aiDeltaMs);
-			sUnderworldMgr.Update(aiDeltaMs);
-			sCityLifeMgr.Update(aiDeltaMs);
-			sEmergentPoliceMgr.Update(aiDeltaMs);
-			sMafiaMgr.Update(aiDeltaMs);
-			sExileMgr.Update(aiDeltaMs);
-			sNeuralSwarmMgr.Update(dtSec);
-			sStructuralVoxelEngine.Update(dtSec);
-			sSharedMemoryShardFabric.Update(dtSec);
-			sNonEuclideanPortalEngine.Update(dtSec);
-			sSourceTelekinesisEngine.Update(dtSec);
-			sGlobalSovereignMesh.Update(dtSec);
-			sGaussianSplatEngine.Update(dtSec);
-			sPhysarumLogisticsEngine.Update(dtSec);
-			sBiometricResonanceEngine.Update(dtSec);
-			sWebAssemblyGatewayEngine.Update(dtSec);
-			sWorldRealizationEngine.Update(dtSec);
-			sCastleAgentCombatEngine.Update(dtSec);
-			sCastlePvPKarmaEngine.Update(dtSec);
-			sCastleUnderworldAssaultEngine.Update(dtSec);
-			sAirspaceAndConvoyEngine.Update(dtSec);
-			sNeuroevolutionaryCombatEngine.Update(dtSec);
-			sMachineCitySystem.Update(dtSec);
-			sQuantumSuperpositionEngine.Update(dtSec);
-			sGenerationalLineageEngine.Update(dtSec);
-			sSubAtomicMatrixGrid.Update(dtSec);
-			sCosmicVerticalityEngine.Update(dtSec);
-			sCollectiveConsciousnessEngine.Update(dtSec);
-			sMegacityBourseEngine.Update(dtSec);
-			sTemporalAnomalyEngine.Update(dtSec);
-			sParallelMatrixEngine.Update(dtSec);
-			sQuantumEntangledMeshEngine.Update(dtSec);
-			sSourceVoxelSynthesisEngine.Update(dtSec);
-			sDeepCoreMeltdownEngine.Update(dtSec);
-			sArchitectSandboxEngine.Update(dtSec);
+			
+			// Batch 1: Underworld, City Life & Syndicate Ecology
+			auto b1Future = sTaskScheduler.Enqueue([aiDeltaMs]() {
+				sCityLifeMgr.Update(aiDeltaMs);
+				sMafiaMgr.Update(aiDeltaMs);
+				sExileMgr.Update(aiDeltaMs);
+				sUnderworldMgr.Update(aiDeltaMs);
+			});
+
+			// Batch 2: Law Enforcement, Tactical Response & Combat Units
+			auto b2Future = sTaskScheduler.Enqueue([aiDeltaMs, dtSec]() {
+				sEmergentPoliceMgr.Update(aiDeltaMs);
+				sFrankCastleMgr.Update(aiDeltaMs);
+				sNeuralSwarmMgr.Update(dtSec);
+				sCastleAgentCombatEngine.Update(dtSec);
+				sCastlePvPKarmaEngine.Update(dtSec);
+				sCastleUnderworldAssaultEngine.Update(dtSec);
+			});
+
+			// Batch 3: Airspace, Robotics & Physics Simulation
+			auto b3Future = sTaskScheduler.Enqueue([dtSec]() {
+				sAirspaceAndConvoyEngine.Update(dtSec);
+				sNeuroevolutionaryCombatEngine.Update(dtSec);
+				sMachineCitySystem.Update(dtSec);
+				sStructuralVoxelEngine.Update(dtSec);
+				sSharedMemoryShardFabric.Update(dtSec);
+				sNonEuclideanPortalEngine.Update(dtSec);
+				sSourceTelekinesisEngine.Update(dtSec);
+				sGlobalSovereignMesh.Update(dtSec);
+			});
+
+			// Batch 4: Quantum, Lattice & World Realization Engines
+			auto b4Future = sTaskScheduler.Enqueue([dtSec]() {
+				sGaussianSplatEngine.Update(dtSec);
+				sPhysarumLogisticsEngine.Update(dtSec);
+				sBiometricResonanceEngine.Update(dtSec);
+				sWebAssemblyGatewayEngine.Update(dtSec);
+				sWorldRealizationEngine.Update(dtSec);
+				sQuantumSuperpositionEngine.Update(dtSec);
+				sGenerationalLineageEngine.Update(dtSec);
+				sSubAtomicMatrixGrid.Update(dtSec);
+				sCosmicVerticalityEngine.Update(dtSec);
+				sCollectiveConsciousnessEngine.Update(dtSec);
+				sMegacityBourseEngine.Update(dtSec);
+				sTemporalAnomalyEngine.Update(dtSec);
+				sParallelMatrixEngine.Update(dtSec);
+				sQuantumEntangledMeshEngine.Update(dtSec);
+				sSourceVoxelSynthesisEngine.Update(dtSec);
+				sDeepCoreMeltdownEngine.Update(dtSec);
+				sArchitectSandboxEngine.Update(dtSec);
+			});
+
+			b1Future.wait();
+			b2Future.wait();
+			b3Future.wait();
+			b4Future.wait();
 
 			// The Anomaly Event (Phase 50)
 			static uint32 lastAnomalyCheckMs = 0;
