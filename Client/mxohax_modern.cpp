@@ -894,12 +894,12 @@ static HRESULT STDMETHODCALLTYPE DetourPresent(IDirect3DDevice9* pDevice, const 
     static bool s_capturedStreamBmp = false;
     if (s_inStreamingState4 && pDevice) {
         s_streamingPresents++;
-        if (s_state4Ticks >= 25 && !s_capturedLoadBmp) {
+        if (s_state4Ticks >= 15 && !s_capturedLoadBmp) {
             s_capturedLoadBmp = true;
             CaptureD3D9Backbuffer(pDevice, "E:\\Games\\The Matrix Online\\loading_screen_render.bmp");
             Log("[mxohax] Phase 1: Captured 2D Loading Screen to loading_screen_render.bmp\n");
         }
-        if (s_state4Ticks >= 110 && !s_capturedStreamBmp) {
+        if (s_state4Ticks >= 45 && !s_capturedStreamBmp) {
             s_capturedStreamBmp = true;
             CaptureD3D9Backbuffer(pDevice, "E:\\Games\\The Matrix Online\\matrix_streaming_render.bmp");
             Log("[mxohax] Phase 2: Captured 3D Matrix Code Stream to matrix_streaming_render.bmp\n");
@@ -961,12 +961,12 @@ static HRESULT STDMETHODCALLTYPE DetourPresentEx(IDirect3DDevice9Ex* pDevice, co
     static bool s_capturedStreamBmpEx = false;
     if (s_inStreamingState4 && pDevice) {
         s_streamingPresentsEx++;
-        if (s_state4Ticks >= 25 && !s_capturedLoadBmpEx) {
+        if (s_state4Ticks >= 15 && !s_capturedLoadBmpEx) {
             s_capturedLoadBmpEx = true;
             CaptureD3D9Backbuffer(pDevice, "E:\\Games\\The Matrix Online\\loading_screen_render.bmp");
             Log("[mxohax] Phase 1: Captured 2D Loading Screen to loading_screen_render.bmp (Ex)\n");
         }
-        if (s_state4Ticks >= 110 && !s_capturedStreamBmpEx) {
+        if (s_state4Ticks >= 45 && !s_capturedStreamBmpEx) {
             s_capturedStreamBmpEx = true;
             CaptureD3D9Backbuffer(pDevice, "E:\\Games\\The Matrix Online\\matrix_streaming_render.bmp");
             Log("[mxohax] Phase 2: Captured 3D Matrix Code Stream to matrix_streaming_render.bmp (Ex)\n");
@@ -1462,24 +1462,24 @@ static void ApplyOperativeAppearance(uintptr_t clientBase, void* pPlayer) {
 // ============================================================================
 // Locomotion, Physics, Camera Orbiting & Combat Systems
 // ============================================================================
-static const double SPAWN_GROUND_ELEVATION = 637.5; // Calibrated ground elevation flush with Slums pavement tiles
+static const double SPAWN_GROUND_ELEVATION = 625.0; // Calibrated ground elevation flush with Slums pavement tiles
 
 static double GetCalibratedGroundElevation(double x, double z) {
     // 1. Elevated platform / overpass walkway (where operative spawns at 16710, 3230)
     // Runs from X: 16560 to 16830, Z: 2850 to 3720
     if (x >= 16560.0 && x <= 16830.0 && z >= 2850.0 && z <= 3720.0) {
-        return 637.5; // True pavement tile surface (soles flush)
+        return 625.0; // True pavement tile surface (soles flush)
     }
 
     // 2. Ledge / curb concrete barrier bordering the platform
     if (x > 16830.0 && x <= 16845.0 && z >= 2850.0 && z <= 3720.0) {
-        return 645.0; // Raised curb barrier
+        return 637.5; // Raised curb barrier
     }
 
     // 3. North ramp / stairs transition leading down to church / street level
     if (z > 3720.0 && z <= 3850.0 && x >= 16650.0 && x <= 16840.0) {
         double t = (z - 3720.0) / 130.0;
-        return 637.5 - t * (637.5 - 572.0); // Smooth ramp transition down to 572.0
+        return 625.0 - t * (625.0 - 572.0); // Smooth ramp transition down to 572.0
     }
 
     // 4. Church courtyard and street sidewalk / roadway level
@@ -1513,8 +1513,166 @@ static double g_targetZ = 3237.01;
 // Combat tactics stance
 enum StanceType { STANCE_FREE = 0, STANCE_POWER = 1, STANCE_GRAB = 2, STANCE_SPEED = 3, STANCE_WITHDRAW = 4 };
 static StanceType g_currentStance = STANCE_FREE;
+static bool       g_bMouseDownOnUI = false;
+static int        g_pressedHudButton = 0;
+static int        g_quickbarPage = 1;
+
+static void __fastcall Safe_Interlock_Button_Withdraw(void* pThis, void* /*edx*/);
+static void __fastcall Safe_Interlock_Grab_Button(void* pThis, void* /*edx*/);
+static void __fastcall Safe_Interlock_Power_Button(void* pThis, void* /*edx*/);
+static void __fastcall Safe_Interlock_Speed_Button(void* pThis, void* /*edx*/);
+
+#pragma pack(push, 1)
+struct LithtechInputEvent {
+    DWORD unk0;      // 0x00
+    DWORD unk4;      // 0x04
+    DWORD eventCode; // 0x08: 'Move' (0x65766F4D), 'MLDn' (0x6E444C4D), 'MLUp' (0x70554C4D), 'MRDn' (0x6E44524D), 'MRUp' (0x7055524D)
+    DWORD unkC;      // 0x0C
+    DWORD unk10;     // 0x10
+    int   mouseX;    // 0x14
+    int   mouseY;    // 0x18
+    DWORD unk1C;     // 0x1C
+    DWORD unk20;     // 0x20
+};
+#pragma pack(pop)
 
 static WNDPROC OriginalWndProc = nullptr;
+
+static void DispatchInputEventToClient(uintptr_t clientBase, DWORD eventCode, int x, int y) {
+    if (!clientBase) return;
+    void* pWidgetMgr = *reinterpret_cast<void**>(clientBase + 0x00897F98);
+    if (!pWidgetMgr || IsBadReadPtr(pWidgetMgr, 0x100)) return;
+
+    // 1. Update cursor position in CLTWidgetManager
+    typedef void (__thiscall *SetCursorPos_t)(void* pThis, int x, int y);
+    SetCursorPos_t pSetCursorPos = reinterpret_cast<SetCursorPos_t>(clientBase + 0x00377030);
+    __try {
+        pSetCursorPos(pWidgetMgr, x, y);
+    } __except (EXCEPTION_EXECUTE_HANDLER) {}
+
+    // 2. Prepare event
+    LithtechInputEvent evt;
+    memset(&evt, 0, sizeof(evt));
+    evt.eventCode = eventCode;
+    evt.mouseX = x;
+    evt.mouseY = y;
+
+    // 3. Dispatch to CUI::DispatchInput
+    typedef void (__cdecl *DispatchInput_t)(LithtechInputEvent* pEvent);
+    DispatchInput_t pDispatch = reinterpret_cast<DispatchInput_t>(clientBase + 0x0001DED0);
+    __try {
+        pDispatch(&evt);
+    } __except (EXCEPTION_EXECUTE_HANDLER) {}
+}
+
+static void* GetHoveredUIWidget(uintptr_t clientBase) {
+    if (!clientBase) return nullptr;
+    void* pWidgetMgr = *reinterpret_cast<void**>(clientBase + 0x00897F98);
+    if (!pWidgetMgr || IsBadReadPtr(pWidgetMgr, 0x100)) return nullptr;
+    typedef void* (__thiscall *GetHoveredWidget_t)(void* pThis);
+    GetHoveredWidget_t pGetHovered = reinterpret_cast<GetHoveredWidget_t>(clientBase + 0x00378270);
+    __try {
+        return pGetHovered(pWidgetMgr);
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return nullptr;
+    }
+}
+
+static void SetWidgetVisualState(void* pWidget, int state) {
+    if (!pWidget || IsBadReadPtr(pWidget, sizeof(void*))) return;
+    void** vtbl = *reinterpret_cast<void***>(pWidget);
+    if (!vtbl || IsBadReadPtr(vtbl, 0x100)) return;
+    typedef void (__thiscall *SetState_t)(void* pThis, int state);
+    SetState_t pSetState = reinterpret_cast<SetState_t>(vtbl[0x94 / 4]);
+    __try {
+        pSetState(pWidget, state);
+    } __except (EXCEPTION_EXECUTE_HANDLER) {}
+}
+
+enum HudButtonId {
+    HUD_BTN_NONE = 0,
+    HUD_BTN_QB_PAGE,
+    HUD_BTN_QB_1,
+    HUD_BTN_QB_2,
+    HUD_BTN_QB_3,
+    HUD_BTN_QB_4,
+    HUD_BTN_QB_5,
+    HUD_BTN_QB_6,
+    HUD_BTN_QB_7,
+    HUD_BTN_QB_8,
+    HUD_BTN_QB_9,
+    HUD_BTN_QB_10,
+    HUD_BTN_TACTIC_FREE,
+    HUD_BTN_TACTIC_POWER,
+    HUD_BTN_TACTIC_GRAB,
+    HUD_BTN_TACTIC_SPEED,
+    HUD_BTN_TACTIC_WITHDRAW,
+    HUD_BTN_CELL_PHONE,
+    HUD_BTN_CHAR_STATUS,
+    HUD_BTN_COMPASS,
+    HUD_BTN_OPTIONS,
+    HUD_BTN_LATENCY,
+    HUD_BTN_TARGET_VITALS
+};
+
+static HudButtonId HitTestHudButton(int x, int y) {
+    // 1. Quickbar Page Switcher: [680, 0] to [723, 48]
+    if (x >= 680 && x <= 723 && y >= 0 && y <= 48) {
+        return HUD_BTN_QB_PAGE;
+    }
+
+    // 2. Quickbar Slots 1-10: [724, 0] to [1100, 48]
+    if (y >= 0 && y <= 48) {
+        if (x >= 724 && x <= 759)   return HUD_BTN_QB_1;
+        if (x >= 760 && x <= 795)   return HUD_BTN_QB_2;
+        if (x >= 796 && x <= 832)   return HUD_BTN_QB_3;
+        if (x >= 833 && x <= 868)   return HUD_BTN_QB_4;
+        if (x >= 869 && x <= 905)   return HUD_BTN_QB_5;
+        if (x >= 906 && x <= 942)   return HUD_BTN_QB_6;
+        if (x >= 943 && x <= 978)   return HUD_BTN_QB_7;
+        if (x >= 979 && x <= 1015)  return HUD_BTN_QB_8;
+        if (x >= 1016 && x <= 1051) return HUD_BTN_QB_9;
+        if (x >= 1052 && x <= 1100) return HUD_BTN_QB_10;
+    }
+
+    // 3. Combat Tactics buttons: [940, 48] to [1190, 105]
+    if (y >= 48 && y <= 105) {
+        if (x >= 940 && x <= 986)   return HUD_BTN_TACTIC_FREE;
+        if (x >= 987 && x <= 1023)  return HUD_BTN_TACTIC_POWER;
+        if (x >= 1024 && x <= 1059) return HUD_BTN_TACTIC_GRAB;
+        if (x >= 1060 && x <= 1095) return HUD_BTN_TACTIC_SPEED;
+        if (x >= 1096 && x <= 1190) return HUD_BTN_TACTIC_WITHDRAW;
+    }
+
+    // 4. Compass and Docked buttons: Y=[940, 1080]
+    // Character Status button: [820, 1010] to [890, 1080]
+    if (x >= 820 && x <= 890 && y >= 1010 && y <= 1080) {
+        return HUD_BTN_CHAR_STATUS;
+    }
+
+    // Compass dial: [890, 940] to [1030, 1080]
+    if (x >= 890 && x <= 1030 && y >= 940 && y <= 1080) {
+        return HUD_BTN_COMPASS;
+    }
+
+    // Cell Phone button: [1030, 1010] to [1100, 1080]
+    if (x >= 1030 && x <= 1100 && y >= 1010 && y <= 1080) {
+        return HUD_BTN_CELL_PHONE;
+    }
+
+    // 5. Bottom Right buttons: [1800, 1010] to [1920, 1080]
+    if (y >= 1010 && y <= 1080) {
+        if (x >= 1800 && x <= 1870) return HUD_BTN_LATENCY;
+        if (x >= 1871 && x <= 1920) return HUD_BTN_OPTIONS;
+    }
+
+    // 6. Top Right Target / Vitals: [1680, 0] to [1920, 90]
+    if (x >= 1680 && x <= 1920 && y >= 0 && y <= 90) {
+        return HUD_BTN_TARGET_VITALS;
+    }
+
+    return HUD_BTN_NONE;
+}
 
 static void TriggerPhoneCall(uintptr_t clientBase) {
     Log("[mxohax] CELL PHONE ACTIVATED: Initiating safe contact with Zion Operator...\n");
@@ -1563,6 +1721,17 @@ static void SetTacticsStance(uintptr_t clientBase, StanceType newStance) {
         __try {
             pSetVisible(pUI, 0x1B, 1);
         } __except (EXCEPTION_EXECUTE_HANDLER) {}
+
+        // Visually update the corresponding stance button on CViewInterlock (Control 0x0E)
+        void* pInterlock = *reinterpret_cast<void**>(reinterpret_cast<uintptr_t>(pUI) + 0x28 + 0x0E * 4);
+        if (pInterlock && !IsBadReadPtr(pInterlock, 0x100)) {
+            void* pBtnSpeed = *reinterpret_cast<void**>(reinterpret_cast<uintptr_t>(pInterlock) + 0x70);
+            void* pBtnPower = *reinterpret_cast<void**>(reinterpret_cast<uintptr_t>(pInterlock) + 0x74);
+            void* pBtnGrab  = *reinterpret_cast<void**>(reinterpret_cast<uintptr_t>(pInterlock) + 0x80);
+            if (pBtnSpeed) SetWidgetVisualState(pBtnSpeed, (newStance == STANCE_SPEED) ? 4 : 0);
+            if (pBtnPower) SetWidgetVisualState(pBtnPower, (newStance == STANCE_POWER) ? 4 : 0);
+            if (pBtnGrab)  SetWidgetVisualState(pBtnGrab,  (newStance == STANCE_GRAB)  ? 4 : 0);
+        }
     }
 }
 
@@ -1588,25 +1757,140 @@ static void ExecuteQuickbarAbility(uintptr_t clientBase, int slotIndex) {
         slotIndex, id, name, g_hasTarget ? g_targetName : "Self");
 }
 
+static void ExecuteHudButtonAction(uintptr_t clientBase, HudButtonId btnId, int mx, int my) {
+    if (!clientBase) return;
+    void* pUI = *reinterpret_cast<void**>(clientBase + 0x00898C54);
+
+    typedef void (__thiscall *SetControlVisible_t)(void* pUI, DWORD ctrlId, BOOL bVisible);
+    SetControlVisible_t pSetVisible = reinterpret_cast<SetControlVisible_t>(clientBase + 0x0001DB80);
+
+    switch (btnId) {
+        case HUD_BTN_QB_PAGE: {
+            g_quickbarPage = (g_quickbarPage == 1) ? 2 : 1;
+            Log("[mxohax] UI BUTTON CLICK: Quickbar Page Switched to Page %d (at %d, %d)\n", g_quickbarPage, mx, my);
+            break;
+        }
+        case HUD_BTN_QB_1:
+        case HUD_BTN_QB_2:
+        case HUD_BTN_QB_3:
+        case HUD_BTN_QB_4:
+        case HUD_BTN_QB_5:
+        case HUD_BTN_QB_6:
+        case HUD_BTN_QB_7:
+        case HUD_BTN_QB_8:
+        case HUD_BTN_QB_9:
+        case HUD_BTN_QB_10: {
+            int slot = (int)(btnId - HUD_BTN_QB_1) + 1;
+            Log("[mxohax] UI BUTTON CLICK: Quickbar Slot %d clicked at (%d, %d)\n", slot, mx, my);
+            ExecuteQuickbarAbility(clientBase, slot);
+            break;
+        }
+        case HUD_BTN_TACTIC_FREE: {
+            Log("[mxohax] UI BUTTON CLICK: Combat Tactics [Free] clicked at (%d, %d)\n", mx, my);
+            SetTacticsStance(clientBase, STANCE_FREE);
+            break;
+        }
+        case HUD_BTN_TACTIC_POWER: {
+            Log("[mxohax] UI BUTTON CLICK: Combat Tactics [Power] clicked at (%d, %d)\n", mx, my);
+            SetTacticsStance(clientBase, STANCE_POWER);
+            if (pUI && !IsBadReadPtr(pUI, 0x200)) {
+                void* pInterlock = *reinterpret_cast<void**>(reinterpret_cast<uintptr_t>(pUI) + 0x28 + 0x0E * 4);
+                if (pInterlock) Safe_Interlock_Power_Button(pInterlock, nullptr);
+            }
+            break;
+        }
+        case HUD_BTN_TACTIC_GRAB: {
+            Log("[mxohax] UI BUTTON CLICK: Combat Tactics [Grab] clicked at (%d, %d)\n", mx, my);
+            SetTacticsStance(clientBase, STANCE_GRAB);
+            if (pUI && !IsBadReadPtr(pUI, 0x200)) {
+                void* pInterlock = *reinterpret_cast<void**>(reinterpret_cast<uintptr_t>(pUI) + 0x28 + 0x0E * 4);
+                if (pInterlock) Safe_Interlock_Grab_Button(pInterlock, nullptr);
+            }
+            break;
+        }
+        case HUD_BTN_TACTIC_SPEED: {
+            Log("[mxohax] UI BUTTON CLICK: Combat Tactics [Speed] clicked at (%d, %d)\n", mx, my);
+            SetTacticsStance(clientBase, STANCE_SPEED);
+            if (pUI && !IsBadReadPtr(pUI, 0x200)) {
+                void* pInterlock = *reinterpret_cast<void**>(reinterpret_cast<uintptr_t>(pUI) + 0x28 + 0x0E * 4);
+                if (pInterlock) Safe_Interlock_Speed_Button(pInterlock, nullptr);
+            }
+            break;
+        }
+        case HUD_BTN_TACTIC_WITHDRAW: {
+            Log("[mxohax] UI BUTTON CLICK: Combat Tactics [Withdraw] clicked at (%d, %d)\n", mx, my);
+            SetTacticsStance(clientBase, STANCE_WITHDRAW);
+            if (pUI && !IsBadReadPtr(pUI, 0x200)) {
+                void* pInterlock = *reinterpret_cast<void**>(reinterpret_cast<uintptr_t>(pUI) + 0x28 + 0x0E * 4);
+                if (pInterlock) Safe_Interlock_Button_Withdraw(pInterlock, nullptr);
+            }
+            break;
+        }
+        case HUD_BTN_CELL_PHONE: {
+            Log("[mxohax] UI BUTTON CLICK: Cell Phone button clicked at (%d, %d) -> Calling Operator!\n", mx, my);
+            TriggerPhoneCall(clientBase);
+            break;
+        }
+        case HUD_BTN_CHAR_STATUS: {
+            Log("[mxohax] UI BUTTON CLICK: Character Status button clicked at (%d, %d)\n", mx, my);
+            if (pUI && !IsBadReadPtr(pUI, 0x100)) {
+                __try { pSetVisible(pUI, 0x42, 1); } __except (EXCEPTION_EXECUTE_HANDLER) {}
+            }
+            break;
+        }
+        case HUD_BTN_COMPASS: {
+            Log("[mxohax] UI BUTTON CLICK: Compass dial clicked at (%d, %d) -> Resetting camera yaw to player facing\n", mx, my);
+            g_camYaw = g_playerYaw;
+            break;
+        }
+        case HUD_BTN_OPTIONS: {
+            Log("[mxohax] UI BUTTON CLICK: Options/Checklist button clicked at (%d, %d)\n", mx, my);
+            if (pUI && !IsBadReadPtr(pUI, 0x100)) {
+                __try { pSetVisible(pUI, 0x47, 1); } __except (EXCEPTION_EXECUTE_HANDLER) {}
+            }
+            break;
+        }
+        case HUD_BTN_LATENCY: {
+            Log("[mxohax] UI BUTTON CLICK: Network Latency meter clicked at (%d, %d) (Ping: 14ms, State: In-World)\n", mx, my);
+            break;
+        }
+        case HUD_BTN_TARGET_VITALS: {
+            Log("[mxohax] UI BUTTON CLICK: Operative Vitals/Portrait clicked at (%d, %d) -> Targeting self/nearest\n", mx, my);
+            SetTargetOperative(clientBase, "S1acker (Self)", 359, g_playerX, g_playerY, g_playerZ);
+            break;
+        }
+        default:
+            break;
+    }
+}
+
 static LRESULT CALLBACK SubclassWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam) {
+    HMODULE hClient = GetModuleHandleA("client.dll");
+    uintptr_t clientBase = (uintptr_t)hClient;
+
+    RECT clientRc;
+    GetClientRect(hWnd, &clientRc);
+    int winW = clientRc.right - clientRc.left;
+    int winH = clientRc.bottom - clientRc.top;
+    if (winW <= 0) winW = 1920;
+    if (winH <= 0) winH = 1080;
+
     switch (uMsg) {
-        case WM_RBUTTONDOWN:
-        case WM_LBUTTONDOWN:
-            g_bRightMouseDown = (uMsg == WM_RBUTTONDOWN || (wParam & MK_RBUTTON));
-            g_bLeftMouseDown = (uMsg == WM_LBUTTONDOWN || (wParam & MK_LBUTTON));
-            g_lastMouseX = (short)LOWORD(lParam);
-            g_lastMouseY = (short)HIWORD(lParam);
-            break;
-        case WM_RBUTTONUP:
-            g_bRightMouseDown = false;
-            break;
-        case WM_LBUTTONUP:
-            g_bLeftMouseDown = false;
-            break;
         case WM_MOUSEMOVE: {
             short mx = (short)LOWORD(lParam);
             short my = (short)HIWORD(lParam);
-            if ((wParam & MK_RBUTTON) || (wParam & MK_LBUTTON)) {
+            int normX = (int)((double)mx * 1920.0 / (double)winW);
+            int normY = (int)((double)my * 1080.0 / (double)winH);
+
+            // Feed mouse move into native CLTWidgetManager and CUI
+            if (clientBase) {
+                DispatchInputEventToClient(clientBase, 0x65766F4D /* 'Move' */, normX, normY);
+            }
+
+            // Camera orbiting:
+            // Right mouse drag ALWAYS orbits camera.
+            // Left mouse drag ONLY orbits camera if the click started in 3D world space (NOT on UI).
+            if ((wParam & MK_RBUTTON) || ((wParam & MK_LBUTTON) && !g_bMouseDownOnUI)) {
                 if (g_lastMouseX >= 0 && g_lastMouseY >= 0) {
                     int dx = mx - g_lastMouseX;
                     int dy = my - g_lastMouseY;
@@ -1621,6 +1905,102 @@ static LRESULT CALLBACK SubclassWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPA
             g_lastMouseY = my;
             break;
         }
+        case WM_LBUTTONDOWN: {
+            short mx = (short)LOWORD(lParam);
+            short my = (short)HIWORD(lParam);
+            int normX = (int)((double)mx * 1920.0 / (double)winW);
+            int normY = (int)((double)my * 1080.0 / (double)winH);
+
+            g_bLeftMouseDown = true;
+            g_lastMouseX = mx;
+            g_lastMouseY = my;
+            g_bHumanInputActive = true;
+
+            // 1. Dispatch 'MLDn' event into native CLTWidgetManager and CUI
+            if (clientBase) {
+                DispatchInputEventToClient(clientBase, 0x6E444C4D /* 'MLDn' */, normX, normY);
+            }
+
+            // 2. Check if hovering over native UI widget or HUD button region
+            void* pHovered = clientBase ? GetHoveredUIWidget(clientBase) : nullptr;
+            HudButtonId hitBtn = HitTestHudButton(normX, normY);
+
+            if (pHovered != nullptr || hitBtn != HUD_BTN_NONE) {
+                g_bMouseDownOnUI = true;
+                g_pressedHudButton = (int)hitBtn;
+
+                // Set visual pressed state on hovered widget
+                if (pHovered) {
+                    SetWidgetVisualState(pHovered, 4); // State 4 = PRESSED
+                }
+                Log("[mxohax] MOUSE LBUTTONDOWN ON UI: at (%d, %d) [norm %d, %d], widget=0x%p, hudBtn=%d\n",
+                    mx, my, normX, normY, pHovered, (int)hitBtn);
+
+                // Execute immediate response on down for maximum responsiveness
+                if (hitBtn != HUD_BTN_NONE) {
+                    ExecuteHudButtonAction(clientBase, hitBtn, normX, normY);
+                }
+                return 0; // Handled! Do not drag 3D camera
+            } else {
+                g_bMouseDownOnUI = false;
+                g_pressedHudButton = (int)HUD_BTN_NONE;
+            }
+            break;
+        }
+        case WM_LBUTTONUP: {
+            short mx = (short)LOWORD(lParam);
+            short my = (short)HIWORD(lParam);
+            int normX = (int)((double)mx * 1920.0 / (double)winW);
+            int normY = (int)((double)my * 1080.0 / (double)winH);
+
+            g_bLeftMouseDown = false;
+            g_bHumanInputActive = true;
+
+            // 1. Dispatch 'MLUp' event into native CLTWidgetManager and CUI
+            if (clientBase) {
+                DispatchInputEventToClient(clientBase, 0x70554C4D /* 'MLUp' */, normX, normY);
+            }
+
+            // 2. If mouse down occurred on UI, handle button release and action execution
+            if (g_bMouseDownOnUI) {
+                HudButtonId releasedBtn = HitTestHudButton(normX, normY);
+                void* pHovered = clientBase ? GetHoveredUIWidget(clientBase) : nullptr;
+
+                // Reset visual state
+                if (pHovered) {
+                    SetWidgetVisualState(pHovered, 0); // State 0 = NORMAL / UNPRESSED
+                }
+
+                // If released over same button or over any valid HUD button, execute action!
+                HudButtonId targetBtn = (releasedBtn != HUD_BTN_NONE) ? releasedBtn : (HudButtonId)g_pressedHudButton;
+                if (targetBtn != HUD_BTN_NONE && targetBtn != (HudButtonId)g_pressedHudButton) {
+                    ExecuteHudButtonAction(clientBase, targetBtn, normX, normY);
+                }
+
+                g_bMouseDownOnUI = false;
+                g_pressedHudButton = (int)HUD_BTN_NONE;
+                return 0; // Handled
+            }
+            break;
+        }
+        case WM_RBUTTONDOWN: {
+            g_bRightMouseDown = true;
+            g_lastMouseX = (short)LOWORD(lParam);
+            g_lastMouseY = (short)HIWORD(lParam);
+            if (clientBase) {
+                DispatchInputEventToClient(clientBase, 0x6E44524D /* 'MRDn' */, g_lastMouseX, g_lastMouseY);
+            }
+            break;
+        }
+        case WM_RBUTTONUP: {
+            g_bRightMouseDown = false;
+            short mx = (short)LOWORD(lParam);
+            short my = (short)HIWORD(lParam);
+            if (clientBase) {
+                DispatchInputEventToClient(clientBase, 0x7055524D /* 'MRUp' */, mx, my);
+            }
+            break;
+        }
         case WM_MOUSEWHEEL: {
             short delta = GET_WHEEL_DELTA_WPARAM(wParam);
             g_camDist -= (delta / 120.0f) * 20.0f;
@@ -1631,8 +2011,6 @@ static LRESULT CALLBACK SubclassWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPA
         }
         case WM_KEYDOWN: {
             g_bHumanInputActive = true;
-            HMODULE hClient = GetModuleHandleA("client.dll");
-            uintptr_t clientBase = (uintptr_t)hClient;
             if (wParam == 'P') {
                 TriggerPhoneCall(clientBase);
             } else if (wParam == VK_TAB) {
@@ -1643,6 +2021,8 @@ static LRESULT CALLBACK SubclassWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPA
                 ExecuteQuickbarAbility(clientBase, (int)(wParam - '0'));
             } else if (wParam == '0') {
                 ExecuteQuickbarAbility(clientBase, 10);
+            } else if (wParam == VK_ESCAPE) {
+                ExecuteHudButtonAction(clientBase, HUD_BTN_OPTIONS, 0, 0);
             }
             break;
         }
@@ -1715,9 +2095,9 @@ static void UpdatePlayerPositionAndPhysics(uintptr_t clientBase, void* curPlayer
         *reinterpret_cast<double*>(reinterpret_cast<uintptr_t>(pActor) + 0x538) = g_playerZ;
 
         // Double precision velocities on CActor
-        *reinterpret_cast<double*>(reinterpret_cast<uintptr_t>(pActor) + 0x510) = actVelX;
+        *reinterpret_cast<double*>(reinterpret_cast<uintptr_t>(pActor) + 0x510) = isMoving ? actVelX : 0.0;
         *reinterpret_cast<double*>(reinterpret_cast<uintptr_t>(pActor) + 0x518) = g_isJumping ? g_velY : 0.0;
-        *reinterpret_cast<double*>(reinterpret_cast<uintptr_t>(pActor) + 0x520) = actVelZ;
+        *reinterpret_cast<double*>(reinterpret_cast<uintptr_t>(pActor) + 0x520) = isMoving ? actVelZ : 0.0;
 
         // Locomotion stopped/idle flag (+0x4EE): 1 = stopped/idle, 0 = moving
         *reinterpret_cast<BYTE*>(reinterpret_cast<uintptr_t>(pActor) + 0x4EE) = (!isMoving && !g_isJumping) ? 1 : 0;
@@ -1728,8 +2108,11 @@ static void UpdatePlayerPositionAndPhysics(uintptr_t clientBase, void* curPlayer
         }
 
         static bool s_wasMoving = false;
-        bool shouldAddSample = isMoving || g_isJumping || s_wasMoving;
+        static int s_idleSampleTicks = 0;
+        bool stateChanged = (isMoving != s_wasMoving);
         s_wasMoving = isMoving;
+
+        bool shouldAddSample = isMoving || g_isJumping || stateChanged || (++s_idleSampleTicks % 30 == 0);
 
         if (shouldAddSample) {
             BYTE sample[128] = {0};
@@ -1822,6 +2205,8 @@ static void UpdateCamera(uintptr_t clientBase, void* pCam) {
         }
     }
 }
+
+static int s_tickCount = 0;
 
 static void EnsureInWorldRendering(uintptr_t clientBase, void* pWorldMgr, DWORD pShell, bool promoteToState3 = true) {
     if (!pWorldMgr) return;
@@ -2201,6 +2586,12 @@ static void EnsureInWorldRendering(uintptr_t clientBase, void* pWorldMgr, DWORD 
     Log("[mxohax] *** PROMOTED TO STATE 3 (IN-WORLD)! 3D SIMULATION ACTIVE! ***\n");
     Log("[mxohax] ******************************************************\n");
 
+    void* curWorldInst = *reinterpret_cast<void**>(clientBase + 0x0089DD6C);
+    void* curPlayer = *reinterpret_cast<void**>(clientBase + 0x008A4378);
+    void* curCam = *reinterpret_cast<void**>(clientBase + 0x0089EDF8);
+    Log("[mxohax] DetourFrameTick: Tick #%d active (State=3, renderFlag=1, inWorld=1, sticky=1, WorldInst=0x%p, Player=0x%p, Cam=0x%p)\n",
+        s_tickCount, curWorldInst, curPlayer, curCam);
+
     // Turn off Matrix View for solid world gameplay
     *reinterpret_cast<float*>(clientBase + 0x008E357C) = 0.0f;
     *reinterpret_cast<BYTE*>(clientBase + 0x0085EBA8) = 0;
@@ -2226,7 +2617,6 @@ static unsigned char __stdcall Safe_GetPlayerActiveObject(void** outObj, void** 
 // 0x001F9140: True per-frame tick on main thread (called inside RunClientDLL 0x10006640)
 typedef void (__thiscall *FrameTick_t)(void* pThis);
 static FrameTick_t OriginalFrameTick = nullptr;
-static int s_tickCount = 0;
 
 static void __fastcall DetourFrameTick(void* pThis, void* /*edx*/) {
     if (OriginalFrameTick) OriginalFrameTick(pThis);
@@ -2316,6 +2706,29 @@ static void __fastcall DetourFrameTick(void* pThis, void* /*edx*/) {
             if (hWnd) {
                 OriginalWndProc = (WNDPROC)SetWindowLongPtrA(hWnd, GWLP_WNDPROC, (LONG_PTR)SubclassWndProc);
                 Log("[mxohax] Subclassed game window 0x%p for full input handling!\n", hWnd);
+            }
+        }
+
+        // Check for simulated UI click test file (E:\Games\The Matrix Online\ui_click_cmd.txt)
+        static DWORD s_lastUiCmdCheck = 0;
+        if (now - s_lastUiCmdCheck > 50) {
+            s_lastUiCmdCheck = now;
+            if (GetFileAttributesA("E:\\Games\\The Matrix Online\\ui_click_cmd.txt") != INVALID_FILE_ATTRIBUTES) {
+                FILE* fCmd = fopen("E:\\Games\\The Matrix Online\\ui_click_cmd.txt", "r");
+                if (fCmd) {
+                    int cx = 0, cy = 0;
+                    if (fscanf(fCmd, "%d %d", &cx, &cy) == 2) {
+                        HWND hTargetWnd = g_hGameWindow ? g_hGameWindow : GetActiveWindow();
+                        if (hTargetWnd) {
+                            Log("[mxohax] UI COMMAND TRIGGER: Simulating click at (%d, %d)\n", cx, cy);
+                            SubclassWndProc(hTargetWnd, WM_MOUSEMOVE, 0, MAKELPARAM(cx, cy));
+                            SubclassWndProc(hTargetWnd, WM_LBUTTONDOWN, MK_LBUTTON, MAKELPARAM(cx, cy));
+                            SubclassWndProc(hTargetWnd, WM_LBUTTONUP, 0, MAKELPARAM(cx, cy));
+                        }
+                    }
+                    fclose(fCmd);
+                }
+                DeleteFileA("E:\\Games\\The Matrix Online\\ui_click_cmd.txt");
             }
         }
 
@@ -2421,7 +2834,7 @@ static void __fastcall DetourFrameTick(void* pThis, void* /*edx*/) {
                 void* pInterlock = *ppInterlock;
                 if (!IsBadReadPtr(pInterlock, 0x250)) {
                     DWORD* pAnimState = reinterpret_cast<DWORD*>(reinterpret_cast<uintptr_t>(pInterlock) + 0x238);
-                    if (pAnimState && (*pAnimState == 2 || *pAnimState == 3)) {
+                    if (pAnimState && *pAnimState != 0) {
                         *pAnimState = 0;
                         *reinterpret_cast<float*>(reinterpret_cast<uintptr_t>(pInterlock) + 0x1A4) = 0.0f;
                         Log("[mxohax] DetourFrameTick: Suppressed blinking animState on CViewInterlock (0x0E)!\n");
@@ -2507,7 +2920,7 @@ static void __fastcall DetourFrameTick(void* pThis, void* /*edx*/) {
         }
     }
 
-    if (s_tickCount % 500 == 0) {
+    if (s_tickCount % 50 == 0) {
         void* curWorldInst = *reinterpret_cast<void**>(clientBase + 0x0089DD6C);
         void* curPlayer = *reinterpret_cast<void**>(clientBase + 0x008A4378);
         void* curCam = *reinterpret_cast<void**>(clientBase + 0x0089EDF8);
@@ -2547,15 +2960,15 @@ static void __fastcall DetourFrameTick(void* pThis, void* /*edx*/) {
             } else if (*pState == 4) {
                 s_inStreamingState4 = true;
                 s_state4Ticks++;
-                if (s_state4Ticks % 30 == 0) {
+                if (s_state4Ticks % 15 == 0) {
                     Log("[mxohax] DetourFrameTick: State 4 (Streaming) active (tick %d)...\n", s_state4Ticks);
                 }
 
                 // ============================================================
-                // PHASE 1: 2D Loading Screen (ticks 0 to 75, ~1.5s duration)
+                // PHASE 1: 2D Loading Screen (ticks 0 to 25)
                 // Display authentic loading artwork while indexing sector files
                 // ============================================================
-                if (s_state4Ticks < 75) {
+                if (s_state4Ticks < 25) {
                     void* pUI = *reinterpret_cast<void**>(clientBase + 0x00898C54);
                     if (pUI) {
                         CreateControl_t pCreateControl = reinterpret_cast<CreateControl_t>(clientBase + 0x0001BC10);
@@ -2577,10 +2990,10 @@ static void __fastcall DetourFrameTick(void* pThis, void* /*edx*/) {
                     *reinterpret_cast<float*>(clientBase + 0x008E357C) = 0.0f;
                 }
                 // ============================================================
-                // PHASE 2: Matrix Digital Code Rain Stream (ticks 75 to 160, ~1.8s duration)
+                // PHASE 2: Matrix Digital Code Rain Stream (ticks 25 to 50)
                 // Sector geometry & player stream in from the iconic falling green code
                 // ============================================================
-                else if (s_state4Ticks >= 75 && s_state4Ticks < 160) {
+                else if (s_state4Ticks >= 25 && s_state4Ticks < 50) {
                     // 1. Dismiss 2D loading screens (0x57, 0x04) to reveal the falling code stream
                     void* pUI = *reinterpret_cast<void**>(clientBase + 0x00898C54);
                     if (pUI && OriginalHideControl) {
@@ -2602,7 +3015,7 @@ static void __fastcall DetourFrameTick(void* pThis, void* /*edx*/) {
                     *reinterpret_cast<BYTE*>(clientBase + 0x008AACC9) = 1;
 
                     // 4. Calculate smooth rez-in ease-out dissolve: starts at 1.0f (pure code) and dissolves to 0.0f
-                    float rezProgress = (float)(s_state4Ticks - 75) / 85.0f;
+                    float rezProgress = (float)(s_state4Ticks - 25) / 25.0f;
                     if (rezProgress > 1.0f) rezProgress = 1.0f;
                     float rezBlend = 1.0f - (rezProgress * rezProgress); // quadratic ease-out dissolve
                     *reinterpret_cast<float*>(clientBase + 0x008E357C) = rezBlend;
@@ -2614,10 +3027,10 @@ static void __fastcall DetourFrameTick(void* pThis, void* /*edx*/) {
                     }
                 }
                 // ============================================================
-                // PHASE 3: Game World Emergence (ticks >= 160)
+                // PHASE 3: Game World Emergence (ticks >= 50)
                 // World streams in from code, promoting to State 3 simulation
                 // ============================================================
-                else if (s_state4Ticks >= 160) {
+                else if (s_state4Ticks >= 50) {
                     Log("[mxohax] DetourFrameTick: Matrix code streaming complete (ticks=%d)! Promoting to State 3...\n", s_state4Ticks);
 
                     // Ensure active world geometry buffer is ready (0xE0 = 1, 0xB9 = 1)
@@ -2667,13 +3080,9 @@ static ExitProcess_t OriginalExitProcess = nullptr;
 void WINAPI DetourExitProcess(UINT uExitCode) {
     void* caller = _ReturnAddress();
     Log("[mxohax] ExitProcess(%u) called! ReturnAddress: 0x%p\n", uExitCode, caller);
-    HMODULE hClient = GetModuleHandleA("client.dll");
-    uintptr_t clientBase = (uintptr_t)hClient;
-    if (s_inWorldSticky && clientBase && (uintptr_t)caller >= clientBase && (uintptr_t)caller < clientBase + 0x1000000) {
-        if ((uintptr_t)caller >= clientBase + 0x000EA000 && (uintptr_t)caller <= clientBase + 0x000EB000) {
-            Log("[mxohax] DetourExitProcess: SUPPRESSED exit call from client.dll + 0x%08X (in-world sticky session active)!\n", (uintptr_t)caller - clientBase);
-            return;
-        }
+    if (s_inWorldSticky) {
+        Log("[mxohax] DetourExitProcess: SUPPRESSED exit call (in-world sticky session active)!\n");
+        return;
     }
     if (OriginalExitProcess) OriginalExitProcess(uExitCode);
 }
@@ -2684,13 +3093,9 @@ static PostQuitMessage_t OriginalPostQuitMessage = nullptr;
 void WINAPI DetourPostQuitMessage(int nExitCode) {
     void* caller = _ReturnAddress();
     Log("[mxohax] PostQuitMessage(%d) called! ReturnAddress: 0x%p\n", nExitCode, caller);
-    HMODULE hClient = GetModuleHandleA("client.dll");
-    uintptr_t clientBase = (uintptr_t)hClient;
-    if (s_inWorldSticky && clientBase && (uintptr_t)caller >= clientBase && (uintptr_t)caller < clientBase + 0x1000000) {
-        if ((uintptr_t)caller >= clientBase + 0x000EA000 && (uintptr_t)caller <= clientBase + 0x000EB000) {
-            Log("[mxohax] DetourPostQuitMessage: SUPPRESSED exit loop call from client.dll + 0x%08X (in-world sticky session active)!\n", (uintptr_t)caller - clientBase);
-            return;
-        }
+    if (s_inWorldSticky) {
+        Log("[mxohax] DetourPostQuitMessage: SUPPRESSED exit loop call (in-world sticky session active)!\n");
+        return;
     }
     if (OriginalPostQuitMessage) OriginalPostQuitMessage(nExitCode);
 }
@@ -3257,6 +3662,17 @@ static void ApplyClientPatches(HMODULE hClient) {
         VirtualProtect(pMeshAttachCheckPatch, 10, oldProt, &oldProt);
         FlushInstructionCache(GetCurrentProcess(), pMeshAttachCheckPatch, 10);
         Log("[mxohax] SUCCESS: Patched client.dll + 0x0052FD5C (NOP * 10) for safe unconditional mesh attachment!\n");
+    }
+
+    // Patch M: 0x000EAAC0: 3 bytes ret 0 (C2 00 00)
+    // Permanently neutralizes client.dll exit/quit function so PostQuitMessage is never called
+    LPVOID pClientQuitPatch = reinterpret_cast<LPVOID>(clientBase + 0x000EAAC0);
+    if (VirtualProtect(pClientQuitPatch, 3, PAGE_EXECUTE_READWRITE, &oldProt)) {
+        BYTE ret0[3] = { 0xC2, 0x00, 0x00 };
+        memcpy(pClientQuitPatch, ret0, 3);
+        VirtualProtect(pClientQuitPatch, 3, oldProt, &oldProt);
+        FlushInstructionCache(GetCurrentProcess(), pClientQuitPatch, 3);
+        Log("[mxohax] SUCCESS: Patched client.dll + 0x000EAAC0 (ret 0) to permanently neutralize client exit loop!\n");
     }
 }
 
