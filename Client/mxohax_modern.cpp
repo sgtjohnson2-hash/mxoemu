@@ -904,6 +904,17 @@ static HRESULT STDMETHODCALLTYPE DetourPresent(IDirect3DDevice9* pDevice, const 
         }
     }
 
+    static DWORD s_lastCaptureCheck = 0;
+    DWORD nowTick = GetTickCount();
+    if (pDevice && nowTick - s_lastCaptureCheck > 250) {
+        s_lastCaptureCheck = nowTick;
+        if (GetFileAttributesA("E:\\Games\\The Matrix Online\\capture_now.txt") != INVALID_FILE_ATTRIBUTES) {
+            DeleteFileA("E:\\Games\\The Matrix Online\\capture_now.txt");
+            CaptureD3D9Backbuffer((IDirect3DDevice9*)pDevice, "E:\\Games\\The Matrix Online\\live_capture.bmp");
+            Log("[mxohax] Live capture written to live_capture.bmp\n");
+        }
+    }
+
     return OriginalPresent(pDevice, pSourceRect, pDestRect, hDestWindowOverride, pDirtyRegion);
 }
 
@@ -943,6 +954,17 @@ static HRESULT STDMETHODCALLTYPE DetourPresentEx(IDirect3DDevice9Ex* pDevice, co
             CaptureD3D9Backbuffer((IDirect3DDevice9*)pDevice, "E:\\Games\\The Matrix Online\\action_combat.bmp");
         } else if (s_inWorldPresents == 260) {
             CaptureD3D9Backbuffer((IDirect3DDevice9*)pDevice, "E:\\Games\\The Matrix Online\\action_phone.bmp");
+        }
+    }
+
+    static DWORD s_lastCaptureCheckEx = 0;
+    DWORD nowTickEx = GetTickCount();
+    if (pDevice && nowTickEx - s_lastCaptureCheckEx > 250) {
+        s_lastCaptureCheckEx = nowTickEx;
+        if (GetFileAttributesA("E:\\Games\\The Matrix Online\\capture_now.txt") != INVALID_FILE_ATTRIBUTES) {
+            DeleteFileA("E:\\Games\\The Matrix Online\\capture_now.txt");
+            CaptureD3D9Backbuffer((IDirect3DDevice9*)pDevice, "E:\\Games\\The Matrix Online\\live_capture.bmp");
+            Log("[mxohax] Live capture written to live_capture.bmp (Ex)\n");
         }
     }
 
@@ -1178,6 +1200,7 @@ static void SyncActorPosition(uintptr_t clientBase, void* pPlayer, void* pActor,
     *reinterpret_cast<double*>(reinterpret_cast<uintptr_t>(pActor) + 0x510) = 0.0;
     *reinterpret_cast<double*>(reinterpret_cast<uintptr_t>(pActor) + 0x518) = 0.0;
     *reinterpret_cast<double*>(reinterpret_cast<uintptr_t>(pActor) + 0x520) = 0.0;
+    *reinterpret_cast<BYTE*>(reinterpret_cast<uintptr_t>(pActor) + 0x4EE) = 1; // 1 = stopped / idle stance
 
     float* pActorRot = reinterpret_cast<float*>(reinterpret_cast<uintptr_t>(pActor) + 0x4FC);
     if (pActorRot && !IsBadReadPtr(pActorRot, 16)) {
@@ -1399,8 +1422,9 @@ static void ApplyOperativeAppearance(uintptr_t clientBase, void* pPlayer) {
 // ============================================================================
 // Locomotion, Physics, Camera Orbiting & Combat Systems
 // ============================================================================
+static const double GROUND_ELEVATION = 635.0; // Calibrated ground elevation flush with Slums pavement tiles
 static double g_playerX = 16710.0;
-static double g_playerY = 665.0;
+static double g_playerY = GROUND_ELEVATION;
 static double g_playerZ = 3230.0;
 static float  g_playerYaw = 0.0f; // 0 = facing North (+Z)
 static double g_velY = 0.0;
@@ -1415,12 +1439,12 @@ static bool   g_bRightMouseDown = false;
 static bool   g_bLeftMouseDown = false;
 static bool   g_bHumanInputActive = false;
 
-// Targeting system (Nearby Operative NPC P: charId=393 at 16802.3, 665.0, 3237.01)
+// Targeting system (Nearby Operative NPC P: charId=393 at 16802.3, 635.0, 3237.01)
 static bool   g_hasTarget = false;
 static DWORD  g_targetCharId = 393;
 static char   g_targetName[64] = "P";
 static double g_targetX = 16802.3;
-static double g_targetY = 665.0;
+static double g_targetY = GROUND_ELEVATION;
 static double g_targetZ = 3237.01;
 
 // Combat tactics stance
@@ -1549,7 +1573,7 @@ static LRESULT CALLBACK SubclassWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPA
             if (wParam == 'P') {
                 TriggerPhoneCall(clientBase);
             } else if (wParam == VK_TAB) {
-                SetTargetOperative(clientBase, "P", 393, 16802.3, 665.0, 3237.01);
+                SetTargetOperative(clientBase, "P", 393, 16802.3, GROUND_ELEVATION, 3237.01);
             } else if (wParam >= VK_F1 && wParam <= VK_F5) {
                 SetTacticsStance(clientBase, (StanceType)(wParam - VK_F1));
             } else if (wParam >= '1' && wParam <= '9') {
@@ -1563,20 +1587,20 @@ static LRESULT CALLBACK SubclassWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPA
     return OriginalWndProc ? CallWindowProcA(OriginalWndProc, hWnd, uMsg, wParam, lParam) : DefWindowProcA(hWnd, uMsg, wParam, lParam);
 }
 
-static void UpdatePlayerPositionAndPhysics(uintptr_t clientBase, void* curPlayer, double dt) {
+static void UpdatePlayerPositionAndPhysics(uintptr_t clientBase, void* curPlayer, double dt, bool isMoving, double actVelX, double actVelZ) {
     if (!curPlayer || IsBadReadPtr(curPlayer, 0xB0)) return;
 
     // Apply jumping physics and gravity
     if (g_isJumping) {
         g_playerY += g_velY * dt;
         g_velY -= 950.0 * dt;
-        if (g_playerY <= 665.0) {
-            g_playerY = 665.0;
+        if (g_playerY <= GROUND_ELEVATION) {
+            g_playerY = GROUND_ELEVATION;
             g_velY = 0.0;
             g_isJumping = false;
         }
     } else {
-        if (g_playerY < 665.0) g_playerY = 665.0;
+        if (g_playerY < GROUND_ELEVATION) g_playerY = GROUND_ELEVATION;
     }
 
     // Walkway boundary collision: keep player safely on the barrens walkway
@@ -1612,30 +1636,45 @@ static void UpdatePlayerPositionAndPhysics(uintptr_t clientBase, void* curPlayer
     // 3. Update pActor 3D scene transform and queue position sample
     void* pActor = *reinterpret_cast<void**>(reinterpret_cast<uintptr_t>(curPlayer) + 0xA8);
     if (pActor && !IsBadReadPtr(pActor, 0x690)) {
+        // Double precision positions on CActor
         *reinterpret_cast<double*>(reinterpret_cast<uintptr_t>(pActor) + 0x528) = g_playerX;
         *reinterpret_cast<double*>(reinterpret_cast<uintptr_t>(pActor) + 0x530) = g_playerY;
         *reinterpret_cast<double*>(reinterpret_cast<uintptr_t>(pActor) + 0x538) = g_playerZ;
+
+        // Double precision velocities on CActor
+        *reinterpret_cast<double*>(reinterpret_cast<uintptr_t>(pActor) + 0x510) = actVelX;
+        *reinterpret_cast<double*>(reinterpret_cast<uintptr_t>(pActor) + 0x518) = g_isJumping ? g_velY : 0.0;
+        *reinterpret_cast<double*>(reinterpret_cast<uintptr_t>(pActor) + 0x520) = actVelZ;
+
+        // Locomotion stopped/idle flag (+0x4EE): 1 = stopped/idle, 0 = moving
+        *reinterpret_cast<BYTE*>(reinterpret_cast<uintptr_t>(pActor) + 0x4EE) = (!isMoving && !g_isJumping) ? 1 : 0;
 
         float* pActorRot = reinterpret_cast<float*>(reinterpret_cast<uintptr_t>(pActor) + 0x4FC);
         if (pActorRot && !IsBadReadPtr(pActorRot, 16)) {
             memcpy(pActorRot, playerQuat, sizeof(playerQuat));
         }
 
-        BYTE sample[128] = {0};
-        *reinterpret_cast<DWORD*>(sample + 0x00) = GetTickCount();
-        *reinterpret_cast<double*>(sample + 0x08) = g_playerX;
-        *reinterpret_cast<double*>(sample + 0x10) = g_playerY;
-        *reinterpret_cast<double*>(sample + 0x18) = g_playerZ;
-        *reinterpret_cast<float*>(sample + 0x20) = playerQuat[0];
-        *reinterpret_cast<float*>(sample + 0x24) = playerQuat[1];
-        *reinterpret_cast<float*>(sample + 0x28) = playerQuat[2];
-        *reinterpret_cast<float*>(sample + 0x2C) = playerQuat[3];
+        static bool s_wasMoving = false;
+        bool shouldAddSample = isMoving || g_isJumping || s_wasMoving;
+        s_wasMoving = isMoving;
 
-        typedef void (__thiscall *AddPosSample_t)(void* pActor, const void* pSample);
-        AddPosSample_t pAddSample = reinterpret_cast<AddPosSample_t>(clientBase + 0x004F3920);
-        __try {
-            pAddSample(pActor, sample);
-        } __except (EXCEPTION_EXECUTE_HANDLER) {}
+        if (shouldAddSample) {
+            BYTE sample[128] = {0};
+            *reinterpret_cast<DWORD*>(sample + 0x00) = GetTickCount();
+            *reinterpret_cast<double*>(sample + 0x08) = g_playerX;
+            *reinterpret_cast<double*>(sample + 0x10) = g_playerY;
+            *reinterpret_cast<double*>(sample + 0x18) = g_playerZ;
+            *reinterpret_cast<float*>(sample + 0x20) = playerQuat[0];
+            *reinterpret_cast<float*>(sample + 0x24) = playerQuat[1];
+            *reinterpret_cast<float*>(sample + 0x28) = playerQuat[2];
+            *reinterpret_cast<float*>(sample + 0x2C) = playerQuat[3];
+
+            typedef void (__thiscall *AddPosSample_t)(void* pActor, const void* pSample);
+            AddPosSample_t pAddSample = reinterpret_cast<AddPosSample_t>(clientBase + 0x004F3920);
+            __try {
+                pAddSample(pActor, sample);
+            } __except (EXCEPTION_EXECUTE_HANDLER) {}
+        }
 
         typedef void (__thiscall *CalcExtents_t)(void* pActor);
         CalcExtents_t pCalcExtents = reinterpret_cast<CalcExtents_t>(clientBase + 0x004E9BF0);
@@ -1746,7 +1785,7 @@ static void EnsureInWorldRendering(uintptr_t clientBase, void* pWorldMgr, DWORD 
 
         // 2. Set default spawn coordinates at clientBase + 0x008BA5E8 to Slums Barrens walkway
         *reinterpret_cast<float*>(clientBase + 0x008BA5E8) = 16710.0f;
-        *reinterpret_cast<float*>(clientBase + 0x008BA5EC) = 665.0f;
+        *reinterpret_cast<float*>(clientBase + 0x008BA5EC) = (float)GROUND_ELEVATION;
         *reinterpret_cast<float*>(clientBase + 0x008BA5F0) = 3230.0f;
         *reinterpret_cast<float*>(clientBase + 0x008BA5F4) = 0.0f;
         *reinterpret_cast<WORD*>(clientBase + 0x008BA5F8) = 0;
@@ -1763,7 +1802,7 @@ static void EnsureInWorldRendering(uintptr_t clientBase, void* pWorldMgr, DWORD 
             pCtor(pPlayer, &flag, nullptr);
             Log("[mxohax] EnsureInWorld: PlayerCtor(0x101d17c0) initialized PlayerObject at 0x%p\n", pPlayer);
 
-            // Coordinates for operative s1acker on Slums Barrens walkway: (16710.0f, 665.0f, 3230.0f)
+            // Coordinates for operative s1acker on Slums Barrens walkway: (16710.0f, 635.0f, 3230.0f)
             // Allocate full 64 bytes (16 floats) for 4x4 matrix/coords
             float* pPos = *reinterpret_cast<float**>(reinterpret_cast<DWORD>(pPlayer) + 0x94);
             if (!pPos) {
@@ -1772,7 +1811,7 @@ static void EnsureInWorldRendering(uintptr_t clientBase, void* pWorldMgr, DWORD 
             }
             if (pPos) {
                 pPos[0] = 16710.0f;
-                pPos[1] = 665.0f;
+                pPos[1] = (float)GROUND_ELEVATION;
                 pPos[2] = 3230.0f;
                 pPos[3] = 1.0f;
                 pPos[4] = 0.0f;
@@ -1804,7 +1843,7 @@ static void EnsureInWorldRendering(uintptr_t clientBase, void* pWorldMgr, DWORD 
             pPos = *reinterpret_cast<float**>(reinterpret_cast<DWORD>(pPlayer) + 0x94);
             if (pPos) {
                 pPos[0] = 16710.0f;
-                pPos[1] = 665.0f;
+                pPos[1] = (float)GROUND_ELEVATION;
                 pPos[2] = 3230.0f;
                 pPos[3] = 1.0f;
                 pPos[4] = 0.0f;
@@ -1823,7 +1862,7 @@ static void EnsureInWorldRendering(uintptr_t clientBase, void* pWorldMgr, DWORD 
         if (pPos) {
             if (pPos[1] < 600.0f || (pPos[0] == 0.0f && pPos[2] == 0.0f) || fabsf(pPos[0] - 16710.0f) > 300.0f || fabsf(pPos[2] - 3230.0f) > 300.0f) {
                 pPos[0] = 16710.0f;
-                pPos[1] = 665.0f;
+                pPos[1] = (float)GROUND_ELEVATION;
                 pPos[2] = 3230.0f;
                 pPos[3] = 1.0f;
                 pPos[4] = 0.0f;
@@ -1860,7 +1899,7 @@ static void EnsureInWorldRendering(uintptr_t clientBase, void* pWorldMgr, DWORD 
         void* pActor = *reinterpret_cast<void**>(reinterpret_cast<uintptr_t>(pPlayer) + 0xA8);
         if (pActor && !IsBadReadPtr(pActor, 0x40)) {
             __try {
-                SyncActorPosition(clientBase, pPlayer, pActor, 16710.0, 665.0, 3230.0);
+                SyncActorPosition(clientBase, pPlayer, pActor, 16710.0, GROUND_ELEVATION, 3230.0);
             } __except (EXCEPTION_EXECUTE_HANDLER) {}
         }
     }
@@ -1942,7 +1981,7 @@ static void EnsureInWorldRendering(uintptr_t clientBase, void* pWorldMgr, DWORD 
             pSetMode(pCam, 2);
 
             g_playerX = 16710.0;
-            g_playerY = 665.0;
+            g_playerY = GROUND_ELEVATION;
             g_playerZ = 3230.0;
             g_playerYaw = 0.0f;
             g_camYaw = 0.0f;
@@ -2217,96 +2256,55 @@ static void __fastcall DetourFrameTick(void* pThis, void* /*edx*/) {
         bool keyUp = (GetAsyncKeyState(VK_UP) & 0x8000) != 0;
         bool keyDown = (GetAsyncKeyState(VK_DOWN) & 0x8000) != 0;
 
-        if (keyW || keyS || keyA || keyD || keySpace || keyLeft || keyRight || keyUp || keyDown) {
-            g_bHumanInputActive = true;
+        g_bHumanInputActive = true;
+
+        double speed = keyShift ? 480.0 : 280.0;
+        double moveFwd = 0.0;
+        double moveRight = 0.0;
+        if (keyW || keyUp) moveFwd += 1.0;
+        if (keyS || keyDown) moveFwd -= 1.0;
+        if (keyD) moveRight += 1.0;
+        if (keyA) moveRight -= 1.0;
+
+        if (keyLeft)  g_camYaw -= 2.0f * (float)dt;
+        if (keyRight) g_camYaw += 2.0f * (float)dt;
+
+        bool isMoving = false;
+        double actVelX = 0.0;
+        double actVelZ = 0.0;
+
+        if (moveFwd != 0.0 || moveRight != 0.0) {
+            double fwdX = sinf(g_camYaw);
+            double fwdZ = cosf(g_camYaw);
+            double rtX = cosf(g_camYaw);
+            double rtZ = -sinf(g_camYaw);
+
+            double dirX = fwdX * moveFwd + rtX * moveRight;
+            double dirZ = fwdZ * moveFwd + rtZ * moveRight;
+            double len = sqrt(dirX * dirX + dirZ * dirZ);
+            if (len > 0.001) {
+                dirX /= len;
+                dirZ /= len;
+                actVelX = dirX * speed;
+                actVelZ = dirZ * speed;
+                g_playerX += actVelX * dt;
+                g_playerZ += actVelZ * dt;
+                g_playerYaw = (float)atan2(dirX, dirZ);
+                isMoving = true;
+            }
         }
 
-        if (g_bHumanInputActive) {
-            double speed = keyShift ? 480.0 : 280.0;
-            double moveFwd = 0.0;
-            double moveRight = 0.0;
-            if (keyW || keyUp) moveFwd += 1.0;
-            if (keyS || keyDown) moveFwd -= 1.0;
-            if (keyD) moveRight += 1.0;
-            if (keyA) moveRight -= 1.0;
-
-            if (keyLeft)  g_camYaw -= 2.0f * (float)dt;
-            if (keyRight) g_camYaw += 2.0f * (float)dt;
-
-            if (moveFwd != 0.0 || moveRight != 0.0) {
-                double fwdX = sinf(g_camYaw);
-                double fwdZ = cosf(g_camYaw);
-                double rtX = cosf(g_camYaw);
-                double rtZ = -sinf(g_camYaw);
-
-                double dirX = fwdX * moveFwd + rtX * moveRight;
-                double dirZ = fwdZ * moveFwd + rtZ * moveRight;
-                double len = sqrt(dirX * dirX + dirZ * dirZ);
-                if (len > 0.001) {
-                    dirX /= len;
-                    dirZ /= len;
-                    g_playerX += dirX * speed * dt;
-                    g_playerZ += dirZ * speed * dt;
-                    g_playerYaw = (float)atan2(dirX, dirZ);
-                }
-            }
-            if (keySpace && !g_isJumping && g_playerY <= 665.1) {
-                g_velY = 520.0;
-                g_isJumping = true;
-                Log("[mxohax] Live Human Input: Wire-Fu Jump launched!\n");
-            }
-        } else {
-            // Automated testing playback sequence
-            if (s_inWorldTicks >= 50 && s_inWorldTicks < 100) {
-                // Move forward towards Operative P (16802.3, 665.0, 3237.01)
-                double dx = 16802.3 - g_playerX;
-                double dz = 3237.01 - g_playerZ;
-                double dist = sqrt(dx*dx + dz*dz);
-                if (dist > 10.0) {
-                    double moveSpd = 260.0;
-                    g_playerX += (dx / dist) * moveSpd * dt;
-                    g_playerZ += (dz / dist) * moveSpd * dt;
-                    g_playerYaw = (float)atan2(dx, dz);
-                    g_camYaw = g_playerYaw;
-                }
-                static bool s_loggedMvt = false;
-                if (!s_loggedMvt) {
-                    s_loggedMvt = true;
-                    Log("[mxohax] AUTOMATED ACTION: WASD locomotion active -> advancing along Slums walkway towards Operative 'P'!\n");
-                }
-            } else if (s_inWorldTicks >= 100 && s_inWorldTicks < 140) {
-                // Wire-fu jump launch
-                if (!g_isJumping && g_playerY <= 665.1) {
-                    g_velY = 540.0;
-                    g_isJumping = true;
-                    Log("[mxohax] AUTOMATED ACTION: Wire-Fu Jump launched! V_y=540.0 units/s\n");
-                }
-            } else if (s_inWorldTicks >= 140 && s_inWorldTicks < 180) {
-                // Camera orbit and Target Operative P
-                g_camYaw += 0.015f;
-                if (!g_hasTarget) {
-                    SetTargetOperative(clientBase, "P", 393, 16802.3, 665.0, 3237.01);
-                }
-            } else if (s_inWorldTicks >= 180 && s_inWorldTicks < 220) {
-                // Tactics stance switch & Quickbar ability
-                if (g_currentStance != STANCE_POWER) {
-                    SetTacticsStance(clientBase, STANCE_POWER);
-                    ExecuteQuickbarAbility(clientBase, 1);
-                }
-            } else if (s_inWorldTicks >= 220 && s_inWorldTicks < 260) {
-                static bool s_autoPhoneDone = false;
-                if (!s_autoPhoneDone) {
-                    s_autoPhoneDone = true;
-                    TriggerPhoneCall(clientBase);
-                }
-            }
+        if (keySpace && !g_isJumping && g_playerY <= GROUND_ELEVATION + 0.1) {
+            g_velY = 520.0;
+            g_isJumping = true;
+            Log("[mxohax] Live Human Input: Wire-Fu Jump launched!\n");
         }
 
         // Apply position, orientation and extents to player and actor
         if (curPlayer) {
             *reinterpret_cast<BYTE*>(reinterpret_cast<uintptr_t>(curPlayer) + 0xC) |= 0x20;
             void* pActor = *reinterpret_cast<void**>(reinterpret_cast<uintptr_t>(curPlayer) + 0xA8);
-            UpdatePlayerPositionAndPhysics(clientBase, curPlayer, dt);
+            UpdatePlayerPositionAndPhysics(clientBase, curPlayer, dt, isMoving, actVelX, actVelZ);
 
             if (pActor && !IsBadReadPtr(pActor, 0x690) && (s_tickCount % 60 == 0)) {
                 typedef void (__thiscall *ShowLocalPlayer_t)(void* pActor);
