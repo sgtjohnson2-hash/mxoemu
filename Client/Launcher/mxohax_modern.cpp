@@ -631,6 +631,8 @@ static Control_t OriginalHideControl = nullptr;
 typedef void (__thiscall *SetControlVisible_t)(void* pUI, DWORD ctrlId, BOOL bVisible);
 static SetControlVisible_t OriginalSetControlVisible = nullptr;
 
+typedef void* (__thiscall *CreateControl_t)(void* pUI, DWORD ctrlId);
+
 static void __fastcall DetourHideControl(void* pUI, void* /*edx*/, DWORD ctrlId) {
     if (ctrlId != 0x1A) {
         Log("[mxohax] HideControl: 0x%02X\n", ctrlId);
@@ -693,13 +695,23 @@ static bool TryAutoJackIn(DWORD clientBase) {
     void* pWorldMgr = *reinterpret_cast<void**>(clientBase + 0x0089DD68);
     if (!pWorldMgr) return false;
 
-    // 1. Dismiss Screen 0x30 (Login screen), but do NOT hide Screen 0x5D yet
-    if (OriginalHideControl) {
-        void* pUI = *reinterpret_cast<void**>(clientBase + 0x00898C54);
-        if (pUI) {
+    // 1. Phase 1: Show authentic 2D Loading Screen (0x57) and dismiss Login (0x30) & Character Selection (0x5D)
+    void* pUI = *reinterpret_cast<void**>(clientBase + 0x00898C54);
+    if (pUI) {
+        if (OriginalHideControl) {
             OriginalHideControl(pUI, 0x30);
-            Log("[mxohax] [AutoJackIn] Dismissed Screen 0x30\n");
+            OriginalHideControl(pUI, 0x5D);
+            Log("[mxohax] [AutoJackIn] Dismissed Screen 0x30 and 0x5D\n");
         }
+        typedef void* (__thiscall *CreateControl_t)(void* pUI, DWORD ctrlId);
+        typedef void (__thiscall *SetControlVisible_t)(void* pUI, DWORD ctrlId, BOOL bVisible);
+        CreateControl_t pCreateControl = reinterpret_cast<CreateControl_t>(clientBase + 0x0001BC10);
+        SetControlVisible_t pSetVisible = reinterpret_cast<SetControlVisible_t>(clientBase + 0x0001DB80);
+        __try {
+            pCreateControl(pUI, 0x57);
+            pSetVisible(pUI, 0x57, 1);
+            Log("[mxohax] [AutoJackIn] Displayed authentic Phase 1 2D Loading Screen (0x57)!\n");
+        } __except (EXCEPTION_EXECUTE_HANDLER) {}
     }
 
     // 2. Ensure CNetClient at clientBase + 0x0089BBA0 is marked connected
@@ -878,12 +890,19 @@ static HRESULT STDMETHODCALLTYPE DetourPresent(IDirect3DDevice9* pDevice, const 
     }
 
     static int s_streamingPresents = 0;
+    static bool s_capturedLoadBmp = false;
     static bool s_capturedStreamBmp = false;
     if (s_inStreamingState4 && pDevice) {
         s_streamingPresents++;
-        if (s_state4Ticks >= 40 && !s_capturedStreamBmp) {
+        if (s_state4Ticks >= 25 && !s_capturedLoadBmp) {
+            s_capturedLoadBmp = true;
+            CaptureD3D9Backbuffer(pDevice, "E:\\Games\\The Matrix Online\\loading_screen_render.bmp");
+            Log("[mxohax] Phase 1: Captured 2D Loading Screen to loading_screen_render.bmp\n");
+        }
+        if (s_state4Ticks >= 110 && !s_capturedStreamBmp) {
             s_capturedStreamBmp = true;
             CaptureD3D9Backbuffer(pDevice, "E:\\Games\\The Matrix Online\\matrix_streaming_render.bmp");
+            Log("[mxohax] Phase 2: Captured 3D Matrix Code Stream to matrix_streaming_render.bmp\n");
         }
     }
 
@@ -931,12 +950,19 @@ static HRESULT STDMETHODCALLTYPE DetourPresentEx(IDirect3DDevice9Ex* pDevice, co
     }
 
     static int s_streamingPresentsEx = 0;
+    static bool s_capturedLoadBmpEx = false;
     static bool s_capturedStreamBmpEx = false;
     if (s_inStreamingState4 && pDevice) {
         s_streamingPresentsEx++;
-        if (s_state4Ticks >= 40 && !s_capturedStreamBmpEx) {
+        if (s_state4Ticks >= 25 && !s_capturedLoadBmpEx) {
+            s_capturedLoadBmpEx = true;
+            CaptureD3D9Backbuffer(pDevice, "E:\\Games\\The Matrix Online\\loading_screen_render.bmp");
+            Log("[mxohax] Phase 1: Captured 2D Loading Screen to loading_screen_render.bmp (Ex)\n");
+        }
+        if (s_state4Ticks >= 110 && !s_capturedStreamBmpEx) {
             s_capturedStreamBmpEx = true;
             CaptureD3D9Backbuffer(pDevice, "E:\\Games\\The Matrix Online\\matrix_streaming_render.bmp");
+            Log("[mxohax] Phase 2: Captured 3D Matrix Code Stream to matrix_streaming_render.bmp (Ex)\n");
         }
     }
 
@@ -2400,13 +2426,17 @@ static void __fastcall DetourFrameTick(void* pThis, void* /*edx*/) {
             Log("[mxohax] ******************************************************\n");
             Log("[mxohax] *** IN-WORLD CONFIRMED: 3D SIMULATION LOOP ACTIVE! ***\n");
             Log("[mxohax] ******************************************************\n");
-            void* pUI = *reinterpret_cast<void**>(clientBase + 0x00898C54);
-            if (pUI && OriginalHideControl) {
-                OriginalHideControl(pUI, 0x04);
-                OriginalHideControl(pUI, 0x57);
-                OriginalHideControl(pUI, 0x30);
-                OriginalHideControl(pUI, 0x5D);
-                Log("[mxohax] Dismissed loading screens 0x04, 0x57, 0x30 and 0x5D upon entering world!\n");
+            // Only dismiss loading screens if already promoted to State 3 (In-World).
+            // Do NOT dismiss Phase 1 loading screen 0x57 while streaming in State 4!
+            if (s_inWorldSticky) {
+                void* pUI = *reinterpret_cast<void**>(clientBase + 0x00898C54);
+                if (pUI && OriginalHideControl) {
+                    OriginalHideControl(pUI, 0x04);
+                    OriginalHideControl(pUI, 0x57);
+                    OriginalHideControl(pUI, 0x30);
+                    OriginalHideControl(pUI, 0x5D);
+                    Log("[mxohax] Dismissed loading screens 0x04, 0x57, 0x30 and 0x5D upon entering State 3 world!\n");
+                }
             }
         }
     }
@@ -2455,53 +2485,71 @@ static void __fastcall DetourFrameTick(void* pThis, void* /*edx*/) {
                     Log("[mxohax] DetourFrameTick: State 4 (Streaming) active (tick %d)...\n", s_state4Ticks);
                 }
 
-                // Enable 3D scene rendering flags in WorldMgr so D3D9 renders during streaming
-                *reinterpret_cast<BYTE*>(reinterpret_cast<DWORD>(pWorldMgr) + 0x20) = 1;
-                *reinterpret_cast<BYTE*>(reinterpret_cast<DWORD>(pWorldMgr) + 0x22) = 1;
-
-                // Engage native Matrix View rez-in effect during State 4!
-                *reinterpret_cast<BYTE*>(clientBase + 0x0085EBA8) = 1;
-                *reinterpret_cast<BYTE*>(clientBase + 0x0085EBA9) = 1;
-                *reinterpret_cast<BYTE*>(clientBase + 0x0085EBAA) = 1;
-                *reinterpret_cast<BYTE*>(clientBase + 0x008E3590) = 1;
-
-                // Calculate smooth rez-in blend factor: starts at 1.0f (full green code) and smoothly dissolves to 0.0f
-                float rezProgress = (float)s_state4Ticks / 80.0f;
-                if (rezProgress > 1.0f) rezProgress = 1.0f;
-                float rezBlend = 1.0f - (rezProgress * rezProgress); // quadratic ease-out dissolve
-                *reinterpret_cast<float*>(clientBase + 0x008E357C) = rezBlend;
-
-                // Keep 2D loading screens dismissed once streaming begins so the 3D Matrix code rain is visible!
-                if (s_state4Ticks >= 15) {
+                // ============================================================
+                // PHASE 1: 2D Loading Screen (ticks 0 to 75, ~1.5s duration)
+                // Display authentic loading artwork while indexing sector files
+                // ============================================================
+                if (s_state4Ticks < 75) {
+                    void* pUI = *reinterpret_cast<void**>(clientBase + 0x00898C54);
+                    if (pUI) {
+                        CreateControl_t pCreateControl = reinterpret_cast<CreateControl_t>(clientBase + 0x0001BC10);
+                        SetControlVisible_t pSetVisible = reinterpret_cast<SetControlVisible_t>(clientBase + 0x0001DB80);
+                        __try {
+                            pCreateControl(pUI, 0x57);
+                            pSetVisible(pUI, 0x57, 1);
+                        } __except (EXCEPTION_EXECUTE_HANDLER) {}
+                    }
+                    // Keep 3D Matrix View OFF during Phase 1 so 2D Loading Screen artwork is front & center
+                    *reinterpret_cast<BYTE*>(clientBase + 0x0085EBA8) = 0;
+                    *reinterpret_cast<BYTE*>(clientBase + 0x0085EBA9) = 0;
+                    *reinterpret_cast<BYTE*>(clientBase + 0x0085EBAA) = 0;
+                    *reinterpret_cast<BYTE*>(clientBase + 0x008E3590) = 0;
+                    *reinterpret_cast<float*>(clientBase + 0x008E357C) = 0.0f;
+                }
+                // ============================================================
+                // PHASE 2: Matrix Digital Code Rain Stream (ticks 75 to 160, ~1.8s duration)
+                // Sector geometry & player stream in from the iconic falling green code
+                // ============================================================
+                else if (s_state4Ticks >= 75 && s_state4Ticks < 160) {
+                    // 1. Dismiss 2D loading screens (0x57, 0x04) to reveal the falling code stream
                     void* pUI = *reinterpret_cast<void**>(clientBase + 0x00898C54);
                     if (pUI && OriginalHideControl) {
                         OriginalHideControl(pUI, 0x57);
                         OriginalHideControl(pUI, 0x04);
                         OriginalHideControl(pUI, 0x30);
                     }
-                }
 
-                // At tick 15, prepare scene and player in State 4 so the user sees the world rezzing in!
-                if (!s_playerEnteredWorld && s_state4Ticks >= 15) {
-                    Log("[mxohax] DetourFrameTick: Initializing in-world scene/player for State 4 streaming rez-in...\n");
-                    EnsureInWorldRendering(clientBase, pWorldMgr, pShell, false /* keepInState4 */);
-                }
+                    // 2. Enable 3D scene rendering flags in WorldMgr
+                    *reinterpret_cast<BYTE*>(reinterpret_cast<DWORD>(pWorldMgr) + 0x20) = 1;
+                    *reinterpret_cast<BYTE*>(reinterpret_cast<DWORD>(pWorldMgr) + 0x22) = 1;
 
-                // Check if streaming completed
-                typedef char (__thiscall *IsFinished_t)(void* pLevelSys);
-                void* pLevelSys = *reinterpret_cast<void**>(clientBase + 0x008A6004);
-                char finished = 0;
-                if (pLevelSys) {
-                    IsFinished_t pIsFinished = reinterpret_cast<IsFinished_t>(clientBase + 0x002066C0);
-                    finished = pIsFinished(pLevelSys);
-                }
+                    // 3. Engage native 3D Matrix View Digital Rain effect
+                    *reinterpret_cast<BYTE*>(clientBase + 0x0085EBA8) = 1;
+                    *reinterpret_cast<BYTE*>(clientBase + 0x0085EBA9) = 1;
+                    *reinterpret_cast<BYTE*>(clientBase + 0x0085EBAA) = 1;
+                    *reinterpret_cast<BYTE*>(clientBase + 0x008E3590) = 1;
 
-                // Allow full dramatic Matrix code rain rez-in stream duration (~160 ticks / ~2.7s)
-                if (s_state4Ticks >= 80) {
-                    Log("[mxohax] DetourFrameTick: Matrix code streaming complete (finished=%d, ticks=%d)! Promoting to State 3...\n",
-                        finished, s_state4Ticks);
+                    // 4. Calculate smooth rez-in ease-out dissolve: starts at 1.0f (pure code) and dissolves to 0.0f
+                    float rezProgress = (float)(s_state4Ticks - 75) / 85.0f;
+                    if (rezProgress > 1.0f) rezProgress = 1.0f;
+                    float rezBlend = 1.0f - (rezProgress * rezProgress); // quadratic ease-out dissolve
+                    *reinterpret_cast<float*>(clientBase + 0x008E357C) = rezBlend;
+
+                    // 5. Initialize in-world scene/player for State 4 streaming rez-in
+                    if (!s_playerEnteredWorld) {
+                        Log("[mxohax] DetourFrameTick: Initializing in-world scene/player for Phase 2 State 4 streaming rez-in...\n");
+                        EnsureInWorldRendering(clientBase, pWorldMgr, pShell, false /* keepInState4 */);
+                    }
+                }
+                // ============================================================
+                // PHASE 3: Game World Emergence (ticks >= 160)
+                // World streams in from code, promoting to State 3 simulation
+                // ============================================================
+                else if (s_state4Ticks >= 160) {
+                    Log("[mxohax] DetourFrameTick: Matrix code streaming complete (ticks=%d)! Promoting to State 3...\n", s_state4Ticks);
 
                     // Ensure active world geometry buffer is ready (0xE0 = 1, 0xB9 = 1)
+                    void* pLevelSys = *reinterpret_cast<void**>(clientBase + 0x008A6004);
                     if (pLevelSys) {
                         DWORD* pActiveWorld = *reinterpret_cast<DWORD**>(reinterpret_cast<DWORD>(pLevelSys) + 0x18);
                         if (pActiveWorld) {
