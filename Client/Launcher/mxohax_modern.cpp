@@ -910,27 +910,34 @@ static HRESULT STDMETHODCALLTYPE DetourPresent(IDirect3DDevice9* pDevice, const 
         s_inWorldPresents++;
         if (s_inWorldPresents == 50) {
             CaptureD3D9Backbuffer((IDirect3DDevice9*)pDevice, "E:\\Games\\The Matrix Online\\inworld_render.bmp");
+            Log("[mxohax] Captured initial in-world State 3 frame to inworld_render.bmp\n");
         } else if (s_inWorldPresents == 100) {
-            CaptureD3D9Backbuffer((IDirect3DDevice9*)pDevice, "E:\\Games\\The Matrix Online\\action_movement.bmp");
-        } else if (s_inWorldPresents == 140) {
-            CaptureD3D9Backbuffer((IDirect3DDevice9*)pDevice, "E:\\Games\\The Matrix Online\\action_jump.bmp");
-        } else if (s_inWorldPresents == 180) {
-            CaptureD3D9Backbuffer((IDirect3DDevice9*)pDevice, "E:\\Games\\The Matrix Online\\action_targeting.bmp");
-        } else if (s_inWorldPresents == 220) {
-            CaptureD3D9Backbuffer((IDirect3DDevice9*)pDevice, "E:\\Games\\The Matrix Online\\action_combat.bmp");
-        } else if (s_inWorldPresents == 260) {
-            CaptureD3D9Backbuffer((IDirect3DDevice9*)pDevice, "E:\\Games\\The Matrix Online\\action_phone.bmp");
+            CaptureD3D9Backbuffer((IDirect3DDevice9*)pDevice, "E:\\Games\\The Matrix Online\\inworld_idle.bmp");
+            Log("[mxohax] Captured confirmed stationary idle stance to inworld_idle.bmp\n");
         }
     }
 
     static DWORD s_lastCaptureCheck = 0;
     DWORD nowTick = GetTickCount();
-    if (pDevice && nowTick - s_lastCaptureCheck > 250) {
+    if (pDevice && nowTick - s_lastCaptureCheck > 100) {
         s_lastCaptureCheck = nowTick;
         if (GetFileAttributesA("E:\\Games\\The Matrix Online\\capture_now.txt") != INVALID_FILE_ATTRIBUTES) {
+            char targetPath[260] = "E:\\Games\\The Matrix Online\\live_capture.bmp";
+            FILE* fTrig = fopen("E:\\Games\\The Matrix Online\\capture_now.txt", "r");
+            if (fTrig) {
+                char buf[260] = {0};
+                if (fgets(buf, sizeof(buf), fTrig)) {
+                    char* nl = strpbrk(buf, "\r\n");
+                    if (nl) *nl = 0;
+                    if (strlen(buf) > 0) {
+                        strncpy_s(targetPath, sizeof(targetPath), buf, _TRUNCATE);
+                    }
+                }
+                fclose(fTrig);
+            }
             DeleteFileA("E:\\Games\\The Matrix Online\\capture_now.txt");
-            CaptureD3D9Backbuffer((IDirect3DDevice9*)pDevice, "E:\\Games\\The Matrix Online\\live_capture.bmp");
-            Log("[mxohax] Live capture written to live_capture.bmp\n");
+            CaptureD3D9Backbuffer((IDirect3DDevice9*)pDevice, targetPath);
+            Log("[mxohax] On-demand capture written to: %s\n", targetPath);
         }
     }
 
@@ -970,27 +977,34 @@ static HRESULT STDMETHODCALLTYPE DetourPresentEx(IDirect3DDevice9Ex* pDevice, co
         s_inWorldPresents++;
         if (s_inWorldPresents == 50) {
             CaptureD3D9Backbuffer((IDirect3DDevice9*)pDevice, "E:\\Games\\The Matrix Online\\inworld_render.bmp");
+            Log("[mxohax] Captured initial in-world State 3 frame to inworld_render.bmp (Ex)\n");
         } else if (s_inWorldPresents == 100) {
-            CaptureD3D9Backbuffer((IDirect3DDevice9*)pDevice, "E:\\Games\\The Matrix Online\\action_movement.bmp");
-        } else if (s_inWorldPresents == 140) {
-            CaptureD3D9Backbuffer((IDirect3DDevice9*)pDevice, "E:\\Games\\The Matrix Online\\action_jump.bmp");
-        } else if (s_inWorldPresents == 180) {
-            CaptureD3D9Backbuffer((IDirect3DDevice9*)pDevice, "E:\\Games\\The Matrix Online\\action_targeting.bmp");
-        } else if (s_inWorldPresents == 220) {
-            CaptureD3D9Backbuffer((IDirect3DDevice9*)pDevice, "E:\\Games\\The Matrix Online\\action_combat.bmp");
-        } else if (s_inWorldPresents == 260) {
-            CaptureD3D9Backbuffer((IDirect3DDevice9*)pDevice, "E:\\Games\\The Matrix Online\\action_phone.bmp");
+            CaptureD3D9Backbuffer((IDirect3DDevice9*)pDevice, "E:\\Games\\The Matrix Online\\inworld_idle.bmp");
+            Log("[mxohax] Captured confirmed stationary idle stance to inworld_idle.bmp (Ex)\n");
         }
     }
 
     static DWORD s_lastCaptureCheckEx = 0;
     DWORD nowTickEx = GetTickCount();
-    if (pDevice && nowTickEx - s_lastCaptureCheckEx > 250) {
+    if (pDevice && nowTickEx - s_lastCaptureCheckEx > 100) {
         s_lastCaptureCheckEx = nowTickEx;
         if (GetFileAttributesA("E:\\Games\\The Matrix Online\\capture_now.txt") != INVALID_FILE_ATTRIBUTES) {
+            char targetPath[260] = "E:\\Games\\The Matrix Online\\live_capture.bmp";
+            FILE* fTrig = fopen("E:\\Games\\The Matrix Online\\capture_now.txt", "r");
+            if (fTrig) {
+                char buf[260] = {0};
+                if (fgets(buf, sizeof(buf), fTrig)) {
+                    char* nl = strpbrk(buf, "\r\n");
+                    if (nl) *nl = 0;
+                    if (strlen(buf) > 0) {
+                        strncpy_s(targetPath, sizeof(targetPath), buf, _TRUNCATE);
+                    }
+                }
+                fclose(fTrig);
+            }
             DeleteFileA("E:\\Games\\The Matrix Online\\capture_now.txt");
-            CaptureD3D9Backbuffer((IDirect3DDevice9*)pDevice, "E:\\Games\\The Matrix Online\\live_capture.bmp");
-            Log("[mxohax] Live capture written to live_capture.bmp (Ex)\n");
+            CaptureD3D9Backbuffer((IDirect3DDevice9*)pDevice, targetPath);
+            Log("[mxohax] On-demand capture written to: %s (Ex)\n", targetPath);
         }
     }
 
@@ -1448,17 +1462,17 @@ static void ApplyOperativeAppearance(uintptr_t clientBase, void* pPlayer) {
 // ============================================================================
 // Locomotion, Physics, Camera Orbiting & Combat Systems
 // ============================================================================
-static const double GROUND_ELEVATION = 635.0; // Calibrated ground elevation flush with Slums pavement tiles
+static const double GROUND_ELEVATION = 625.0; // Calibrated ground elevation flush with Slums pavement tiles
 static double g_playerX = 16710.0;
 static double g_playerY = GROUND_ELEVATION;
 static double g_playerZ = 3230.0;
-static float  g_playerYaw = 0.0f; // 0 = facing North (+Z)
+static float  g_playerYaw = 4.712389f; // Facing West (towards camera)
 static double g_velY = 0.0;
 static bool   g_isJumping = false;
 
-static float  g_camPitch = 12.0f * 0.0174532925f; // ~12 degrees downward
-static float  g_camYaw = 0.0f;                   // 0 = facing North (+Z)
-static float  g_camDist = 200.0f;                // 200 units behind player
+static float  g_camPitch = 8.0f * 0.0174532925f;  // ~8 degrees downward
+static float  g_camYaw = 1.5707963f;              // facing East (towards brick building & operative)
+static float  g_camDist = 380.0f;                 // 380 units back to frame head to toe and boots contact
 static int    g_lastMouseX = -1;
 static int    g_lastMouseY = -1;
 static bool   g_bRightMouseDown = false;
@@ -1626,7 +1640,14 @@ static void UpdatePlayerPositionAndPhysics(uintptr_t clientBase, void* curPlayer
             g_isJumping = false;
         }
     } else {
-        if (g_playerY < GROUND_ELEVATION) g_playerY = GROUND_ELEVATION;
+        if (g_playerY > GROUND_ELEVATION) {
+            g_playerY -= 950.0 * dt;
+            if (g_playerY <= GROUND_ELEVATION) {
+                g_playerY = GROUND_ELEVATION;
+            }
+        } else if (g_playerY < GROUND_ELEVATION) {
+            g_playerY = GROUND_ELEVATION;
+        }
     }
 
     // Walkway boundary collision: keep player safely on the barrens walkway
@@ -1725,13 +1746,13 @@ static void UpdateCamera(uintptr_t clientBase, void* pCam) {
     double* pTargetPosC8 = reinterpret_cast<double*>(reinterpret_cast<uintptr_t>(pCam) + 0xC8);
     if (pTargetPosC8) {
         pTargetPosC8[0] = g_playerX;
-        pTargetPosC8[1] = g_playerY + 45.0;
+        pTargetPosC8[1] = g_playerY + 28.0;
         pTargetPosC8[2] = g_playerZ;
     }
     double* pCamPos8 = reinterpret_cast<double*>(reinterpret_cast<uintptr_t>(pCam) + 8);
     if (pCamPos8) {
         pCamPos8[0] = g_playerX;
-        pCamPos8[1] = g_playerY + 45.0;
+        pCamPos8[1] = g_playerY + 28.0;
         pCamPos8[2] = g_playerZ;
     }
 
@@ -1743,10 +1764,10 @@ static void UpdateCamera(uintptr_t clientBase, void* pCam) {
     double camFwdY = -sinf(g_camPitch);
     double camFwdZ = cosf(g_camYaw) * cosf(g_camPitch);
 
-    // Over-the-shoulder chase camera
-    double camX = g_playerX - camFwdX * g_camDist + cosf(g_camYaw) * 15.0;
-    double camY = g_playerY + 45.0 - camFwdY * g_camDist;
-    double camZ = g_playerZ - camFwdZ * g_camDist - sinf(g_camYaw) * 15.0;
+    // Centered camera framing entire operative and ground contact
+    double camX = g_playerX - camFwdX * g_camDist;
+    double camY = g_playerY + 28.0 - camFwdY * g_camDist;
+    double camZ = g_playerZ - camFwdZ * g_camDist;
 
     float sp = sinf(g_camPitch * 0.5f);
     float cp = cosf(g_camPitch * 0.5f);
@@ -1886,16 +1907,14 @@ static void EnsureInWorldRendering(uintptr_t clientBase, void* pWorldMgr, DWORD 
             *reinterpret_cast<float**>(reinterpret_cast<DWORD>(pPlayer) + 0x94) = pPos;
         }
         if (pPos) {
-            if (pPos[1] < 600.0f || (pPos[0] == 0.0f && pPos[2] == 0.0f) || fabsf(pPos[0] - 16710.0f) > 300.0f || fabsf(pPos[2] - 3230.0f) > 300.0f) {
-                pPos[0] = 16710.0f;
-                pPos[1] = (float)GROUND_ELEVATION;
-                pPos[2] = 3230.0f;
-                pPos[3] = 1.0f;
-                pPos[4] = 0.0f;
-                pPos[5] = 1.0f;
-                pPos[15] = 1.0f;
-                Log("[mxohax] EnsureInWorld: Updated existing Player coordinates to Slums walkway (%.1f, %.1f, %.1f)\n", pPos[0], pPos[1], pPos[2]);
-            }
+            pPos[0] = 16710.0f;
+            pPos[1] = (float)GROUND_ELEVATION;
+            pPos[2] = 3230.0f;
+            pPos[3] = 1.0f;
+            pPos[4] = 0.0f;
+            pPos[5] = 1.0f;
+            pPos[15] = 1.0f;
+            Log("[mxohax] EnsureInWorld: Updated existing Player coordinates to Slums walkway (%.1f, %.1f, %.1f)\n", pPos[0], pPos[1], pPos[2]);
         }
         float* pRot = *reinterpret_cast<float**>(reinterpret_cast<DWORD>(pPlayer) + 0x98);
         if (!pRot) {
@@ -1992,9 +2011,9 @@ static void EnsureInWorldRendering(uintptr_t clientBase, void* pWorldMgr, DWORD 
     }
 
     // Configure Camera CVars
-    *reinterpret_cast<float*>(clientBase + 0x0089F2D0) = 12.0f;  // Pitch = 12 degrees down
-    *reinterpret_cast<float*>(clientBase + 0x0089F304) = 0.0f;   // Yaw = 0 degrees (facing North)
-    *reinterpret_cast<float*>(clientBase + 0x0089F338) = 200.0f; // Chase distance = 200.0 units
+    *reinterpret_cast<float*>(clientBase + 0x0089F2D0) = 8.0f;   // Pitch = 8 degrees down
+    *reinterpret_cast<float*>(clientBase + 0x0089F304) = 90.0f;  // Yaw = 90 degrees
+    *reinterpret_cast<float*>(clientBase + 0x0089F338) = 380.0f; // Chase distance = 380.0 units
     *reinterpret_cast<DWORD*>(clientBase + 0x0089EFAC) = 2;      // Default Camera Mode = 2 (Chase Cam)
     *reinterpret_cast<DWORD*>(clientBase + 0x008971C8) = 2;      // Enforce Camera_Mode = 2 (Third Person)
 
@@ -2009,10 +2028,10 @@ static void EnsureInWorldRendering(uintptr_t clientBase, void* pWorldMgr, DWORD 
             g_playerX = 16710.0;
             g_playerY = GROUND_ELEVATION;
             g_playerZ = 3230.0;
-            g_playerYaw = 0.0f;
-            g_camYaw = 0.0f;
-            g_camPitch = 12.0f * 0.0174532925f;
-            g_camDist = 200.0f;
+            g_playerYaw = 4.712389f;
+            g_camYaw = 1.5707963f;
+            g_camPitch = 8.0f * 0.0174532925f;
+            g_camDist = 380.0f;
 
             if (pPlayer) {
                 float* pPos = *reinterpret_cast<float**>(reinterpret_cast<DWORD>(pPlayer) + 0x94);
