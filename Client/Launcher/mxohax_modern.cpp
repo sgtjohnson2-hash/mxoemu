@@ -647,9 +647,11 @@ static bool s_playerEnteredWorld = false;
 static bool s_screen5DActive = false;
 static bool s_autoJackInDone = false;
 static int  s_screen5DFrames = 0;
+static bool s_charSheetVisible = false;
+static bool s_optionsVisible = false;
 
 static void __fastcall DetourSetControlVisible(void* pUI, void* /*edx*/, DWORD ctrlId, BOOL bVisible) {
-    if (ctrlId == 0x5D || ctrlId == 0x30 || ctrlId == 0x04 || ctrlId == 0x57) {
+    if (ctrlId == 0x5D || ctrlId == 0x30 || ctrlId == 0x04 || ctrlId == 0x57 || ctrlId == 0x42 || ctrlId == 0x47) {
         Log("[mxohax] SetControlVisible: 0x%02X (bVisible=%d)\n", ctrlId, bVisible ? 1 : 0);
     }
     if (ctrlId == 0x5D && bVisible) {
@@ -659,6 +661,14 @@ static void __fastcall DetourSetControlVisible(void* pUI, void* /*edx*/, DWORD c
     }
     if (s_inWorldSticky && bVisible && (ctrlId == 0x30 || ctrlId == 0x5D || ctrlId == 0x04 || ctrlId == 0x57)) {
         Log("[mxohax] SetControlVisible: 0x%02X suppressed while in-world!\n", ctrlId);
+        return;
+    }
+    if (s_inWorldSticky && bVisible && !s_charSheetVisible && ctrlId == 0x42) {
+        Log("[mxohax] SetControlVisible: 0x42 (Character Details) suppressed while in-world!\n");
+        return;
+    }
+    if (s_inWorldSticky && bVisible && !s_optionsVisible && ctrlId == 0x47) {
+        Log("[mxohax] SetControlVisible: 0x47 (Options) suppressed while in-world!\n");
         return;
     }
     if (OriginalSetControlVisible) OriginalSetControlVisible(pUI, ctrlId, bVisible);
@@ -1037,8 +1047,14 @@ static HRESULT STDMETHODCALLTYPE DetourCreateDevice(IDirect3D9* pD3D, UINT Adapt
         pPresentationParameters->BackBufferWidth = 1920;
         pPresentationParameters->BackBufferHeight = 1080;
     }
-    if (hFocusWindow) g_hGameWindow = hFocusWindow;
-    else if (pPresentationParameters && pPresentationParameters->hDeviceWindow) g_hGameWindow = pPresentationParameters->hDeviceWindow;
+    if (hFocusWindow) {
+        g_hGameWindow = hFocusWindow;
+        SetWindowPos(hFocusWindow, HWND_NOTOPMOST, 0, 0, 1920, 1080, SWP_SHOWWINDOW);
+    }
+    else if (pPresentationParameters && pPresentationParameters->hDeviceWindow) {
+        g_hGameWindow = pPresentationParameters->hDeviceWindow;
+        SetWindowPos(pPresentationParameters->hDeviceWindow, HWND_NOTOPMOST, 0, 0, 1920, 1080, SWP_SHOWWINDOW);
+    }
     HRESULT hr = OriginalCreateDevice(pD3D, Adapter, DeviceType, hFocusWindow, BehaviorFlags, pPresentationParameters, ppReturnedDeviceInterface);
     if (SUCCEEDED(hr) && ppReturnedDeviceInterface && *ppReturnedDeviceInterface) {
         Log("[mxohax] CreateDevice: pDevice=0x%p, FocusWindow=0x%p\n", *ppReturnedDeviceInterface, hFocusWindow);
@@ -1054,8 +1070,14 @@ static HRESULT STDMETHODCALLTYPE DetourCreateDeviceEx(IDirect3D9Ex* pD3D, UINT A
         pPresentationParameters->BackBufferWidth = 1920;
         pPresentationParameters->BackBufferHeight = 1080;
     }
-    if (hFocusWindow) g_hGameWindow = hFocusWindow;
-    else if (pPresentationParameters && pPresentationParameters->hDeviceWindow) g_hGameWindow = pPresentationParameters->hDeviceWindow;
+    if (hFocusWindow) {
+        g_hGameWindow = hFocusWindow;
+        SetWindowPos(hFocusWindow, HWND_NOTOPMOST, 0, 0, 1920, 1080, SWP_SHOWWINDOW);
+    }
+    else if (pPresentationParameters && pPresentationParameters->hDeviceWindow) {
+        g_hGameWindow = pPresentationParameters->hDeviceWindow;
+        SetWindowPos(pPresentationParameters->hDeviceWindow, HWND_NOTOPMOST, 0, 0, 1920, 1080, SWP_SHOWWINDOW);
+    }
     HRESULT hr = OriginalCreateDeviceEx(pD3D, Adapter, DeviceType, hFocusWindow, BehaviorFlags, pPresentationParameters, pFullscreenDisplayMode, ppReturnedDeviceInterface);
     if (SUCCEEDED(hr) && ppReturnedDeviceInterface && *ppReturnedDeviceInterface) {
         Log("[mxohax] CreateDeviceEx: pDevice=0x%p, FocusWindow=0x%p\n", *ppReturnedDeviceInterface, hFocusWindow);
@@ -1462,24 +1484,24 @@ static void ApplyOperativeAppearance(uintptr_t clientBase, void* pPlayer) {
 // ============================================================================
 // Locomotion, Physics, Camera Orbiting & Combat Systems
 // ============================================================================
-static const double SPAWN_GROUND_ELEVATION = 625.0; // Calibrated ground elevation flush with Slums pavement tiles
+static const double SPAWN_GROUND_ELEVATION = 603.5; // Calibrated ground elevation flush with Slums pavement tiles
 
 static double GetCalibratedGroundElevation(double x, double z) {
     // 1. Elevated platform / overpass walkway (where operative spawns at 16710, 3230)
     // Runs from X: 16560 to 16830, Z: 2850 to 3720
     if (x >= 16560.0 && x <= 16830.0 && z >= 2850.0 && z <= 3720.0) {
-        return 625.0; // True pavement tile surface (soles flush)
+        return 603.5; // True pavement tile surface (soles flush against concrete mesh)
     }
 
     // 2. Ledge / curb concrete barrier bordering the platform
     if (x > 16830.0 && x <= 16845.0 && z >= 2850.0 && z <= 3720.0) {
-        return 637.5; // Raised curb barrier
+        return 615.0; // Raised curb barrier
     }
 
     // 3. North ramp / stairs transition leading down to church / street level
     if (z > 3720.0 && z <= 3850.0 && x >= 16650.0 && x <= 16840.0) {
         double t = (z - 3720.0) / 130.0;
-        return 625.0 - t * (625.0 - 572.0); // Smooth ramp transition down to 572.0
+        return 603.5 - t * (603.5 - 572.0); // Smooth ramp transition down to 572.0
     }
 
     // 4. Church courtyard and street sidewalk / roadway level
@@ -1501,6 +1523,8 @@ static int    g_lastMouseY = -1;
 static bool   g_bRightMouseDown = false;
 static bool   g_bLeftMouseDown = false;
 static bool   g_bHumanInputActive = false;
+static bool   g_bPlayerIsMoving = false;
+static bool   s_keysDown[256] = {0};
 
 // Targeting system (Nearby Operative NPC P: charId=393 at 16802.3, 637.5, 3237.01)
 static bool   g_hasTarget = false;
@@ -1644,32 +1668,40 @@ static HudButtonId HitTestHudButton(int x, int y) {
         if (x >= 1096 && x <= 1190) return HUD_BTN_TACTIC_WITHDRAW;
     }
 
-    // 4. Compass and Docked buttons: Y=[940, 1080]
-    // Character Status button: [820, 1010] to [890, 1080]
-    if (x >= 820 && x <= 890 && y >= 1010 && y <= 1080) {
+    // 4. Compass and Docked buttons: Y=[900, 1080]
+    // Character Status button: [760, 930] to [890, 1080]
+    if (x >= 760 && x <= 890 && y >= 930 && y <= 1080) {
         return HUD_BTN_CHAR_STATUS;
     }
 
-    // Compass dial: [890, 940] to [1030, 1080]
-    if (x >= 890 && x <= 1030 && y >= 940 && y <= 1080) {
+    // Compass dial and cluster: [890, 900] to [1030, 1080]
+    if (x >= 890 && x <= 1030 && y >= 900 && y <= 1080) {
         return HUD_BTN_COMPASS;
     }
 
-    // Cell Phone button: [1030, 1010] to [1100, 1080]
-    if (x >= 1030 && x <= 1100 && y >= 1010 && y <= 1080) {
+    // Cell Phone button: [1030, 930] to [1160, 1080]
+    if (x >= 1030 && x <= 1160 && y >= 930 && y <= 1080) {
         return HUD_BTN_CELL_PHONE;
     }
 
-    // 5. Bottom Right buttons: [1800, 1010] to [1920, 1080]
-    if (y >= 1010 && y <= 1080) {
-        if (x >= 1800 && x <= 1870) return HUD_BTN_LATENCY;
-        if (x >= 1871 && x <= 1920) return HUD_BTN_OPTIONS;
+    // Broad Compass frame & dial fallback: [700, 900] to [1220, 1080]
+    if (x >= 700 && x <= 1220 && y >= 900 && y <= 1080) {
+        return HUD_BTN_COMPASS;
     }
 
-    // 6. Top Right Target / Vitals: [1680, 0] to [1920, 90]
-    if (x >= 1680 && x <= 1920 && y >= 0 && y <= 90) {
+    // 5. Bottom Right buttons & Latency: [1750, 1000] to [1920, 1080]
+    if (x >= 1750 && x <= 1920 && y >= 1000 && y <= 1080) {
+        if (x >= 1750 && x <= 1870) return HUD_BTN_LATENCY;
+        return HUD_BTN_OPTIONS;
+    }
+
+    // 6. Top Right Target / Vitals: [1550, 0] to [1920, 110]
+    if (x >= 1550 && x <= 1920 && y >= 0 && y <= 110) {
         return HUD_BTN_TARGET_VITALS;
     }
+
+    // 7. Chat Window & Toolbar boundary: [0, 750] to [520, 1080]
+    // Handled naturally by CLTWidgetManager and OriginalWndProc
 
     return HUD_BTN_NONE;
 }
@@ -1691,18 +1723,39 @@ static void EnforceControlRect(void* pUI, DWORD ctrlId, int left, int top, int w
 
 static void LockAllHudFrames(uintptr_t clientBase, void* pUI) {
     if (!pUI) return;
-    // 1. Compass / Radar: Docked bottom-center, exactly centered at X=960, flush at bottom Y=1014..1080
-    EnforceControlRect(pUI, 0x27, 832, 1014, 256, 66);
-    // 2. Player Window (Quickbar, IS/Health meters, Combat tactics): Docked top-center
-    EnforceControlRect(pUI, 0x1B, 680, 0, 560, 105);
-    // 3. Target Status Frame: Docked top-right
-    EnforceControlRect(pUI, 0x22, 1680, 0, 240, 90);
-    // 4. Main Chat Window: Docked bottom-left
-    EnforceControlRect(pUI, 0x02, 10, 780, 500, 260);
-    // 5. Chat Toolbar: Below chat window
-    EnforceControlRect(pUI, 0x03, 10, 1040, 500, 35);
-    // 6. Network Latency Meter: Docked bottom-right
-    EnforceControlRect(pUI, 0x4D, 1800, 1040, 110, 35);
+    int screenW = clientBase ? *reinterpret_cast<int*>(clientBase + 0x00896CCC) : 1920;
+    int screenH = clientBase ? *reinterpret_cast<int*>(clientBase + 0x00896D04) : 1080;
+    if (screenW <= 0 || screenH <= 0) {
+        if (g_hGameWindow && IsWindow(g_hGameWindow)) {
+            RECT rc;
+            GetClientRect(g_hGameWindow, &rc);
+            screenW = rc.right - rc.left;
+            screenH = rc.bottom - rc.top;
+        }
+    }
+    if (screenW <= 0) screenW = 1920;
+    if (screenH <= 0) screenH = 1080;
+
+    // 1. Compass / Radar (0x27): Docked bottom-center, exactly centered at screenW / 2
+    EnforceControlRect(pUI, 0x27, (screenW / 2) - 128, screenH - 66, 256, 66);
+    // 2. Player Window (Quickbar, IS/Health meters, Combat tactics) (0x1B): Docked top-center
+    EnforceControlRect(pUI, 0x1B, (screenW / 2) - 280, 0, 560, 105);
+    // 3. Target Status Frame (0x22): Docked top-right
+    EnforceControlRect(pUI, 0x22, screenW - 240, 0, 240, 90);
+    // 4. Main Chat Window (0x02): Docked bottom-left
+    EnforceControlRect(pUI, 0x02, 10, screenH - 300, 500, 260);
+    // 5. Chat Toolbar (0x03): Below chat window
+    EnforceControlRect(pUI, 0x03, 10, screenH - 40, 500, 35);
+    // 6. Network Latency Meter (0x4D): Docked bottom-right
+    EnforceControlRect(pUI, 0x4D, screenW - 120, screenH - 40, 110, 35);
+    // 7. Character Status (0x42): Centered popup dialog (only if active)
+    if (s_charSheetVisible) {
+        EnforceControlRect(pUI, 0x42, (screenW / 2) - 200, (screenH / 2) - 200, 400, 400);
+    }
+    // 8. Options Window (0x47): Centered popup dialog (only if active)
+    if (s_optionsVisible) {
+        EnforceControlRect(pUI, 0x47, (screenW / 2) - 200, (screenH / 2) - 200, 400, 400);
+    }
 }
 
 static void TriggerNativeIdleTransition(uintptr_t clientBase) {
@@ -1876,7 +1929,17 @@ static void ExecuteHudButtonAction(uintptr_t clientBase, HudButtonId btnId, int 
         case HUD_BTN_CHAR_STATUS: {
             Log("[mxohax] UI BUTTON CLICK: Character Status button clicked at (%d, %d)\n", mx, my);
             if (pUI && !IsBadReadPtr(pUI, 0x100)) {
-                __try { pSetVisible(pUI, 0x42, 1); } __except (EXCEPTION_EXECUTE_HANDLER) {}
+                typedef void* (__thiscall *CreateControl_t)(void* pUI, DWORD ctrlId);
+                CreateControl_t pCreateControl = reinterpret_cast<CreateControl_t>(clientBase + 0x0001BC10);
+                void** ppCtrl = reinterpret_cast<void**>(reinterpret_cast<uintptr_t>(pUI) + 0x28 + (0x42 * 4));
+                s_charSheetVisible = !s_charSheetVisible;
+                if (s_charSheetVisible) {
+                    if (!ppCtrl || !*ppCtrl) pCreateControl(pUI, 0x42);
+                    __try { pSetVisible(pUI, 0x42, 1); } __except (EXCEPTION_EXECUTE_HANDLER) {}
+                } else {
+                    if (OriginalHideControl) OriginalHideControl(pUI, 0x42);
+                    __try { pSetVisible(pUI, 0x42, 0); } __except (EXCEPTION_EXECUTE_HANDLER) {}
+                }
             }
             break;
         }
@@ -1888,7 +1951,17 @@ static void ExecuteHudButtonAction(uintptr_t clientBase, HudButtonId btnId, int 
         case HUD_BTN_OPTIONS: {
             Log("[mxohax] UI BUTTON CLICK: Options/Checklist button clicked at (%d, %d)\n", mx, my);
             if (pUI && !IsBadReadPtr(pUI, 0x100)) {
-                __try { pSetVisible(pUI, 0x47, 1); } __except (EXCEPTION_EXECUTE_HANDLER) {}
+                typedef void* (__thiscall *CreateControl_t)(void* pUI, DWORD ctrlId);
+                CreateControl_t pCreateControl = reinterpret_cast<CreateControl_t>(clientBase + 0x0001BC10);
+                void** ppCtrl = reinterpret_cast<void**>(reinterpret_cast<uintptr_t>(pUI) + 0x28 + (0x47 * 4));
+                s_optionsVisible = !s_optionsVisible;
+                if (s_optionsVisible) {
+                    if (!ppCtrl || !*ppCtrl) pCreateControl(pUI, 0x47);
+                    __try { pSetVisible(pUI, 0x47, 1); } __except (EXCEPTION_EXECUTE_HANDLER) {}
+                } else {
+                    if (OriginalHideControl) OriginalHideControl(pUI, 0x47);
+                    __try { pSetVisible(pUI, 0x47, 0); } __except (EXCEPTION_EXECUTE_HANDLER) {}
+                }
             }
             break;
         }
@@ -1918,15 +1991,30 @@ static LRESULT CALLBACK SubclassWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPA
     if (winH <= 0) winH = 1080;
 
     switch (uMsg) {
+        case WM_ACTIVATE:
+        case WM_SETFOCUS: {
+            break;
+        }
+        case WM_KILLFOCUS: {
+            memset(s_keysDown, 0, sizeof(s_keysDown));
+            g_bPlayerIsMoving = false;
+            break;
+        }
         case WM_MOUSEMOVE: {
             short mx = (short)LOWORD(lParam);
             short my = (short)HIWORD(lParam);
-            int normX = (int)((double)mx * 1920.0 / (double)winW);
-            int normY = (int)((double)my * 1080.0 / (double)winH);
+
+            int normX = (winW > 0) ? (int)((double)mx * 1920.0 / (double)winW) : mx;
+            int normY = (winH > 0) ? (int)((double)my * 1080.0 / (double)winH) : my;
+            if (normX < 0) normX = 0;
+            if (normX > 1920) normX = 1920;
+            if (normY < 0) normY = 0;
+            if (normY > 1080) normY = 1080;
 
             if (clientBase) {
                 // Permanently keep dragging active control global neutralized
                 *reinterpret_cast<DWORD*>(clientBase + 0x00849394) = 0xFFFFFFFF;
+                DispatchInputEventToClient(clientBase, 0x65766F4D, normX, normY); // 'Move'
             }
 
             // Camera orbiting:
@@ -1945,13 +2033,22 @@ static LRESULT CALLBACK SubclassWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPA
             }
             g_lastMouseX = mx;
             g_lastMouseY = my;
-            return 0; // Handled, prevent any background CUI dragging in OriginalWndProc
+
+            return OriginalWndProc ? CallWindowProcA(OriginalWndProc, hWnd, uMsg, wParam, lParam) : DefWindowProcA(hWnd, uMsg, wParam, lParam);
         }
         case WM_LBUTTONDOWN: {
+            SetFocus(hWnd);
+            SetActiveWindow(hWnd);
+
             short mx = (short)LOWORD(lParam);
             short my = (short)HIWORD(lParam);
-            int normX = (int)((double)mx * 1920.0 / (double)winW);
-            int normY = (int)((double)my * 1080.0 / (double)winH);
+
+            int normX = (winW > 0) ? (int)((double)mx * 1920.0 / (double)winW) : mx;
+            int normY = (winH > 0) ? (int)((double)my * 1080.0 / (double)winH) : my;
+            if (normX < 0) normX = 0;
+            if (normX > 1920) normX = 1920;
+            if (normY < 0) normY = 0;
+            if (normY > 1080) normY = 1080;
 
             if (clientBase) {
                 *reinterpret_cast<DWORD*>(clientBase + 0x00849394) = 0xFFFFFFFF;
@@ -1981,19 +2078,28 @@ static LRESULT CALLBACK SubclassWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPA
                 if (hitBtn != HUD_BTN_NONE) {
                     ExecuteHudButtonAction(clientBase, hitBtn, normX, normY);
                 }
-                return 0; // Handled! Do not drag 3D camera
             } else {
                 g_bMouseDownOnUI = false;
                 g_pressedHudButton = (int)HUD_BTN_NONE;
-                return 0; // Click in 3D world space: do NOT dispatch to CUI so HUD frames NEVER drag
             }
-            break;
+
+            if (clientBase) {
+                DispatchInputEventToClient(clientBase, 0x6E444C4D, normX, normY); // 'MLDn'
+            }
+
+            return OriginalWndProc ? CallWindowProcA(OriginalWndProc, hWnd, uMsg, wParam, lParam) : DefWindowProcA(hWnd, uMsg, wParam, lParam);
         }
         case WM_LBUTTONUP: {
+            ReleaseCapture(); // Ensure no mouse capture holds UI controls
             short mx = (short)LOWORD(lParam);
             short my = (short)HIWORD(lParam);
-            int normX = (int)((double)mx * 1920.0 / (double)winW);
-            int normY = (int)((double)my * 1080.0 / (double)winH);
+
+            int normX = (winW > 0) ? (int)((double)mx * 1920.0 / (double)winW) : mx;
+            int normY = (winH > 0) ? (int)((double)my * 1080.0 / (double)winH) : my;
+            if (normX < 0) normX = 0;
+            if (normX > 1920) normX = 1920;
+            if (normY < 0) normY = 0;
+            if (normY > 1080) normY = 1080;
 
             if (clientBase) {
                 *reinterpret_cast<DWORD*>(clientBase + 0x00849394) = 0xFFFFFFFF;
@@ -2020,21 +2126,49 @@ static LRESULT CALLBACK SubclassWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPA
 
                 g_bMouseDownOnUI = false;
                 g_pressedHudButton = (int)HUD_BTN_NONE;
-                return 0; // Handled
             }
             g_bMouseDownOnUI = false;
             g_pressedHudButton = (int)HUD_BTN_NONE;
-            return 0;
+
+            if (clientBase) {
+                DispatchInputEventToClient(clientBase, 0x70554C4D, normX, normY); // 'MLUp'
+            }
+
+            return OriginalWndProc ? CallWindowProcA(OriginalWndProc, hWnd, uMsg, wParam, lParam) : DefWindowProcA(hWnd, uMsg, wParam, lParam);
         }
         case WM_RBUTTONDOWN: {
+            SetFocus(hWnd);
             g_bRightMouseDown = true;
             g_lastMouseX = (short)LOWORD(lParam);
             g_lastMouseY = (short)HIWORD(lParam);
-            return 0;
+            short mx = (short)LOWORD(lParam);
+            short my = (short)HIWORD(lParam);
+            int normX = (winW > 0) ? (int)((double)mx * 1920.0 / (double)winW) : mx;
+            int normY = (winH > 0) ? (int)((double)my * 1080.0 / (double)winH) : my;
+            if (clientBase) {
+                DispatchInputEventToClient(clientBase, 0x6E44524D, normX, normY); // 'MRDn'
+            }
+            return OriginalWndProc ? CallWindowProcA(OriginalWndProc, hWnd, uMsg, wParam, lParam) : DefWindowProcA(hWnd, uMsg, wParam, lParam);
         }
         case WM_RBUTTONUP: {
+            ReleaseCapture();
             g_bRightMouseDown = false;
-            return 0;
+            short mx = (short)LOWORD(lParam);
+            short my = (short)HIWORD(lParam);
+            int normX = (winW > 0) ? (int)((double)mx * 1920.0 / (double)winW) : mx;
+            int normY = (winH > 0) ? (int)((double)my * 1080.0 / (double)winH) : my;
+            if (clientBase) {
+                DispatchInputEventToClient(clientBase, 0x7055524D, normX, normY); // 'MRUp'
+            }
+            return OriginalWndProc ? CallWindowProcA(OriginalWndProc, hWnd, uMsg, wParam, lParam) : DefWindowProcA(hWnd, uMsg, wParam, lParam);
+        }
+        case WM_CAPTURECHANGED: {
+            ReleaseCapture();
+            g_bMouseDownOnUI = false;
+            g_bLeftMouseDown = false;
+            g_bRightMouseDown = false;
+            g_pressedHudButton = (int)HUD_BTN_NONE;
+            return OriginalWndProc ? CallWindowProcA(OriginalWndProc, hWnd, uMsg, wParam, lParam) : DefWindowProcA(hWnd, uMsg, wParam, lParam);
         }
         case WM_MOUSEWHEEL: {
             short delta = GET_WHEEL_DELTA_WPARAM(wParam);
@@ -2042,11 +2176,16 @@ static LRESULT CALLBACK SubclassWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPA
             if (g_camDist < 60.0f) g_camDist = 60.0f;
             if (g_camDist > 500.0f) g_camDist = 500.0f;
             g_bHumanInputActive = true;
-            return 0;
+            return OriginalWndProc ? CallWindowProcA(OriginalWndProc, hWnd, uMsg, wParam, lParam) : DefWindowProcA(hWnd, uMsg, wParam, lParam);
         }
         case WM_KEYDOWN: {
             g_bHumanInputActive = true;
-            if (wParam == 'P') {
+            if (wParam < 256) {
+                s_keysDown[wParam] = true;
+                if (wParam >= 'A' && wParam <= 'Z') s_keysDown[wParam + 32] = true;
+                if (wParam >= 'a' && wParam <= 'z') s_keysDown[wParam - 32] = true;
+            }
+            if (wParam == 'P' || wParam == 'p') {
                 TriggerPhoneCall(clientBase);
             } else if (wParam == VK_TAB) {
                 SetTargetOperative(clientBase, "P", 393, 16802.3, SPAWN_GROUND_ELEVATION, 3237.01);
@@ -2059,7 +2198,18 @@ static LRESULT CALLBACK SubclassWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPA
             } else if (wParam == VK_ESCAPE) {
                 ExecuteHudButtonAction(clientBase, HUD_BTN_OPTIONS, 0, 0);
             }
-            return 0;
+            return OriginalWndProc ? CallWindowProcA(OriginalWndProc, hWnd, uMsg, wParam, lParam) : DefWindowProcA(hWnd, uMsg, wParam, lParam);
+        }
+        case WM_KEYUP: {
+            if (wParam < 256) {
+                s_keysDown[wParam] = false;
+                if (wParam >= 'A' && wParam <= 'Z') s_keysDown[wParam + 32] = false;
+                if (wParam >= 'a' && wParam <= 'z') s_keysDown[wParam - 32] = false;
+            }
+            return OriginalWndProc ? CallWindowProcA(OriginalWndProc, hWnd, uMsg, wParam, lParam) : DefWindowProcA(hWnd, uMsg, wParam, lParam);
+        }
+        case WM_CHAR: {
+            return OriginalWndProc ? CallWindowProcA(OriginalWndProc, hWnd, uMsg, wParam, lParam) : DefWindowProcA(hWnd, uMsg, wParam, lParam);
         }
     }
     return OriginalWndProc ? CallWindowProcA(OriginalWndProc, hWnd, uMsg, wParam, lParam) : DefWindowProcA(hWnd, uMsg, wParam, lParam);
@@ -2488,9 +2638,9 @@ static void EnsureInWorldRendering(uintptr_t clientBase, void* pWorldMgr, DWORD 
             g_playerY = SPAWN_GROUND_ELEVATION;
             g_playerZ = 3230.0;
             g_playerYaw = 0.0f;
-            g_camYaw = 0.0f;
-            g_camPitch = 12.0f * 0.0174532925f;
-            g_camDist = 280.0f;
+            g_camYaw = 3.14159f; // Facing South, directly observing player's front and boots flush on tiles
+            g_camPitch = 0.1745f; // 10 degrees downward pitch framing full body & feet
+            g_camDist = 420.0f;  // Crisp framing of operative face down to boots resting on tiles
 
             if (pPlayer) {
                 float* pPos = *reinterpret_cast<float**>(reinterpret_cast<DWORD>(pPlayer) + 0x94);
@@ -2551,6 +2701,16 @@ static void EnsureInWorldRendering(uintptr_t clientBase, void* pWorldMgr, DWORD 
             *reinterpret_cast<BYTE*>(reinterpret_cast<uintptr_t>(pChatMgr) + 0x58) = 1;
             Log("[mxohax] EnsureInWorld: Activated Chat Manager tabs!\n");
         }
+
+        // Ensure optional dialogs (0x42 Char Sheet, 0x47 Options) remain hidden initially
+        __try {
+            if (OriginalHideControl) {
+                OriginalHideControl(pUI, 0x42);
+                OriginalHideControl(pUI, 0x47);
+            }
+            pSetVisible(pUI, 0x42, 0);
+            pSetVisible(pUI, 0x47, 0);
+        } __except (EXCEPTION_EXECUTE_HANDLER) {}
 
         LockAllHudFrames(clientBase, pUI);
         TriggerNativeIdleTransition(clientBase);
@@ -2617,9 +2777,10 @@ static void EnsureInWorldRendering(uintptr_t clientBase, void* pWorldMgr, DWORD 
     *reinterpret_cast<BYTE*>(reinterpret_cast<DWORD>(pWorldMgr) + 0x27) = 1;
     if (pShell) {
         HWND hWnd = *reinterpret_cast<HWND*>(pShell + 0x14);
+        if (!hWnd) hWnd = g_hGameWindow;
         if (hWnd) {
             ShowWindow(hWnd, SW_RESTORE);
-            SetWindowPos(hWnd, HWND_TOPMOST, 0, 0, 1920, 1080, SWP_SHOWWINDOW | SWP_NOMOVE | SWP_NOSIZE);
+            SetWindowPos(hWnd, HWND_NOTOPMOST, 0, 0, 1920, 1080, SWP_SHOWWINDOW);
             SetForegroundWindow(hWnd);
         }
     }
@@ -2680,11 +2841,13 @@ static void __fastcall DetourFrameTick(void* pThis, void* /*edx*/) {
         if (curPlayer && !IsBadReadPtr(curPlayer, 0xB0)) {
             void* pActor = *reinterpret_cast<void**>(reinterpret_cast<uintptr_t>(curPlayer) + 0xA8);
             if (pActor && !IsBadReadPtr(pActor, 0x690) && !g_isJumping) {
-                bool keyW = (GetAsyncKeyState('W') & 0x8000) != 0;
-                bool keyS = (GetAsyncKeyState('S') & 0x8000) != 0;
-                bool keyA = (GetAsyncKeyState('A') & 0x8000) != 0;
-                bool keyD = (GetAsyncKeyState('D') & 0x8000) != 0;
-                if (!keyW && !keyS && !keyA && !keyD) {
+                bool kMove = s_keysDown['W'] || s_keysDown['w'] || ((GetAsyncKeyState('W') & 0x8000) != 0) || ((GetAsyncKeyState(VK_UP) & 0x8000) != 0) ||
+                             s_keysDown['S'] || s_keysDown['s'] || ((GetAsyncKeyState('S') & 0x8000) != 0) || ((GetAsyncKeyState(VK_DOWN) & 0x8000) != 0) ||
+                             s_keysDown['A'] || s_keysDown['a'] || ((GetAsyncKeyState('A') & 0x8000) != 0) || ((GetAsyncKeyState(VK_LEFT) & 0x8000) != 0) ||
+                             s_keysDown['D'] || s_keysDown['d'] || ((GetAsyncKeyState('D') & 0x8000) != 0) || ((GetAsyncKeyState(VK_RIGHT) & 0x8000) != 0);
+                if (kMove) {
+                    *reinterpret_cast<BYTE*>(reinterpret_cast<uintptr_t>(pActor) + 0x4EE) = 0; // 0 = in motion
+                } else if (!g_bPlayerIsMoving) {
                     *reinterpret_cast<BYTE*>(reinterpret_cast<uintptr_t>(pActor) + 0x4EE) = 1;
                     *reinterpret_cast<double*>(reinterpret_cast<uintptr_t>(pActor) + 0x510) = 0.0;
                     *reinterpret_cast<double*>(reinterpret_cast<uintptr_t>(pActor) + 0x518) = 0.0;
@@ -2758,6 +2921,15 @@ static void __fastcall DetourFrameTick(void* pThis, void* /*edx*/) {
                         pSetVisible(pUI, id, 1);
                     } __except (EXCEPTION_EXECUTE_HANDLER) {}
                 }
+                // Ensure dialogs (0x42 Char Sheet, 0x47 Options) remain hidden initially
+                __try {
+                    if (OriginalHideControl) {
+                        OriginalHideControl(pUI, 0x42);
+                        OriginalHideControl(pUI, 0x47);
+                    }
+                    pSetVisible(pUI, 0x42, 0);
+                    pSetVisible(pUI, 0x47, 0);
+                } __except (EXCEPTION_EXECUTE_HANDLER) {}
                 LockAllHudFrames(clientBase, pUI);
                 TriggerNativeIdleTransition(clientBase);
             }
@@ -2774,14 +2946,35 @@ static void __fastcall DetourFrameTick(void* pThis, void* /*edx*/) {
         if (dt < 0.001) dt = 0.01667;
         s_lastTickTime = now;
 
+        // Reset subclass if current hooked window was destroyed
+        if (OriginalWndProc && (!g_hGameWindow || !IsWindow(g_hGameWindow))) {
+            Log("[mxohax] Subclassed window 0x%p died or invalid. Resetting OriginalWndProc.\n", g_hGameWindow);
+            OriginalWndProc = nullptr;
+            g_hGameWindow = NULL;
+        }
+
         // Subclass window if not yet hooked
         if (!OriginalWndProc) {
-            HWND hWnd = g_hGameWindow;
-            if (!hWnd) hWnd = *reinterpret_cast<HWND*>(pShell + 0x14);
-            if (!hWnd) hWnd = GetActiveWindow();
-            if (hWnd) {
+            HWND hWnd = NULL;
+            if (pShell && !IsBadReadPtr((void*)pShell, 0x30)) {
+                HWND shellWnd = *reinterpret_cast<HWND*>(pShell + 0x14);
+                if (shellWnd && IsWindow(shellWnd)) hWnd = shellWnd;
+            }
+            if (!hWnd && g_hGameWindow && IsWindow(g_hGameWindow)) {
+                hWnd = g_hGameWindow;
+            }
+            if (!hWnd) {
+                HWND act = GetActiveWindow();
+                if (act && IsWindow(act)) hWnd = act;
+            }
+            if (!hWnd) {
+                HWND fg = GetForegroundWindow();
+                if (fg && IsWindow(fg)) hWnd = fg;
+            }
+            if (hWnd && IsWindow(hWnd)) {
+                g_hGameWindow = hWnd;
                 OriginalWndProc = (WNDPROC)SetWindowLongPtrA(hWnd, GWLP_WNDPROC, (LONG_PTR)SubclassWndProc);
-                Log("[mxohax] Subclassed game window 0x%p for full input handling!\n", hWnd);
+                Log("[mxohax] Subclassed game window 0x%p for full input handling! (OriginalWndProc=0x%p)\n", hWnd, OriginalWndProc);
             }
         }
 
@@ -2794,7 +2987,7 @@ static void __fastcall DetourFrameTick(void* pThis, void* /*edx*/) {
                 if (fCmd) {
                     int cx = 0, cy = 0;
                     if (fscanf(fCmd, "%d %d", &cx, &cy) == 2) {
-                        HWND hTargetWnd = g_hGameWindow ? g_hGameWindow : GetActiveWindow();
+                        HWND hTargetWnd = (g_hGameWindow && IsWindow(g_hGameWindow)) ? g_hGameWindow : GetActiveWindow();
                         if (hTargetWnd) {
                             Log("[mxohax] UI COMMAND TRIGGER: Simulating click at (%d, %d)\n", cx, cy);
                             SubclassWndProc(hTargetWnd, WM_MOUSEMOVE, 0, MAKELPARAM(cx, cy));
@@ -2806,32 +2999,45 @@ static void __fastcall DetourFrameTick(void* pThis, void* /*edx*/) {
                 }
                 DeleteFileA("E:\\Games\\The Matrix Online\\ui_click_cmd.txt");
             }
+            // Check for simulated key command (E:\Games\The Matrix Online\ui_key_cmd.txt)
+            if (GetFileAttributesA("E:\\Games\\The Matrix Online\\ui_key_cmd.txt") != INVALID_FILE_ATTRIBUTES) {
+                FILE* fKey = fopen("E:\\Games\\The Matrix Online\\ui_key_cmd.txt", "r");
+                if (fKey) {
+                    char kChar = 0;
+                    int kDown = 0;
+                    if (fscanf(fKey, " %c %d", &kChar, &kDown) == 2) {
+                        unsigned char vk = (unsigned char)toupper(kChar);
+                        s_keysDown[vk] = (kDown != 0);
+                        Log("[mxohax] UI KEY COMMAND TRIGGER: Key '%c' (%d) -> %s\n", kChar, (int)vk, kDown ? "DOWN" : "UP");
+                    }
+                    fclose(fKey);
+                }
+                DeleteFileA("E:\\Games\\The Matrix Online\\ui_key_cmd.txt");
+            }
         }
 
-        // Check human keyboard inputs
-        bool keyW = (GetAsyncKeyState('W') & 0x8000) != 0;
-        bool keyS = (GetAsyncKeyState('S') & 0x8000) != 0;
-        bool keyA = (GetAsyncKeyState('A') & 0x8000) != 0;
-        bool keyD = (GetAsyncKeyState('D') & 0x8000) != 0;
-        bool keySpace = (GetAsyncKeyState(VK_SPACE) & 0x8000) != 0;
-        bool keyShift = (GetAsyncKeyState(VK_SHIFT) & 0x8000) != 0;
-        bool keyLeft = (GetAsyncKeyState(VK_LEFT) & 0x8000) != 0;
-        bool keyRight = (GetAsyncKeyState(VK_RIGHT) & 0x8000) != 0;
-        bool keyUp = (GetAsyncKeyState(VK_UP) & 0x8000) != 0;
-        bool keyDown = (GetAsyncKeyState(VK_DOWN) & 0x8000) != 0;
+        // Check human keyboard inputs (window messages + GetAsyncKeyState fallback)
+        bool keyW = s_keysDown['W'] || s_keysDown['w'] || ((GetAsyncKeyState('W') & 0x8000) != 0) || ((GetAsyncKeyState(VK_UP) & 0x8000) != 0);
+        bool keyS = s_keysDown['S'] || s_keysDown['s'] || ((GetAsyncKeyState('S') & 0x8000) != 0) || ((GetAsyncKeyState(VK_DOWN) & 0x8000) != 0);
+        bool keyA = s_keysDown['A'] || s_keysDown['a'] || ((GetAsyncKeyState('A') & 0x8000) != 0) || ((GetAsyncKeyState(VK_LEFT) & 0x8000) != 0);
+        bool keyD = s_keysDown['D'] || s_keysDown['d'] || ((GetAsyncKeyState('D') & 0x8000) != 0) || ((GetAsyncKeyState(VK_RIGHT) & 0x8000) != 0);
+        bool keySpace = s_keysDown[VK_SPACE] || ((GetAsyncKeyState(VK_SPACE) & 0x8000) != 0);
+        bool keyShift = s_keysDown[VK_SHIFT] || ((GetAsyncKeyState(VK_SHIFT) & 0x8000) != 0);
+        bool keyLeft = s_keysDown[VK_LEFT] || ((GetAsyncKeyState(VK_LEFT) & 0x8000) != 0);
+        bool keyRight = s_keysDown[VK_RIGHT] || ((GetAsyncKeyState(VK_RIGHT) & 0x8000) != 0);
 
         g_bHumanInputActive = true;
 
         double speed = keyShift ? 480.0 : 280.0;
         double moveFwd = 0.0;
         double moveRight = 0.0;
-        if (keyW || keyUp) moveFwd += 1.0;
-        if (keyS || keyDown) moveFwd -= 1.0;
+        if (keyW) moveFwd += 1.0;
+        if (keyS) moveFwd -= 1.0;
         if (keyD) moveRight += 1.0;
         if (keyA) moveRight -= 1.0;
 
-        if (keyLeft)  g_camYaw -= 2.0f * (float)dt;
-        if (keyRight) g_camYaw += 2.0f * (float)dt;
+        if (keyLeft && !keyA)  g_camYaw -= 2.0f * (float)dt;
+        if (keyRight && !keyD) g_camYaw += 2.0f * (float)dt;
 
         bool isMoving = false;
         double actVelX = 0.0;
@@ -2857,6 +3063,7 @@ static void __fastcall DetourFrameTick(void* pThis, void* /*edx*/) {
                 isMoving = true;
             }
         }
+        g_bPlayerIsMoving = isMoving;
 
         double curGround = GetCalibratedGroundElevation(g_playerX, g_playerZ);
         if (keySpace && !g_isJumping && g_playerY <= curGround + 2.0) {
@@ -2871,7 +3078,7 @@ static void __fastcall DetourFrameTick(void* pThis, void* /*edx*/) {
             void* pActor = *reinterpret_cast<void**>(reinterpret_cast<uintptr_t>(curPlayer) + 0xA8);
             UpdatePlayerPositionAndPhysics(clientBase, curPlayer, dt, isMoving, actVelX, actVelZ);
 
-            if (pActor && !IsBadReadPtr(pActor, 0x690) && (s_tickCount % 60 == 0)) {
+            if (pActor && !IsBadReadPtr(pActor, 0x690) && (s_inWorldTicks < 120 || (s_tickCount % 30 == 0))) {
                 typedef void (__thiscall *ShowLocalPlayer_t)(void* pActor);
                 ShowLocalPlayer_t pShowActor = reinterpret_cast<ShowLocalPlayer_t>(clientBase + 0x004EAB80);
                 pShowActor(pActor);
@@ -2896,7 +3103,7 @@ static void __fastcall DetourFrameTick(void* pThis, void* /*edx*/) {
             UpdateCamera(clientBase, pCam);
 
             static int s_camTickLog = 0;
-            if (++s_camTickLog % 60 == 0) {
+            if (++s_camTickLog % 10 == 0 || isMoving) {
                 Log("[mxohax] DetourFrameTick: Player=(%.1f, %.1f, %.1f, yaw=%.2f) CamYaw=%.2f Pitch=%.2f Dist=%.1f Jumping=%d Target='%s'\n",
                     g_playerX, g_playerY, g_playerZ, g_playerYaw, g_camYaw, g_camPitch, g_camDist, (int)g_isJumping, g_hasTarget ? g_targetName : "None");
             }
@@ -2919,6 +3126,11 @@ static void __fastcall DetourFrameTick(void* pThis, void* /*edx*/) {
             }
         }
 
+        // Lock HUD frames to docked coordinates every single frame tick
+        if (pUI) {
+            LockAllHudFrames(clientBase, pUI);
+        }
+
         // Periodic HUD visibility re-assertion & Chat Window activation
         static int s_hudTickCheck = 0;
         if (++s_hudTickCheck % 60 == 0) {
@@ -2934,7 +3146,6 @@ static void __fastcall DetourFrameTick(void* pThis, void* /*edx*/) {
                 if (pChatMgr && !IsBadReadPtr(pChatMgr, 0x60)) {
                     *reinterpret_cast<BYTE*>(reinterpret_cast<uintptr_t>(pChatMgr) + 0x58) = 1;
                 }
-                LockAllHudFrames(clientBase, pUI);
             }
         }
 
@@ -3752,10 +3963,21 @@ static void ApplyClientPatches(HMODULE hClient) {
         Log("[mxohax] SUCCESS: Patched client.dll + 0x000EAAC0 (ret 0) to permanently neutralize client exit loop!\n");
     }
 
+    // Patch N0: 0x000182E0: 5 bytes: xor eax, eax; ret 0x0C (31 C0 C2 0C 00)
+    // Completely disables internal CUI control drag repositioning without stack corruption
+    LPVOID pDragHandler = reinterpret_cast<LPVOID>(clientBase + 0x000182E0);
+    DWORD oldProtDrag = 0;
+    if (VirtualProtect(pDragHandler, 5, PAGE_EXECUTE_READWRITE, &oldProtDrag)) {
+        BYTE patchDrag0[5] = { 0x31, 0xC0, 0xC2, 0x0C, 0x00 }; // xor eax, eax; ret 0x0C
+        memcpy(pDragHandler, patchDrag0, 5);
+        VirtualProtect(pDragHandler, 5, oldProtDrag, &oldProtDrag);
+        FlushInstructionCache(GetCurrentProcess(), pDragHandler, 5);
+        Log("[mxohax] SUCCESS: Patched client.dll + 0x000182E0 (xor eax, eax; ret 0x0C) to permanently disable CUI control repositioning!\n");
+    }
+
     // Patch N1: 0x000184E0: 3 bytes: xor eax, eax; ret (31 C0 C3)
     // Completely disables CUI::StartDraggingControl so dragging is never initiated
     LPVOID pStartDrag = reinterpret_cast<LPVOID>(clientBase + 0x000184E0);
-    DWORD oldProtDrag = 0;
     if (VirtualProtect(pStartDrag, 3, PAGE_EXECUTE_READWRITE, &oldProtDrag)) {
         BYTE patchDrag[3] = { 0x31, 0xC0, 0xC3 }; // xor eax, eax; ret
         memcpy(pStartDrag, patchDrag, 3);
@@ -3778,17 +4000,7 @@ static void ApplyClientPatches(HMODULE hClient) {
     // Neutralize active dragging global
     *reinterpret_cast<DWORD*>(clientBase + 0x00849394) = 0xFFFFFFFF;
 
-    // Patch N3: 0x001A4D25: 7 bytes: NOP * 7 (90 90 90 90 90 90 90)
-    // Prevents client.dll from destroying the stationary idle flag [pActor + 0x4EE] to 0 every tick
-    LPVOID pIdleReset = reinterpret_cast<LPVOID>(clientBase + 0x001A4D25);
-    DWORD oldProtIdle = 0;
-    if (VirtualProtect(pIdleReset, 7, PAGE_EXECUTE_READWRITE, &oldProtIdle)) {
-        BYTE nop7[7] = { 0x90, 0x90, 0x90, 0x90, 0x90, 0x90, 0x90 };
-        memcpy(pIdleReset, nop7, 7);
-        VirtualProtect(pIdleReset, 7, oldProtIdle, &oldProtIdle);
-        FlushInstructionCache(GetCurrentProcess(), pIdleReset, 7);
-        Log("[mxohax] SUCCESS: Patched client.dll + 0x001A4D25 (NOP * 7) to preserve stationary idle flag!\n");
-    }
+    // Patch N3: 0x001A4D25: disabled (client.dll handles [pActor + 0x4EE] naturally during movement; DetourFrameTick synchronizes moving/idle state)
 
     // Patch N4: 0x004EC9D4: 6 bytes: NOP * 6 (90 90 90 90 90 90)
     // Prevents skipping position sample evaluation for local player
