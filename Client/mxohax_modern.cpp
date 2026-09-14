@@ -1674,6 +1674,48 @@ static HudButtonId HitTestHudButton(int x, int y) {
     return HUD_BTN_NONE;
 }
 
+static void EnforceControlRect(void* pUI, DWORD ctrlId, int left, int top, int width, int height) {
+    if (!pUI || IsBadReadPtr(pUI, 0x200)) return;
+    void** ppCtrl = reinterpret_cast<void**>(reinterpret_cast<uintptr_t>(pUI) + 0x28 + (ctrlId * 4));
+    if (!ppCtrl || !*ppCtrl || IsBadReadPtr(*ppCtrl, 0x60)) return;
+    void* pCtrl = *ppCtrl;
+    void** vtbl = *reinterpret_cast<void***>(pCtrl);
+    if (!vtbl || IsBadReadPtr(vtbl, 0x20)) return;
+    typedef void (__thiscall *SetRect_t)(void* pThis, const int* pRect);
+    SetRect_t pSetRect = reinterpret_cast<SetRect_t>(vtbl[0x10 / 4]);
+    int rect[4] = { left, top, width, height };
+    __try {
+        pSetRect(pCtrl, rect);
+    } __except (EXCEPTION_EXECUTE_HANDLER) {}
+}
+
+static void LockAllHudFrames(uintptr_t clientBase, void* pUI) {
+    if (!pUI) return;
+    // 1. Compass / Radar: Docked bottom-center, exactly centered at X=960, flush at bottom Y=1014..1080
+    EnforceControlRect(pUI, 0x27, 832, 1014, 256, 66);
+    // 2. Player Window (Quickbar, IS/Health meters, Combat tactics): Docked top-center
+    EnforceControlRect(pUI, 0x1B, 680, 0, 560, 105);
+    // 3. Target Status Frame: Docked top-right
+    EnforceControlRect(pUI, 0x22, 1680, 0, 240, 90);
+    // 4. Main Chat Window: Docked bottom-left
+    EnforceControlRect(pUI, 0x02, 10, 780, 500, 260);
+    // 5. Chat Toolbar: Below chat window
+    EnforceControlRect(pUI, 0x03, 10, 1040, 500, 35);
+    // 6. Network Latency Meter: Docked bottom-right
+    EnforceControlRect(pUI, 0x4D, 1800, 1040, 110, 35);
+}
+
+static void TriggerNativeIdleTransition(uintptr_t clientBase) {
+    if (!clientBase) return;
+    void* pLocoCtrl = reinterpret_cast<void*>(clientBase + 0x008A28E8);
+    if (!pLocoCtrl || IsBadReadPtr(pLocoCtrl, 0x200)) return;
+    typedef void (__thiscall *SetIdleTransition_t)(void* pThis, BOOL bIdle);
+    SetIdleTransition_t pSetIdle = reinterpret_cast<SetIdleTransition_t>(clientBase + 0x001A4B90);
+    __try {
+        pSetIdle(pLocoCtrl, 1);
+    } __except (EXCEPTION_EXECUTE_HANDLER) {}
+}
+
 static void TriggerPhoneCall(uintptr_t clientBase) {
     Log("[mxohax] CELL PHONE ACTIVATED: Initiating safe contact with Zion Operator...\n");
     void* pThis = malloc(0x100);
@@ -1882,9 +1924,9 @@ static LRESULT CALLBACK SubclassWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPA
             int normX = (int)((double)mx * 1920.0 / (double)winW);
             int normY = (int)((double)my * 1080.0 / (double)winH);
 
-            // Feed mouse move into native CLTWidgetManager and CUI
             if (clientBase) {
-                DispatchInputEventToClient(clientBase, 0x65766F4D /* 'Move' */, normX, normY);
+                // Permanently keep dragging active control global neutralized
+                *reinterpret_cast<DWORD*>(clientBase + 0x00849394) = 0xFFFFFFFF;
             }
 
             // Camera orbiting:
@@ -1903,7 +1945,7 @@ static LRESULT CALLBACK SubclassWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPA
             }
             g_lastMouseX = mx;
             g_lastMouseY = my;
-            break;
+            return 0; // Handled, prevent any background CUI dragging in OriginalWndProc
         }
         case WM_LBUTTONDOWN: {
             short mx = (short)LOWORD(lParam);
@@ -1911,17 +1953,16 @@ static LRESULT CALLBACK SubclassWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPA
             int normX = (int)((double)mx * 1920.0 / (double)winW);
             int normY = (int)((double)my * 1080.0 / (double)winH);
 
+            if (clientBase) {
+                *reinterpret_cast<DWORD*>(clientBase + 0x00849394) = 0xFFFFFFFF;
+            }
+
             g_bLeftMouseDown = true;
             g_lastMouseX = mx;
             g_lastMouseY = my;
             g_bHumanInputActive = true;
 
-            // 1. Dispatch 'MLDn' event into native CLTWidgetManager and CUI
-            if (clientBase) {
-                DispatchInputEventToClient(clientBase, 0x6E444C4D /* 'MLDn' */, normX, normY);
-            }
-
-            // 2. Check if hovering over native UI widget or HUD button region
+            // Check if hovering over native UI widget or HUD button region
             void* pHovered = clientBase ? GetHoveredUIWidget(clientBase) : nullptr;
             HudButtonId hitBtn = HitTestHudButton(normX, normY);
 
@@ -1944,6 +1985,7 @@ static LRESULT CALLBACK SubclassWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPA
             } else {
                 g_bMouseDownOnUI = false;
                 g_pressedHudButton = (int)HUD_BTN_NONE;
+                return 0; // Click in 3D world space: do NOT dispatch to CUI so HUD frames NEVER drag
             }
             break;
         }
@@ -1953,15 +1995,14 @@ static LRESULT CALLBACK SubclassWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPA
             int normX = (int)((double)mx * 1920.0 / (double)winW);
             int normY = (int)((double)my * 1080.0 / (double)winH);
 
+            if (clientBase) {
+                *reinterpret_cast<DWORD*>(clientBase + 0x00849394) = 0xFFFFFFFF;
+            }
+
             g_bLeftMouseDown = false;
             g_bHumanInputActive = true;
 
-            // 1. Dispatch 'MLUp' event into native CLTWidgetManager and CUI
-            if (clientBase) {
-                DispatchInputEventToClient(clientBase, 0x70554C4D /* 'MLUp' */, normX, normY);
-            }
-
-            // 2. If mouse down occurred on UI, handle button release and action execution
+            // If mouse down occurred on UI, handle button release and action execution
             if (g_bMouseDownOnUI) {
                 HudButtonId releasedBtn = HitTestHudButton(normX, normY);
                 void* pHovered = clientBase ? GetHoveredUIWidget(clientBase) : nullptr;
@@ -1981,25 +2022,19 @@ static LRESULT CALLBACK SubclassWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPA
                 g_pressedHudButton = (int)HUD_BTN_NONE;
                 return 0; // Handled
             }
-            break;
+            g_bMouseDownOnUI = false;
+            g_pressedHudButton = (int)HUD_BTN_NONE;
+            return 0;
         }
         case WM_RBUTTONDOWN: {
             g_bRightMouseDown = true;
             g_lastMouseX = (short)LOWORD(lParam);
             g_lastMouseY = (short)HIWORD(lParam);
-            if (clientBase) {
-                DispatchInputEventToClient(clientBase, 0x6E44524D /* 'MRDn' */, g_lastMouseX, g_lastMouseY);
-            }
-            break;
+            return 0;
         }
         case WM_RBUTTONUP: {
             g_bRightMouseDown = false;
-            short mx = (short)LOWORD(lParam);
-            short my = (short)HIWORD(lParam);
-            if (clientBase) {
-                DispatchInputEventToClient(clientBase, 0x7055524D /* 'MRUp' */, mx, my);
-            }
-            break;
+            return 0;
         }
         case WM_MOUSEWHEEL: {
             short delta = GET_WHEEL_DELTA_WPARAM(wParam);
@@ -2007,7 +2042,7 @@ static LRESULT CALLBACK SubclassWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPA
             if (g_camDist < 60.0f) g_camDist = 60.0f;
             if (g_camDist > 500.0f) g_camDist = 500.0f;
             g_bHumanInputActive = true;
-            break;
+            return 0;
         }
         case WM_KEYDOWN: {
             g_bHumanInputActive = true;
@@ -2024,7 +2059,7 @@ static LRESULT CALLBACK SubclassWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPA
             } else if (wParam == VK_ESCAPE) {
                 ExecuteHudButtonAction(clientBase, HUD_BTN_OPTIONS, 0, 0);
             }
-            break;
+            return 0;
         }
     }
     return OriginalWndProc ? CallWindowProcA(OriginalWndProc, hWnd, uMsg, wParam, lParam) : DefWindowProcA(hWnd, uMsg, wParam, lParam);
@@ -2112,6 +2147,19 @@ static void UpdatePlayerPositionAndPhysics(uintptr_t clientBase, void* curPlayer
         bool stateChanged = (isMoving != s_wasMoving);
         s_wasMoving = isMoving;
 
+        // Synchronize CPlayerLocomotionController
+        void* pLocoCtrl = reinterpret_cast<void*>(clientBase + 0x008A28E8);
+        if (pLocoCtrl && !IsBadReadPtr(pLocoCtrl, 0x30)) {
+            if (!isMoving && !g_isJumping) {
+                DWORD locoState = *reinterpret_cast<DWORD*>(reinterpret_cast<uintptr_t>(pLocoCtrl) + 0x18);
+                if (stateChanged || locoState != 0) {
+                    TriggerNativeIdleTransition(clientBase);
+                }
+            } else if (isMoving) {
+                *reinterpret_cast<DWORD*>(reinterpret_cast<uintptr_t>(pLocoCtrl) + 0x18) = 6; // RUNNING
+            }
+        }
+
         bool shouldAddSample = isMoving || g_isJumping || stateChanged || (++s_idleSampleTicks % 30 == 0);
 
         if (shouldAddSample) {
@@ -2145,7 +2193,7 @@ static void UpdatePlayerPositionAndPhysics(uintptr_t clientBase, void* curPlayer
         *reinterpret_cast<BYTE*>(reinterpret_cast<uintptr_t>(pActor) + 0x684) = 0; // In-world
         *reinterpret_cast<BYTE*>(reinterpret_cast<uintptr_t>(pActor) + 0x385) = 3; // Scene transform valid
         *reinterpret_cast<BYTE*>(reinterpret_cast<uintptr_t>(pActor) + 0x290) = 0;
-        *reinterpret_cast<float*>(reinterpret_cast<uintptr_t>(pActor) + 0x56C) = 0.0f;
+        *reinterpret_cast<float*>(reinterpret_cast<uintptr_t>(pActor) + 0x56C) = isMoving ? 1.0f : 0.0f;
     }
 }
 
@@ -2503,6 +2551,9 @@ static void EnsureInWorldRendering(uintptr_t clientBase, void* pWorldMgr, DWORD 
             *reinterpret_cast<BYTE*>(reinterpret_cast<uintptr_t>(pChatMgr) + 0x58) = 1;
             Log("[mxohax] EnsureInWorld: Activated Chat Manager tabs!\n");
         }
+
+        LockAllHudFrames(clientBase, pUI);
+        TriggerNativeIdleTransition(clientBase);
     }
 
     // Step 6: Ensure pWorldMgr + 0xC (viewport list) has a valid Viewport object bound to the active camera
@@ -2619,12 +2670,35 @@ typedef void (__thiscall *FrameTick_t)(void* pThis);
 static FrameTick_t OriginalFrameTick = nullptr;
 
 static void __fastcall DetourFrameTick(void* pThis, void* /*edx*/) {
+    HMODULE hClient = GetModuleHandleA("client.dll");
+    DWORD clientBase = hClient ? reinterpret_cast<DWORD>(hClient) : 0;
+
+    // Neutralize dragging global before tick
+    if (clientBase) {
+        *reinterpret_cast<DWORD*>(clientBase + 0x00849394) = 0xFFFFFFFF;
+        void* curPlayer = *reinterpret_cast<void**>(clientBase + 0x008A4378);
+        if (curPlayer && !IsBadReadPtr(curPlayer, 0xB0)) {
+            void* pActor = *reinterpret_cast<void**>(reinterpret_cast<uintptr_t>(curPlayer) + 0xA8);
+            if (pActor && !IsBadReadPtr(pActor, 0x690) && !g_isJumping) {
+                bool keyW = (GetAsyncKeyState('W') & 0x8000) != 0;
+                bool keyS = (GetAsyncKeyState('S') & 0x8000) != 0;
+                bool keyA = (GetAsyncKeyState('A') & 0x8000) != 0;
+                bool keyD = (GetAsyncKeyState('D') & 0x8000) != 0;
+                if (!keyW && !keyS && !keyA && !keyD) {
+                    *reinterpret_cast<BYTE*>(reinterpret_cast<uintptr_t>(pActor) + 0x4EE) = 1;
+                    *reinterpret_cast<double*>(reinterpret_cast<uintptr_t>(pActor) + 0x510) = 0.0;
+                    *reinterpret_cast<double*>(reinterpret_cast<uintptr_t>(pActor) + 0x518) = 0.0;
+                    *reinterpret_cast<double*>(reinterpret_cast<uintptr_t>(pActor) + 0x520) = 0.0;
+                }
+            }
+        }
+    }
+
     if (OriginalFrameTick) OriginalFrameTick(pThis);
     s_tickCount++;
 
-    HMODULE hClient = GetModuleHandleA("client.dll");
-    if (!hClient) return;
-    DWORD clientBase = reinterpret_cast<DWORD>(hClient);
+    if (!clientBase) return;
+    *reinterpret_cast<DWORD*>(clientBase + 0x00849394) = 0xFFFFFFFF;
 
     // Monitor in-world status via CClientShell (at clientBase + 0x00896A38)
     DWORD pShell = clientBase + 0x00896A38;
@@ -2684,6 +2758,8 @@ static void __fastcall DetourFrameTick(void* pThis, void* /*edx*/) {
                         pSetVisible(pUI, id, 1);
                     } __except (EXCEPTION_EXECUTE_HANDLER) {}
                 }
+                LockAllHudFrames(clientBase, pUI);
+                TriggerNativeIdleTransition(clientBase);
             }
             ApplyOperativeAppearance(clientBase, curPlayer);
             Log("[mxohax] In-world UI initialized and loading screens dismissed once.\n");
@@ -2858,6 +2934,7 @@ static void __fastcall DetourFrameTick(void* pThis, void* /*edx*/) {
                 if (pChatMgr && !IsBadReadPtr(pChatMgr, 0x60)) {
                     *reinterpret_cast<BYTE*>(reinterpret_cast<uintptr_t>(pChatMgr) + 0x58) = 1;
                 }
+                LockAllHudFrames(clientBase, pUI);
             }
         }
 
@@ -3674,6 +3751,59 @@ static void ApplyClientPatches(HMODULE hClient) {
         FlushInstructionCache(GetCurrentProcess(), pClientQuitPatch, 3);
         Log("[mxohax] SUCCESS: Patched client.dll + 0x000EAAC0 (ret 0) to permanently neutralize client exit loop!\n");
     }
+
+    // Patch N1: 0x000184E0: 3 bytes: xor eax, eax; ret (31 C0 C3)
+    // Completely disables CUI::StartDraggingControl so dragging is never initiated
+    LPVOID pStartDrag = reinterpret_cast<LPVOID>(clientBase + 0x000184E0);
+    DWORD oldProtDrag = 0;
+    if (VirtualProtect(pStartDrag, 3, PAGE_EXECUTE_READWRITE, &oldProtDrag)) {
+        BYTE patchDrag[3] = { 0x31, 0xC0, 0xC3 }; // xor eax, eax; ret
+        memcpy(pStartDrag, patchDrag, 3);
+        VirtualProtect(pStartDrag, 3, oldProtDrag, &oldProtDrag);
+        FlushInstructionCache(GetCurrentProcess(), pStartDrag, 3);
+        Log("[mxohax] SUCCESS: Patched client.dll + 0x000184E0 (xor eax, eax; ret) to permanently disable CUI dragging!\n");
+    }
+
+    // Patch N2: 0x000187B0: 1 byte: ret (C3)
+    // Completely disables CUI::UpdateDraggingControl so mouse moves never reposition controls
+    LPVOID pUpdateDrag = reinterpret_cast<LPVOID>(clientBase + 0x000187B0);
+    if (VirtualProtect(pUpdateDrag, 1, PAGE_EXECUTE_READWRITE, &oldProtDrag)) {
+        BYTE patchUpd[1] = { 0xC3 }; // ret
+        memcpy(pUpdateDrag, patchUpd, 1);
+        VirtualProtect(pUpdateDrag, 1, oldProtDrag, &oldProtDrag);
+        FlushInstructionCache(GetCurrentProcess(), pUpdateDrag, 1);
+        Log("[mxohax] SUCCESS: Patched client.dll + 0x000187B0 (ret) to permanently disable CUI drag updates!\n");
+    }
+
+    // Neutralize active dragging global
+    *reinterpret_cast<DWORD*>(clientBase + 0x00849394) = 0xFFFFFFFF;
+
+    // Patch N3: 0x001A4D25: 7 bytes: NOP * 7 (90 90 90 90 90 90 90)
+    // Prevents client.dll from destroying the stationary idle flag [pActor + 0x4EE] to 0 every tick
+    LPVOID pIdleReset = reinterpret_cast<LPVOID>(clientBase + 0x001A4D25);
+    DWORD oldProtIdle = 0;
+    if (VirtualProtect(pIdleReset, 7, PAGE_EXECUTE_READWRITE, &oldProtIdle)) {
+        BYTE nop7[7] = { 0x90, 0x90, 0x90, 0x90, 0x90, 0x90, 0x90 };
+        memcpy(pIdleReset, nop7, 7);
+        VirtualProtect(pIdleReset, 7, oldProtIdle, &oldProtIdle);
+        FlushInstructionCache(GetCurrentProcess(), pIdleReset, 7);
+        Log("[mxohax] SUCCESS: Patched client.dll + 0x001A4D25 (NOP * 7) to preserve stationary idle flag!\n");
+    }
+
+    // Patch N4: 0x004EC9D4: 6 bytes: NOP * 6 (90 90 90 90 90 90)
+    // Prevents skipping position sample evaluation for local player
+    LPVOID pSampleSkip = reinterpret_cast<LPVOID>(clientBase + 0x004EC9D4);
+    DWORD oldProtSample = 0;
+    if (VirtualProtect(pSampleSkip, 6, PAGE_EXECUTE_READWRITE, &oldProtSample)) {
+        BYTE nop6[6] = { 0x90, 0x90, 0x90, 0x90, 0x90, 0x90 };
+        memcpy(pSampleSkip, nop6, 6);
+        VirtualProtect(pSampleSkip, 6, oldProtSample, &oldProtSample);
+        FlushInstructionCache(GetCurrentProcess(), pSampleSkip, 6);
+        Log("[mxohax] SUCCESS: Patched client.dll + 0x004EC9D4 (NOP * 6) to enable local player sample processing!\n");
+    }
+
+    // Enforce in-world locomotion controller flag
+    *reinterpret_cast<BYTE*>(clientBase + 0x0089DD5C) = 1;
 }
 
 // Hook LoadLibraryA to catch client.dll synchronously
