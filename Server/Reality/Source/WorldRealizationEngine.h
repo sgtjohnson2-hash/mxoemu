@@ -6,6 +6,7 @@
 #include <vector>
 #include <unordered_map>
 #include <shared_mutex>
+#include <atomic>
 #include <cstdint>
 
 // ============================================================================
@@ -322,6 +323,8 @@ private:
     mutable std::shared_mutex m_realizationMutex;
     std::unordered_map<uint32_t, Active3DCourier> m_couriers;
     std::unordered_map<uint32_t, Active3DStasisFieldInstance> m_stasisFields;
+    mutable std::shared_mutex m_smokeMutex;
+    std::atomic<uint32_t> m_activeSmokeCount{0};
     std::unordered_map<uint32_t, Active3DSmokeZone> m_smokeZones;
     std::unordered_map<uint32_t, Active3DClaymoreTrap> m_claymores;
     std::unordered_map<uint32_t, Active3DSniperTracer> m_sniperTracers;

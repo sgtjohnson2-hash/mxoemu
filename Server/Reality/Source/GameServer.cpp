@@ -338,10 +338,24 @@ void GameServer::SimulationLoop()
 			}
 
 			// Zero-allocation thread-safe object update & network packet batching
-			sObjMgr.ForEachGO([](PlayerObject* po) {
+			// 1. High-frequency (30Hz) zero-latency network update and queue flush for connected human players
+			sObjMgr.ForEachHumanPlayer([](PlayerObject* po) {
 				po->Update();
 				po->getClient().FlushQueue();
 			});
+
+			// 2. Throttled background entity queue flushing (every 500ms)
+			// Eliminates 15,000-object heap iteration every 33ms on the main simulation thread
+			static uint32 lastBackgroundFlushMs = 0;
+			if (currentMs - lastBackgroundFlushMs >= 500) {
+				lastBackgroundFlushMs = currentMs;
+				sObjMgr.ForEachGO([](PlayerObject* po) {
+					if (po->getClient().isBot()) {
+						po->Update();
+						po->getClient().FlushQueue();
+					}
+				});
+			}
 
 			// Item 54: Flush pending lazy deletions from Garbage Collector
 			sObjMgr.FlushDeletions();

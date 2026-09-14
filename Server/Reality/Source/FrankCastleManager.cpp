@@ -474,15 +474,24 @@ void FrankCastleManager::Update(uint32 deltaMs)
     m_currentHealth = po->getCurrentHealth();
     m_currentInnerStrength = po->getCurrentInnerStrength();
 
-    // Check health threshold: tactical retreat & smoke if critical
+    // Check health threshold: tactical retreat & smoke if critical (120s cooldown, max 3 zones)
     if (m_currentHealth < (GetMaxHealth() * 0.20f) && 
         m_currentState != FRANK_STATE_TACTICAL_RETREAT && 
         m_currentState != FRANK_STATE_FIELD_TRIAGE) {
         m_currentState = FRANK_STATE_TACTICAL_RETREAT;
         m_stateTimerMs = 0;
-        DEBUG_LOG("FrankCastle: Tactical smoke deployed. Vitals compromised. Falling back to safehouse for surgery and re-arm.");
-        sWorldRealizationEngine.ManifestTacticalSmoke3D(m_currentPos.x, m_currentPos.y, m_currentPos.z, 800.0f, 25.0f);
-        AddWarJournalEntry(JOURNAL_TACTICAL_RETREAT, "Multiple Hostiles", "Emergency Smoke Extraction", "Fell back to fortified perimeter under heavy fire.", 1, m_currentPos);
+
+        uint32 now = getMSTime();
+        if ((now - m_lastTacticalSmokeMs >= 120000) && 
+            (sWorldRealizationEngine.GetActiveSmokeZoneCount() < 3)) {
+            m_lastTacticalSmokeMs = now;
+            DEBUG_LOG("FrankCastle: Tactical smoke deployed. Vitals compromised. Falling back to safehouse for surgery and re-arm.");
+            sWorldRealizationEngine.ManifestTacticalSmoke3D(m_currentPos.x, m_currentPos.y, m_currentPos.z, 800.0f, 25.0f);
+            AddWarJournalEntry(JOURNAL_TACTICAL_RETREAT, "Multiple Hostiles", "Emergency Smoke Extraction", "Fell back to fortified perimeter under heavy fire.", 1, m_currentPos);
+        } else {
+            DEBUG_LOG("FrankCastle: Tactical smoke on cooldown or zone limit reached. Falling back to safehouse under evasive maneuvers.");
+            AddWarJournalEntry(JOURNAL_TACTICAL_RETREAT, "Multiple Hostiles", "Evasive Extraction", "Fell back to fortified perimeter under cover.", 1, m_currentPos);
+        }
     }
 
     // Periodic safehouse defense updates & CIWS turrets
@@ -1014,6 +1023,13 @@ void FrankCastleManager::ExecuteTacticalCombatTurn(uint32 deltaMs)
         }
 
         case ACT_SMOKE_EXTRACTION: {
+            uint32 now = getMSTime();
+            if ((now - m_lastTacticalSmokeMs >= 120000) && 
+                (sWorldRealizationEngine.GetActiveSmokeZoneCount() < 3)) {
+                m_lastTacticalSmokeMs = now;
+                sWorldRealizationEngine.ManifestTacticalSmoke3D(m_currentPos.x, m_currentPos.y, m_currentPos.z, 800.0f, 25.0f);
+                AddWarJournalEntry(JOURNAL_TACTICAL_RETREAT, "Target Engagement", "Tactical Smoke Extraction", "Extracted via smoke screen under heavy return fire.", 1, m_currentPos);
+            }
             m_currentState = FRANK_STATE_TACTICAL_RETREAT;
             m_stateTimerMs = 0;
             return;
@@ -1122,23 +1138,31 @@ void FrankCastleManager::PerformFieldTriage(uint32 deltaMs)
     if (!po) return;
 
     uint32 maxHp = GetMaxHealth();
-    uint32 healPerTick = (uint32)(maxHp * 0.15f);
-    po->setCurrentHealth(std::min(maxHp, (uint32)po->getCurrentHealth() + healPerTick));
+    // Gradual surgical convalescence: heal ~5% per second (0.05 * deltaMs / 1000) instead of 15% every 33ms frame
+    float healIncrement = (float)maxHp * 0.05f * ((float)deltaMs / 1000.0f);
+    uint32 curHp = (uint32)po->getCurrentHealth();
+    uint32 newHp = (uint32)std::min((float)maxHp, (float)curHp + std::max(1.0f, healIncrement));
+    po->setCurrentHealth(newHp);
     m_currentHealth = po->getCurrentHealth();
 
     uint32 maxIs = GetMaxInnerStrength();
-    po->setInnerStrength(maxIs, maxIs);
-    m_currentInnerStrength = maxIs;
+    float isIncrement = (float)maxIs * 0.05f * ((float)deltaMs / 1000.0f);
+    uint32 curIs = (uint32)po->getCurrentInnerStrength();
+    uint32 newIs = (uint32)std::min((float)maxIs, (float)curIs + std::max(1.0f, isIncrement));
+    po->setInnerStrength(newIs, maxIs);
+    m_currentInnerStrength = newIs;
 
     SafehouseNode* safehouse = GetNearestFortifiedSafehouse(m_currentPos.x, m_currentPos.z);
     if (safehouse) {
         RestockFromSafehouse(safehouse->id);
     }
 
-    if (m_currentHealth >= maxHp || m_triageTimerMs > 10000) {
+    // Require sustained convalescence: minimum 45 seconds of triage and full HP before returning to patrol
+    if (m_triageTimerMs >= 45000 && m_currentHealth >= maxHp) {
         m_currentState = FRANK_STATE_IDLE_PATROL;
         m_triageTimerMs = 0;
-        DEBUG_LOG("FrankCastle: Triage complete. Vitals optimal. Weapons re-primed. Moving back to patrol.");
+        m_currentTargetGoId = 0;
+        DEBUG_LOG("FrankCastle: Triage complete. Vitals 100% optimal. Weapons re-primed. Resuming tactical patrol.");
     }
 }
 

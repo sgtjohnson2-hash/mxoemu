@@ -601,6 +601,7 @@ private:
     uint32 m_lastSiegeCheckMs;
     uint32 m_lastPublicBroadcastMs{0};
     uint32 m_lastArmoryAccessMs;
+    uint32 m_lastTacticalSmokeMs{0};
     uint32 m_cleanSweepDistrictId;
     bool m_cleanSweepActive;
     uint32 m_cleanSweepTimerMs;
