@@ -776,7 +776,10 @@ void PedestrianEcology::ExecuteTier3Panic(BotClient* bot, PlayerObject* me, floa
     if (cordonActive) {
         // Subway is cordoned! Check if near subway and intercept
         if (CheckCordonInterception(bot, me, nearestSubway.x, nearestSubway.z, 500.0f)) {
-            bot->Say("The subway is sealed! The police locked the gates! We're trapped!");
+            if (now - bot->GetLastWhisperTime() > 8000) {
+                bot->SetLastWhisperTime(now);
+                bot->Say("The subway is sealed! The police locked the gates! We're trapped!");
+            }
             bot->Emote(50); // Cower
             return;
         }
@@ -799,7 +802,10 @@ void PedestrianEcology::ExecuteTier3Panic(BotClient* bot, PlayerObject* me, floa
         bot->MoveTo(pos.x + moveX, pos.y, pos.z + moveZ);
     } else {
         // Reached shelter
-        bot->Say("Made it inside! Lock the doors! They're turning everyone out there!");
+        if (now - bot->GetLastWhisperTime() > 8000) {
+            bot->SetLastWhisperTime(now);
+            bot->Say("Made it inside! Lock the doors! They're turning everyone out there!");
+        }
         bot->SetFearLevel(0.50f); // Calmed down to Tier 1 inside shelter
     }
 

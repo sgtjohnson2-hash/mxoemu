@@ -321,11 +321,19 @@ void BotManager::Update()
     // Fast-path: When no human players are connected, assign background LOD without thread pool overhead
     if (m_activePlayerIds.empty())
     {
+        bool anyCombat = false;
         for (const auto& bot : *botsSnapshot)
         {
-            if (bot) bot->SetLOD(ExecutionLOD::BACKGROUND_AREA);
+            if (bot && (bot->IsInCombat() || bot->IsPanicking())) {
+                bot->SetLOD(ExecutionLOD::APPROACH_AREA);
+                anyCombat = true;
+            } else if (bot) {
+                bot->SetLOD(ExecutionLOD::BACKGROUND_AREA);
+            }
         }
-        return; // 0% CPU when server is idle with no connected players!
+        if (!anyCombat) {
+            return; // 0% CPU when server is idle with no connected players and no active combat!
+        }
     }
     else
     {
@@ -347,10 +355,10 @@ void BotManager::Update()
             bool anyCombat = false;
             for (const auto& bot : *botsSnapshot)
             {
-                if (bot->IsInCombat() || bot->IsPanicking()) {
+                if (bot && (bot->IsInCombat() || bot->IsPanicking())) {
                     bot->SetLOD(ExecutionLOD::APPROACH_AREA);
                     anyCombat = true;
-                } else {
+                } else if (bot) {
                     bot->SetLOD(ExecutionLOD::BACKGROUND_AREA);
                 }
             }

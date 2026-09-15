@@ -386,6 +386,21 @@ void GameServer::SimulationLoop()
 			// Item 54: Flush pending lazy deletions from Garbage Collector
 			sObjMgr.FlushDeletions();
 
+			// Periodic simulation telemetry logging (every 10 seconds)
+			static uint32 simTickCounter = 0;
+			static uint32 lastTelemetryLogMs = 0;
+			simTickCounter++;
+			if (currentMs - lastTelemetryLogMs >= 10000) {
+				float elapsedSec = (lastTelemetryLogMs == 0) ? 10.0f : (currentMs - lastTelemetryLogMs) / 1000.0f;
+				float tps = simTickCounter / elapsedSec;
+				simTickCounter = 0;
+				lastTelemetryLogMs = currentMs;
+				size_t activeBots = sBotMgr.GetBotCount();
+				size_t hardlines = sBotMgr.GetHardlines().size();
+				INFO_LOG(format("SimulationLoop: Tick %1% | TPS: %2% | Active Bots: %3% | Hardlines: %4%")
+					% currentMs % tps % activeBots % hardlines);
+			}
+
 #if defined(__linux__)
 			static uint32 lastTrimMs = 0;
 			if (currentMs - lastTrimMs >= 300000) { // Every 5 minutes
