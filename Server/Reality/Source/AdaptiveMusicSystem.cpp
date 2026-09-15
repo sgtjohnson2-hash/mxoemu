@@ -114,19 +114,21 @@ void AdaptiveMusicSystem::update(uint32 currentMs)
         }
         else if (state.threatLevel == 0 && state.currentState != MUSIC_STATE_COMBAT)
         {
-            PlayerObject* player = sObjMgr.getGOPtr(goId);
-            if (player) {
-                // Check if in Club Hel zone (e.g. coordinates around X=58000, Z=10000 downtown)
-                LocationVector pos = player->getPosition();
-                if (pos.x > 57900 && pos.x < 58100 && pos.z > 9900 && pos.z < 10100) {
-                    if (state.currentTrackFamily != "ClubHel_Juno") {
-                        state.currentTrackFamily = "ClubHel_Juno";
-                        INFO_LOG(format("Music Transition: Player %1% entered Club Hel. Playing Juno Reactor ambient.") % goId);
+            if (GameServer::getSingletonPtr()) {
+                PlayerObject* player = sObjMgr.getGOPtr(goId);
+                if (player) {
+                    // Check if in Club Hel zone (e.g. coordinates around X=58000, Z=10000 downtown)
+                    LocationVector pos = player->getPosition();
+                    if (pos.x > 57900 && pos.x < 58100 && pos.z > 9900 && pos.z < 10100) {
+                        if (state.currentTrackFamily != "ClubHel_Juno") {
+                            state.currentTrackFamily = "ClubHel_Juno";
+                            INFO_LOG(format("Music Transition: Player %1% entered Club Hel. Playing Juno Reactor ambient.") % goId);
+                            sendMusicCommand(goId, state.currentTrackFamily, "ambient");
+                        }
+                    } else if (state.currentTrackFamily == "ClubHel_Juno") {
+                        state.currentTrackFamily = "4Square"; // Back to default
                         sendMusicCommand(goId, state.currentTrackFamily, "ambient");
                     }
-                } else if (state.currentTrackFamily == "ClubHel_Juno") {
-                    state.currentTrackFamily = "4Square"; // Back to default
-                    sendMusicCommand(goId, state.currentTrackFamily, "ambient");
                 }
             }
         }
@@ -209,6 +211,9 @@ uint8 AdaptiveMusicSystem::GetCurrentInfectionStage(uint32 playerGoId) const
 
 void AdaptiveMusicSystem::sendMusicCommand(uint32 playerGoId, const std::string& family, const std::string& stemType, int index)
 {
+    if (!GameServer::getSingletonPtr()) {
+        return;
+    }
     PlayerObject* po = sObjMgr.getGOPtr(playerGoId);
     if (po)
     {
