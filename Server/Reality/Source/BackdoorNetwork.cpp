@@ -30,6 +30,7 @@ void BackdoorNetwork::Initialize()
     m_portals.clear();
     m_craftedKeys.clear();
     m_firewallAnchors.clear();
+    m_activeConstructHandshakes.clear();
     m_nextKeyId = 1001;
     m_nextPuzzleId = 1;
     m_totalTransits = 0;
@@ -402,6 +403,27 @@ bool BackdoorNetwork::ExecuteCivilianJackout(uint32 entityGoId, uint32 hardlineI
     sFactionWarMgr.registerPvPKill(FACTION_ZION, FACTION_MACHINES); // Zion score reward
     INFO_LOG(format("BackdoorNetwork: Civilian %1% successfully jacked out to Zion via Hardline %2%!") % entityGoId % hardlineId);
     return true;
+}
+
+bool BackdoorNetwork::InitiateConstructHandshake(uint32 entityGoId, uint32 doorId, float& outX, float& outY, float& outZ)
+{
+    std::lock_guard<std::recursive_mutex> lock(m_networkMutex);
+    const BackdoorPortal* p = GetPortal(doorId);
+    if (!p) return false;
+
+    // Direct instantaneous coordinate domain handoff to Loading Construct White Void space (100000, 100000, 1000)
+    outX = 100000.0f;
+    outY = 100000.0f;
+    outZ = 1000.0f;
+    m_activeConstructHandshakes[entityGoId] = doorId;
+    m_totalTransits++;
+    return true;
+}
+
+bool BackdoorNetwork::VerifyConstructHandshakeActive(uint32 entityGoId) const
+{
+    std::lock_guard<std::recursive_mutex> lock(m_networkMutex);
+    return m_activeConstructHandshakes.find(entityGoId) != m_activeConstructHandshakes.end();
 }
 
 // ============================================================================

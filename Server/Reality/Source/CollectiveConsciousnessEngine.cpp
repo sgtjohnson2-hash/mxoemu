@@ -20,6 +20,7 @@ void CollectiveConsciousnessEngine::Initialize()
 {
     std::unique_lock<std::shared_mutex> lock(m_hiveMutex);
     m_nodes.clear();
+    m_connectomeThreats.clear();
     m_recentBroadcasts.clear();
     m_nextBroadcastId = 1;
     m_totalBroadcasts = 0;
@@ -32,6 +33,7 @@ void CollectiveConsciousnessEngine::ResetForTesting()
 {
     std::unique_lock<std::shared_mutex> lock(m_hiveMutex);
     m_nodes.clear();
+    m_connectomeThreats.clear();
     m_recentBroadcasts.clear();
     m_nextBroadcastId = 1;
     m_totalBroadcasts = 0;
@@ -173,6 +175,100 @@ size_t CollectiveConsciousnessEngine::GetTotalBroadcasts() const
     return m_totalBroadcasts;
 }
 
+uint32_t CollectiveConsciousnessEngine::BroadcastThreatToShardUnits(
+    uint32_t senderGoId, uint32_t targetGoId, float x, float y, float z,
+    const std::string& threat, float urgency, float broadcastRadius)
+{
+    uint32_t bId = 0;
+    uint32_t closestPeerId = 0;
+
+    {
+        std::unique_lock<std::shared_mutex> lock(m_hiveMutex);
+        bId = m_nextBroadcastId++;
+        TelepathicBroadcastMessage msg;
+        msg.messageId = bId;
+        msg.faction = HiveMindFaction::MachineConsensus;
+        msg.senderGoId = senderGoId;
+        msg.targetX = x;
+        msg.targetY = y;
+        msg.targetZ = z;
+        msg.threatSignature = threat;
+        msg.urgency = urgency;
+
+        float rSq = broadcastRadius * broadcastRadius;
+        uint32_t reached = 0;
+        float minPeerDist = 1e9f;
+
+        for (const auto& kv : m_nodes) {
+            const auto& node = kv.second;
+            if (!node.isOnline || node.faction != HiveMindFaction::MachineConsensus) continue;
+
+            float dx = node.posX - x;
+            float dy = node.posY - y;
+            float dz = node.posZ - z;
+            if (dx * dx + dy * dy + dz * dz <= rSq) {
+                ++reached;
+                if (node.botGoId != senderGoId) {
+                    float d = dx * dx + dy * dy + dz * dz;
+                    if (d < minPeerDist) {
+                        minPeerDist = d;
+                        closestPeerId = node.botGoId;
+                    }
+                }
+            }
+        }
+
+        msg.nodesReached = reached;
+        m_recentBroadcasts.push_back(msg);
+        if (m_recentBroadcasts.size() > 50) {
+            m_recentBroadcasts.erase(m_recentBroadcasts.begin());
+        }
+        ++m_totalBroadcasts;
+
+        // Synchronize threat vector into connectome fabric
+        auto& tv = m_connectomeThreats[targetGoId];
+        tv.targetGoId = targetGoId;
+        tv.targetX = x;
+        tv.targetY = y;
+        tv.targetZ = z;
+        tv.threatRating = urgency;
+        tv.reportingNodeId = senderGoId;
+        tv.threatSignature = threat;
+    }
+
+    if (closestPeerId > 0) {
+        sWorldRealizationEngine.ManifestHiveMindSynapse3D(senderGoId, closestPeerId, "MachineConsensus");
+    }
+
+    return bId;
+}
+
+bool CollectiveConsciousnessEngine::QueryConnectomeTargetThreat(uint32_t targetGoId, ConnectomeThreatVector& outThreat) const
+{
+    std::shared_lock<std::shared_mutex> lock(m_hiveMutex);
+    auto it = m_connectomeThreats.find(targetGoId);
+    if (it != m_connectomeThreats.end()) {
+        outThreat = it->second;
+        return true;
+    }
+    return false;
+}
+
+void CollectiveConsciousnessEngine::SynchronizePlayerTacticalTelemetry(uint32_t reportingGoId, uint32_t playerGoId, uint8_t predictedCounterTactic)
+{
+    std::unique_lock<std::shared_mutex> lock(m_hiveMutex);
+    auto& tv = m_connectomeThreats[playerGoId];
+    tv.targetGoId = playerGoId;
+    tv.reportingNodeId = reportingGoId;
+    tv.predictedCounterTactic = predictedCounterTactic;
+}
+
+size_t CollectiveConsciousnessEngine::GetSynchronizedThreatCount() const
+{
+    std::shared_lock<std::shared_mutex> lock(m_hiveMutex);
+    return m_connectomeThreats.size();
+}
+
 // ============================================================================
 // Headless Test Suite 49: Hyper-Scale Sentience & Universal Collective Consciousness
 // ============================================================================
@@ -260,11 +356,35 @@ void RunCollectiveConsciousnessTestSuite()
     assert(sCollectiveConsciousnessEngine.GetFactionNodeCount(HiveMindFaction::MachineConsensus) == 2);
     assert(sCollectiveConsciousnessEngine.GetTotalNodes() == 6);
 
-    // 11. Reset Verification
+    // 11. Epoch VII: Machine Mind Connectome Shard Threat Broadcasting
+    sCollectiveConsciousnessEngine.RegisterHiveNode(501, HiveMindFaction::MachineConsensus, 1000.0f, 0.0f, 1000.0f, 1000.0f);
+    sCollectiveConsciousnessEngine.RegisterHiveNode(502, HiveMindFaction::MachineConsensus, 1200.0f, 0.0f, 1100.0f, 1000.0f);
+    sCollectiveConsciousnessEngine.RegisterHiveNode(503, HiveMindFaction::MachineConsensus, 1500.0f, 0.0f, 1400.0f, 1000.0f);
+
+    uint32_t redpillTargetGoId = 999;
+    uint32_t threatBroadcastId = sCollectiveConsciousnessEngine.BroadcastThreatToShardUnits(
+        501, redpillTargetGoId, 1100.0f, 0.0f, 1050.0f, "REDPILL_FOCUS_HIGH_VELOCITY", 0.9f, 5000.0f);
+    assert(threatBroadcastId > 0);
+    assert(sCollectiveConsciousnessEngine.GetSynchronizedThreatCount() == 1);
+
+    ConnectomeThreatVector syncedThreat;
+    bool foundConnectomeThreat = sCollectiveConsciousnessEngine.QueryConnectomeTargetThreat(redpillTargetGoId, syncedThreat);
+    assert(foundConnectomeThreat);
+    assert(syncedThreat.targetGoId == redpillTargetGoId);
+    assert(syncedThreat.reportingNodeId == 501);
+    assert(syncedThreat.threatSignature == "REDPILL_FOCUS_HIGH_VELOCITY");
+
+    // Tactical sync across shard units: learned player tendency counter
+    sCollectiveConsciousnessEngine.SynchronizePlayerTacticalTelemetry(502, redpillTargetGoId, 5); // Speed counters Grab
+    assert(sCollectiveConsciousnessEngine.QueryConnectomeTargetThreat(redpillTargetGoId, syncedThreat));
+    assert(syncedThreat.predictedCounterTactic == 5);
+
+    // 12. Reset Verification
     sCollectiveConsciousnessEngine.ResetForTesting();
     assert(sCollectiveConsciousnessEngine.GetTotalNodes() == 0);
     assert(sCollectiveConsciousnessEngine.GetTotalBroadcasts() == 0);
+    assert(sCollectiveConsciousnessEngine.GetSynchronizedThreatCount() == 0);
     assert(sCollectiveConsciousnessEngine.GetFactionNodeCount(HiveMindFaction::MachineConsensus) == 0);
 
-    std::cout << "[PASSED] Suite 49: Hyper-Scale Sentience & Universal Collective Consciousness (35 assertions passed)." << std::endl;
+    std::cout << "[PASSED] Suite 49: Hyper-Scale Sentience & Universal Collective Consciousness (44 assertions passed)." << std::endl;
 }

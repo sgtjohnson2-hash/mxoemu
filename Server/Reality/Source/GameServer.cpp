@@ -337,6 +337,16 @@ void GameServer::SimulationLoop()
 				}
 			}
 
+			// Epoch XII: Periodic Reality Reset Saturation Checks & Multi-Epoch Shard State Synchronization
+			static uint32 lastResetCheckMs = 0;
+			if (currentMs - lastResetCheckMs >= 5000) { // Every 5 seconds
+				lastResetCheckMs = currentMs;
+				if (sTemporalAnomalyEngine.CheckRealityResetThreshold()) {
+					sTemporalAnomalyEngine.TriggerRealityResetCycle("Architectural Convergence: Critical Saturation Exceeded");
+					sTemporalAnomalyEngine.SynchronizeShardStateMesh("Reality-Main-Shard-01", static_cast<float>(currentMs));
+				}
+			}
+
 			// Zero-allocation thread-safe object update & network packet batching
 			// 1. High-frequency (30Hz) zero-latency network update and queue flush for connected human players
 			sObjMgr.ForEachHumanPlayer([](PlayerObject* po) {

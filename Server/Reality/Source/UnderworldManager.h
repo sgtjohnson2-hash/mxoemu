@@ -238,6 +238,47 @@ struct PoliceDispatchCall {
 };
 
 // ============================================================================
+// Epoch IX: Player Sovereignty, Autonomous Crew Governance & Laundering
+// ============================================================================
+
+struct PlayerCrewGovernance {
+    uint32 crewId{0};
+    std::string crewName;
+    uint32 leaderGoId{0};
+    std::vector<uint32> memberGoIds;
+    std::vector<uint32> colonizedTurfSectorIds;
+    uint32 warChestBits{0};
+    uint32 influenceScore{0};
+    bool isActive{true};
+};
+
+struct RevenueLaunderingConvoy {
+    uint32 convoyId{0};
+    uint32 crewId{0};
+    uint32 launderedAmount{0};
+    LocationVector origin;
+    LocationVector destination;
+    LocationVector currentLocation;
+    float routeProgress{0.0f};
+    bool isAmbushed{false};
+    bool isDelivered{false};
+};
+
+struct ContestedStreetWarEvent {
+    uint32 warId{0};
+    uint32 districtId{1};
+    std::string districtName{"Slums"};
+    uint32 attackerCrewOrFactionId{0};
+    uint32 defenderCrewOrFactionId{0};
+    float intensity{1.0f};
+    bool barricadesErected{true};
+    bool swatInterdictionActive{false};
+    uint32 timeRemainingSec{300};
+    bool isActive{true};
+    uint32 winningEntityId{0};
+};
+
+// ============================================================================
 // Underworld Manager Singleton
 // ============================================================================
 
@@ -309,7 +350,20 @@ public:
     void AddDistrictHeat(uint32 districtId, float delta);
     std::string GetDistrictTensionName(uint32 districtId) const;
     bool IsThreeWayWarActive(uint32 districtId) const;
-    bool IsFourWayWarActive(uint32 districtId) const;
+    // Epoch IX: Autonomous Crew Governance, Turf Colonization, Laundering Convoys & Street Wars
+    uint32 IncorporatePlayerCrew(uint32 leaderGoId, const std::string& crewName);
+    bool ColonizeTurfSector(uint32 crewId, uint32 sectorId);
+    const PlayerCrewGovernance* GetPlayerCrew(uint32 crewId) const;
+    size_t GetPlayerCrewCount() const;
+
+    uint32 LaunchRevenueLaunderingConvoy(uint32 crewId, uint32 amount, const LocationVector& start, const LocationVector& dest);
+    bool AmbushLaunderingConvoy(uint32 convoyId, uint32 interceptorGoId);
+    bool CompleteLaunderingConvoy(uint32 convoyId);
+    size_t GetActiveLaunderingConvoyCount() const;
+
+    uint32 InitiateDistrictStreetWar(uint32 districtId, uint32 attackerId, uint32 defenderId);
+    bool ResolveStreetWar(uint32 warId, uint32 winningEntityId);
+    size_t GetActiveStreetWarCount() const;
 
     // Reporting & Persistence
     std::string GenerateUnderworldStatusReport() const;
@@ -351,6 +405,9 @@ private:
     std::map<uint32, EmergentCrimeEvent> m_crimes;
     std::map<uint32, PolicePrecinct> m_precincts;
     std::vector<PoliceDispatchCall> m_recentDispatches;
+    std::map<uint32, PlayerCrewGovernance> m_playerCrews;
+    std::map<uint32, RevenueLaunderingConvoy> m_launderingConvoys;
+    std::map<uint32, ContestedStreetWarEvent> m_streetWars;
 
     float m_districtHeat[6]; // Indices 1 to 5 for districts
     uint32 m_districtWantedStars[6]; // Wanted level stars 0-5
@@ -361,6 +418,9 @@ private:
     uint32 m_nextLieutenantId{1};
     uint32 m_nextCrimeId{1};
     uint32 m_nextDispatchId{1};
+    uint32 m_nextCrewId{1};
+    uint32 m_nextLaunderingConvoyId{1};
+    uint32 m_nextStreetWarId{1};
 
     uint32 m_hitListSyncTimerMs{0};
     uint32 m_convoySpawnTimerMs{0};

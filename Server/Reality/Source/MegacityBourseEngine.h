@@ -45,6 +45,30 @@ struct MarketTransaction
     float executionPrice{0.0f};
 };
 
+struct BlackMarketListing
+{
+    uint32_t listingId{0};
+    std::string itemType;
+    std::string itemName;
+    float basePrice{1000.0f};
+    float currentPrice{1000.0f};
+    uint32_t supply{10};
+    uint32_t demand{10};
+    float factionTensionMultiplier{1.0f};
+};
+
+struct CipherKeyAuction
+{
+    uint32_t auctionId{0};
+    uint32_t sellerGoId{0};
+    std::string cipherKeyData;
+    uint32_t currentHighBid{0};
+    uint32_t highestBidderGoId{0};
+    std::string highestBidderFaction;
+    float durationRemainingSec{60.0f};
+    bool isFinalized{false};
+};
+
 class MegacityBourseEngine : public Singleton<MegacityBourseEngine>
 {
 public:
@@ -64,6 +88,18 @@ public:
     bool ExecuteTrade(const std::string& symbol, uint32_t traderGoId, bool isBuy, uint32_t volume, float& outExecutionPrice);
     void ApplySimulationEventImpact(const std::string& eventType, const std::string& targetSymbol, float priceDeltaPercent);
 
+    // Epoch IX: Dynamic Marketplace Pricing & Decrypted Machine Cipher Key Auctions
+    void RegisterMarketListing(uint32_t listingId, const std::string& type, const std::string& name, float basePrice, uint32_t supply = 10);
+    float GetMarketListingPrice(uint32_t listingId) const;
+    bool PurchaseMarketListing(uint32_t listingId, uint32_t buyerGoId, float& outFinalPrice);
+    void UpdateMarketSupplyDemand(uint32_t listingId, int deltaSupply, int deltaDemand);
+    size_t GetMarketListingCount() const;
+
+    uint32_t CreateCipherKeyAuction(uint32_t sellerGoId, const std::string& cipherKey, uint32_t startingBid);
+    bool PlaceCipherAuctionBid(uint32_t auctionId, uint32_t bidderGoId, const std::string& faction, uint32_t bidAmount);
+    bool FinalizeCipherAuction(uint32_t auctionId, uint32_t& outWinnerGoId, uint32_t& outWinningBid, std::string& outFaction);
+    size_t GetActiveAuctionCount() const;
+
     // Market Shocks & Panics
     void TriggerMarketCrash(float severity);
     void TriggerShortSqueeze(const std::string& symbol);
@@ -76,8 +112,11 @@ public:
 private:
     mutable std::shared_mutex m_bourseMutex;
     std::unordered_map<std::string, CorporateTicker> m_tickers;
+    std::unordered_map<uint32_t, BlackMarketListing> m_listings;
+    std::unordered_map<uint32_t, CipherKeyAuction> m_auctions;
     std::vector<MarketTransaction> m_transactions;
     uint32_t m_nextTransactionId{1};
+    uint32_t m_nextAuctionId{1};
     bool m_isCrashActive{false};
     float m_crashRecoveryTimer{0.0f};
 };

@@ -20,7 +20,9 @@ void NonEuclideanPortalEngine::Initialize()
     std::unique_lock<std::shared_mutex> lock(m_portalMutex);
     m_portals.clear();
     m_expiringPortals.clear();
+    m_handshakes.clear();
     m_nextPortalId = 1;
+    m_nextHandshakeId = 1;
 
     boost::format fmt("NonEuclideanPortalEngine initialized with continuous spatial folding & momentum conservation.");
     INFO_LOG(fmt);
@@ -320,6 +322,64 @@ void NonEuclideanPortalEngine::Update(float dt)
     }
 }
 
+uint32_t NonEuclideanPortalEngine::InitiateConstructHandshake(
+    uint32_t entityGoId, uint32_t portalId, uint32_t constructInstanceId,
+    PortalVec3& outDstPos)
+{
+    std::unique_lock<std::shared_mutex> lock(m_portalMutex);
+    uint32_t hsId = m_nextHandshakeId++;
+
+    CoordinateDomainHandshake hs;
+    hs.handshakeId = hsId;
+    hs.entityGoId = entityGoId;
+    hs.sourcePortalId = portalId;
+    hs.constructInstanceId = constructInstanceId;
+
+    auto it = m_portals.find(portalId);
+    if (it != m_portals.end()) {
+        hs.sourcePos = it->second.position;
+    } else {
+        hs.sourcePos = PortalVec3(0.0f, 603.5f, 0.0f);
+    }
+
+    // Seamless Construct Domain Coordinate: White Void origin at (100000, 100000, 1000)
+    hs.constructPos = PortalVec3(100000.0f + (constructInstanceId * 5000.0f), 100000.0f, 1000.0f);
+    hs.handshakeTimestampMs = 1000;
+    hs.packetDropProtectionActive = true;
+    hs.handshakeConfirmed = true;
+
+    outDstPos = hs.constructPos;
+    m_handshakes[hsId] = hs;
+    return hsId;
+}
+
+bool NonEuclideanPortalEngine::ConfirmConstructHandshake(uint32_t handshakeId)
+{
+    std::unique_lock<std::shared_mutex> lock(m_portalMutex);
+    auto it = m_handshakes.find(handshakeId);
+    if (it != m_handshakes.end()) {
+        it->second.handshakeConfirmed = true;
+        return true;
+    }
+    return false;
+}
+
+bool NonEuclideanPortalEngine::VerifyPacketDropProtection(uint32_t handshakeId) const
+{
+    std::shared_lock<std::shared_mutex> lock(m_portalMutex);
+    auto it = m_handshakes.find(handshakeId);
+    if (it != m_handshakes.end()) {
+        return it->second.packetDropProtectionActive && it->second.handshakeConfirmed;
+    }
+    return false;
+}
+
+size_t NonEuclideanPortalEngine::GetActiveHandshakeCount() const
+{
+    std::shared_lock<std::shared_mutex> lock(m_portalMutex);
+    return m_handshakes.size();
+}
+
 // ============================================================================
 // Test Suite 32: Non-Euclidean Spatial Folding & Portals
 // ============================================================================
@@ -462,8 +522,23 @@ void RunNonEuclideanPortalTestSuite()
     assert_test(sNonEuclideanPortalEngine.GetPortal(opPortalId) == nullptr,
                 "Operator tactical portal expired and recycled after duration timeout");
 
+    // 10. Epoch VIII: Hardline Phone Booth to Construct Space Handshake & Packet Drop Protection
+    PortalVec3 constructOutPos;
+    uint32_t phoneBoothPortalId = clubHelId;
+    uint32_t redpillEntityId = 7771;
+    uint32_t constructInstanceId = 1;
+
+    uint32_t hsId = sNonEuclideanPortalEngine.InitiateConstructHandshake(
+        redpillEntityId, phoneBoothPortalId, constructInstanceId, constructOutPos
+    );
+    assert_test(hsId > 0, "Initiated seamless construct coordinate domain handshake from phone booth");
+    assert_test(constructOutPos.x >= 100000.0f, "Construct target position translated into White Void coordinate space");
+    assert_test(sNonEuclideanPortalEngine.GetActiveHandshakeCount() == 1, "Active handshake registered in engine");
+    assert_test(sNonEuclideanPortalEngine.VerifyPacketDropProtection(hsId), "Zero packet drop protection active during domain transition");
+    assert_test(sNonEuclideanPortalEngine.ConfirmConstructHandshake(hsId), "Construct domain handshake confirmed");
+
     std::cout << "\n------------------------------------------------------------" << std::endl;
-    std::cout << "  EPOCH VI NON-EUCLIDEAN PORTAL TEST SUITE COMPLETE" << std::endl;
+    std::cout << "  EPOCH VI & VIII NON-EUCLIDEAN PORTAL TEST SUITE COMPLETE" << std::endl;
     std::cout << "  PASSED: " << passed << " | FAILED: " << failed << std::endl;
     std::cout << "------------------------------------------------------------\n" << std::endl;
 

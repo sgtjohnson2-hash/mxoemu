@@ -62,6 +62,13 @@ void UnderworldManager::Initialize()
     m_districtWantedStars[4] = 3;
     m_districtWantedStars[5] = 1;
 
+    m_playerCrews.clear();
+    m_launderingConvoys.clear();
+    m_streetWars.clear();
+    m_nextCrewId = 1;
+    m_nextLaunderingConvoyId = 1;
+    m_nextStreetWarId = 1;
+
     SyncWithFrankCastleHitList();
 
     INFO_LOG(format("UnderworldManager: Initialized with %1% Rackets, %2% Boss Lieutenants, %3% Turf Sectors, %4% Precincts.")
@@ -1889,6 +1896,183 @@ bool UnderworldManager::LoadUnderworldStateFromFile(const std::string& path)
 }
 
 // ============================================================================
+// Epoch IX: Autonomous Crew Governance, Laundering Convoys & Street Wars
+// ============================================================================
+
+uint32 UnderworldManager::IncorporatePlayerCrew(uint32 leaderGoId, const std::string& crewName)
+{
+    std::lock_guard<std::recursive_mutex> lock(m_mutex);
+    uint32 cid = m_nextCrewId++;
+    PlayerCrewGovernance crew;
+    crew.crewId = cid;
+    crew.crewName = crewName;
+    crew.leaderGoId = leaderGoId;
+    crew.memberGoIds.push_back(leaderGoId);
+    crew.warChestBits = 10000;
+    crew.influenceScore = 100;
+    crew.isActive = true;
+
+    m_playerCrews[cid] = crew;
+    INFO_LOG(format("UnderworldManager: Incorporated Sovereign Player Crew '%1%' (ID: %2%) led by operative %3%")
+             % crewName % cid % leaderGoId);
+    return cid;
+}
+
+bool UnderworldManager::ColonizeTurfSector(uint32 crewId, uint32 sectorId)
+{
+    std::lock_guard<std::recursive_mutex> lock(m_mutex);
+    auto itCrew = m_playerCrews.find(crewId);
+    if (itCrew == m_playerCrews.end() || !itCrew->second.isActive) return false;
+
+    auto itSec = m_turfSectors.find(sectorId);
+    if (itSec == m_turfSectors.end()) return false;
+
+    itCrew->second.colonizedTurfSectorIds.push_back(sectorId);
+    itCrew->second.influenceScore += 250;
+    itSec->second.controllingFaction = SyndicateFaction::JudasCabal;
+    itSec->second.isContested = false;
+
+    INFO_LOG(format("UnderworldManager: Crew '%1%' successfully colonized Turf Sector %2% ('%3%')")
+             % itCrew->second.crewName % sectorId % itSec->second.name);
+    return true;
+}
+
+const PlayerCrewGovernance* UnderworldManager::GetPlayerCrew(uint32 crewId) const
+{
+    std::lock_guard<std::recursive_mutex> lock(m_mutex);
+    auto it = m_playerCrews.find(crewId);
+    if (it != m_playerCrews.end()) return &it->second;
+    return nullptr;
+}
+
+size_t UnderworldManager::GetPlayerCrewCount() const
+{
+    std::lock_guard<std::recursive_mutex> lock(m_mutex);
+    return m_playerCrews.size();
+}
+
+uint32 UnderworldManager::LaunchRevenueLaunderingConvoy(
+    uint32 crewId, uint32 amount, const LocationVector& start, const LocationVector& dest)
+{
+    std::lock_guard<std::recursive_mutex> lock(m_mutex);
+    uint32 cid = m_nextLaunderingConvoyId++;
+    RevenueLaunderingConvoy c;
+    c.convoyId = cid;
+    c.crewId = crewId;
+    c.launderedAmount = amount;
+    c.origin = start;
+    c.destination = dest;
+    c.currentLocation = start;
+    c.routeProgress = 0.0f;
+    c.isAmbushed = false;
+    c.isDelivered = false;
+
+    m_launderingConvoys[cid] = c;
+    INFO_LOG(format("UnderworldManager: Crew %1% dispatched Laundering Convoy #%2% carrying %3% $Bits")
+             % crewId % cid % amount);
+    return cid;
+}
+
+bool UnderworldManager::AmbushLaunderingConvoy(uint32 convoyId, uint32 interceptorGoId)
+{
+    (void)interceptorGoId;
+    std::lock_guard<std::recursive_mutex> lock(m_mutex);
+    auto it = m_launderingConvoys.find(convoyId);
+    if (it == m_launderingConvoys.end() || it->second.isDelivered) return false;
+
+    it->second.isAmbushed = true;
+    m_totalConvoysIntercepted++;
+    INFO_LOG(format("UnderworldManager: Laundering Convoy #%1% ambushed by operative %2%!")
+             % convoyId % interceptorGoId);
+    return true;
+}
+
+bool UnderworldManager::CompleteLaunderingConvoy(uint32 convoyId)
+{
+    std::lock_guard<std::recursive_mutex> lock(m_mutex);
+    auto it = m_launderingConvoys.find(convoyId);
+    if (it == m_launderingConvoys.end() || it->second.isDelivered) return false;
+
+    it->second.isDelivered = true;
+    it->second.routeProgress = 1.0f;
+    it->second.currentLocation = it->second.destination;
+
+    auto itCrew = m_playerCrews.find(it->second.crewId);
+    if (itCrew != m_playerCrews.end()) {
+        itCrew->second.warChestBits += it->second.launderedAmount;
+    }
+
+    INFO_LOG(format("UnderworldManager: Laundering Convoy #%1% successfully delivered! +%2% clean Bits to war chest.")
+             % convoyId % it->second.launderedAmount);
+    return true;
+}
+
+size_t UnderworldManager::GetActiveLaunderingConvoyCount() const
+{
+    std::lock_guard<std::recursive_mutex> lock(m_mutex);
+    size_t count = 0;
+    for (const auto& kv : m_launderingConvoys) {
+        if (!kv.second.isDelivered && !kv.second.isAmbushed) count++;
+    }
+    return count;
+}
+
+uint32 UnderworldManager::InitiateDistrictStreetWar(uint32 districtId, uint32 attackerId, uint32 defenderId)
+{
+    std::lock_guard<std::recursive_mutex> lock(m_mutex);
+    uint32 wid = m_nextStreetWarId++;
+    ContestedStreetWarEvent war;
+    war.warId = wid;
+    war.districtId = districtId;
+    war.districtName = GetDistrictName(districtId);
+    war.attackerCrewOrFactionId = attackerId;
+    war.defenderCrewOrFactionId = defenderId;
+    war.intensity = 1.0f;
+    war.barricadesErected = true;
+    war.swatInterdictionActive = true;
+    war.timeRemainingSec = 300;
+    war.isActive = true;
+    war.winningEntityId = 0;
+
+    m_streetWars[wid] = war;
+    AddDistrictHeat(districtId, 25.0f);
+
+    INFO_LOG(format("UnderworldManager: District Street War #%1% broken out in %2%! Barricades and SWAT deployed.")
+             % wid % war.districtName);
+    return wid;
+}
+
+bool UnderworldManager::ResolveStreetWar(uint32 warId, uint32 winningEntityId)
+{
+    std::lock_guard<std::recursive_mutex> lock(m_mutex);
+    auto it = m_streetWars.find(warId);
+    if (it == m_streetWars.end() || !it->second.isActive) return false;
+
+    it->second.isActive = false;
+    it->second.winningEntityId = winningEntityId;
+
+    auto itCrew = m_playerCrews.find(winningEntityId);
+    if (itCrew != m_playerCrews.end()) {
+        itCrew->second.influenceScore += 500;
+        itCrew->second.warChestBits += 50000;
+    }
+
+    INFO_LOG(format("UnderworldManager: Street War #%1% resolved in %2%! Victor: Entity #%3%")
+             % warId % it->second.districtName % winningEntityId);
+    return true;
+}
+
+size_t UnderworldManager::GetActiveStreetWarCount() const
+{
+    std::lock_guard<std::recursive_mutex> lock(m_mutex);
+    size_t count = 0;
+    for (const auto& kv : m_streetWars) {
+        if (kv.second.isActive) count++;
+    }
+    return count;
+}
+
+// ============================================================================
 // Underworld Master Test Suite
 // ============================================================================
 void RunUnderworldTestSuite()
@@ -2070,6 +2254,36 @@ void RunUnderworldTestSuite()
         threadsCompleted = false;
     }
     assertTest("Underworld Concurrency & Mutex Thread Safety", threadsCompleted);
+
+    // 17. Epoch IX: Autonomous Crew Governance, Turf Colonization, Laundering Convoys & Street Wars
+    uint32 crewId = sUnderworldMgr.IncorporatePlayerCrew(10001, "Sovereign Zion Vanguard");
+    assertTest("Player Syndicate Crew Incorporation", crewId > 0);
+    assertTest("Player Crew Count Increment", sUnderworldMgr.GetPlayerCrewCount() == 1);
+
+    const auto* crew = sUnderworldMgr.GetPlayerCrew(crewId);
+    assertTest("Player Crew Record Query", crew != nullptr && crew->crewName == "Sovereign Zion Vanguard");
+
+    bool colonized = sUnderworldMgr.ColonizeTurfSector(crewId, 1); // Colonize Sector 1
+    assertTest("Player Crew Colonizes Turf Sector", colonized);
+    assertTest("Turf Sector Ownership Updated", sUnderworldMgr.GetTurfSector(1)->controllingFaction == SyndicateFaction::JudasCabal);
+
+    LocationVector startPos(100.0, 0.0, 100.0);
+    LocationVector destPos(2500.0, 0.0, 3000.0);
+    uint32 convoyId = sUnderworldMgr.LaunchRevenueLaunderingConvoy(crewId, 25000, startPos, destPos);
+    assertTest("Launch Revenue Laundering Escort Convoy", convoyId > 0);
+    assertTest("Active Laundering Convoy Count", sUnderworldMgr.GetActiveLaunderingConvoyCount() == 1);
+
+    bool completedConvoy = sUnderworldMgr.CompleteLaunderingConvoy(convoyId);
+    assertTest("Complete Revenue Laundering Convoy & Deposit Clean Bits", completedConvoy);
+    assertTest("War Chest Enriched with Laundered Bits", sUnderworldMgr.GetPlayerCrew(crewId)->warChestBits >= 35000);
+
+    uint32 warId = sUnderworldMgr.InitiateDistrictStreetWar(1, crewId, 3); // Slums street war
+    assertTest("Contested District Street War Initiation", warId > 0);
+    assertTest("Active Street War Count", sUnderworldMgr.GetActiveStreetWarCount() == 1);
+
+    bool warResolved = sUnderworldMgr.ResolveStreetWar(warId, crewId);
+    assertTest("Resolve Contested District Street War with Victorious Crew", warResolved);
+    assertTest("Active Street War Concluded", sUnderworldMgr.GetActiveStreetWarCount() == 0);
 
     std::cout << "\n============================================================" << std::endl;
     std::cout << "  UNDERWORLD TEST RESULTS: " << passed << " PASSED, " << failed << " FAILED" << std::endl;

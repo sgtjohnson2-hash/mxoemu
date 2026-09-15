@@ -124,6 +124,10 @@ public:
     // Telemetry & Statistics
     uint32 GetTotalTransits() const;
 
+    // Epoch VIII: Phone Booth to Construct Space Coordinate Handshakes
+    bool InitiateConstructHandshake(uint32 entityGoId, uint32 doorId, float& outX, float& outY, float& outZ);
+    bool VerifyConstructHandshakeActive(uint32 entityGoId) const;
+
     // Procedural Infinite Green Hallway Backdoors (Epoch IV)
     void InitializeProceduralHallways(uint32 segmentCount = 10);
     bool TraverseInfiniteHallway(uint32 currentSegment, uint32 doorChoice, uint32& outNextSegment, PortalPosition& outExitPos);
@@ -136,6 +140,7 @@ private:
     std::vector<BackdoorPortal> m_portals;
     std::map<uint32, KeymakerMasterKey> m_craftedKeys;
     std::map<uint32, FirewallAnchor> m_firewallAnchors;
+    std::map<uint32, uint32> m_activeConstructHandshakes;
     std::vector<struct InfiniteHallwaySegment> m_infiniteSegments;
     bool m_infiniteHallwayActive{false};
     uint32 m_nextKeyId{1001};

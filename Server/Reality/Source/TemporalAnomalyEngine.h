@@ -51,6 +51,18 @@ struct ChronalGhostEcho
     bool isPlaying{true};
 };
 
+// Epoch XII: Sovereign Shard Mesh & Reality Reset Protocol
+struct RealityResetCycle
+{
+    uint32_t cycleNumber{7};
+    float anomalySaturation{0.0f};      // 0.0 to 1.0 (threshold e.g. 0.85f)
+    bool resetTriggered{false};
+    float resetCountdownSec{0.0f};
+    uint32_t totalResetsExecuted{0};
+    std::string activeArchitectDecree{""};
+    std::vector<std::string> synchronizedShards;
+};
+
 class TemporalAnomalyEngine : public Singleton<TemporalAnomalyEngine>
 {
 public:
@@ -72,6 +84,14 @@ public:
     // Chronal Ghost Echoes
     uint32_t SpawnChronalGhostEcho(uint32_t entityGoId, float x, float y, float z, float duration = 3.0f);
 
+    // Epoch XII: Multi-Epoch Shard State Mesh & Reality Reset Cycle
+    void RecordShardAnomalySaturation(float saturationIncrement);
+    float GetAnomalySaturation() const;
+    bool CheckRealityResetThreshold(float threshold = 0.85f) const;
+    bool TriggerRealityResetCycle(const std::string& architectDecree, float countdownSec = 10.0f);
+    bool SynchronizeShardStateMesh(const std::string& shardId, float stateChecksum);
+    const RealityResetCycle& GetRealityResetCycle() const;
+
     // Metrics & Queries
     size_t GetRecordedEntityCount() const;
     size_t GetActiveGlitchCount() const;
@@ -83,6 +103,7 @@ private:
     std::unordered_map<uint32_t, EntityTemporalBuffer> m_buffers;
     std::unordered_map<uint32_t, ActiveDejaVuGlitch> m_glitches;
     std::unordered_map<uint32_t, ChronalGhostEcho> m_echoes;
+    RealityResetCycle m_resetCycle;
     uint32_t m_nextGlitchId{1};
     uint32_t m_nextEchoId{1};
     size_t m_totalRewinds{0};
@@ -91,3 +112,5 @@ private:
 #define sTemporalAnomalyEngine TemporalAnomalyEngine::getSingleton()
 
 void RunTemporalAnomalyTestSuite();
+
+#endif // MXOEMU_TEMPORAL_ANOMALY_ENGINE_H

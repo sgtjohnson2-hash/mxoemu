@@ -12,8 +12,10 @@ SourceVoxelSynthesisEngine::SourceVoxelSynthesisEngine()
       m_nextCoverId(1),
       m_nextFieldId(1),
       m_nextWeaponId(1),
+      m_nextTearId(1),
       m_invertedBullets(0),
       m_glyphShowers(0),
+      m_totalDissolvedSurfaces(0),
       m_totalVoxelsMaterialized(0),
       m_sourceEnergyReserve(100000.0f) {
 }
@@ -28,6 +30,7 @@ void SourceVoxelSynthesisEngine::Initialize() {
     m_barriers.reserve(256);
     m_fields.reserve(64);
     m_weapons.reserve(128);
+    m_glitchTears.reserve(64);
     std::cout << "[SourceVoxelSynthesisEngine] Initialized molecular voxel synthesis and ballistic inversion." << std::endl;
 }
 
@@ -36,13 +39,44 @@ void SourceVoxelSynthesisEngine::Reset() {
     m_barriers.clear();
     m_fields.clear();
     m_weapons.clear();
+    m_glitchTears.clear();
     m_nextCoverId = 1;
     m_nextFieldId = 1;
     m_nextWeaponId = 1;
+    m_nextTearId = 1;
     m_invertedBullets = 0;
     m_glyphShowers = 0;
+    m_totalDissolvedSurfaces = 0;
     m_totalVoxelsMaterialized = 0;
     m_sourceEnergyReserve = 100000.0f;
+}
+
+void SourceVoxelSynthesisEngine::Update(float dtSec) {
+    std::lock_guard<std::mutex> lock(m_mutex);
+    for (auto& b : m_barriers) {
+        if (b.active) {
+            b.remainingLifetime -= dtSec;
+            if (b.remainingLifetime <= 0.0f) b.active = false;
+        }
+    }
+    for (auto& f : m_fields) {
+        if (f.active) {
+            f.remainingDuration -= dtSec;
+            if (f.remainingDuration <= 0.0f) f.active = false;
+        }
+    }
+    for (auto& w : m_weapons) {
+        if (w.active) {
+            w.remainingDuration -= dtSec;
+            if (w.remainingDuration <= 0.0f) w.active = false;
+        }
+    }
+    for (auto& t : m_glitchTears) {
+        if (t.active) {
+            t.remainingDuration -= dtSec;
+            if (t.remainingDuration <= 0.0f) t.active = false;
+        }
+    }
 }
 
 uint32_t SourceVoxelSynthesisEngine::SynthesizeCover(float x, float y, float z, float width, float height,
@@ -258,33 +292,66 @@ void SourceVoxelSynthesisEngine::ReplenishSourceEnergy(float amount) {
     m_sourceEnergyReserve += amount;
 }
 
-void SourceVoxelSynthesisEngine::Update(float dtSec) {
+uint32_t SourceVoxelSynthesisEngine::CreateRealityGlitchTear(
+    uint32_t operativeGoId, float x, float y, float z, float radius,
+    float intensity, float durationSec, uint32_t operativeFocusRating) {
     std::lock_guard<std::mutex> lock(m_mutex);
-    if (!m_initialized) return;
+    if (operativeFocusRating < 40) return 0;
+
+    uint32_t id = m_nextTearId++;
+    RealityGlitchTear t;
+    t.id = id;
+    t.operativeGoId = operativeGoId;
+    t.x = x;
+    t.y = y;
+    t.z = z;
+    t.radius = radius;
+    t.glitchIntensity = intensity;
+    t.remainingDuration = durationSec;
+    t.requiredFocus = operativeFocusRating;
+    t.active = true;
+
+    m_glitchTears.push_back(t);
+    m_totalVoxelsMaterialized += static_cast<uint64_t>(radius * 100.0f);
+    return id;
+}
+
+bool SourceVoxelSynthesisEngine::ManipulateVoxelGeometry(
+    uint32_t barrierId, float deltaWidth, float deltaHeight, uint32_t operativeFocusRating) {
+    std::lock_guard<std::mutex> lock(m_mutex);
+    if (operativeFocusRating < 50) return false;
 
     for (auto& b : m_barriers) {
-        if (!b.active) continue;
-        b.remainingLifetime -= dtSec;
-        if (b.remainingLifetime <= 0.0f) {
-            b.active = false;
+        if (b.id == barrierId && b.active) {
+            b.width = std::max(1.0f, b.width + deltaWidth);
+            b.height = std::max(1.0f, b.height + deltaHeight);
+            b.health = std::min(b.maxHealth, b.health + 200.0f);
+            m_totalVoxelsMaterialized += 250;
+            return true;
         }
     }
+    return false;
+}
 
-    for (auto& f : m_fields) {
-        if (!f.active) continue;
-        f.remainingDuration -= dtSec;
-        if (f.remainingDuration <= 0.0f) {
-            f.active = false;
-        }
-    }
+bool SourceVoxelSynthesisEngine::DissolveSurfaceToVoxels(
+    float x, float y, float z, float radius, uint32_t operativeFocusRating) {
+    (void)x; (void)y; (void)z;
+    std::lock_guard<std::mutex> lock(m_mutex);
+    if (operativeFocusRating < 60) return false;
 
-    for (auto& w : m_weapons) {
-        if (!w.active) continue;
-        w.remainingDuration -= dtSec;
-        if (w.remainingDuration <= 0.0f) {
-            w.active = false;
-        }
+    m_totalDissolvedSurfaces++;
+    m_totalVoxelsMaterialized += static_cast<uint64_t>(radius * 200.0f);
+    m_glyphShowers += 5;
+    return true;
+}
+
+size_t SourceVoxelSynthesisEngine::GetActiveRealityTearCount() const {
+    std::lock_guard<std::mutex> lock(m_mutex);
+    size_t count = 0;
+    for (const auto& t : m_glitchTears) {
+        if (t.active) count++;
     }
+    return count;
 }
 
 void RunSourceVoxelSynthesisTestSuite() {
@@ -383,6 +450,30 @@ void RunSourceVoxelSynthesisTestSuite() {
     // Energy replenish
     sSourceVoxelSynthesisEngine.ReplenishSourceEnergy(5000.0f);
     assert(sSourceVoxelSynthesisEngine.GetSourceEnergyReserve() >= 105000.0f); assertions++;
+
+    // 9. Epoch VIII: Procedural Code Voxelization & Spatial Glitch Manipulation
+    // Low focus operative fails to create reality tear
+    uint32_t failTear = sSourceVoxelSynthesisEngine.CreateRealityGlitchTear(9001, 100.0f, 0.0f, 100.0f, 10.0f, 0.8f, 15.0f, 20);
+    assert(failTear == 0); assertions++;
+
+    // High focus operative (Focus 75) successfully creates reality glitch tear
+    uint32_t glitchTear = sSourceVoxelSynthesisEngine.CreateRealityGlitchTear(9001, 100.0f, 0.0f, 100.0f, 15.0f, 0.95f, 20.0f, 75);
+    assert(glitchTear > 0); assertions++;
+    assert(sSourceVoxelSynthesisEngine.GetActiveRealityTearCount() == 1); assertions++;
+
+    // Manipulate Voxel Geometry of existing barrier
+    uint32_t testCover = sSourceVoxelSynthesisEngine.SynthesizeCover(300.0f, 0.0f, 300.0f, 4.0f, 2.0f, VoxelCoverMaterial::DigitalConcrete, 60.0f);
+    bool manipulated = sSourceVoxelSynthesisEngine.ManipulateVoxelGeometry(testCover, 2.0f, 1.0f, 80);
+    assert(manipulated); assertions++;
+    const auto* coverPtr = sSourceVoxelSynthesisEngine.FindNearestCover(300.0f, 0.0f, 300.0f, 10.0f);
+    assert(coverPtr != nullptr); assertions++;
+    assert(coverPtr->width == 6.0f); assertions++;
+    assert(coverPtr->height == 3.0f); assertions++;
+
+    // Dissolve Urban Surface to Phosphor Voxels
+    bool dissolved = sSourceVoxelSynthesisEngine.DissolveSurfaceToVoxels(300.0f, 0.0f, 300.0f, 25.0f, 85);
+    assert(dissolved); assertions++;
+    assert(sSourceVoxelSynthesisEngine.GetTotalDissolvedSurfaces() == 1); assertions++;
 
     std::cout << "[Suite 54] PASSED (" << assertions << " assertions verified)" << std::endl;
 }

@@ -95,6 +95,7 @@ void RunEpochIVMasteryTestSuite();
 void RunNeuralSwarmTestSuite();
 void RunStructuralVoxelTestSuite();
 void RunNeuralAudioTestSuite();
+void RunAdaptiveMusicTestSuite();
 void RunSharedMemoryShardTestSuite();
 void RunEpochVINeuromorphicSuite();
 void RunNonEuclideanPortalTestSuite();
@@ -399,6 +400,7 @@ int main(int argc, char* argv[])
         RunNeuralSwarmTestSuite();
         RunStructuralVoxelTestSuite();
         RunNeuralAudioTestSuite();
+        RunAdaptiveMusicTestSuite();
         RunSharedMemoryShardTestSuite();
         RunEpochVINeuromorphicSuite();
         RunNonEuclideanPortalTestSuite();
@@ -485,6 +487,7 @@ int main(int argc, char* argv[])
         RunSharedMemoryShardTestSuite();
     } else if (g_testNeuralAudio) {
         RunNeuralAudioTestSuite();
+        RunAdaptiveMusicTestSuite();
     } else if (g_testStructuralVoxel) {
         RunStructuralVoxelTestSuite();
     } else if (g_testNeuralSwarm) {

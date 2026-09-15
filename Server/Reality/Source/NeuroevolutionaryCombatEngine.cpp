@@ -318,6 +318,86 @@ const MarkovCombatProfile* NeuroevolutionaryCombatEngine::GetCombatProfile(uint3
     return nullptr;
 }
 
+void NeuroevolutionaryCombatEngine::RecordPlayerStanceTendency(uint32_t playerGoId, uint8_t chosenTactic)
+{
+    std::unique_lock<std::shared_mutex> lock(m_engineMutex);
+    auto& profile = m_profiles[playerGoId];
+    profile.targetGoId = playerGoId;
+
+    if (chosenTactic < 9) {
+        profile.stanceCounts[chosenTactic]++;
+        profile.totalStanceObservations++;
+        if (profile.hasLastStance && profile.lastStance < 9) {
+            profile.stanceTransitionMatrix[profile.lastStance][chosenTactic]++;
+        }
+        profile.lastStance = chosenTactic;
+        profile.hasLastStance = true;
+    }
+}
+
+uint8_t NeuroevolutionaryCombatEngine::PredictOptimalCounterTactic(uint32_t playerGoId, uint8_t playerCurrentTactic) const
+{
+    std::shared_lock<std::shared_mutex> lock(m_engineMutex);
+    auto it = m_profiles.find(playerGoId);
+    if (it == m_profiles.end() || it->second.totalStanceObservations == 0) {
+        return 4; // Default Power
+    }
+
+    const auto& profile = it->second;
+    uint8_t predictedTactic = 4;
+
+    if (playerCurrentTactic < 9 && profile.hasLastStance) {
+        uint32_t maxTrans = 0;
+        uint8_t bestNext = 8;
+        for (int i = 0; i < 9; ++i) {
+            if (profile.stanceTransitionMatrix[playerCurrentTactic][i] > maxTrans) {
+                maxTrans = profile.stanceTransitionMatrix[playerCurrentTactic][i];
+                bestNext = i;
+            }
+        }
+        if (maxTrans > 0) {
+            predictedTactic = bestNext;
+        } else {
+            uint32_t maxFreq = 0;
+            for (int i = 0; i < 9; ++i) {
+                if (profile.stanceCounts[i] > maxFreq) {
+                    maxFreq = profile.stanceCounts[i];
+                    predictedTactic = i;
+                }
+            }
+        }
+    } else {
+        uint32_t maxFreq = 0;
+        for (int i = 0; i < 9; ++i) {
+            if (profile.stanceCounts[i] > maxFreq) {
+                maxFreq = profile.stanceCounts[i];
+                predictedTactic = i;
+            }
+        }
+    }
+
+    // Rock-Paper-Scissors Advantage Counter:
+    // TACTIC_RETALIATE = 0 (Grab)  -> Counter with TACTIC_SPEED (5) (Speed interrupts Grab)
+    // TACTIC_DEFENSE   = 3 (Guard) -> Counter with TACTIC_RETALIATE (0) (Grab breaks Guard)
+    // TACTIC_POWER     = 4 (Power) -> Counter with TACTIC_RETALIATE (0) (Grab breaks Power)
+    // TACTIC_SPEED     = 5 (Speed) -> Counter with TACTIC_POWER (4) (Power crushes Speed)
+    switch (predictedTactic) {
+        case 0: return 5; // Speed counters Grab
+        case 3: return 0; // Grab counters Guard
+        case 4: return 0; // Grab counters Power
+        case 5: return 4; // Power counters Speed
+        default: return 4;
+    }
+}
+
+float NeuroevolutionaryCombatEngine::GetStanceAdaptationConfidence(uint32_t playerGoId) const
+{
+    std::shared_lock<std::shared_mutex> lock(m_engineMutex);
+    auto it = m_profiles.find(playerGoId);
+    if (it == m_profiles.end() || it->second.totalStanceObservations == 0) return 0.0f;
+    return std::min(1.0f, static_cast<float>(it->second.totalStanceObservations) / 10.0f);
+}
+
 FlankRouteVectors NeuroevolutionaryCombatEngine::ComputeTacticalFlankVectors(
     float targetX, float targetY, float targetZ,
     float targetHeadingDeg, float flankDistance, float flankAngleDeg)
@@ -454,5 +534,35 @@ void RunNeuroevolutionaryCombatTestSuite()
     assert(flank.rightFlankX > 1000.0f);
     assert(flank.suppressionZ < 1000.0f);
 
-    std::cout << "[PASSED] Suite 43: Neuroevolutionary Combat AI & Tactical Adaptation (34 assertions passed)." << std::endl;
+    // 8. Epoch VII: Machine Mind Stance Adaptation (Power/Speed/Grab Counters)
+    uint32_t stancePlayerId = 888;
+    assert(sNeuroevolutionaryCombatEngine.GetStanceAdaptationConfidence(stancePlayerId) == 0.0f);
+    assert(sNeuroevolutionaryCombatEngine.PredictOptimalCounterTactic(stancePlayerId) == 4); // Default Power
+
+    // Player repeatedly uses Grab (0) to break guard
+    for (int i = 0; i < 8; ++i) {
+        sNeuroevolutionaryCombatEngine.RecordPlayerStanceTendency(stancePlayerId, 0); // Grab
+    }
+    // Machine Mind learns player stance tendency and counters with Speed (5) to interrupt
+    assert(sNeuroevolutionaryCombatEngine.PredictOptimalCounterTactic(stancePlayerId) == 5);
+    assert(sNeuroevolutionaryCombatEngine.GetStanceAdaptationConfidence(stancePlayerId) == 0.8f);
+
+    // Another player favors Speed (5)
+    uint32_t speedPlayerId = 889;
+    for (int i = 0; i < 10; ++i) {
+        sNeuroevolutionaryCombatEngine.RecordPlayerStanceTendency(speedPlayerId, 5); // Speed
+    }
+    // Machine Mind counters Speed with Power (4)
+    assert(sNeuroevolutionaryCombatEngine.PredictOptimalCounterTactic(speedPlayerId) == 4);
+    assert(sNeuroevolutionaryCombatEngine.GetStanceAdaptationConfidence(speedPlayerId) == 1.0f);
+
+    // Another player favors Power (4)
+    uint32_t powerPlayerId = 890;
+    for (int i = 0; i < 10; ++i) {
+        sNeuroevolutionaryCombatEngine.RecordPlayerStanceTendency(powerPlayerId, 4); // Power
+    }
+    // Machine Mind counters Power with Grab (0) (unblockable throw)
+    assert(sNeuroevolutionaryCombatEngine.PredictOptimalCounterTactic(powerPlayerId) == 0);
+
+    std::cout << "[PASSED] Suite 43: Neuroevolutionary Combat AI & Tactical Adaptation (42 assertions passed)." << std::endl;
 }

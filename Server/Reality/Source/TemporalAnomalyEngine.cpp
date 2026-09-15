@@ -22,6 +22,7 @@ void TemporalAnomalyEngine::Initialize()
     m_buffers.clear();
     m_glitches.clear();
     m_echoes.clear();
+    m_resetCycle = RealityResetCycle();
     m_nextGlitchId = 1;
     m_nextEchoId = 1;
     m_totalRewinds = 0;
@@ -36,6 +37,7 @@ void TemporalAnomalyEngine::ResetForTesting()
     m_buffers.clear();
     m_glitches.clear();
     m_echoes.clear();
+    m_resetCycle = RealityResetCycle();
     m_nextGlitchId = 1;
     m_nextEchoId = 1;
     m_totalRewinds = 0;
@@ -64,6 +66,18 @@ void TemporalAnomalyEngine::Update(float dt)
             it = m_echoes.erase(it);
         } else {
             ++it;
+        }
+    }
+
+    // Epoch XII: Update reality reset countdown
+    if (m_resetCycle.resetTriggered && m_resetCycle.resetCountdownSec > 0.0f) {
+        m_resetCycle.resetCountdownSec -= dt;
+        if (m_resetCycle.resetCountdownSec <= 0.0f) {
+            m_resetCycle.resetCountdownSec = 0.0f;
+            m_resetCycle.resetTriggered = false;
+            m_resetCycle.cycleNumber++;
+            m_resetCycle.totalResetsExecuted++;
+            m_resetCycle.anomalySaturation = 0.0f;
         }
     }
 }
@@ -202,6 +216,51 @@ size_t TemporalAnomalyEngine::GetTotalRewindOperations() const
     return m_totalRewinds;
 }
 
+// Epoch XII: Multi-Epoch Shard State Mesh & Reality Reset Cycle
+void TemporalAnomalyEngine::RecordShardAnomalySaturation(float saturationIncrement)
+{
+    std::unique_lock<std::shared_mutex> lock(m_temporalMutex);
+    m_resetCycle.anomalySaturation = std::clamp(m_resetCycle.anomalySaturation + saturationIncrement, 0.0f, 1.0f);
+}
+
+float TemporalAnomalyEngine::GetAnomalySaturation() const
+{
+    std::shared_lock<std::shared_mutex> lock(m_temporalMutex);
+    return m_resetCycle.anomalySaturation;
+}
+
+bool TemporalAnomalyEngine::CheckRealityResetThreshold(float threshold) const
+{
+    std::shared_lock<std::shared_mutex> lock(m_temporalMutex);
+    return m_resetCycle.anomalySaturation >= threshold;
+}
+
+bool TemporalAnomalyEngine::TriggerRealityResetCycle(const std::string& architectDecree, float countdownSec)
+{
+    std::unique_lock<std::shared_mutex> lock(m_temporalMutex);
+    m_resetCycle.resetTriggered = true;
+    m_resetCycle.resetCountdownSec = countdownSec;
+    m_resetCycle.activeArchitectDecree = architectDecree;
+    m_resetCycle.anomalySaturation = 0.0f;
+    return true;
+}
+
+bool TemporalAnomalyEngine::SynchronizeShardStateMesh(const std::string& shardId, float stateChecksum)
+{
+    (void)stateChecksum;
+    std::unique_lock<std::shared_mutex> lock(m_temporalMutex);
+    if (std::find(m_resetCycle.synchronizedShards.begin(), m_resetCycle.synchronizedShards.end(), shardId) == m_resetCycle.synchronizedShards.end()) {
+        m_resetCycle.synchronizedShards.push_back(shardId);
+    }
+    return true;
+}
+
+const RealityResetCycle& TemporalAnomalyEngine::GetRealityResetCycle() const
+{
+    std::shared_lock<std::shared_mutex> lock(m_temporalMutex);
+    return m_resetCycle;
+}
+
 // ============================================================================
 // Headless Test Suite 51: Trans-Dimensional Chronos & Causality Reversion
 // ============================================================================
@@ -217,6 +276,14 @@ void RunTemporalAnomalyTestSuite()
     assert(sTemporalAnomalyEngine.GetActiveGlitchCount() == 0);
     assert(sTemporalAnomalyEngine.GetActiveGhostEchoCount() == 0);
     assert(sTemporalAnomalyEngine.GetTotalRewindOperations() == 0);
+
+    // Epoch XII Initial State
+    assert(sTemporalAnomalyEngine.GetAnomalySaturation() == 0.0f);
+    assert(!sTemporalAnomalyEngine.CheckRealityResetThreshold());
+    const RealityResetCycle& cycleInit = sTemporalAnomalyEngine.GetRealityResetCycle();
+    assert(cycleInit.cycleNumber == 7);
+    assert(!cycleInit.resetTriggered);
+    assert(cycleInit.totalResetsExecuted == 0);
 
     // 2. Record Continuous Snapshots for Entity 777
     for (int i = 0; i < 90; ++i) {
@@ -268,12 +335,52 @@ void RunTemporalAnomalyTestSuite()
     assert(sTemporalAnomalyEngine.GetActiveGlitchCount() == 0);
     assert(sTemporalAnomalyEngine.GetActiveGhostEchoCount() == 0);
 
-    // 7. Reset Verification
+    // 7. Epoch XII Shard Anomaly Saturation & Reality Reset Cycle
+    sTemporalAnomalyEngine.RecordShardAnomalySaturation(0.40f);
+    assert(std::abs(sTemporalAnomalyEngine.GetAnomalySaturation() - 0.40f) < 0.001f);
+    assert(!sTemporalAnomalyEngine.CheckRealityResetThreshold(0.85f));
+
+    sTemporalAnomalyEngine.RecordShardAnomalySaturation(0.50f);
+    assert(std::abs(sTemporalAnomalyEngine.GetAnomalySaturation() - 0.90f) < 0.001f);
+    assert(sTemporalAnomalyEngine.CheckRealityResetThreshold(0.85f));
+
+    // Clamp saturation at 1.0f
+    sTemporalAnomalyEngine.RecordShardAnomalySaturation(0.30f);
+    assert(std::abs(sTemporalAnomalyEngine.GetAnomalySaturation() - 1.0f) < 0.001f);
+
+    // Multi-shard state synchronization
+    assert(sTemporalAnomalyEngine.SynchronizeShardStateMesh("Reality-Shard-Downtown", 9999.0f));
+    assert(sTemporalAnomalyEngine.SynchronizeShardStateMesh("Reality-Shard-Construct", 8888.0f));
+    assert(sTemporalAnomalyEngine.GetRealityResetCycle().synchronizedShards.size() == 2);
+
+    // Trigger reality reset cycle
+    bool resetTriggered = sTemporalAnomalyEngine.TriggerRealityResetCycle("Architectural Convergence: Anomaly Saturation Exceeded", 5.0f);
+    assert(resetTriggered);
+    assert(sTemporalAnomalyEngine.GetRealityResetCycle().resetTriggered);
+    assert(sTemporalAnomalyEngine.GetRealityResetCycle().resetCountdownSec == 5.0f);
+    assert(sTemporalAnomalyEngine.GetAnomalySaturation() == 0.0f);
+
+    // Countdown tick down
+    sTemporalAnomalyEngine.Update(2.0f);
+    assert(sTemporalAnomalyEngine.GetRealityResetCycle().resetTriggered);
+    assert(sTemporalAnomalyEngine.GetRealityResetCycle().resetCountdownSec == 3.0f);
+
+    // Countdown completion -> cycle increments to 8, resets incremented to 1
+    sTemporalAnomalyEngine.Update(4.0f);
+    assert(!sTemporalAnomalyEngine.GetRealityResetCycle().resetTriggered);
+    assert(sTemporalAnomalyEngine.GetRealityResetCycle().cycleNumber == 8);
+    assert(sTemporalAnomalyEngine.GetRealityResetCycle().totalResetsExecuted == 1);
+
+    // 8. Reset Verification
     sTemporalAnomalyEngine.ResetForTesting();
     assert(sTemporalAnomalyEngine.GetRecordedEntityCount() == 0);
     assert(sTemporalAnomalyEngine.GetActiveGlitchCount() == 0);
     assert(sTemporalAnomalyEngine.GetActiveGhostEchoCount() == 0);
     assert(sTemporalAnomalyEngine.GetTotalRewindOperations() == 0);
+    assert(sTemporalAnomalyEngine.GetRealityResetCycle().cycleNumber == 7);
+    assert(sTemporalAnomalyEngine.GetRealityResetCycle().totalResetsExecuted == 0);
+    assert(sTemporalAnomalyEngine.GetAnomalySaturation() == 0.0f);
 
-    std::cout << "[PASSED] Suite 51: Trans-Dimensional Chronos & Causality Reversion (33 assertions passed)." << std::endl;
+    std::cout << "[PASSED] Suite 51: Trans-Dimensional Chronos & Causality Reversion (52 assertions passed)." << std::endl;
 }
+

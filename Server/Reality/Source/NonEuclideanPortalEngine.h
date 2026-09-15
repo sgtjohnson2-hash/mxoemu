@@ -133,6 +133,19 @@ struct AcousticDiffractionResult
     float spreadAngleDeg{45.0f};
 };
 
+struct CoordinateDomainHandshake
+{
+    uint32_t handshakeId{0};
+    uint32_t entityGoId{0};
+    uint32_t sourcePortalId{0};
+    uint32_t constructInstanceId{0};
+    PortalVec3 sourcePos;
+    PortalVec3 constructPos;
+    uint64_t handshakeTimestampMs{0};
+    bool packetDropProtectionActive{true};
+    bool handshakeConfirmed{true};
+};
+
 class NonEuclideanPortalEngine : public Singleton<NonEuclideanPortalEngine>
 {
 public:
@@ -171,6 +184,14 @@ public:
     // Operator Dynamic Portal Deployment
     uint32_t PlaceOperatorTacticalPortal(uint32_t operatorGoId, const PortalVec3& pos,
                                          const PortalVec3& normal, float durationSec = 60.0f);
+
+    // Epoch VIII: Seamless Hardline Phone Booth to Construct Space Handshakes
+    uint32_t InitiateConstructHandshake(uint32_t entityGoId, uint32_t portalId, uint32_t constructInstanceId,
+                                        PortalVec3& outDstPos);
+    bool ConfirmConstructHandshake(uint32_t handshakeId);
+    bool VerifyPacketDropProtection(uint32_t handshakeId) const;
+    size_t GetActiveHandshakeCount() const;
+
     void Update(float dt);
 
 private:
@@ -178,7 +199,9 @@ private:
 
     mutable std::shared_mutex m_portalMutex;
     std::unordered_map<uint32_t, PortalAperture> m_portals;
+    std::unordered_map<uint32_t, CoordinateDomainHandshake> m_handshakes;
     uint32_t m_nextPortalId{1};
+    uint32_t m_nextHandshakeId{1};
 
     struct OperatorPortalExpiry {
         uint32_t portalId;

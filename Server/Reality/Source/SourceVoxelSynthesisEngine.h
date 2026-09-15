@@ -48,6 +48,19 @@ struct MaterializedWeapon {
     bool active;
 };
 
+struct RealityGlitchTear {
+    uint32_t id;
+    uint32_t operativeGoId;
+    float x;
+    float y;
+    float z;
+    float radius;
+    float glitchIntensity;
+    float remainingDuration;
+    uint32_t requiredFocus;
+    bool active;
+};
+
 class SourceVoxelSynthesisEngine : public Singleton<SourceVoxelSynthesisEngine> {
 public:
     SourceVoxelSynthesisEngine();
@@ -80,6 +93,14 @@ public:
     const MaterializedWeapon* GetMaterializedWeapon(uint32_t weaponId) const;
     std::vector<MaterializedWeapon> GetWeaponsByOwner(uint32_t ownerGoId) const;
 
+    // Epoch VIII: Procedural Code Voxelization & Spatial Glitch Manipulation for High-Focus Operatives
+    uint32_t CreateRealityGlitchTear(uint32_t operativeGoId, float x, float y, float z, float radius = 10.0f,
+                                    float intensity = 1.0f, float durationSec = 15.0f, uint32_t operativeFocusRating = 60);
+    bool ManipulateVoxelGeometry(uint32_t barrierId, float deltaWidth, float deltaHeight, uint32_t operativeFocusRating);
+    bool DissolveSurfaceToVoxels(float x, float y, float z, float radius, uint32_t operativeFocusRating);
+    size_t GetActiveRealityTearCount() const;
+    uint32_t GetTotalDissolvedSurfaces() const { return m_totalDissolvedSurfaces; }
+
     // Metrics & Telemetry
     uint64_t GetTotalVoxelsMaterialized() const { return m_totalVoxelsMaterialized; }
     float GetSourceEnergyReserve() const { return m_sourceEnergyReserve; }
@@ -91,14 +112,17 @@ private:
     uint32_t m_nextCoverId;
     uint32_t m_nextFieldId;
     uint32_t m_nextWeaponId;
+    uint32_t m_nextTearId;
     uint32_t m_invertedBullets;
     uint32_t m_glyphShowers;
+    uint32_t m_totalDissolvedSurfaces;
     uint64_t m_totalVoxelsMaterialized;
     float m_sourceEnergyReserve;
 
     std::vector<VoxelCoverBarrier> m_barriers;
     std::vector<BallisticInversionField> m_fields;
     std::vector<MaterializedWeapon> m_weapons;
+    std::vector<RealityGlitchTear> m_glitchTears;
 };
 
 #define sSourceVoxelSynthesisEngine SourceVoxelSynthesisEngine::getSingleton()

@@ -58,6 +58,13 @@ struct MarkovCombatProfile
     float adaptationFactor{0.70f};
     uint32_t totalCountersExecuted{0};
     uint32_t totalSparksManifested{0};
+
+    // Epoch VII: Stance Tendency Learning & Dynamic RPS Counters
+    uint32_t stanceCounts[9]{0};
+    uint32_t stanceTransitionMatrix[9][9]{{0}};
+    uint32_t totalStanceObservations{0};
+    uint8_t lastStance{8};
+    bool hasLastStance{false};
 };
 
 struct FlankRouteVectors
@@ -106,6 +113,11 @@ public:
                                    float& outCounterProb, bool& outSparkManifested,
                                    bool forceSuccessForTest = false);
     const MarkovCombatProfile* GetCombatProfile(uint32_t targetGoId) const;
+
+    // Epoch VII: Dynamic Tactic Adaptation against Player Tendencies (Power/Speed/Grab)
+    void RecordPlayerStanceTendency(uint32_t playerGoId, uint8_t chosenTactic);
+    uint8_t PredictOptimalCounterTactic(uint32_t playerGoId, uint8_t playerCurrentTactic = 8) const;
+    float GetStanceAdaptationConfidence(uint32_t playerGoId) const;
 
     // 4. Coordinated Tactical Flanking Routes
     FlankRouteVectors ComputeTacticalFlankVectors(float targetX, float targetY, float targetZ,

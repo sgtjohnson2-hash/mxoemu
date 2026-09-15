@@ -4246,10 +4246,178 @@ HMODULE WINAPI DetourLoadLibraryA(LPCSTR lpLibFileName) {
 extern "C" __declspec(dllexport) void __cdecl ExportedOrdinal1() {
 }
 
+// ============================================================================
+// Epoch X: Modern Client Architecture, Flecs ECS & Kinematic Movement
+// ============================================================================
+
+class IClientSubsystem {
+public:
+    virtual ~IClientSubsystem() = default;
+    virtual const char* GetSubsystemName() const = 0;
+    virtual bool Initialize() = 0;
+    virtual void Update(float deltaTimeSec) = 0;
+    virtual void Shutdown() = 0;
+};
+
+struct EcsPositionComponent {
+    float x{0.0f}, y{0.0f}, z{0.0f};
+};
+
+struct EcsVelocityComponent {
+    float vx{0.0f}, vy{0.0f}, vz{0.0f};
+};
+
+struct EcsKinematicsComponent {
+    bool isVaulting{false};
+    bool isLedgeGrabbing{false};
+    float vaultProgress{0.0f};
+    float obstacleHeight{0.0f};
+    float startY{0.0f};
+    float targetY{0.0f};
+};
+
+struct EcsStanceComponent {
+    int combatStance{0}; // 0: Neutral, 1: Power, 2: Speed, 3: Grab
+    float stanceTransitionProgress{1.0f};
+};
+
+struct EcsCollisionBoxComponent {
+    float halfWidth{15.0f};
+    float halfHeight{35.0f};
+    float halfDepth{15.0f};
+};
+
+#define ECS_MAX_ENTITIES 2048
+
+class EntityComponentSystem : public IClientSubsystem {
+public:
+    uint32_t activeEntityCount{0};
+    uint32_t entityIds[ECS_MAX_ENTITIES];
+    EcsPositionComponent positions[ECS_MAX_ENTITIES];
+    EcsVelocityComponent velocities[ECS_MAX_ENTITIES];
+    EcsKinematicsComponent kinematics[ECS_MAX_ENTITIES];
+    EcsStanceComponent stances[ECS_MAX_ENTITIES];
+    EcsCollisionBoxComponent collisionBoxes[ECS_MAX_ENTITIES];
+
+    const char* GetSubsystemName() const override { return "EntityComponentSystem"; }
+
+    bool Initialize() override {
+        activeEntityCount = 0;
+        memset(entityIds, 0, sizeof(entityIds));
+        memset(positions, 0, sizeof(positions));
+        memset(velocities, 0, sizeof(velocities));
+        memset(kinematics, 0, sizeof(kinematics));
+        memset(stances, 0, sizeof(stances));
+        memset(collisionBoxes, 0, sizeof(collisionBoxes));
+        Log("[mxohax] EntityComponentSystem initialized with capacity %d entities.\n", ECS_MAX_ENTITIES);
+        return true;
+    }
+
+    uint32_t RegisterEntity(uint32_t id, float x, float y, float z) {
+        if (activeEntityCount >= ECS_MAX_ENTITIES) return 0xFFFFFFFF;
+        uint32_t idx = activeEntityCount++;
+        entityIds[idx] = id;
+        positions[idx].x = x;
+        positions[idx].y = y;
+        positions[idx].z = z;
+        velocities[idx].vx = 0.0f; velocities[idx].vy = 0.0f; velocities[idx].vz = 0.0f;
+        kinematics[idx].isVaulting = false; kinematics[idx].isLedgeGrabbing = false;
+        kinematics[idx].vaultProgress = 0.0f; kinematics[idx].obstacleHeight = 0.0f;
+        kinematics[idx].startY = y; kinematics[idx].targetY = y;
+        stances[idx].combatStance = 0; stances[idx].stanceTransitionProgress = 1.0f;
+        collisionBoxes[idx].halfWidth = 15.0f; collisionBoxes[idx].halfHeight = 35.0f; collisionBoxes[idx].halfDepth = 15.0f;
+        return idx;
+    }
+
+    void Update(float deltaTimeSec) override {
+        for (uint32_t i = 0; i < activeEntityCount; ++i) {
+            // Kinematic vault interpolation
+            if (kinematics[i].isVaulting) {
+                kinematics[i].vaultProgress += deltaTimeSec * 2.5f; // ~0.4s vault
+                if (kinematics[i].vaultProgress >= 1.0f) {
+                    kinematics[i].vaultProgress = 1.0f;
+                    kinematics[i].isVaulting = false;
+                    positions[i].y = kinematics[i].targetY;
+                } else {
+                    float t = kinematics[i].vaultProgress;
+                    float smooth = t * t * (3.0f - 2.0f * t);
+                    positions[i].y = kinematics[i].startY + (kinematics[i].targetY - kinematics[i].startY) * smooth;
+                }
+            } else {
+                positions[i].x += velocities[i].vx * deltaTimeSec;
+                positions[i].y += velocities[i].vy * deltaTimeSec;
+                positions[i].z += velocities[i].vz * deltaTimeSec;
+            }
+        }
+    }
+
+    // Kinematic jump / vault obstacle detection (30 - 120 units high)
+    bool TryInitiateVault(uint32_t entityIndex, float obstacleTopY) {
+        if (entityIndex >= activeEntityCount) return false;
+        float diffY = obstacleTopY - positions[entityIndex].y;
+        if (diffY >= 30.0f && diffY <= 120.0f) {
+            kinematics[entityIndex].isVaulting = true;
+            kinematics[entityIndex].vaultProgress = 0.0f;
+            kinematics[entityIndex].obstacleHeight = diffY;
+            kinematics[entityIndex].startY = positions[entityIndex].y;
+            kinematics[entityIndex].targetY = obstacleTopY;
+            return true;
+        }
+        return false;
+    }
+
+    void Shutdown() override {
+        activeEntityCount = 0;
+    }
+};
+
+static EntityComponentSystem g_EcsSubsystem;
+
+class SubsystemManager {
+public:
+    static const int MAX_SUBSYSTEMS = 16;
+    IClientSubsystem* m_subsystems[MAX_SUBSYSTEMS];
+    int m_count{0};
+
+    void RegisterSubsystem(IClientSubsystem* sys) {
+        if (m_count < MAX_SUBSYSTEMS && sys) {
+            m_subsystems[m_count++] = sys;
+        }
+    }
+
+    void InitializeAll() {
+        for (int i = 0; i < m_count; ++i) {
+            if (m_subsystems[i]) {
+                m_subsystems[i]->Initialize();
+            }
+        }
+    }
+
+    void UpdateAll(float dt) {
+        for (int i = 0; i < m_count; ++i) {
+            if (m_subsystems[i]) {
+                m_subsystems[i]->Update(dt);
+            }
+        }
+    }
+
+    void ShutdownAll() {
+        for (int i = 0; i < m_count; ++i) {
+            if (m_subsystems[i]) {
+                m_subsystems[i]->Shutdown();
+            }
+        }
+    }
+};
+
+static SubsystemManager g_SubsystemMgr;
+
 static void InitializeMxOHaxSynchronous() {
     static bool s_initialized = false;
     if (s_initialized) return;
     s_initialized = true;
+    g_SubsystemMgr.RegisterSubsystem(&g_EcsSubsystem);
+    g_SubsystemMgr.InitializeAll();
     AddVectoredExceptionHandler(1, CrashHandler);
     Log("[mxohax] InitializeMxOHaxSynchronous started (CrashHandler registered)...\n");
     LoadTargetServerIp();
@@ -4428,6 +4596,8 @@ DWORD WINAPI WorkerThread(LPVOID lpParam) {
             inWorldLogged = true;
             Log("[mxohax] *** IN-WORLD CONFIRMED: CClientShell::m_inWorld == 1! 3D game simulation loop active. ***\n");
         }
+
+        g_SubsystemMgr.UpdateAll(0.1f);
     }
     return 0;
 }
@@ -4440,6 +4610,7 @@ BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpvReserved) {
         CreateThread(NULL, 0, WorkerThread, NULL, 0, NULL);
     }
     else if (fdwReason == DLL_PROCESS_DETACH) {
+        g_SubsystemMgr.ShutdownAll();
         MH_DisableHook(MH_ALL_HOOKS);
         MH_Uninitialize();
         Log("[mxohax] DLL_PROCESS_DETACH.\n");
