@@ -79,6 +79,7 @@ public:
 	void QueueState(msgBaseClassPtr theData,bool immediateOnly=false,packetAckFunc callFunc=0)
 	{
 		if (isBot() && !g_sniffPackets) return;
+		std::lock_guard<std::recursive_mutex> lock(m_queueMutex);
 		msgBaseClassPtr &realPtr = theData;
 		shared_ptr<ObjectUpdateMsg> amIObjectUpdate = dynamic_pointer_cast<ObjectUpdateMsg>(realPtr);
 		if (amIObjectUpdate != NULL)
@@ -89,6 +90,7 @@ public:
 	void QueueCommand(msgBaseClassPtr theCmd,packetAckFunc callFunc=0)
 	{
 		if (isBot() && !g_sniffPackets) return;
+		std::lock_guard<std::recursive_mutex> lock(m_queueMutex);
 		msgBaseClassPtr &realPtr = theCmd;
 		shared_ptr<ObjectUpdateMsg> amIObjectUpdate = dynamic_pointer_cast<ObjectUpdateMsg>(realPtr);
 		if (amIObjectUpdate != NULL)
@@ -240,6 +242,7 @@ private:
 	};
 	typedef deque<queuedState> stateQueueType;
 	stateQueueType m_queuedStates;
+	mutable std::recursive_mutex m_queueMutex;
 
 	void SendEncrypted(SequencedPacket withSequences);
 

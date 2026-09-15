@@ -585,6 +585,7 @@ bool GameClient::PacketReceived( uint16 clientSeq )
 
 uint32 GameClient::AcknowledgePacket( uint16 serverSeq, uint8 ackBits )
 {
+	std::lock_guard<std::recursive_mutex> lock(m_queueMutex);
 	vector<uint16> ackSequences;
 	ackSequences.reserve(8);
 	vector<uint16> nakSequences;
@@ -725,6 +726,7 @@ uint32 GameClient::AcknowledgePacket( uint16 serverSeq, uint8 ackBits )
 
 string GameClient::GetNetStats()
 {
+	std::lock_guard<std::recursive_mutex> lock(m_queueMutex);
 	format summary = format("Latency: %1%ms GuarQ: %2% UnGuarQ: %3% sSeq: %4% cSeq: %5%\n");
 	summary % int(m_currentPing) % uint32(m_sentCommands.size()) % uint32(m_queuedStates.size()) % m_serverSequence % m_lastClientSequence;
 	stringstream details;
@@ -787,6 +789,7 @@ string GameClient::GetNetStats()
 
 void GameClient::ResetRCC()
 {
+	std::lock_guard<std::recursive_mutex> lock(m_queueMutex);
 	m_serverSequence = 1;
 	m_serverCommandsSent = 0;
 	m_lastClientSequence = 0;
@@ -872,6 +875,7 @@ uint16 GameClient::SendSequencedPacket( msgBaseClassPtr jumboPacket )
 
 void GameClient::FlushQueue( bool alsoResend )
 {
+	std::lock_guard<std::recursive_mutex> lock(m_queueMutex);
 	//reliable commands first
 	{
 		uint32 reliableResendMS = min(max((uint32)m_currentPing, MINIMUM_RESEND_TIME)*PING_MULTIPLIER_RELIABLE, MAXIMUM_RESEND_TIME);
@@ -1099,6 +1103,7 @@ void GameClient::CheckAndResend()
 
 void GameClient::ClearQueues()
 {
+	std::lock_guard<std::recursive_mutex> lock(m_queueMutex);
 	m_queuedCommands.clear();
 	m_queuedStates.clear();
 	m_sentCommands.clear();
