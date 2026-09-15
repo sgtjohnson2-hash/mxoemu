@@ -350,6 +350,7 @@ public:
     void AddDistrictHeat(uint32 districtId, float delta);
     std::string GetDistrictTensionName(uint32 districtId) const;
     bool IsThreeWayWarActive(uint32 districtId) const;
+    bool IsFourWayWarActive(uint32 districtId) const;
     // Epoch IX: Autonomous Crew Governance, Turf Colonization, Laundering Convoys & Street Wars
     uint32 IncorporatePlayerCrew(uint32 leaderGoId, const std::string& crewName);
     bool ColonizeTurfSector(uint32 crewId, uint32 sectorId);

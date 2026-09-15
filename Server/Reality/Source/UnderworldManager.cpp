@@ -2281,8 +2281,8 @@ void RunUnderworldTestSuite()
     assertTest("Contested District Street War Initiation", warId > 0);
     assertTest("Active Street War Count", sUnderworldMgr.GetActiveStreetWarCount() == 1);
 
-    bool warResolved = sUnderworldMgr.ResolveStreetWar(warId, crewId);
-    assertTest("Resolve Contested District Street War with Victorious Crew", warResolved);
+    bool streetWarResolved = sUnderworldMgr.ResolveStreetWar(warId, crewId);
+    assertTest("Resolve Contested District Street War with Victorious Crew", streetWarResolved);
     assertTest("Active Street War Concluded", sUnderworldMgr.GetActiveStreetWarCount() == 0);
 
     std::cout << "\n============================================================" << std::endl;
