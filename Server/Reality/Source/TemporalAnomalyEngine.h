@@ -112,5 +112,3 @@ private:
 #define sTemporalAnomalyEngine TemporalAnomalyEngine::getSingleton()
 
 void RunTemporalAnomalyTestSuite();
-
-#endif // MXOEMU_TEMPORAL_ANOMALY_ENGINE_H
