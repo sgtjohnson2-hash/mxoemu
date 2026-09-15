@@ -17,6 +17,7 @@
 #include "FactionWarManager.h"
 #include "MissionSystem.h"
 #include "Threading/TaskScheduler.h"
+#include "Config.h"
 #include <fstream>
 #include <memory>
 
@@ -318,12 +319,18 @@ void BotManager::Update()
     // Fast-path: When no human players are connected, assign background LOD without thread pool overhead
     if (m_activePlayerIds.empty())
     {
+        bool anyCombat = false;
         for (const auto& bot : *botsSnapshot)
         {
-            if (bot->IsInCombat() || bot->IsPanicking())
+            if (bot->IsInCombat() || bot->IsPanicking()) {
                 bot->SetLOD(ExecutionLOD::APPROACH_AREA);
-            else
+                anyCombat = true;
+            } else {
                 bot->SetLOD(ExecutionLOD::BACKGROUND_AREA);
+            }
+        }
+        if (!anyCombat) {
+            return; // 0% CPU when server is idle with no connected players!
         }
     }
     else
@@ -343,13 +350,17 @@ void BotManager::Update()
 
         if (humanPositions.empty())
         {
+            bool anyCombat = false;
             for (const auto& bot : *botsSnapshot)
             {
-                if (bot->IsInCombat() || bot->IsPanicking())
+                if (bot->IsInCombat() || bot->IsPanicking()) {
                     bot->SetLOD(ExecutionLOD::APPROACH_AREA);
-                else
+                    anyCombat = true;
+                } else {
                     bot->SetLOD(ExecutionLOD::BACKGROUND_AREA);
+                }
             }
+            if (!anyCombat) return;
         }
         else
         {
@@ -402,56 +413,89 @@ void BotManager::Update()
         }
     }
 
-    // Parallel bot update execution across persistent TaskScheduler workers
-    sTaskScheduler.ParallelFor(0, botsSnapshot->size(), [&](size_t i)
+    // Filter only active bots requiring execution to eliminate 12,000-bot scheduler churn
+    std::vector<std::shared_ptr<BotClient>> activeBots;
+    activeBots.reserve(64);
+    for (const auto& bot : *botsSnapshot)
     {
-        auto bot = (*botsSnapshot)[i];
-        if (!bot) return;
-
-        ExecutionLOD targetLOD = bot->GetLOD();
-        uint32 tickRate = 0;
-        if (targetLOD == ExecutionLOD::ACTIVE_VIEWPORT)
-            tickRate = 100; // 10Hz for active bots near players
-        else if (targetLOD == ExecutionLOD::APPROACH_AREA)
-            tickRate = 500; // 2Hz for approach area
-        else
-            tickRate = 0; // 0Hz (skip background area logic per ExecutionLOD specification)
-
-        if (tickRate > 0 && (now - bot->GetLastLodTick() >= tickRate))
+        if (bot && bot->GetLOD() != ExecutionLOD::BACKGROUND_AREA)
         {
-            float botDeltaSeconds = 0.033f;
-            if (bot->GetLastLodTick() != 0) {
-                botDeltaSeconds = (now - bot->GetLastLodTick()) / 1000.0f;
-                if (botDeltaSeconds > 3.5f) botDeltaSeconds = 3.5f;
-            }
+            activeBots.push_back(bot);
+        }
+    }
 
-            if (bot->GetPlayerGoId() != 0)
+    if (activeBots.empty())
+    {
+        return;
+    }
+
+    // Execute active bot updates directly if small, or parallelize across workers
+    if (activeBots.size() <= 32)
+    {
+        for (auto& bot : activeBots)
+        {
+            ExecutionLOD targetLOD = bot->GetLOD();
+            uint32 tickRate = (targetLOD == ExecutionLOD::ACTIVE_VIEWPORT) ? 100 : 500;
+            if (tickRate > 0 && (now - bot->GetLastLodTick() >= tickRate))
             {
-                bot->SetLastLodTick(now);
-                try {
-                    bot->UpdateBotAI(botDeltaSeconds);
-                } catch(const std::exception& e) {
-                    std::cout << "CRASH inside UpdateBotAI for bot index " << i << ": " << e.what() << std::endl;
-                } catch(...) {
-                    std::cout << "UNKNOWN CRASH inside UpdateBotAI for bot index " << i << std::endl;
+                float botDeltaSeconds = 0.033f;
+                if (bot->GetLastLodTick() != 0) {
+                    botDeltaSeconds = (now - bot->GetLastLodTick()) / 1000.0f;
+                    if (botDeltaSeconds > 3.5f) botDeltaSeconds = 3.5f;
+                }
+                if (bot->GetPlayerGoId() != 0)
+                {
+                    bot->SetLastLodTick(now);
+                    try {
+                        bot->UpdateBotAI(botDeltaSeconds);
+                    } catch (...) {}
                 }
             }
         }
-    }, 32);
+    }
+    else
+    {
+        sTaskScheduler.ParallelFor(0, activeBots.size(), [&](size_t i)
+        {
+            auto bot = activeBots[i];
+            if (!bot) return;
+
+            ExecutionLOD targetLOD = bot->GetLOD();
+            uint32 tickRate = (targetLOD == ExecutionLOD::ACTIVE_VIEWPORT) ? 100 : 500;
+            if (tickRate > 0 && (now - bot->GetLastLodTick() >= tickRate))
+            {
+                float botDeltaSeconds = 0.033f;
+                if (bot->GetLastLodTick() != 0) {
+                    botDeltaSeconds = (now - bot->GetLastLodTick()) / 1000.0f;
+                    if (botDeltaSeconds > 3.5f) botDeltaSeconds = 3.5f;
+                }
+                if (bot->GetPlayerGoId() != 0)
+                {
+                    bot->SetLastLodTick(now);
+                    try {
+                        bot->UpdateBotAI(botDeltaSeconds);
+                    } catch (...) {}
+                }
+            }
+        }, 16);
+    }
 }
 
 void BotManager::PopulateWorld()
 {
     const auto& npcs = sDataLoader.GetAllNPCs();
-    INFO_LOG(format("BotManager: Populating world with %1% authentic NPC spawn points (Ceiling: %2%)...") % npcs.size() % MAX_BOT_POPULATION_CEILING);
+    size_t targetPop = (size_t)sConfig.GetIntDefault("BotManager.InitialPopulation", 2500);
+    targetPop = std::min(targetPop, (size_t)MAX_BOT_POPULATION_CEILING);
+    INFO_LOG(format("BotManager: Populating world with authentic NPC spawn points (Target: %1%, Ceiling: %2%, Available: %3%)...")
+        % targetPop % MAX_BOT_POPULATION_CEILING % npcs.size());
 
     std::vector<std::shared_ptr<BotClient>> newBots;
-    newBots.reserve(std::min((size_t)MAX_BOT_POPULATION_CEILING, npcs.size()));
+    newBots.reserve(std::min(targetPop, npcs.size()));
 
     int spawnCount = 0;
     for (auto it = npcs.begin(); it != npcs.end(); ++it)
     {
-        if (newBots.size() >= MAX_BOT_POPULATION_CEILING) {
+        if (newBots.size() >= targetPop) {
             break;
         }
         const NPCTemplate& templ = it->second;

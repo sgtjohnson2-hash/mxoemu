@@ -111,15 +111,24 @@ public:
             return;
         }
 
-        size_t numChunks = (total + chunkSize - 1) / chunkSize;
+        size_t workers = m_workers.size();
+        size_t effChunkSize = chunkSize;
+        if (workers > 0)
+        {
+            size_t optimalChunk = (total + (workers * 2) - 1) / (workers * 2);
+            if (optimalChunk > effChunkSize)
+                effChunkSize = optimalChunk;
+        }
+
+        size_t numChunks = (total + effChunkSize - 1) / effChunkSize;
         std::atomic<size_t> completed(0);
         std::vector<std::future<void>> futures;
         futures.reserve(numChunks);
 
         for (size_t c = 0; c < numChunks; ++c)
         {
-            size_t cStart = start + c * chunkSize;
-            size_t cEnd = std::min(end, cStart + chunkSize);
+            size_t cStart = start + c * effChunkSize;
+            size_t cEnd = std::min(end, cStart + effChunkSize);
 
             futures.push_back(Enqueue([&fn, cStart, cEnd]() {
                 for (size_t i = cStart; i < cEnd; ++i)
