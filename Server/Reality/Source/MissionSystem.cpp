@@ -13,6 +13,7 @@
 #include <iostream>
 #include "GameClient.h"
 #include "MessageTypes.h"
+#include "FactionWarManager.h"
 
 createFileSingleton(MissionSystem);
 
@@ -691,4 +692,240 @@ bool MissionSystem::CompleteContactQuest(PlayerObject* player, uint32 questId)
              % player->getHandle() % q->title % q->contactName);
     sBotMgr.LogCombat((format("[%1%] %2%: %3%") % q->contactName % q->title % q->dialogCompletion).str());
     return true;
+}
+
+uint32 MissionSystem::SynthesizeProceduralMission(PlayerObject* player, ProceduralMissionArchetype archetype)
+{
+    if (!player) return 0;
+    std::lock_guard<std::recursive_mutex> lock(m_missionMutex);
+
+    uint32 playerGoId = player->getGoId();
+    if (m_activeMissions.find(playerGoId) != m_activeMissions.end()) {
+        return 0; // Already has active mission
+    }
+
+    uint32 myFaction = player->getFaction(); // 0=Machine, 1=Zion, 2=Merovingian
+    uint32 districtId = sFactionWarMgr.GetHighestTensionDistrict();
+    float tension = sFactionWarMgr.GetDistrictTension(districtId);
+    std::string districtName = sFactionWarMgr.GetDistrictName(districtId);
+    uint32 enemyFaction = sFactionWarMgr.GetLeadingEnemyFaction(myFaction, districtId);
+
+    std::string enemyFactionName = (enemyFaction == 0) ? "Machine" : (enemyFaction == 1 ? "Zion" : "Merovingian");
+    std::string myFactionName = (myFaction == 1) ? "Zion" : (myFaction == 0 ? "Machine" : "Merovingian");
+
+    uint32 missionId = 900000 + (rand() % 90000);
+    MissionTemplate templ;
+    templ.missionId = missionId;
+    templ.requiredFactionRep = 0;
+    templ.rewardItemTemplateId = 0;
+    templ.nextMissionSuccessId = 0;
+    templ.nextMissionFailId = 0;
+
+    switch (archetype)
+    {
+        case ProceduralMissionArchetype::DATA_EXTRACTION:
+        {
+            templ.title = "[OP: DATA BREACH] " + districtName + " Cryptographic Extraction";
+            templ.description = "Frontline tension in " + districtName + " is critical (" + std::to_string((int)tension) + 
+                "% contested against " + enemyFactionName + " forces). Infiltrate the regional construct terminal, bypass hostile firewalls, and extract cryptographic fragments before responding strike teams converge.";
+            templ.infoReward = 3500 + static_cast<uint32>(tension * 25.0f);
+            templ.expReward = 6000 + static_cast<uint32>(tension * 30.0f);
+            templ.rewardFactionRep = 50;
+
+            // Objective 1: Hack Terminal
+            MissionObjective obj1;
+            obj1.command = ObjectiveCommand::HACK;
+            obj1.targetNpcId = 7001; // Data terminal / node
+            obj1.description = "Infiltrate and breach security mainframe in " + districtName;
+            obj1.dialog = "Root access established. Decrypting operational archives...";
+            obj1.isTimed = true;
+            obj1.timeLimitSeconds = 180;
+            obj1.spawnAmbush = false;
+            obj1.isEscort = false;
+            obj1.targetCharUID = 0;
+            obj1.nextMissionSuccessId = 0;
+            obj1.nextMissionFailId = 0;
+            templ.objectives.push_back(obj1);
+
+            // Objective 2: Defeat Responding Ambush
+            MissionObjective obj2;
+            obj2.command = ObjectiveCommand::DEFEAT;
+            obj2.targetNpcId = 7002;
+            obj2.description = "Neutralize " + enemyFactionName + " responding tactical squad";
+            obj2.dialog = "Threat neutralized. Perimeter secure.";
+            obj2.isTimed = false;
+            obj2.timeLimitSeconds = 0;
+            obj2.spawnAmbush = true;
+            obj2.isEscort = false;
+            obj2.targetCharUID = 0;
+            obj2.nextMissionSuccessId = 0;
+            obj2.nextMissionFailId = 0;
+            templ.objectives.push_back(obj2);
+
+            // Objective 3: Extraction Hardline
+            MissionObjective obj3;
+            obj3.command = ObjectiveCommand::TALK;
+            obj3.targetNpcId = 7003; // Hardline contact
+            obj3.description = "Extract cryptographic fragments via ringing hardline in " + districtName;
+            obj3.dialog = "Operator: 'Data received and quarantined. Excellent infiltration, operative. Jacking out now.'";
+            obj3.isTimed = false;
+            obj3.timeLimitSeconds = 0;
+            obj3.spawnAmbush = false;
+            obj3.isEscort = false;
+            obj3.targetCharUID = 0;
+            obj3.nextMissionSuccessId = 0;
+            obj3.nextMissionFailId = 0;
+            templ.objectives.push_back(obj3);
+            break;
+        }
+
+        case ProceduralMissionArchetype::ASSET_RESCUE:
+        {
+            templ.title = "[OP: ASSET RESCUE] " + districtName + " Exile Program Recovery";
+            templ.description = "An unregistered exile program holding vital telemetry on " + enemyFactionName +
+                " operations is cornered in " + districtName + " (Tension: " + std::to_string((int)tension) +
+                "%). Establish escort perimeter and guide the asset safely to the evacuation hardline.";
+            templ.infoReward = 4000 + static_cast<uint32>(tension * 30.0f);
+            templ.expReward = 7500 + static_cast<uint32>(tension * 35.0f);
+            templ.rewardFactionRep = 65;
+
+            // Objective 1: Locate Exile Asset
+            MissionObjective obj1;
+            obj1.command = ObjectiveCommand::TALK;
+            obj1.targetNpcId = 8801;
+            obj1.description = "Locate hidden exile asset in " + districtName + " sub-level";
+            obj1.dialog = "Exile: 'Thank heaven you found me! The sweep teams are closing in. Get me out of here!'";
+            obj1.isTimed = false;
+            obj1.timeLimitSeconds = 0;
+            obj1.spawnAmbush = false;
+            obj1.isEscort = false;
+            obj1.targetCharUID = 0;
+            obj1.nextMissionSuccessId = 0;
+            obj1.nextMissionFailId = 0;
+            templ.objectives.push_back(obj1);
+
+            // Objective 2: Escort to Safety
+            MissionObjective obj2;
+            obj2.command = ObjectiveCommand::ESCORT;
+            obj2.targetNpcId = 8801;
+            obj2.description = "Escort exile asset through hostile " + enemyFactionName + " patrol zones";
+            obj2.dialog = "Exile: 'Almost to the hardline! Keep moving!'";
+            obj2.isTimed = false;
+            obj2.timeLimitSeconds = 0;
+            obj2.spawnAmbush = true;
+            obj2.isEscort = true;
+            obj2.escortTargetId = 8801;
+            obj2.targetCharUID = 0;
+            obj2.nextMissionSuccessId = 0;
+            obj2.nextMissionFailId = 0;
+            templ.objectives.push_back(obj2);
+
+            // Objective 3: Extract at Hardline
+            MissionObjective obj3;
+            obj3.command = ObjectiveCommand::GIVE;
+            obj3.targetNpcId = 8802;
+            obj3.description = "Verify safe passage and transmit exile code to " + myFactionName + " safehouse";
+            obj3.dialog = "Operator: 'Asset secured. Decrypted routine logged into Zion mainframe. Outstanding extraction.'";
+            obj3.isTimed = false;
+            obj3.timeLimitSeconds = 0;
+            obj3.spawnAmbush = false;
+            obj3.isEscort = false;
+            obj3.targetCharUID = 0;
+            obj3.nextMissionSuccessId = 0;
+            obj3.nextMissionFailId = 0;
+            templ.objectives.push_back(obj3);
+            break;
+        }
+
+        case ProceduralMissionArchetype::COUNTER_INTEL:
+        {
+            templ.title = "[OP: COUNTER-INTEL] " + districtName + " Double-Agent Neutralization";
+            templ.description = "Telemetry indicates an unmasked operative in " + districtName + " is leaking " +
+                myFactionName + " tactical cipher keys to " + enemyFactionName + " handlers. Intercept the traitor, confiscate the data core, and sever the leak.";
+            templ.infoReward = 4500 + static_cast<uint32>(tension * 35.0f);
+            templ.expReward = 8000 + static_cast<uint32>(tension * 40.0f);
+            templ.rewardFactionRep = 75;
+
+            // Objective 1: Hunt Double-Agent
+            MissionObjective obj1;
+            obj1.command = ObjectiveCommand::DEFEAT;
+            obj1.targetNpcId = 9101;
+            obj1.description = "Track down and eliminate rogue double-agent in " + districtName;
+            obj1.dialog = "Traitor: 'You're too late... the transmission already went through!'";
+            obj1.isTimed = false;
+            obj1.timeLimitSeconds = 0;
+            obj1.spawnAmbush = false;
+            obj1.isEscort = false;
+            obj1.targetCharUID = 0;
+            obj1.nextMissionSuccessId = 0;
+            obj1.nextMissionFailId = 0;
+            templ.objectives.push_back(obj1);
+
+            // Objective 2: Recover Cipher Core
+            MissionObjective obj2;
+            obj2.command = ObjectiveCommand::LOOT;
+            obj2.targetNpcId = 9101;
+            obj2.requiredItem = "0x3A01";
+            obj2.description = "Recover encrypted cipher memory core from neutralized target";
+            obj2.dialog = "Cipher core extracted and stored in secure inventory.";
+            obj2.isTimed = false;
+            obj2.timeLimitSeconds = 0;
+            obj2.spawnAmbush = true;
+            obj2.isEscort = false;
+            obj2.targetCharUID = 0;
+            obj2.nextMissionSuccessId = 0;
+            obj2.nextMissionFailId = 0;
+            templ.objectives.push_back(obj2);
+
+            // Objective 3: Debrief Operator
+            MissionObjective obj3;
+            obj3.command = ObjectiveCommand::TALK;
+            obj3.targetNpcId = 9102;
+            obj3.description = "Deliver recovered memory core to " + myFactionName + " intelligence contact";
+            obj3.dialog = "Operator: 'Memory core analyzed. The leak is plugged and enemy ambush coordinates exposed. Commendable work, operative.'";
+            obj3.isTimed = false;
+            obj3.timeLimitSeconds = 0;
+            obj3.spawnAmbush = false;
+            obj3.isEscort = false;
+            obj3.targetCharUID = 0;
+            obj3.nextMissionSuccessId = 0;
+            obj3.nextMissionFailId = 0;
+            templ.objectives.push_back(obj3);
+            break;
+        }
+    }
+
+    m_missions[missionId] = templ;
+
+    INFO_LOG(format("MissionSystem: Synthesized Procedural Mission #%1% '%2%' for %3% (Tension: %4%%%)")
+        % missionId % templ.title % player->getHandle() % (int)tension);
+
+    // Assign mission to player
+    ActiveMissionState state;
+    state.missionId = missionId;
+    state.currentObjectiveIndex = 0;
+    state.objectiveStartTimeMs = getMSTime();
+    m_activeMissions[playerGoId] = state;
+
+    uint32 newInstanceId = missionId + playerGoId;
+    player->getClient().m_instanceId = newInstanceId;
+
+    player->getClient().QueueCommand(std::make_shared<SystemChatMsg>(
+        (format("{c:00FF00}[MISSION SYNTHESIS] Contract Active: %1% (District: %2%, Faction Tension: %3%%%){/c}")
+         % templ.title % districtName % (int)tension).str()
+    ));
+
+    return missionId;
+}
+
+uint32 MissionSystem::GenerateFactionTensionMission(PlayerObject* player)
+{
+    if (!player) return 0;
+    ProceduralMissionArchetype archetypes[] = {
+        ProceduralMissionArchetype::DATA_EXTRACTION,
+        ProceduralMissionArchetype::ASSET_RESCUE,
+        ProceduralMissionArchetype::COUNTER_INTEL
+    };
+    int pick = rand() % 3;
+    return SynthesizeProceduralMission(player, archetypes[pick]);
 }

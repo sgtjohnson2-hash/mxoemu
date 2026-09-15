@@ -486,20 +486,20 @@ void CombatSystem::RemoveCombatant(uint32 goId)
 float CombatSystem::TacticModifier(uint8 attackerTactic, uint8 targetTactic)
 {
 	// Authentic Matrix Online martial arts counter matrix:
-	// Power beats Grab (1.30x)
-	// Grab beats Defense/Block (1.40x throw/block break)
-	// Grab beats Speed (1.25x intercept)
-	// Speed beats Power (1.30x fast interrupt)
-	// Defense absorbs Power/Speed (handled in ResolveAttack)
-	if (attackerTactic == TACTIC_POWER && targetTactic == TACTIC_RETALIATE) return 1.30f;
+	// Power crushes Speed (+35% damage bonus, frame advantage)
+	// Speed interrupts Grab (+35% damage bonus, fast interrupt)
+	// Grab breaks Guard (+40% damage bonus, unblockable throw / block break)
+	// Grab breaks Power (+35% damage bonus, counters heavy windup)
+	// Matched tactics clash (0.90x damage, glancing blow)
+	if (attackerTactic == TACTIC_POWER && targetTactic == TACTIC_SPEED) return 1.35f;
+	if (attackerTactic == TACTIC_SPEED && targetTactic == TACTIC_RETALIATE) return 1.35f;
 	if (attackerTactic == TACTIC_RETALIATE && targetTactic == TACTIC_DEFENSE) return 1.40f;
-	if (attackerTactic == TACTIC_RETALIATE && targetTactic == TACTIC_SPEED) return 1.25f;
-	if (attackerTactic == TACTIC_SPEED && targetTactic == TACTIC_POWER) return 1.30f;
+	if (attackerTactic == TACTIC_RETALIATE && targetTactic == TACTIC_POWER) return 1.35f;
 	if (attackerTactic == targetTactic && attackerTactic != TACTIC_NORMAL) return 0.90f; // Mirrored tactics glance off
 	return 1.0f;
 }
 
-CombatSystem::AttackResult CombatSystem::ResolveAttack(PlayerObject* attacker, PlayerObject* target, const CombatMove& move, uint8 attackerTactic, uint8 targetTactic)
+CombatSystem::AttackResult CombatSystem::ResolveAttack(PlayerObject* attacker, PlayerObject* target, const CombatMove& move, uint8 attackerTactic, uint8 targetTactic, bool inInterlock, bool bypassBlock)
 {
 	AttackResult res;
 	res.hit = true;
@@ -668,12 +668,19 @@ CombatSystem::AttackResult CombatSystem::ResolveAttack(PlayerObject* attacker, P
 	//and recovers Inner Strength (documented block behavior)
 	{
 		float absorbed = float(target->getLevel()) * 0.5f;
+		if (attackerTactic == TACTIC_RETALIATE && targetTactic == TACTIC_POWER)
+		{
+			// Grab breaks Power: throws heavy power stance and bypasses toughness absorption
+			absorbed = 0.0f;
+		}
+
 		if (targetTactic == TACTIC_DEFENSE)
 		{
-			if (attackerTactic == TACTIC_RETALIATE)
+			if (bypassBlock || attackerTactic == TACTIC_RETALIATE)
 			{
+				// Grab breaks Guard: unblockable throw bypasses defense completely
 				if (!target->getClient().isBot())
-					target->getClient().QueueCommand(std::make_shared<SystemChatMsg>("{c:FF0000}[COMBAT] Your Block was broken by a Grab!{/c}"));
+					target->getClient().QueueCommand(std::make_shared<SystemChatMsg>("{c:FF0000}[COMBAT] Your Block was broken by a Grab! Unblockable throw!{/c}"));
 			}
 			else
 			{
@@ -704,7 +711,9 @@ CombatSystem::AttackResult CombatSystem::ResolveAttack(PlayerObject* attacker, P
 	if (res.hit)
 	{
 		bool wasAlive = !target->isDead();
-		target->takeDamage(attacker->getGoId(), res.damageTaken, move.hitFxId);
+		// Synchronized combat animation subpacket trigger (0x280001C1)
+		uint32 hitFx = inInterlock ? 0x280001C1 : ((move.hitFxId != 0 && move.hitFxId != 1234) ? move.hitFxId : 0x280001C1);
+		target->takeDamage(attacker->getGoId(), res.damageTaken, hitFx);
         target->recordIncomingAttack(move.id);
 
 		if (!attacker->getClient().isBot()) {
@@ -743,11 +752,106 @@ bool CombatSystem::RunInterlockRound(InterlockSession &session)
 	const CombatMove* moveA = session.queuedMoveA ? GetMove(session.queuedMoveA) : DefaultMelee();
 	const CombatMove* moveB = session.queuedMoveB ? GetMove(session.queuedMoveB) : DefaultMelee();
 
-	//a queued special preempts the counter-exchange (no hit-hit round)
-	bool specialFromA = (session.queuedMoveA != 0);
+	uint8 tacA = session.tacticA;
+	uint8 tacB = session.tacticB;
 
-	if (moveA) ResolveAttack(pA, pB, *moveA, session.tacticA, session.tacticB);
-	if (moveB && !specialFromA && !pB->isDead()) ResolveAttack(pB, pA, *moveB, session.tacticB, session.tacticA);
+	// Deterministic Rock-Paper-Scissors martial arts interlock evaluations:
+	// 1. Power crushes Speed (+35% damage bonus, frame advantage)
+	// 2. Speed interrupts Grab (+35% damage bonus, fast interrupt cancels grab)
+	// 3. Grab breaks Guard (+40% damage bonus, unblockable throw bypasses block)
+	//    Grab breaks Power (+35% damage bonus, unblockable throw counters heavy windup)
+	bool aCrushesB = (tacA == TACTIC_POWER && tacB == TACTIC_SPEED);
+	bool bCrushesA = (tacB == TACTIC_POWER && tacA == TACTIC_SPEED);
+
+	bool aInterruptsB = (tacA == TACTIC_SPEED && tacB == TACTIC_RETALIATE);
+	bool bInterruptsA = (tacB == TACTIC_SPEED && tacA == TACTIC_RETALIATE);
+
+	bool aBreaksGuardB = (tacA == TACTIC_RETALIATE && tacB == TACTIC_DEFENSE);
+	bool bBreaksGuardA = (tacB == TACTIC_RETALIATE && tacA == TACTIC_DEFENSE);
+
+	bool aBreaksPowerB = (tacA == TACTIC_RETALIATE && tacB == TACTIC_POWER);
+	bool bBreaksPowerA = (tacB == TACTIC_RETALIATE && tacA == TACTIC_POWER);
+
+	bool isClash = (tacA == tacB && tacA != TACTIC_NORMAL);
+
+	// Synchronized combat animation subpacket triggers (0x280001C1) and paired emotes
+	if (aCrushesB) {
+		sGame.AnnounceStateUpdateNear(pA->getPosition().x, pA->getPosition().z, 20000.0f, std::make_shared<EmoteMsg>(pA->getGoId(), 43, 1)); // Power strike
+		sGame.AnnounceStateUpdateNear(pB->getPosition().x, pB->getPosition().z, 20000.0f, std::make_shared<EmoteMsg>(pB->getGoId(), 50, 1)); // Heavy stagger
+		if (!pA->getClient().isBot())
+			pA->getClient().QueueCommand(std::make_shared<SystemChatMsg>((format("{c:00FF00}[MARTIAL ARTS] Power crushes Speed! Frame advantage secured against %1%! (+35%% Damage){/c}") % pB->getHandle()).str()));
+		if (!pB->getClient().isBot())
+			pB->getClient().QueueCommand(std::make_shared<SystemChatMsg>((format("{c:FF4444}[MARTIAL ARTS] %1%'s Power stance crushed your Speed attack!{/c}") % pA->getHandle()).str()));
+	} else if (bCrushesA) {
+		sGame.AnnounceStateUpdateNear(pB->getPosition().x, pB->getPosition().z, 20000.0f, std::make_shared<EmoteMsg>(pB->getGoId(), 43, 1));
+		sGame.AnnounceStateUpdateNear(pA->getPosition().x, pA->getPosition().z, 20000.0f, std::make_shared<EmoteMsg>(pA->getGoId(), 50, 1));
+		if (!pB->getClient().isBot())
+			pB->getClient().QueueCommand(std::make_shared<SystemChatMsg>((format("{c:00FF00}[MARTIAL ARTS] Power crushes Speed! Frame advantage secured against %1%! (+35%% Damage){/c}") % pA->getHandle()).str()));
+		if (!pA->getClient().isBot())
+			pA->getClient().QueueCommand(std::make_shared<SystemChatMsg>((format("{c:FF4444}[MARTIAL ARTS] %1%'s Power stance crushed your Speed attack!{/c}") % pB->getHandle()).str()));
+	} else if (aInterruptsB) {
+		sGame.AnnounceStateUpdateNear(pA->getPosition().x, pA->getPosition().z, 20000.0f, std::make_shared<EmoteMsg>(pA->getGoId(), 43, 1)); // Fast jab
+		sGame.AnnounceStateUpdateNear(pB->getPosition().x, pB->getPosition().z, 20000.0f, std::make_shared<EmoteMsg>(pB->getGoId(), 50, 1)); // Interrupted recoil
+		if (!pA->getClient().isBot())
+			pA->getClient().QueueCommand(std::make_shared<SystemChatMsg>((format("{c:00FF00}[MARTIAL ARTS] Speed interrupts Grab! Fast jab interrupted %1%'s grab maneuver! (+35%% Damage){/c}") % pB->getHandle()).str()));
+		if (!pB->getClient().isBot())
+			pB->getClient().QueueCommand(std::make_shared<SystemChatMsg>((format("{c:FF4444}[MARTIAL ARTS] %1%'s Speed strike interrupted your Grab maneuver!{/c}") % pA->getHandle()).str()));
+	} else if (bInterruptsA) {
+		sGame.AnnounceStateUpdateNear(pB->getPosition().x, pB->getPosition().z, 20000.0f, std::make_shared<EmoteMsg>(pB->getGoId(), 43, 1));
+		sGame.AnnounceStateUpdateNear(pA->getPosition().x, pA->getPosition().z, 20000.0f, std::make_shared<EmoteMsg>(pA->getGoId(), 50, 1));
+		if (!pB->getClient().isBot())
+			pB->getClient().QueueCommand(std::make_shared<SystemChatMsg>((format("{c:00FF00}[MARTIAL ARTS] Speed interrupts Grab! Fast jab interrupted %1%'s grab maneuver! (+35%% Damage){/c}") % pA->getHandle()).str()));
+		if (!pA->getClient().isBot())
+			pA->getClient().QueueCommand(std::make_shared<SystemChatMsg>((format("{c:FF4444}[MARTIAL ARTS] %1%'s Speed strike interrupted your Grab maneuver!{/c}") % pB->getHandle()).str()));
+	} else if (aBreaksGuardB || aBreaksPowerB) {
+		sGame.AnnounceStateUpdateNear(pA->getPosition().x, pA->getPosition().z, 20000.0f, std::make_shared<EmoteMsg>(pA->getGoId(), 43, 1)); // Throw slam
+		sGame.AnnounceStateUpdateNear(pB->getPosition().x, pB->getPosition().z, 20000.0f, std::make_shared<EmoteMsg>(pB->getGoId(), 51, 1)); // Knockdown slam
+		const char* targetStance = aBreaksGuardB ? "Guard" : "Power";
+		if (!pA->getClient().isBot())
+			pA->getClient().QueueCommand(std::make_shared<SystemChatMsg>((format("{c:00FF00}[MARTIAL ARTS] Grab breaks %1%! Unblockable throw executed on %2%! (+%3%%% Damage){/c}") % targetStance % pB->getHandle() % (aBreaksGuardB ? 40 : 35)).str()));
+		if (!pB->getClient().isBot())
+			pB->getClient().QueueCommand(std::make_shared<SystemChatMsg>((format("{c:FF0000}[MARTIAL ARTS] Your %1% was broken by %2%'s Grab! Unblockable throw!{/c}") % targetStance % pA->getHandle()).str()));
+	} else if (bBreaksGuardA || bBreaksPowerA) {
+		sGame.AnnounceStateUpdateNear(pB->getPosition().x, pB->getPosition().z, 20000.0f, std::make_shared<EmoteMsg>(pB->getGoId(), 43, 1));
+		sGame.AnnounceStateUpdateNear(pA->getPosition().x, pA->getPosition().z, 20000.0f, std::make_shared<EmoteMsg>(pA->getGoId(), 51, 1));
+		const char* targetStance = bBreaksGuardA ? "Guard" : "Power";
+		if (!pB->getClient().isBot())
+			pB->getClient().QueueCommand(std::make_shared<SystemChatMsg>((format("{c:00FF00}[MARTIAL ARTS] Grab breaks %1%! Unblockable throw executed on %2%! (+%3%%% Damage){/c}") % targetStance % pA->getHandle() % (bBreaksGuardA ? 40 : 35)).str()));
+		if (!pA->getClient().isBot())
+			pA->getClient().QueueCommand(std::make_shared<SystemChatMsg>((format("{c:FF0000}[MARTIAL ARTS] Your %1% was broken by %2%'s Grab! Unblockable throw!{/c}") % targetStance % pB->getHandle()).str()));
+	} else if (isClash) {
+		sGame.AnnounceStateUpdateNear(pA->getPosition().x, pA->getPosition().z, 20000.0f, std::make_shared<EmoteMsg>(pA->getGoId(), 41, 1));
+		sGame.AnnounceStateUpdateNear(pB->getPosition().x, pB->getPosition().z, 20000.0f, std::make_shared<EmoteMsg>(pB->getGoId(), 41, 1));
+		std::string clashName = (tacA == TACTIC_POWER) ? "Power" : (tacA == TACTIC_SPEED ? "Speed" : (tacA == TACTIC_RETALIATE ? "Grab" : "Guard"));
+		if (!pA->getClient().isBot()) pA->getClient().QueueCommand(std::make_shared<SystemChatMsg>((format("{c:FFFF00}[MARTIAL ARTS] Stance Clash! Both combatants chose %1%. Glancing exchange.{/c}") % clashName).str()));
+		if (!pB->getClient().isBot()) pB->getClient().QueueCommand(std::make_shared<SystemChatMsg>((format("{c:FFFF00}[MARTIAL ARTS] Stance Clash! Both combatants chose %1%. Glancing exchange.{/c}") % clashName).str()));
+	}
+
+	// Execution & Interrupt Resolution:
+	if (aInterruptsB) {
+		// A's Speed interrupts B's Grab. A strikes, B's grab is cancelled!
+		if (moveA) ResolveAttack(pA, pB, *moveA, tacA, tacB, true, false);
+	} else if (bInterruptsA) {
+		// B's Speed interrupts A's Grab. B strikes, A's grab is cancelled!
+		if (moveB) ResolveAttack(pB, pA, *moveB, tacB, tacA, true, false);
+	} else if (aCrushesB) {
+		// A's Power crushes B's Speed with frame advantage
+		if (moveA) ResolveAttack(pA, pB, *moveA, tacA, tacB, true, false);
+		if (moveB && !pB->isDead()) {
+			ResolveAttack(pB, pA, *moveB, tacB, tacA, true, false);
+		}
+	} else if (bCrushesA) {
+		// B's Power crushes A's Speed with frame advantage
+		if (moveB) ResolveAttack(pB, pA, *moveB, tacB, tacA, true, false);
+		if (moveA && !pA->isDead()) {
+			ResolveAttack(pA, pB, *moveA, tacA, tacB, true, false);
+		}
+	} else {
+		// Standard exchange: specials take precedence, otherwise both resolve
+		bool specialFromA = (session.queuedMoveA != 0);
+		if (moveA) ResolveAttack(pA, pB, *moveA, tacA, tacB, true, aBreaksGuardB);
+		if (moveB && !specialFromA && !pB->isDead()) ResolveAttack(pB, pA, *moveB, tacB, tacA, true, bBreaksGuardA);
+	}
 
 	session.queuedMoveA = 0;
 	session.queuedMoveB = 0;

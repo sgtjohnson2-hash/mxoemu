@@ -22,6 +22,13 @@ enum class ObjectiveCommand
     HACK
 };
 
+enum class ProceduralMissionArchetype
+{
+    DATA_EXTRACTION = 0,
+    ASSET_RESCUE    = 1,
+    COUNTER_INTEL   = 2
+};
+
 struct MissionObjective
 {
     ObjectiveCommand command;
@@ -145,6 +152,10 @@ public:
     bool AcceptContactQuest(PlayerObject* player, uint32 questId);
     bool ProgressContactQuest(PlayerObject* player, uint32 questId, uint32 stepIndex);
     bool CompleteContactQuest(PlayerObject* player, uint32 questId);
+
+    // Epoch II: Procedural Mission Synthesis Engine (Faction Tension Driven)
+    uint32 SynthesizeProceduralMission(PlayerObject* player, ProceduralMissionArchetype archetype);
+    uint32 GenerateFactionTensionMission(PlayerObject* player);
 
     bool HasActiveMission(uint32 playerGoId) {
         std::lock_guard<std::recursive_mutex> lock(m_missionMutex);

@@ -1574,6 +1574,23 @@ static double g_playerZ = 3230.0;
 static float  g_playerYaw = 0.0f; // Facing North (+Z)
 static double g_velY = 0.0;
 static bool   g_isJumping = false;
+static double g_jumpVelX = 0.0;
+static double g_jumpVelZ = 0.0;
+static bool   g_hasDoubleJumped = false;
+
+// Epoch I: Wire-Fu Acrobatics & Skyscraper Facade Wall-Running
+static bool   g_isWallRunning = false;
+static float  g_wallRunDuration = 0.0f;
+static float  g_wallRunCameraTilt = 0.0f;
+
+// Epoch I: Bullet-Time Focus Evasion
+static bool   g_focusModeActive = false;
+static float  g_timeDilation = 1.0f;
+static float  g_bulletDodgeTimer = 0.0f;
+
+// Epoch III: Matrix Anomaly Code Rain Degradation
+static bool   g_codeRainDegradationActive = false;
+static float  g_matrixCodeRainIntensity = 0.0f;
 
 static float  g_camPitch = 12.0f * 0.0174532925f; // ~12 degrees downward
 static float  g_camYaw = 0.0f;                   // Facing North (+Z, behind player)
@@ -2247,6 +2264,16 @@ static LRESULT CALLBACK SubclassWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPA
             }
             if (wParam == 'P' || wParam == 'p') {
                 TriggerPhoneCall(clientBase);
+            } else if (wParam == 'F' || wParam == 'f') {
+                g_focusModeActive = !g_focusModeActive;
+                g_timeDilation = g_focusModeActive ? 0.35f : 1.0f;
+                Log("[mxohax] Bullet-Time Focus Mode %s (timeDilation=%.2f)!\n", g_focusModeActive ? "ENGAGED" : "DISENGAGED", g_timeDilation);
+            } else if (wParam == 'B' || wParam == 'b') {
+                g_bulletDodgeTimer = 1.2f;
+                Log("[mxohax] Ballistic projectile detected in proximity! Executing Bullet-Time Focus Limbo Dodge...\n");
+            } else if (wParam == 'G' || wParam == 'g') {
+                g_codeRainDegradationActive = !g_codeRainDegradationActive;
+                Log("[mxohax] Matrix Anomaly Code Rain Degradation toggled: %s\n", g_codeRainDegradationActive ? "ACTIVE" : "INACTIVE");
             } else if (wParam == VK_TAB) {
                 SetTargetOperative(clientBase, "P", 393, 16802.3, SPAWN_GROUND_ELEVATION, 3237.01);
             } else if (wParam >= VK_F1 && wParam <= VK_F5) {
@@ -2280,16 +2307,49 @@ static void UpdatePlayerPositionAndPhysics(uintptr_t clientBase, void* curPlayer
 
     double groundElev = GetCalibratedGroundElevation(g_playerX, g_playerZ);
 
-    // Apply jumping physics and gravity
-    if (g_isJumping) {
+    // Wall-Running along skyscraper facades & elevated platform barrier surfaces
+    // Facades flank the platform along X: 16560 (West) and X: 16830-16845 (East)
+    bool nearWestFacade = (g_playerX <= 16575.0 && g_playerX >= 16550.0 && g_playerZ >= 2850.0 && g_playerZ <= 3720.0);
+    bool nearEastFacade = (g_playerX >= 16825.0 && g_playerX <= 16848.0 && g_playerZ >= 2850.0 && g_playerZ <= 3720.0);
+    bool onFacade = (nearWestFacade || nearEastFacade) && (g_playerY > 580.0) && g_isJumping;
+
+    if (onFacade && isMoving && g_wallRunDuration < 2.5f) {
+        g_isWallRunning = true;
+        g_wallRunDuration += (float)dt;
+        // Glide falling rate clamped to slow horizontal wall-glide
+        g_velY = -40.0;
+        g_playerY += g_velY * dt;
+        // Wall-glide movement along facade tangent
+        double wallSpeed = (actVelZ != 0.0) ? actVelZ : (actVelX != 0.0 ? actVelX : 340.0);
+        g_playerZ += wallSpeed * dt;
+        g_wallRunCameraTilt = nearWestFacade ? -0.08f : 0.08f;
+    } else {
+        g_isWallRunning = false;
+        g_wallRunCameraTilt = 0.0f;
+        if (!g_isJumping) g_wallRunDuration = 0.0f;
+    }
+
+    // Apply jumping physics, horizontal momentum preservation, and gravity
+    if (g_isJumping && !g_isWallRunning) {
         g_playerY += g_velY * dt;
         g_velY -= 950.0 * dt;
+
+        // Apply preserved horizontal momentum from wire-fu launch
+        g_playerX += g_jumpVelX * dt;
+        g_playerZ += g_jumpVelZ * dt;
+        g_jumpVelX *= 0.985;
+        g_jumpVelZ *= 0.985;
+
         if (g_playerY <= groundElev) {
             g_playerY = groundElev;
             g_velY = 0.0;
+            g_jumpVelX = 0.0;
+            g_jumpVelZ = 0.0;
             g_isJumping = false;
+            g_hasDoubleJumped = false;
+            g_wallRunDuration = 0.0f;
         }
-    } else {
+    } else if (!g_isWallRunning) {
         if (g_playerY > groundElev) {
             // Smooth gravity drop when stepping off ledges down to street level
             g_playerY -= 800.0 * dt;
@@ -3126,10 +3186,66 @@ static void __fastcall DetourFrameTick(void* pThis, void* /*edx*/) {
         g_bPlayerIsMoving = isMoving;
 
         double curGround = GetCalibratedGroundElevation(g_playerX, g_playerZ);
-        if (keySpace && !g_isJumping && g_playerY <= curGround + 2.0) {
-            g_velY = 560.0;
-            g_isJumping = true;
-            Log("[mxohax] Live Human Input: Wire-Fu Jump launched!\n");
+        if (keySpace) {
+            if (!g_isJumping && g_playerY <= curGround + 2.0) {
+                g_velY = 560.0;
+                g_isJumping = true;
+                g_hasDoubleJumped = false;
+                g_jumpVelX = isMoving ? actVelX : 0.0;
+                g_jumpVelZ = isMoving ? actVelZ : 0.0;
+                Log("[mxohax] Live Human Input: Wire-Fu Jump launched with momentum (Vx=%.1f, Vz=%.1f)!\n", g_jumpVelX, g_jumpVelZ);
+            } else if (g_isWallRunning) {
+                // Wall-Kick jump off skyscraper facade
+                g_velY = 540.0;
+                g_jumpVelX = (g_playerX < 16700.0) ? 380.0 : -380.0;
+                g_jumpVelZ = actVelZ;
+                g_isWallRunning = false;
+                g_wallRunDuration = 0.0f;
+                Log("[mxohax] Live Human Input: Wire-Fu Wall-Kick launched off facade!\n");
+            } else if (g_isJumping && !g_hasDoubleJumped && g_velY < 320.0) {
+                // Double wire-fu kick aerial impulse
+                g_hasDoubleJumped = true;
+                g_velY = 460.0;
+                double kickDirX = sinf(g_camYaw);
+                double kickDirZ = cosf(g_camYaw);
+                g_jumpVelX += kickDirX * 240.0;
+                g_jumpVelZ += kickDirZ * 240.0;
+                Log("[mxohax] Live Human Input: Wire-Fu Double Kick aerial impulse executed!\n");
+            }
+        }
+
+        // Bullet-time focus evasion handling
+        if (g_bulletDodgeTimer > 0.0f) {
+            g_bulletDodgeTimer -= (float)dt;
+            float dodgePhase = sinf((1.2f - g_bulletDodgeTimer) / 1.2f * 3.14159f);
+            g_camPitch = 0.1745f - 0.28f * dodgePhase; // Limbo backward dodge bend
+            if (g_bulletDodgeTimer <= 0.0f) {
+                g_camPitch = 0.1745f;
+                Log("[mxohax] Bullet-Time Focus Evasion completed: Resumed combat posture.\n");
+            }
+        }
+
+        // Matrix anomaly code rain degradation during viral outbreaks
+        if (g_codeRainDegradationActive) {
+            float targetIntensity = 0.70f + 0.15f * sinf((float)now * 0.003f);
+            g_matrixCodeRainIntensity += (targetIntensity - g_matrixCodeRainIntensity) * 0.05f;
+            *reinterpret_cast<float*>(clientBase + 0x008E357C) = g_matrixCodeRainIntensity;
+            *reinterpret_cast<BYTE*>(clientBase + 0x0085EBA8) = 1;
+            *reinterpret_cast<BYTE*>(clientBase + 0x0085EBA9) = 1;
+            *reinterpret_cast<BYTE*>(clientBase + 0x0085EBAA) = 1;
+            *reinterpret_cast<BYTE*>(clientBase + 0x008E3590) = 1;
+        } else if (g_matrixCodeRainIntensity > 0.01f) {
+            g_matrixCodeRainIntensity -= 1.2f * (float)dt;
+            if (g_matrixCodeRainIntensity < 0.0f) g_matrixCodeRainIntensity = 0.0f;
+            *reinterpret_cast<float*>(clientBase + 0x008E357C) = g_matrixCodeRainIntensity;
+        } else {
+            *reinterpret_cast<float*>(clientBase + 0x008E357C) = 0.0f;
+            *reinterpret_cast<BYTE*>(clientBase + 0x0085EBA8) = 0;
+            *reinterpret_cast<BYTE*>(clientBase + 0x0085EBA9) = 0;
+            *reinterpret_cast<BYTE*>(clientBase + 0x0085EBAA) = 0;
+            *reinterpret_cast<BYTE*>(clientBase + 0x008E3590) = 0;
+            *reinterpret_cast<BYTE*>(clientBase + 0x008AACC8) = 0;
+            *reinterpret_cast<BYTE*>(clientBase + 0x008AACC9) = 0;
         }
 
         // Apply position, orientation and extents to player and actor

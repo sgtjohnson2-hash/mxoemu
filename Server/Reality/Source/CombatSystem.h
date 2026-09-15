@@ -208,7 +208,7 @@ private:
 	};
 
 	AttackResult ResolveAttack(PlayerObject* attacker, PlayerObject* target,
-		const CombatMove& move, uint8 attackerTactic, uint8 targetTactic);
+		const CombatMove& move, uint8 attackerTactic, uint8 targetTactic, bool inInterlock = false, bool bypassBlock = false);
 	bool RunInterlockRound(InterlockSession &session); //false = session over, reap it
 	bool RunFreeFireShot(FreeFireState &state); //false = engagement over, reap it
 	float TacticModifier(uint8 attackerTactic, uint8 targetTactic);

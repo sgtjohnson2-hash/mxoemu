@@ -822,3 +822,63 @@ float FactionWarManager::GetDistrictInfoGainBonus(uint32 districtId, uint32 fact
     if (faction == FACTION_MEROVINGIAN && HasDistrictDominance(districtId, FACTION_MEROVINGIAN)) return 0.25f;
     return 0.0f;
 }
+
+float FactionWarManager::GetDistrictTension(uint32 districtId) const
+{
+    auto it = m_districtStatus.find(districtId);
+    if (it != m_districtStatus.end()) {
+        const auto& d = it->second;
+        float contestedScore = static_cast<float>(d.contestedNodeIds.size()) * 25.0f;
+        float spread = std::abs(d.machineInfluence - d.zionInfluence) + std::abs(d.zionInfluence - d.meroInfluence);
+        float balanceScore = std::max(0.0f, (2.0f - spread) * 20.0f);
+        float tension = contestedScore + balanceScore + 25.0f;
+        return std::clamp(tension, 15.0f, 98.0f);
+    }
+    return 50.0f;
+}
+
+uint32 FactionWarManager::GetHighestTensionDistrict() const
+{
+    uint32 bestDistrict = 1;
+    float maxTension = 0.0f;
+    for (const auto& pair : m_districtStatus) {
+        float tension = GetDistrictTension(pair.first);
+        if (tension > maxTension) {
+            maxTension = tension;
+            bestDistrict = pair.first;
+        }
+    }
+    return bestDistrict;
+}
+
+uint32 FactionWarManager::GetLeadingEnemyFaction(uint32 myFaction, uint32 districtId) const
+{
+    auto it = m_districtStatus.find(districtId);
+    if (it != m_districtStatus.end()) {
+        const auto& d = it->second;
+        if (myFaction == FACTION_ZION) {
+            return (d.machineInfluence >= d.meroInfluence) ? FACTION_MACHINES : FACTION_MEROVINGIAN;
+        } else if (myFaction == FACTION_MACHINES) {
+            return (d.zionInfluence >= d.meroInfluence) ? FACTION_ZION : FACTION_MEROVINGIAN;
+        } else {
+            return (d.zionInfluence >= d.machineInfluence) ? FACTION_ZION : FACTION_MACHINES;
+        }
+    }
+    return (myFaction == FACTION_ZION) ? FACTION_MACHINES : FACTION_ZION;
+}
+
+std::string FactionWarManager::GetDistrictName(uint32 districtId) const
+{
+    auto it = m_districtStatus.find(districtId);
+    if (it != m_districtStatus.end() && !it->second.name.empty()) {
+        return it->second.name;
+    }
+    switch (districtId) {
+        case 1: return "Slums / Barrens";
+        case 2: return "Richland Corporate Park";
+        case 3: return "Downtown Financial Construct";
+        case 4: return "International Cultural Hub";
+        case 5: return "Westview Residential Corridor";
+        default: return "MegaCity Sector " + std::to_string(districtId);
+    }
+}

@@ -125,6 +125,12 @@ public:
     float GetDistrictWireFuBonus(uint32 districtId, uint32 faction) const;
     float GetDistrictInfoGainBonus(uint32 districtId, uint32 faction) const;
 
+    // Epoch II: Dynamic City Tension & Frontline Synthesis Queries
+    float GetDistrictTension(uint32 districtId) const;
+    uint32 GetHighestTensionDistrict() const;
+    uint32 GetLeadingEnemyFaction(uint32 myFaction, uint32 districtId) const;
+    std::string GetDistrictName(uint32 districtId) const;
+
 private:
     void syncToDatabase();
     void updateControlNodes(uint32 deltaMs);

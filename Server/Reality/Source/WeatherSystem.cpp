@@ -5,6 +5,7 @@
 #include "GameClient.h"
 #include "MessageTypes.h"
 #include "GameServer.h"
+#include "SmithVirusCascade.h"
 #include <cstdlib>
 
 createFileSingleton(WeatherSystem);
@@ -122,6 +123,24 @@ void WeatherSystem::Update(uint32 currentMs)
             });
         }
         return; // Skip normal weather while glitching
+    }
+
+    // Matrix Anomaly Code Rain Degradation during viral outbreaks
+    {
+        ContagionStage stage = sSmithCascade.GetStage();
+        float infectionPct = sSmithCascade.GetInfectionPercentage();
+        if (stage >= CONTAGION_STAGE_ELEVATED || infectionPct >= 15.0f) {
+            float intensity = std::min(1.0f, 0.50f + (infectionPct / 100.0f) * 0.50f);
+            TriggerGlitchAnomaly(intensity, 300000); // 5 minutes code rain degradation
+            std::string alertMsg = (format("{c:00FF00}[Matrix Anomaly] Viral contagion outbreak detected (%1%%%%)! Cascading digital code rain degradation active.{/c}")
+                % (int)infectionPct).str();
+            sObjMgr.ForEachHumanPlayer([&alertMsg](PlayerObject* p) {
+                p->getClient().QueueCommand(std::make_shared<SystemChatMsg>(alertMsg));
+            });
+            INFO_LOG(format("WeatherSystem: Viral outbreak code rain degradation active. Infection: %1%%%, Intensity: %2%")
+                % infectionPct % intensity);
+            return;
+        }
     }
 
     // In-Game Hourly Circadian Transitions & Announcements

@@ -265,6 +265,16 @@ void PlayerObject::ParseAdminCommand( string theCmd )
         }
         return;
     }
+    else if (iequals(command, "mission") || iequals(command, "procmission"))
+    {
+        uint32 mId = sMissionSys.GenerateFactionTensionMission(this);
+        if (mId > 0) {
+            m_parent.QueueCommand(make_shared<SystemChatMsg>((format("{c:00FF00}[OPERATOR] Procedural contract synthesized: ID #%1%{/c}") % mId).str()));
+        } else {
+            m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FFFF00}[OPERATOR] You already have an active mission contract or could not synthesize at this time.{/c}"));
+        }
+        return;
+    }
     else if (iequals(command, "frank") || iequals(command, "frankStatus") || iequals(command, "punisher"))
     {
         m_parent.QueueCommand(make_shared<SystemChatMsg>(sFrankCastleMgr.GenerateStatusReport()));
