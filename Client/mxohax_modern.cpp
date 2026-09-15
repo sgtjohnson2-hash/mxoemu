@@ -2501,12 +2501,22 @@ static void UpdateCamera(uintptr_t clientBase, void* pCam) {
     float sy = sinf(g_camYaw * 0.5f);
     float cy = cosf(g_camYaw * 0.5f);
 
-    float camRotQ[4] = {
-        cy * sp,
-        sy * cp,
-        -sy * sp,
-        cy * cp
-    };
+    float qx = cy * sp;
+    float qy = sy * cp;
+    float qz = -sy * sp;
+    float qw = cy * cp;
+
+    if (fabsf(g_wallRunCameraTilt) > 0.001f) {
+        float sr = sinf(g_wallRunCameraTilt * 0.5f);
+        float cr = cosf(g_wallRunCameraTilt * 0.5f);
+        float nx = qx * cr + qy * sr;
+        float ny = qy * cr - qx * sr;
+        float nz = qw * sr + qz * cr;
+        float nw = qw * cr - qz * sr;
+        qx = nx; qy = ny; qz = nz; qw = nw;
+    }
+
+    float camRotQ[4] = { qx, qy, qz, qw };
 
     void* pEngineCam = *reinterpret_cast<void**>(pCam);
     if (pEngineCam && !IsBadReadPtr(pEngineCam, 4)) {
@@ -3066,6 +3076,10 @@ static void __fastcall DetourFrameTick(void* pThis, void* /*edx*/) {
         if (dt < 0.001) dt = 0.01667;
         s_lastTickTime = now;
 
+        if (g_focusModeActive && g_timeDilation > 0.01f) {
+            dt *= (double)g_timeDilation;
+        }
+
         // Reset subclass if current hooked window was destroyed
         if (OriginalWndProc && (!g_hGameWindow || !IsWindow(g_hGameWindow))) {
             Log("[mxohax] Subclassed window 0x%p died or invalid. Resetting OriginalWndProc.\n", g_hGameWindow);
@@ -3177,8 +3191,14 @@ static void __fastcall DetourFrameTick(void* pThis, void* /*edx*/) {
                 dirZ /= len;
                 actVelX = dirX * speed;
                 actVelZ = dirZ * speed;
-                g_playerX += actVelX * dt;
-                g_playerZ += actVelZ * dt;
+                if (!g_isJumping && !g_isWallRunning) {
+                    g_playerX += actVelX * dt;
+                    g_playerZ += actVelZ * dt;
+                } else if (g_isJumping && !g_isWallRunning) {
+                    // Fine air-control steering preserved horizontal trajectory
+                    g_jumpVelX += dirX * 120.0 * dt;
+                    g_jumpVelZ += dirZ * 120.0 * dt;
+                }
                 g_playerYaw = (float)atan2(dirX, dirZ);
                 isMoving = true;
             }

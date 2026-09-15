@@ -126,7 +126,7 @@ void WeatherSystem::Update(uint32 currentMs)
     }
 
     // Matrix Anomaly Code Rain Degradation during viral outbreaks
-    {
+    if (!m_isAnomalyActive) {
         ContagionStage stage = sSmithCascade.GetStage();
         float infectionPct = sSmithCascade.GetInfectionPercentage();
         if (stage >= CONTAGION_STAGE_ELEVATED || infectionPct >= 15.0f) {
@@ -220,7 +220,7 @@ void WeatherSystem::UpdateSkybox(uint32 currentMs, float greenTint)
 void WeatherSystem::TriggerGlitchAnomaly(float intensity, uint32 durationMs)
 {
     m_isAnomalyActive = true;
-    m_anomalyEndTime = getTime() * 1000 + durationMs;
+    m_anomalyEndTime = getMSTime() + durationMs;
     SetWeather(3, intensity); // 3 = Matrix Code Rain
     m_skyboxGreenTint = intensity;
     

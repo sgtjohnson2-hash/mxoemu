@@ -776,6 +776,35 @@ uint32 MissionSystem::SynthesizeProceduralMission(PlayerObject* player, Procedur
             obj3.nextMissionSuccessId = 0;
             obj3.nextMissionFailId = 0;
             templ.objectives.push_back(obj3);
+
+            // Dynamic Mission NPCs
+            float px = player->getPosition().x;
+            float py = player->getPosition().y;
+            float pz = player->getPosition().z;
+
+            MissionNpc n1;
+            n1.idNpc = 7001;
+            n1.type = "FRIENDLY";
+            n1.x = px + 12.0f; n1.y = py; n1.z = pz + 10.0f;
+            n1.handle = "Data Terminal [Substation Node]";
+            n1.rsi = 100; n1.level = 15; n1.maxHP = 2000;
+            templ.npcs.push_back(n1);
+
+            MissionNpc n2;
+            n2.idNpc = 7002;
+            n2.type = "HOSTILE";
+            n2.x = px + 22.0f; n2.y = py; n2.z = pz + 18.0f;
+            n2.handle = enemyFactionName + " Tactical Enforcer";
+            n2.rsi = 101; n2.level = 18; n2.maxHP = 3500;
+            templ.npcs.push_back(n2);
+
+            MissionNpc n3;
+            n3.idNpc = 7003;
+            n3.type = "FRIENDLY";
+            n3.x = px + 32.0f; n3.y = py; n3.z = pz + 28.0f;
+            n3.handle = myFactionName + " Extraction Operative";
+            n3.rsi = 102; n3.level = 20; n3.maxHP = 4000;
+            templ.npcs.push_back(n3);
             break;
         }
 
@@ -834,6 +863,27 @@ uint32 MissionSystem::SynthesizeProceduralMission(PlayerObject* player, Procedur
             obj3.nextMissionSuccessId = 0;
             obj3.nextMissionFailId = 0;
             templ.objectives.push_back(obj3);
+
+            // Dynamic Mission NPCs
+            float px2 = player->getPosition().x;
+            float py2 = player->getPosition().y;
+            float pz2 = player->getPosition().z;
+
+            MissionNpc an1;
+            an1.idNpc = 8801;
+            an1.type = "FRIENDLY";
+            an1.x = px2 + 14.0f; an1.y = py2; an1.z = pz2 + 12.0f;
+            an1.handle = "Exile Asset Program";
+            an1.rsi = 103; an1.level = 16; an1.maxHP = 2500;
+            templ.npcs.push_back(an1);
+
+            MissionNpc an2;
+            an2.idNpc = 8802;
+            an2.type = "FRIENDLY";
+            an2.x = px2 + 35.0f; an2.y = py2; an2.z = pz2 + 30.0f;
+            an2.handle = myFactionName + " Safehouse Operator";
+            an2.rsi = 104; an2.level = 20; an2.maxHP = 4000;
+            templ.npcs.push_back(an2);
             break;
         }
 
@@ -891,6 +941,27 @@ uint32 MissionSystem::SynthesizeProceduralMission(PlayerObject* player, Procedur
             obj3.nextMissionSuccessId = 0;
             obj3.nextMissionFailId = 0;
             templ.objectives.push_back(obj3);
+
+            // Dynamic Mission NPCs
+            float px3 = player->getPosition().x;
+            float py3 = player->getPosition().y;
+            float pz3 = player->getPosition().z;
+
+            MissionNpc cn1;
+            cn1.idNpc = 9101;
+            cn1.type = "HOSTILE";
+            cn1.x = px3 + 18.0f; cn1.y = py3; cn1.z = pz3 + 14.0f;
+            cn1.handle = "Rogue Double-Agent";
+            cn1.rsi = 105; cn1.level = 20; cn1.maxHP = 4200;
+            templ.npcs.push_back(cn1);
+
+            MissionNpc cn2;
+            cn2.idNpc = 9102;
+            cn2.type = "FRIENDLY";
+            cn2.x = px3 + 32.0f; cn2.y = py3; cn2.z = pz3 + 26.0f;
+            cn2.handle = myFactionName + " Intelligence Handler";
+            cn2.rsi = 106; cn2.level = 20; cn2.maxHP = 4000;
+            templ.npcs.push_back(cn2);
             break;
         }
     }
@@ -905,10 +976,19 @@ uint32 MissionSystem::SynthesizeProceduralMission(PlayerObject* player, Procedur
     state.missionId = missionId;
     state.currentObjectiveIndex = 0;
     state.objectiveStartTimeMs = getMSTime();
-    m_activeMissions[playerGoId] = state;
 
     uint32 newInstanceId = missionId + playerGoId;
     player->getClient().m_instanceId = newInstanceId;
+
+    // Dynamically spawn synthesized mission NPCs into the world and instance
+    for (const auto& npc : templ.npcs) {
+        uint32 npcGoId = sBotMgr.SpawnMissionBot(npc, newInstanceId);
+        if (npcGoId != 0) {
+            state.spawnedNpcs[npc.idNpc] = npcGoId;
+        }
+    }
+
+    m_activeMissions[playerGoId] = state;
 
     player->getClient().QueueCommand(std::make_shared<SystemChatMsg>(
         (format("{c:00FF00}[MISSION SYNTHESIS] Contract Active: %1% (District: %2%, Faction Tension: %3%%%){/c}")

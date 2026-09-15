@@ -486,15 +486,19 @@ void CombatSystem::RemoveCombatant(uint32 goId)
 float CombatSystem::TacticModifier(uint8 attackerTactic, uint8 targetTactic)
 {
 	// Authentic Matrix Online martial arts counter matrix:
-	// Power crushes Speed (+35% damage bonus, frame advantage)
-	// Speed interrupts Grab (+35% damage bonus, fast interrupt)
+	// Power crushes Speed (+35% damage bonus, frame advantage; Speed deals 0.70x against Power)
+	// Speed interrupts Grab (+35% damage bonus, fast interrupt; Grab deals 0.65x if not cancelled)
 	// Grab breaks Guard (+40% damage bonus, unblockable throw / block break)
 	// Grab breaks Power (+35% damage bonus, counters heavy windup)
+	// Guard vs Speed (Guard blocks/deflects light hits: Speed deals 0.60x)
 	// Matched tactics clash (0.90x damage, glancing blow)
 	if (attackerTactic == TACTIC_POWER && targetTactic == TACTIC_SPEED) return 1.35f;
+	if (attackerTactic == TACTIC_SPEED && targetTactic == TACTIC_POWER) return 0.70f;
 	if (attackerTactic == TACTIC_SPEED && targetTactic == TACTIC_RETALIATE) return 1.35f;
+	if (attackerTactic == TACTIC_RETALIATE && targetTactic == TACTIC_SPEED) return 0.65f;
 	if (attackerTactic == TACTIC_RETALIATE && targetTactic == TACTIC_DEFENSE) return 1.40f;
 	if (attackerTactic == TACTIC_RETALIATE && targetTactic == TACTIC_POWER) return 1.35f;
+	if (attackerTactic == TACTIC_SPEED && targetTactic == TACTIC_DEFENSE) return 0.60f;
 	if (attackerTactic == targetTactic && attackerTactic != TACTIC_NORMAL) return 0.90f; // Mirrored tactics glance off
 	return 1.0f;
 }
@@ -846,11 +850,30 @@ bool CombatSystem::RunInterlockRound(InterlockSession &session)
 		if (moveA && !pA->isDead()) {
 			ResolveAttack(pA, pB, *moveA, tacA, tacB, true, false);
 		}
+	} else if (aBreaksPowerB) {
+		// A's Grab counters B's heavy Power attack with an unblockable throw. B's power strike is cancelled!
+		if (moveA) ResolveAttack(pA, pB, *moveA, tacA, tacB, true, true);
+	} else if (bBreaksPowerA) {
+		// B's Grab counters A's heavy Power attack with an unblockable throw. A's power strike is cancelled!
+		if (moveB) ResolveAttack(pB, pA, *moveB, tacB, tacA, true, true);
+	} else if (aBreaksGuardB) {
+		// A's Grab breaks B's Guard with an unblockable throw. B was blocking and gets thrown.
+		if (moveA) ResolveAttack(pA, pB, *moveA, tacA, tacB, true, true);
+	} else if (bBreaksGuardA) {
+		// B's Grab breaks A's Guard with an unblockable throw. A was blocking and gets thrown.
+		if (moveB) ResolveAttack(pB, pA, *moveB, tacB, tacA, true, true);
 	} else {
-		// Standard exchange: specials take precedence, otherwise both resolve
+		// Standard exchange: defenders only strike if an active special is queued
 		bool specialFromA = (session.queuedMoveA != 0);
-		if (moveA) ResolveAttack(pA, pB, *moveA, tacA, tacB, true, aBreaksGuardB);
-		if (moveB && !specialFromA && !pB->isDead()) ResolveAttack(pB, pA, *moveB, tacB, tacA, true, bBreaksGuardA);
+		if (tacA != TACTIC_DEFENSE || specialFromA) {
+			if (moveA) ResolveAttack(pA, pB, *moveA, tacA, tacB, true, false);
+		}
+		if (!specialFromA && !pB->isDead()) {
+			bool specialFromB = (session.queuedMoveB != 0);
+			if (tacB != TACTIC_DEFENSE || specialFromB) {
+				if (moveB) ResolveAttack(pB, pA, *moveB, tacB, tacA, true, false);
+			}
+		}
 	}
 
 	session.queuedMoveA = 0;
