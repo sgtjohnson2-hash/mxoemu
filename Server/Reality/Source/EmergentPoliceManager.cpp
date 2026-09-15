@@ -733,6 +733,10 @@ bool EmergentPoliceManager::DeclareCode4(uint32 squadId)
                 leader->sayChat("Code 4: Scene secure. Suspects detained, hostages clear.");
                 leader->Emote(1); // cheer / thumbs up
             }
+            for (uint32 bId : s->officerBotGoIds) {
+                sObjMgr.QueueDeletion(bId);
+            }
+            s->officerBotGoIds.clear();
         }
     }
 

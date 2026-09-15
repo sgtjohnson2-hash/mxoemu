@@ -282,6 +282,18 @@ bool Database::WaitExecute( string QueryString)
 {
 	DatabaseConnection &con = GetFreeConnection();
 	bool Result = _SendQuery(con, QueryString.c_str(), false);
+	if (Result && con.conn) {
+		MYSQL_RES* res = mysql_store_result(con.conn);
+		if (res) mysql_free_result(res);
+		while (mysql_more_results(con.conn)) {
+			if (mysql_next_result(con.conn) == 0) {
+				MYSQL_RES* extra = mysql_store_result(con.conn);
+				if (extra) mysql_free_result(extra);
+			} else {
+				break;
+			}
+		}
+	}
 	ReleaseConnection(con);
 	return Result;
 }
@@ -294,7 +306,18 @@ bool Database::run()
 	DatabaseConnection &con = GetFreeConnection();
 	while(query)
 	{
-		_SendQuery( con, query->c_str(), false );
+		if (_SendQuery( con, query->c_str(), false ) && con.conn) {
+			MYSQL_RES* res = mysql_store_result(con.conn);
+			if (res) mysql_free_result(res);
+			while (mysql_more_results(con.conn)) {
+				if (mysql_next_result(con.conn) == 0) {
+					MYSQL_RES* extra = mysql_store_result(con.conn);
+					if (extra) mysql_free_result(extra);
+				} else {
+					break;
+				}
+			}
+		}
 		delete query;
 		if(!m_threadRunning)
 			break;
@@ -505,7 +528,19 @@ bool Database::_SendQuery(DatabaseConnection &con, const char* Sql, bool Self)
 {
 	if (m_isMockMode) return true;
 	mysql_thread_init();
-	//dunno what it does ...leaving untouched 
+
+	if (con.conn) {
+		// Drain any lingering unread results to prevent Commands out of sync
+		while (mysql_more_results(con.conn)) {
+			if (mysql_next_result(con.conn) == 0) {
+				MYSQL_RES* extra = mysql_store_result(con.conn);
+				if (extra) mysql_free_result(extra);
+			} else {
+				break;
+			}
+		}
+	}
+
 	int result = mysql_query(con.conn, Sql);
 	if(result > 0)
 	{
@@ -531,6 +566,7 @@ bool Database::_HandleError(DatabaseConnection &con, uint32 ErrorNumber)
 	case 2006:  // Mysql server has gone away
 	case 2008:  // Client ran out of memory
 	case 2013:  // Lost connection to sql server during query
+	case 2014:  // Commands out of sync (auto-reconnect to heal connection pool)
 	case 2055:  // Lost connection to sql server - system error
 		{
 			// Let's instruct a reconnect to the db when we encounter these errors.

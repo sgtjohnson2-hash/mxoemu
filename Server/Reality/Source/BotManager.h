@@ -48,6 +48,7 @@ public:
     void Update();
 
     void PopulateWorld();
+    void PruneDeadBots();
     static constexpr size_t MAX_BOT_POPULATION_CEILING = 12000;
     size_t GetBotCount() const {
         std::lock_guard<std::recursive_mutex> lock(m_botMutex);

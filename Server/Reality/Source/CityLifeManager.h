@@ -140,6 +140,7 @@ struct BluepillCitizen {
     uint32 preferredShopId{0};
     WorkShiftType shift{WorkShiftType::ShiftDay};
     RoutineScheduleState currentRoutine{RoutineScheduleState::Sleeping};
+    RoutineScheduleState lastEmotedRoutine{RoutineScheduleState::Sleeping};
     StreetActivityType currentStreetActivity{StreetActivityType::Strolling};
     bool isSheltered{false};
     bool isUsingUmbrella{false};

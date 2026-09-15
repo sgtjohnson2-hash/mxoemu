@@ -27,6 +27,7 @@
 #include "PlayerObject.h"
 #include "GameClient.h"
 #include "Database/DatabaseEnv.h"
+#include "BotManager.h"
 
 ObjectMgr::ObjectMgr() : m_currFreeObjectId(OBJECTMANAGER_STARTINGOBJECTID),
     m_playerPool(std::make_unique<ObjectPool<PlayerObject>>())
@@ -348,5 +349,9 @@ void ObjectMgr::FlushDeletions() {
     
     for (uint32 id : toDelete) {
         destroyObject(id);
+    }
+
+    if (!toDelete.empty() && BotManager::getSingletonPtr()) {
+        BotManager::getSingleton().PruneDeadBots();
     }
 }

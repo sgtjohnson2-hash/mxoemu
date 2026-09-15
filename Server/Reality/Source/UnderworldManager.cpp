@@ -534,12 +534,14 @@ bool UnderworldManager::DecapitateRacket(uint32 racketId, bool byCastle)
             if (auto po = sObjMgr.getGOPtrSafe(gId)) {
                 po->killPlayer(0, 0x280001C2);
             }
+            sObjMgr.QueueDeletion(gId);
         }
         r->guardBotGoIds.clear();
         if (r->bossBotGoId != 0) {
             if (auto po = sObjMgr.getGOPtrSafe(r->bossBotGoId)) {
                 po->killPlayer(0, 0x280001C2);
             }
+            sObjMgr.QueueDeletion(r->bossBotGoId);
             r->bossBotGoId = 0;
         }
     }
@@ -666,12 +668,16 @@ bool UnderworldManager::InterceptConvoy(uint32 convoyId, bool byCastle)
             if (auto po = sObjMgr.getGOPtrSafe(c.transportBotGoId)) {
                 po->killPlayer(0, 0x280001C2);
             }
+            sObjMgr.QueueDeletion(c.transportBotGoId);
+            c.transportBotGoId = 0;
         }
         for (uint32 eId : c.escortBotGoIds) {
             if (auto po = sObjMgr.getGOPtrSafe(eId)) {
                 po->killPlayer(0, 0x280001C2);
             }
+            sObjMgr.QueueDeletion(eId);
         }
+        c.escortBotGoIds.clear();
         if (auto frank = sObjMgr.getGOPtrSafe(sFrankCastleMgr.GetFrankGoId())) {
             sLootMgr.GenerateLoot(frank, nullptr);
         }
@@ -1034,6 +1040,7 @@ bool UnderworldManager::NeutralizeCrime(uint32 crimeId, bool byCastle, bool byPo
             if (auto po = sObjMgr.getGOPtrSafe(pId)) {
                 po->killPlayer(0, 0x280001C2);
             }
+            sObjMgr.QueueDeletion(pId);
         }
         c->perpBotGoIds.clear();
         if (c->victimBotGoId != 0) {
@@ -1041,6 +1048,8 @@ bool UnderworldManager::NeutralizeCrime(uint32 crimeId, bool byCastle, bool byPo
                 po->Emote(1); // Cheer
                 po->sayChat("Thank you! I thought I was going to be deleted!");
             }
+            sObjMgr.QueueDeletion(c->victimBotGoId);
+            c->victimBotGoId = 0;
         }
     }
 
@@ -1424,6 +1433,16 @@ void UnderworldManager::UpdateConvoys(uint32 deltaMs)
         if (c.routeProgress >= 1.0f) {
             c.status = ConvoyStatus::CONVOY_DELIVERED;
             AddDistrictHeat(c.destDistrictId, 15.0f);
+            if (Has3DWorldSupport()) {
+                if (c.transportBotGoId != 0) {
+                    sObjMgr.QueueDeletion(c.transportBotGoId);
+                    c.transportBotGoId = 0;
+                }
+                for (uint32 eId : c.escortBotGoIds) {
+                    sObjMgr.QueueDeletion(eId);
+                }
+                c.escortBotGoIds.clear();
+            }
         }
 
         ++it;
@@ -1514,8 +1533,13 @@ void UnderworldManager::UpdateEmergentCrimes(uint32 deltaMs)
                     if (auto po = sObjMgr.getGOPtrSafe(pId)) {
                         po->killPlayer(0, 0x280001C2);
                     }
+                    sObjMgr.QueueDeletion(pId);
                 }
                 c.perpBotGoIds.clear();
+                if (c.victimBotGoId != 0) {
+                    sObjMgr.QueueDeletion(c.victimBotGoId);
+                    c.victimBotGoId = 0;
+                }
             }
         }
 

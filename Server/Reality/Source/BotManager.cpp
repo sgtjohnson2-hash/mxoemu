@@ -108,7 +108,9 @@ std::shared_ptr<BotClient> BotManager::SpawnSingleBot(float x, float y, float z,
     // Phase 2: Bot Population Ceiling & Spatial Recycling
     {
         std::lock_guard<std::recursive_mutex> lock(m_botMutex);
-        if (m_bots.size() >= MAX_BOT_POPULATION_CEILING && !m_bots.empty()) {
+        size_t activeBotLimit = (size_t)sConfig.GetIntDefault("BotManager.ActiveBotLimit", 500);
+        if (activeBotLimit > MAX_BOT_POPULATION_CEILING) activeBotLimit = MAX_BOT_POPULATION_CEILING;
+        if (m_bots.size() >= activeBotLimit && !m_bots.empty()) {
             size_t idx = (m_recycleBotIndex++) % m_bots.size();
             auto recycledBot = m_bots[idx];
             if (recycledBot) {
@@ -319,19 +321,11 @@ void BotManager::Update()
     // Fast-path: When no human players are connected, assign background LOD without thread pool overhead
     if (m_activePlayerIds.empty())
     {
-        bool anyCombat = false;
         for (const auto& bot : *botsSnapshot)
         {
-            if (bot->IsInCombat() || bot->IsPanicking()) {
-                bot->SetLOD(ExecutionLOD::APPROACH_AREA);
-                anyCombat = true;
-            } else {
-                bot->SetLOD(ExecutionLOD::BACKGROUND_AREA);
-            }
+            if (bot) bot->SetLOD(ExecutionLOD::BACKGROUND_AREA);
         }
-        if (!anyCombat) {
-            return; // 0% CPU when server is idle with no connected players!
-        }
+        return; // 0% CPU when server is idle with no connected players!
     }
     else
     {
@@ -484,7 +478,7 @@ void BotManager::Update()
 void BotManager::PopulateWorld()
 {
     const auto& npcs = sDataLoader.GetAllNPCs();
-    size_t targetPop = (size_t)sConfig.GetIntDefault("BotManager.InitialPopulation", 2500);
+    size_t targetPop = (size_t)sConfig.GetIntDefault("BotManager.InitialPopulation", 350);
     targetPop = std::min(targetPop, (size_t)MAX_BOT_POPULATION_CEILING);
     INFO_LOG(format("BotManager: Populating world with authentic NPC spawn points (Target: %1%, Ceiling: %2%, Available: %3%)...")
         % targetPop % MAX_BOT_POPULATION_CEILING % npcs.size());
@@ -684,5 +678,21 @@ void BotManager::HandleCleanseAwakening(uint32 entityGoId)
     }
 }
 
-
-
+void BotManager::PruneDeadBots()
+{
+    std::lock_guard<std::recursive_mutex> lock(m_botMutex);
+    size_t before = m_bots.size();
+    m_bots.erase(
+        std::remove_if(m_bots.begin(), m_bots.end(), [](const std::shared_ptr<BotClient>& b) {
+            if (!b) return true;
+            uint32 goId = b->GetPlayerGoId();
+            if (goId == 0) return true;
+            PlayerObject* po = sObjMgr.getGOPtrSafe(goId);
+            return (po == nullptr);
+        }),
+        m_bots.end()
+    );
+    if (m_bots.size() != before) {
+        m_botsDirty = true;
+    }
+}

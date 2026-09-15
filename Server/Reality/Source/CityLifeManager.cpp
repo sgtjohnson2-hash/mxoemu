@@ -990,21 +990,27 @@ void CityLifeManager::UpdateCitizens(uint32 deltaMs)
             if (auto bot = sBotMgr.GetBotByGOID(c.botGoId)) {
                 if (c.currentRoutine == RoutineScheduleState::Panicking) {
                     bot->SetPanicking(true);
-                    bot->Emote(50); // Cower
-                    bot->MoveTo((float)c.destinationLocation.x, (float)c.destinationLocation.y, (float)c.destinationLocation.z);
+                    if (c.lastEmotedRoutine != RoutineScheduleState::Panicking) {
+                        c.lastEmotedRoutine = RoutineScheduleState::Panicking;
+                        bot->Emote(50); // Cower
+                        bot->MoveTo((float)c.destinationLocation.x, (float)c.destinationLocation.y, (float)c.destinationLocation.z);
+                    }
                 } else {
                     bot->SetPanicking(false);
-                    if (c.currentRoutine == RoutineScheduleState::CommuteToWork || 
-                        c.currentRoutine == RoutineScheduleState::CommuteHome ||
-                        c.currentRoutine == RoutineScheduleState::Shopping ||
-                        c.currentRoutine == RoutineScheduleState::Leisure) {
-                        bot->MoveTo((float)c.destinationLocation.x, (float)c.destinationLocation.y, (float)c.destinationLocation.z);
-                    } else if (c.currentRoutine == RoutineScheduleState::Breakfast || 
-                               c.currentRoutine == RoutineScheduleState::LunchBreak || 
-                               c.currentRoutine == RoutineScheduleState::Dining) {
-                        bot->Emote(10); // Dine
-                    } else if (c.currentRoutine == RoutineScheduleState::Nightclubbing) {
-                        bot->Emote(20); // Dance
+                    if (c.lastEmotedRoutine != c.currentRoutine) {
+                        c.lastEmotedRoutine = c.currentRoutine;
+                        if (c.currentRoutine == RoutineScheduleState::CommuteToWork || 
+                            c.currentRoutine == RoutineScheduleState::CommuteHome ||
+                            c.currentRoutine == RoutineScheduleState::Shopping ||
+                            c.currentRoutine == RoutineScheduleState::Leisure) {
+                            bot->MoveTo((float)c.destinationLocation.x, (float)c.destinationLocation.y, (float)c.destinationLocation.z);
+                        } else if (c.currentRoutine == RoutineScheduleState::Breakfast || 
+                                   c.currentRoutine == RoutineScheduleState::LunchBreak || 
+                                   c.currentRoutine == RoutineScheduleState::Dining) {
+                            bot->Emote(10); // Dine
+                        } else if (c.currentRoutine == RoutineScheduleState::Nightclubbing) {
+                            bot->Emote(20); // Dance
+                        }
                     }
                 }
             }
