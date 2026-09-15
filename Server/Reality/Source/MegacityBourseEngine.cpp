@@ -226,7 +226,9 @@ bool MegacityBourseEngine::PurchaseMarketListing(uint32_t listingId, uint32_t bu
     auto it = m_listings.find(listingId);
     if (it == m_listings.end() || it->second.supply == 0) return false;
 
-    float price = GetMarketListingPrice(listingId);
+    const auto& item = it->second;
+    float supplyFactor = static_cast<float>(item.demand) / std::max(1.0f, static_cast<float>(item.supply));
+    float price = std::max(10.0f, item.basePrice * supplyFactor * item.factionTensionMultiplier);
     it->second.supply--;
     it->second.demand++;
     outFinalPrice = price;
