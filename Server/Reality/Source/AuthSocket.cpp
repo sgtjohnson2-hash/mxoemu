@@ -104,6 +104,17 @@ void AuthSocket::ProcessData( const byte *buf,size_t len )
 	if (len == 0 || buf == nullptr)
 		return;
 
+	// Fast drop for internet web crawlers, TLS handshakes, or plain HTTP probes
+	if (len >= 3)
+	{
+		if (memcmp(buf, "GET", 3) == 0 || memcmp(buf, "POS", 3) == 0 || memcmp(buf, "HEA", 3) == 0 ||
+		    (buf[0] == 0x16 && buf[1] == 0x03) || (buf[0] == 0x03 && buf[1] == 0x01))
+		{
+			SetCloseAndDelete(true);
+			return;
+		}
+	}
+
 	try
 	{
 		ByteBuffer packetContents(buf,len);
@@ -124,6 +135,8 @@ void AuthSocket::ProcessData( const byte *buf,size_t len )
 		{
 		default:
 			{
+				DEBUG_LOG(format("AuthSocket: Unknown opcode 0x%02X from client, disconnecting") % (uint32)packetOpcode);
+				SetCloseAndDelete(true);
 				break;
 			}
 		case AS_GetPublicKeyRequest:

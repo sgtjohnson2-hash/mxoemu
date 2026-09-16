@@ -124,6 +124,17 @@ void MarginSocket::ProcessData( const byte *buf,size_t len )
 	if (len == 0 || buf == nullptr)
 		return;
 
+	// Fast drop for internet web crawlers, TLS handshakes, or plain HTTP probes
+	if (len >= 3)
+	{
+		if (memcmp(buf, "GET", 3) == 0 || memcmp(buf, "POS", 3) == 0 || memcmp(buf, "HEA", 3) == 0 ||
+		    (buf[0] == 0x16 && buf[1] == 0x03) || (buf[0] == 0x03 && buf[1] == 0x01))
+		{
+			SetCloseAndDelete(true);
+			return;
+		}
+	}
+
 	try
 	{
 		ByteBuffer packetContents(buf,len);
@@ -191,10 +202,23 @@ void MarginSocket::ProcessData( const byte *buf,size_t len )
 		packetData >> packetOpcode;
 		MarginOpcode opcode = MarginOpcode(packetOpcode);
 
+		if (opcode != CERT_ConnectRequest && opcode != CERT_ChallengeResponse)
+		{
+			if (m_connState != MARGIN_STATE_AUTHENTICATED && m_connState != MARGIN_STATE_IN_GAME)
+			{
+				WARNING_LOG(format("MarginSocket: Opcode 0x%02X received before authentication (state=%1%), disconnecting")
+					% (uint32)packetOpcode % (uint32)m_connState);
+				SetCloseAndDelete(true);
+				return;
+			}
+		}
+
 	switch (opcode)
 	{
 	default:
 		{
+			DEBUG_LOG(format("MarginSocket: Unknown opcode 0x%02X from client, disconnecting") % (uint32)packetOpcode);
+			SetCloseAndDelete(true);
 			break;
 		}
 	case CERT_ConnectRequest:
@@ -1079,6 +1103,35 @@ void MarginSocket::HandleClaimCharacterNameRequest(ByteBuffer &packetData)
 
 	if (handleStr.empty())
 		handleStr = m_username;
+
+	// Enforce strict handle length and character validation
+	if (handleStr.size() < 3 || handleStr.size() > 24)
+	{
+		WARNING_LOG(format("MS_ClaimCharacterNameRequest: Invalid handle length (%1%), falling back to username '%2%'") % handleStr.size() % m_username);
+		handleStr = m_username;
+	}
+
+	bool validChars = true;
+	for (char c : handleStr)
+	{
+		if (!isalnum((unsigned char)c) && c != '_' && c != '-')
+		{
+			validChars = false;
+			break;
+		}
+	}
+	if (!validChars || handleStr.empty())
+	{
+		WARNING_LOG(format("MS_ClaimCharacterNameRequest: Handle '%1%' contains invalid characters, falling back to username '%2%'") % handleStr % m_username);
+		handleStr = m_username;
+	}
+
+	if (handleStr.empty() || handleStr.size() > 24)
+	{
+		WARNING_LOG("MS_ClaimCharacterNameRequest: Handle is empty or exceeds limit after validation, disconnecting.");
+		SetCloseAndDelete(true);
+		return;
+	}
 
 	vector<char> handleBuf(handleStr.begin(), handleStr.end());
 	handleBuf.push_back('\0');
