@@ -708,9 +708,9 @@ static void __fastcall DetourSetControlPos(void* pControl, void* /*edx*/, const 
     if (!IsBadReadPtr(reinterpret_cast<void*>(reinterpret_cast<uintptr_t>(pControl) + 0x1C), 4)) {
         DWORD ctrlId = *reinterpret_cast<DWORD*>(reinterpret_cast<uintptr_t>(pControl) + 0x1C);
         // Protected HUD controls: 0x1B (Quickbar), 0x27 (Compass), 0x22 (Target), 0x02 (Chat),
-        // 0x03 (Chat Toolbar), 0x4D (Latency), 0x24 (Tactics), 0x23 (Tabs), 0x3D (Buffs)
+        // 0x03 (Chat Toolbar), 0x4D (Latency), 0x24 (Tactics), 0x23 (Tabs), 0x3D (Buffs), 0x0E (Interlock)
         if (ctrlId == 0x27 || ctrlId == 0x1B || ctrlId == 0x22 || ctrlId == 0x02 || ctrlId == 0x03 ||
-            ctrlId == 0x4D || ctrlId == 0x24 || ctrlId == 0x23 || ctrlId == 0x3D) {
+            ctrlId == 0x4D || ctrlId == 0x24 || ctrlId == 0x23 || ctrlId == 0x3D || ctrlId == 0x0E) {
             return; // Dropped unauthorized repositioning
         }
     }
@@ -1761,6 +1761,20 @@ enum HudButtonId {
     HUD_BTN_TARGET_VITALS
 };
 
+static inline bool IsPointInAnyHudRect(int normX, int normY) {
+    // 1. Quickbar & Tactics (top-center: [660, 0] to [1260, 115])
+    if (normX >= 660 && normX <= 1260 && normY >= 0 && normY <= 115) return true;
+    // 2. Target Status (top-right: [1550, 0] to [1920, 110])
+    if (normX >= 1550 && normX <= 1920 && normY >= 0 && normY <= 110) return true;
+    // 3. Compass & Flanking Controls (bottom-center: [660, 900] to [1260, 1080])
+    if (normX >= 660 && normX <= 1260 && normY >= 900 && normY <= 1080) return true;
+    // 4. Main Chat Window & Toolbar (bottom-left: [0, 720] to [540, 1080])
+    if (normX >= 0 && normX <= 540 && normY >= 720 && normY <= 1080) return true;
+    // 5. Network Latency & Options (bottom-right: [1740, 980] to [1920, 1080])
+    if (normX >= 1740 && normX <= 1920 && normY >= 980 && normY <= 1080) return true;
+    return false;
+}
+
 static HudButtonId HitTestHudButton(int x, int y) {
     // 1. Quickbar Page Switcher: [680, 0] to [723, 48]
     if (x >= 680 && x <= 723 && y >= 0 && y <= 48) {
@@ -1854,26 +1868,19 @@ static void LockAllHudFrames(uintptr_t clientBase, void* pUI) {
         hWnd = FindWindowA("MatrixWindowClass", NULL);
         if (!hWnd) hWnd = FindWindowA(NULL, "The Matrix Online");
     }
-    int screenW = 0;
-    int screenH = 0;
-    if (hWnd && IsWindow(hWnd)) {
-        RECT rc;
-        if (GetClientRect(hWnd, &rc) && rc.right > 0 && rc.bottom > 0) {
-            screenW = rc.right - rc.left;
-            screenH = rc.bottom - rc.top;
-        }
-    }
-    if (screenW <= 0 || screenH <= 0) {
-        screenW = clientBase ? *reinterpret_cast<int*>(clientBase + 0x00896CCC) : 1920;
-        screenH = clientBase ? *reinterpret_cast<int*>(clientBase + 0x00896D04) : 1080;
-    }
-    if (screenW <= 0) screenW = 1920;
-    if (screenH <= 0) screenH = 1080;
 
-    // Synchronize client.dll internal screen dimensions to dynamic window client dimensions
+    // Direct3D 9 backbuffer is permanently 1920x1080.
+    // In-game HUD controls are positioned in backbuffer coordinate space [0..1920, 0..1080].
+    // Direct3D 9 handles presentation scaling to whatever client window size exists.
+    // Locking controls to 1920x1080 ensures HUD frames are always docked properly at edges
+    // and never get displaced, shrunk, or float detached in windowed mode.
+    const int screenW = 1920;
+    const int screenH = 1080;
+
+    // Enforce client.dll internal screen dimensions to 1920x1080
     if (clientBase) {
-        *reinterpret_cast<int*>(clientBase + 0x00896CCC) = screenW;
-        *reinterpret_cast<int*>(clientBase + 0x00896D04) = screenH;
+        *reinterpret_cast<int*>(clientBase + 0x00896CCC) = 1920;
+        *reinterpret_cast<int*>(clientBase + 0x00896D04) = 1080;
     }
 
     if (hWnd && IsWindow(hWnd)) {
@@ -1881,9 +1888,15 @@ static void LockAllHudFrames(uintptr_t clientBase, void* pUI) {
         DWORD nowTick = GetTickCount();
         if (nowTick - s_lastWndFileWrite > 500) {
             s_lastWndFileWrite = nowTick;
+            RECT rc;
+            int winW = 1920, winH = 1080;
+            if (GetClientRect(hWnd, &rc) && rc.right > 0 && rc.bottom > 0) {
+                winW = rc.right - rc.left;
+                winH = rc.bottom - rc.top;
+            }
             FILE* fWnd = fopen("E:\\Games\\The Matrix Online\\active_game_wnd.txt", "w");
             if (fWnd) {
-                fprintf(fWnd, "%u %d %d\n", (DWORD)(uintptr_t)hWnd, screenW, screenH);
+                fprintf(fWnd, "%u %d %d\n", (DWORD)(uintptr_t)hWnd, winW, winH);
                 fclose(fWnd);
             }
         }
@@ -1911,8 +1924,8 @@ static void LockAllHudFrames(uintptr_t clientBase, void* pUI) {
     EnforceControlRect(pUI, 0x22, targetX, targetY, targetWidth, targetHeight);
 
     // 4. Main Chat Window (0x02): Docked bottom-left
-    int chatW = (screenW > 550) ? 500 : (screenW - 20);
-    int chatH = (screenH > 600) ? 260 : (screenH / 3);
+    int chatW = 500;
+    int chatH = 260;
     int chatX = 10;
     int chatY = screenH - 40 - chatH;
     EnforceControlRect(pUI, 0x02, chatX, chatY, chatW, chatH);
@@ -2195,16 +2208,6 @@ static LRESULT CALLBACK SubclassWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPA
             short mx = (short)LOWORD(lParam);
             short my = (short)HIWORD(lParam);
 
-            // Intercept WM_MOUSEMOVE when wParam & MK_LBUTTON:
-            // Ensure that if the mouse is moving while clicked on the UI,
-            // client.dll never gets a message that tells it to drag or offset controls.
-            if ((wParam & MK_LBUTTON) && g_bMouseDownOnUI) {
-                g_lastMouseX = mx;
-                g_lastMouseY = my;
-                NeutralizeDragGlobals(clientBase);
-                return 0; // Handled and dropped so client never drags or offsets controls
-            }
-
             int normX = (winW > 0) ? (int)((double)mx * 1920.0 / (double)winW) : mx;
             int normY = (winH > 0) ? (int)((double)my * 1080.0 / (double)winH) : my;
             if (normX < 0) normX = 0;
@@ -2212,14 +2215,25 @@ static LRESULT CALLBACK SubclassWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPA
             if (normY < 0) normY = 0;
             if (normY > 1080) normY = 1080;
 
-            if (clientBase && !g_bMouseDownOnUI) {
+            // Intercept WM_MOUSEMOVE when left button is down:
+            // Ensure that if the mouse is moving while clicked on the UI or over any HUD frame,
+            // client.dll never gets a message that tells it to drag or offset controls,
+            // and camera rotation is completely prevented.
+            if ((wParam & MK_LBUTTON) && (g_bMouseDownOnUI || IsPointInAnyHudRect(normX, normY))) {
+                g_lastMouseX = mx;
+                g_lastMouseY = my;
+                NeutralizeDragGlobals(clientBase);
+                return 0; // Handled and dropped so client never drags or offsets controls
+            }
+
+            if (clientBase && !g_bMouseDownOnUI && !IsPointInAnyHudRect(normX, normY)) {
                 DispatchInputEventToClient(clientBase, 0x65766F4D, normX, normY); // 'Move'
             }
 
             // Camera orbiting:
             // Right mouse drag ALWAYS orbits camera.
             // Left mouse drag ONLY orbits camera if the click started in 3D world space (NOT on UI).
-            if ((wParam & MK_RBUTTON) || ((wParam & MK_LBUTTON) && !g_bMouseDownOnUI)) {
+            if ((wParam & MK_RBUTTON) || ((wParam & MK_LBUTTON) && !g_bMouseDownOnUI && !IsPointInAnyHudRect(normX, normY))) {
                 if (g_lastMouseX >= 0 && g_lastMouseY >= 0) {
                     int dx = mx - g_lastMouseX;
                     int dy = my - g_lastMouseY;
@@ -2260,8 +2274,9 @@ static LRESULT CALLBACK SubclassWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPA
             // Check if hovering over native UI widget or HUD button region
             void* pHovered = clientBase ? GetHoveredUIWidget(clientBase) : nullptr;
             HudButtonId hitBtn = HitTestHudButton(normX, normY);
+            bool bOverHud = (pHovered != nullptr) || (hitBtn != HUD_BTN_NONE) || IsPointInAnyHudRect(normX, normY);
 
-            if (pHovered != nullptr || hitBtn != HUD_BTN_NONE) {
+            if (bOverHud) {
                 g_bMouseDownOnUI = true;
                 g_pressedHudButton = (int)hitBtn;
 
