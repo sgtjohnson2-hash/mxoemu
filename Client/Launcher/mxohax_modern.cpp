@@ -1762,15 +1762,19 @@ enum HudButtonId {
 };
 
 static inline bool IsPointInAnyHudRect(int normX, int normY) {
-    // 1. Quickbar & Tactics (top-center: [660, 0] to [1260, 115])
-    if (normX >= 660 && normX <= 1260 && normY >= 0 && normY <= 115) return true;
+    // 1. Quickbar & Tactics (top-center: [600, 0] to [1260, 115])
+    if (normX >= 600 && normX <= 1260 && normY >= 0 && normY <= 115) return true;
     // 2. Target Status (top-right: [1550, 0] to [1920, 110])
     if (normX >= 1550 && normX <= 1920 && normY >= 0 && normY <= 110) return true;
-    // 3. Compass & Flanking Controls (bottom-center: [660, 900] to [1260, 1080])
+    // 3. Player Vitals & Status (top-left: [0, 0] to [400, 110])
+    if (normX >= 0 && normX <= 400 && normY >= 0 && normY <= 110) return true;
+    // 4. Compass & Flanking Controls (bottom-center: [660, 900] to [1260, 1080])
     if (normX >= 660 && normX <= 1260 && normY >= 900 && normY <= 1080) return true;
-    // 4. Main Chat Window & Toolbar (bottom-left: [0, 720] to [540, 1080])
-    if (normX >= 0 && normX <= 540 && normY >= 720 && normY <= 1080) return true;
-    // 5. Network Latency & Options (bottom-right: [1740, 980] to [1920, 1080])
+    // 5. Fallback for Compass if at legacy coordinates [740, 110] to [1080, 290]
+    if (normX >= 740 && normX <= 1080 && normY >= 110 && normY <= 290) return true;
+    // 6. Main Chat Window & Toolbar (bottom-left: [0, 700] to [540, 1080])
+    if (normX >= 0 && normX <= 540 && normY >= 700 && normY <= 1080) return true;
+    // 7. Network Latency & Options (bottom-right: [1740, 980] to [1920, 1080])
     if (normX >= 1740 && normX <= 1920 && normY >= 980 && normY <= 1080) return true;
     return false;
 }
@@ -1861,6 +1865,60 @@ static void EnforceControlRect(void* pUI, DWORD ctrlId, int left, int top, int w
     }
 }
 
+static void RepositionCompass(uintptr_t clientBase, void* pUI) {
+    if (!pUI || !clientBase || IsBadReadPtr(pUI, 0x200)) return;
+    void** ppCtrl = reinterpret_cast<void**>(reinterpret_cast<uintptr_t>(pUI) + 0x28 + (0x27 * 4));
+    if (!ppCtrl || !*ppCtrl || IsBadReadPtr(*ppCtrl, 0xA0)) return;
+    void* pCtrl27 = *ppCtrl;
+
+    // Compass base widget is at [pCtrl27 + 0x68]
+    void** ppBase = reinterpret_cast<void**>(reinterpret_cast<uintptr_t>(pCtrl27) + 0x68);
+    if (!ppBase || !*ppBase || IsBadReadPtr(*ppBase, 0x80)) return;
+    void* pBase = *ppBase;
+
+    // Compass_ButtonHide is at [pCtrl27 + 0x84] (Slot 09)
+    // Compass_ButtonShow is at [pCtrl27 + 0x88] (Slot 10)
+    void** ppBtnHide = reinterpret_cast<void**>(reinterpret_cast<uintptr_t>(pCtrl27) + 0x84);
+    void** ppBtnShow = reinterpret_cast<void**>(reinterpret_cast<uintptr_t>(pCtrl27) + 0x88);
+
+    int curBaseX = *reinterpret_cast<int*>(reinterpret_cast<uintptr_t>(pBase) + 0x6C);
+    int curBaseY = *reinterpret_cast<int*>(reinterpret_cast<uintptr_t>(pBase) + 0x70);
+
+    // Compass_Base is 146x132.
+    // Centered horizontally in 1920 space: targetX = (1920 / 2) - (146 / 2) = 960 - 73 = 887.
+    // Docked flush to bottom in 1080 space: targetY = 1080 - 132 - 2 = 946.
+    const int targetBaseX = 887;
+    const int targetBaseY = 946;
+
+    int dx = targetBaseX - curBaseX;
+    int dy = targetBaseY - curBaseY;
+
+    if (dx != 0 || dy != 0) {
+        typedef int (__thiscall *SetPosition_t)(void* pWidget, int x, int y, void* pRel, int bMoveChildren);
+        SetPosition_t pSetPosition = reinterpret_cast<SetPosition_t>(clientBase + 0x00382360);
+
+        __try {
+            if (ppBtnHide && *ppBtnHide && !IsBadReadPtr(*ppBtnHide, 0x80)) {
+                void* pBtnHide = *ppBtnHide;
+                int bx = *reinterpret_cast<int*>(reinterpret_cast<uintptr_t>(pBtnHide) + 0x6C);
+                int by = *reinterpret_cast<int*>(reinterpret_cast<uintptr_t>(pBtnHide) + 0x70);
+                pSetPosition(pBtnHide, bx + dx, by + dy, nullptr, 1);
+            }
+            if (ppBtnShow && *ppBtnShow && !IsBadReadPtr(*ppBtnShow, 0x80)) {
+                void* pBtnShow = *ppBtnShow;
+                int bx = *reinterpret_cast<int*>(reinterpret_cast<uintptr_t>(pBtnShow) + 0x6C);
+                int by = *reinterpret_cast<int*>(reinterpret_cast<uintptr_t>(pBtnShow) + 0x70);
+                pSetPosition(pBtnShow, bx + dx, by + dy, nullptr, 1);
+            }
+            curBaseX = *reinterpret_cast<int*>(reinterpret_cast<uintptr_t>(pBase) + 0x6C);
+            curBaseY = *reinterpret_cast<int*>(reinterpret_cast<uintptr_t>(pBase) + 0x70);
+            if (curBaseX != targetBaseX || curBaseY != targetBaseY) {
+                pSetPosition(pBase, targetBaseX, targetBaseY, nullptr, 1);
+            }
+        } __except (EXCEPTION_EXECUTE_HANDLER) {}
+    }
+}
+
 static void LockAllHudFrames(uintptr_t clientBase, void* pUI) {
     if (!pUI) return;
     HWND hWnd = g_hGameWindow;
@@ -1903,11 +1961,7 @@ static void LockAllHudFrames(uintptr_t clientBase, void* pUI) {
     }
 
     // 1. Compass / Radar (0x27): Docked bottom-center, exactly centered horizontally, flush with bottom
-    int compassWidth = 256;
-    int compassHeight = 66;
-    int compassX = (screenW / 2) - (compassWidth / 2);
-    int compassY = screenH - compassHeight;
-    EnforceControlRect(pUI, 0x27, compassX, compassY, compassWidth, compassHeight);
+    RepositionCompass(clientBase, pUI);
 
     // 2. Player Window (Quickbar, IS/Health meters, Combat tactics) (0x1B): Docked top-center
     int qbWidth = 560;
