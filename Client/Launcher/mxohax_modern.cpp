@@ -695,6 +695,20 @@ static void __fastcall DetourSetControlPos(void* pControl, void* /*edx*/, const 
         return;
     }
 
+    // Hard clamp: HUD widgets CANNOT change screen position once placed!
+    if (!IsBadReadPtr(reinterpret_cast<void*>(reinterpret_cast<uintptr_t>(pControl) + 0x1C), 4)) {
+        DWORD ctrlId = *reinterpret_cast<DWORD*>(reinterpret_cast<uintptr_t>(pControl) + 0x1C);
+        // Block ALL HUD controls:
+        // 0x1B (Quickbar), 0x27 (Compass), 0x22 (Target), 0x02 (Chat),
+        // 0x03 (Chat Toolbar), 0x4D (Latency), 0x24 (Tactics), 0x23 (Tabs), 0x3D (Buffs),
+        // 0x0E (Interlock), 0x1C (Mission), 0x2A (Map), 0x42 (Char Sheet), 0x47 (Options)
+        if (ctrlId == 0x27 || ctrlId == 0x1B || ctrlId == 0x22 || ctrlId == 0x02 || ctrlId == 0x03 ||
+            ctrlId == 0x4D || ctrlId == 0x24 || ctrlId == 0x23 || ctrlId == 0x3D || ctrlId == 0x0E ||
+            ctrlId == 0x1C || ctrlId == 0x2A || ctrlId == 0x42 || ctrlId == 0x47) {
+            return; // Dropped unauthorized repositioning
+        }
+    }
+
     HMODULE hClient = GetModuleHandleA("client.dll");
     uintptr_t clientBase = (uintptr_t)hClient;
     if (clientBase) {
@@ -702,16 +716,6 @@ static void __fastcall DetourSetControlPos(void* pControl, void* /*edx*/, const 
         if (dragId != 0xFFFFFFFF) {
             // Drag repositioning blocked
             return;
-        }
-    }
-
-    if (!IsBadReadPtr(reinterpret_cast<void*>(reinterpret_cast<uintptr_t>(pControl) + 0x1C), 4)) {
-        DWORD ctrlId = *reinterpret_cast<DWORD*>(reinterpret_cast<uintptr_t>(pControl) + 0x1C);
-        // Protected HUD controls: 0x1B (Quickbar), 0x27 (Compass), 0x22 (Target), 0x02 (Chat),
-        // 0x03 (Chat Toolbar), 0x4D (Latency), 0x24 (Tactics), 0x23 (Tabs), 0x3D (Buffs), 0x0E (Interlock)
-        if (ctrlId == 0x27 || ctrlId == 0x1B || ctrlId == 0x22 || ctrlId == 0x02 || ctrlId == 0x03 ||
-            ctrlId == 0x4D || ctrlId == 0x24 || ctrlId == 0x23 || ctrlId == 0x3D || ctrlId == 0x0E) {
-            return; // Dropped unauthorized repositioning
         }
     }
 
@@ -1851,13 +1855,22 @@ static void EnforceControlRect(void* pUI, DWORD ctrlId, int left, int top, int w
     void** ppCtrl = reinterpret_cast<void**>(reinterpret_cast<uintptr_t>(pUI) + 0x28 + (ctrlId * 4));
     if (!ppCtrl || !*ppCtrl || IsBadReadPtr(*ppCtrl, 0x60)) return;
     void* pCtrl = *ppCtrl;
-    void** vtbl = *reinterpret_cast<void***>(pCtrl);
-    if (!vtbl || IsBadReadPtr(vtbl, 0x20)) return;
+
+    HMODULE hClient = GetModuleHandleA("client.dll");
+    uintptr_t clientBase = (uintptr_t)hClient;
+    if (!clientBase) return;
+
     typedef void (__thiscall *SetRect_t)(void* pThis, const int* pRect);
-    SetRect_t pSetRect = reinterpret_cast<SetRect_t>(vtbl[0x10 / 4]);
+    typedef void (__thiscall *SetControlPos_t)(void* pThis, const int* pPoint);
+
+    SetRect_t pSetRect = reinterpret_cast<SetRect_t>(clientBase + 0x000163F0);
+    SetControlPos_t pSetControlPos = reinterpret_cast<SetControlPos_t>(clientBase + 0x00015D60);
+
     int rect[4] = { left, top, width, height };
+    int pos[2] = { left, top };
     __try {
         g_bAllowControlMove = true;
+        pSetControlPos(pCtrl, pos);
         pSetRect(pCtrl, rect);
         g_bAllowControlMove = false;
     } __except (EXCEPTION_EXECUTE_HANDLER) {
@@ -2297,6 +2310,10 @@ static LRESULT CALLBACK SubclassWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPA
                     if (g_camPitch > 1.15f)  g_camPitch = 1.15f;
                     g_bHumanInputActive = true;
                 }
+                g_lastMouseX = mx;
+                g_lastMouseY = my;
+                NeutralizeDragGlobals(clientBase);
+                return 0; // Consumed camera rotation! Prevent native turning interference
             }
             g_lastMouseX = mx;
             g_lastMouseY = my;
@@ -2345,6 +2362,8 @@ static LRESULT CALLBACK SubclassWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPA
                 if (hitBtn != HUD_BTN_NONE) {
                     ExecuteHudButtonAction(clientBase, hitBtn, normX, normY);
                 }
+                NeutralizeDragGlobals(clientBase);
+                return 0; // UI click consumed! Dropped so matrix.exe never enters drag mode
             } else {
                 g_bMouseDownOnUI = false;
                 g_pressedHudButton = (int)HUD_BTN_NONE;
@@ -2392,6 +2411,9 @@ static LRESULT CALLBACK SubclassWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPA
 
                 g_bMouseDownOnUI = false;
                 g_pressedHudButton = (int)HUD_BTN_NONE;
+                NeutralizeDragGlobals(clientBase);
+                ReleaseCapture();
+                return 0; // UI release consumed!
             }
             g_bMouseDownOnUI = false;
             g_pressedHudButton = (int)HUD_BTN_NONE;
@@ -4684,6 +4706,14 @@ static void InitializeMxOHaxSynchronous() {
         Log("[mxohax] SUCCESS: kernel32.dll LoadLibraryA hooked at 0x%p\n", pTarget);
     }
 
+    // 1a. Check if client.dll is ALREADY loaded into the process!
+    // Critical: ZionLauncher and JackIn inject mxohax_modern.dll AFTER client.dll is already loaded.
+    HMODULE hClientAlready = GetModuleHandleA("client.dll");
+    if (hClientAlready) {
+        Log("[mxohax] client.dll already loaded at 0x%p! Applying client patches immediately...\n", (void*)hClientAlready);
+        ApplyClientPatches(hClientAlready);
+    }
+
     // 1b. Hook Direct3D 9 creation
     HMODULE hD3D9 = LoadLibraryA("d3d9.dll");
     if (hD3D9) {
@@ -4813,6 +4843,7 @@ DWORD WINAPI WorkerThread(LPVOID lpParam) {
 
     if (!hClient) return 0;
     DWORD clientBase = reinterpret_cast<DWORD>(hClient);
+    ApplyClientPatches(hClient);
     bool inWorldLogged = false;
 
     // Monitor inWorld flag and handle AutoJackIn
