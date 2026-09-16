@@ -683,6 +683,35 @@ static bool g_bAllowControlMove = false;
 typedef int (__thiscall *CLTWidget_SetPosition_t)(void* pThis, int x, int y, void* pRel, int bMoveChildren);
 static CLTWidget_SetPosition_t OriginalWidgetSetPosition = nullptr;
 
+// Detours for client.dll CUI Drag & Resize engine functions
+typedef void (__cdecl *CUI_BeginDrag_t)(const int* pt, void* pControl);
+static CUI_BeginDrag_t OriginalBeginDrag = nullptr;
+static void __cdecl DetourBeginDrag(const int* pt, void* pControl) {
+    // Drop all drag initiation requests. UI controls are permanently immobilized.
+    return;
+}
+
+typedef void (__cdecl *CUI_OnDragMove_t)(const int* pt, void* pControl);
+static CUI_OnDragMove_t OriginalOnDragMove = nullptr;
+static void __cdecl DetourOnDragMove(const int* pt, void* pControl) {
+    // Drop all drag movement requests. UI controls are permanently immobilized.
+    return;
+}
+
+typedef void (__cdecl *CUI_BeginResize_t)(const int* pt, void* pMode, void* pControl);
+static CUI_BeginResize_t OriginalBeginResize = nullptr;
+static void __cdecl DetourBeginResize(const int* pt, void* pMode, void* pControl) {
+    // Drop all resize initiation requests. UI controls are permanently immobilized.
+    return;
+}
+
+typedef void (__cdecl *CUI_OnResizeMove_t)(const int* pt, void* pControl);
+static CUI_OnResizeMove_t OriginalOnResizeMove = nullptr;
+static void __cdecl DetourOnResizeMove(const int* pt, void* pControl) {
+    // Drop all resize movement requests. UI controls are permanently immobilized.
+    return;
+}
+
 static int __fastcall DetourWidgetSetPosition(void* pThis, void* /*edx*/, int x, int y, void* pRel, int bMoveChildren) {
     if (!pThis) return 0;
     if (g_bAllowControlMove) {
@@ -690,9 +719,9 @@ static int __fastcall DetourWidgetSetPosition(void* pThis, void* /*edx*/, int x,
         return 0;
     }
 
-    // During in-world gameplay, ALL HUD widgets are permanently locked to fixed canvas coordinates.
+    // During in-world gameplay and streaming, ALL HUD widgets are permanently locked to fixed canvas coordinates.
     // Completely drop any mouse drag, window movement, or relative offset!
-    if (s_inWorldSticky || s_playerEnteredWorld) {
+    if (s_inWorldSticky || s_playerEnteredWorld || s_inStreamingState4) {
         return 0; // Dropped unauthorized repositioning!
     }
 
@@ -717,7 +746,7 @@ static void __fastcall DetourSetControlPos(void* pControl, void* /*edx*/, const 
     }
 
     // Hard clamp: HUD widgets CANNOT change screen position once placed!
-    if (s_inWorldSticky || s_playerEnteredWorld) {
+    if (s_inWorldSticky || s_playerEnteredWorld || s_inStreamingState4) {
         return; // Dropped unauthorized repositioning
     }
 
@@ -1622,25 +1651,25 @@ static double GetCalibratedGroundElevation(double x, double z) {
 
     // 2. High-precision continuous surface model for MegaCity Slums Sector
     // Zone A: Elevated platform / overpass concourse plaza (where operative spawns at 16710, 3230)
-    // Full concourse plaza runs from X: 16500 to 16900, Z: 2400 to 3720
-    if (x >= 16500.0 && x <= 16900.0 && z >= 2400.0 && z <= 3720.0) {
+    // Full concourse plaza runs across X: 16450 to 16950, Z: 2400 to 3720
+    if (x >= 16450.0 && x <= 16950.0 && z >= 2400.0 && z <= 3720.0) {
         return 603.5; // True pavement tile surface (soles flush against concrete mesh)
     }
 
     // Zone B: Ledge / curb concrete barrier bordering the platform
-    if (((x > 16830.0 && x <= 16860.0) || (x >= 16470.0 && x < 16510.0)) && z >= 2400.0 && z <= 3720.0) {
+    if (((x > 16850.0 && x <= 16950.0) || (x >= 16450.0 && x < 16520.0)) && z >= 2400.0 && z <= 3720.0) {
         return 615.0; // Raised curb barrier
     }
 
     // Zone C1: South ramp / stairs transition leading down to street level
-    if (z >= 2250.0 && z < 2400.0 && x >= 16600.0 && x <= 16850.0) {
-        double t = (2400.0 - z) / 150.0;
+    if (z >= 2100.0 && z < 2400.0 && x >= 16450.0 && x <= 16950.0) {
+        double t = (2400.0 - z) / 300.0;
         return 603.5 - t * (603.5 - 572.0); // Smooth continuous ramp transition down to 572.0
     }
 
     // Zone C2: North ramp / stairs transition leading down to church / street level
-    if (z > 3720.0 && z <= 3870.0 && x >= 16650.0 && x <= 16850.0) {
-        double t = (z - 3720.0) / 150.0;
+    if (z > 3720.0 && z <= 3950.0 && x >= 16450.0 && x <= 16950.0) {
+        double t = (z - 3720.0) / 230.0;
         return 603.5 - t * (603.5 - 572.0); // Smooth continuous ramp transition down to 572.0
     }
 
@@ -2613,20 +2642,25 @@ static void UpdatePlayerPositionAndPhysics(uintptr_t clientBase, void* curPlayer
         }
     } else if (!g_isWallRunning) {
         if (g_playerY > groundElev) {
-            // Smooth gravity drop when stepping off ledges down to street level
-            g_playerY -= 800.0 * dt;
-            if (g_playerY <= groundElev) {
+            double diff = g_playerY - groundElev;
+            if (diff <= 18.0) {
+                // Instant flush contact on curbs, steps, and slopes (no hovering/walking on air!)
                 g_playerY = groundElev;
+            } else {
+                g_playerY -= 1200.0 * dt;
+                if (g_playerY <= groundElev) {
+                    g_playerY = groundElev;
+                }
             }
-        } else if (g_playerY < groundElev) {
+        } else {
             g_playerY = groundElev;
         }
     }
 
-    // Expanded roaming boundary: allows exploring platform, curb, stairs, and church courtyard
+    // Expanded roaming boundary: allows exploring platform, curb, stairs, south/north ramps, and church courtyard
     if (g_playerX < 16400.0) g_playerX = 16400.0;
     if (g_playerX > 17200.0) g_playerX = 17200.0;
-    if (g_playerZ < 2300.0)  g_playerZ = 2300.0;
+    if (g_playerZ < 2050.0)  g_playerZ = 2050.0;
     if (g_playerZ > 4200.0)  g_playerZ = 4200.0;
 
     // 1. Update player float position buffer
@@ -3717,6 +3751,14 @@ static void __fastcall DetourFrameTick(void* pThis, void* /*edx*/) {
                     Log("[mxohax] DetourFrameTick: State 4 (Streaming) active (tick %d)...\n", s_state4Ticks);
                 }
 
+                static int s_dissolveStartTick = 0;
+
+                // Check world loaded status
+                void* pWorldInst = *reinterpret_cast<void**>(clientBase + 0x0089DD6C);
+                BYTE bWorldFlag = pWorldMgr ? *reinterpret_cast<BYTE*>(reinterpret_cast<DWORD>(pWorldMgr) + 0x27) : 0;
+                float fProgress = *reinterpret_cast<float*>(clientBase + 0x00849E58);
+                bool bWorldFullyLoaded = (bWorldFlag != 0 || fProgress >= 1.0f || (pWorldInst != nullptr && s_state4Ticks >= 360));
+
                 // ============================================================
                 // PHASE 1: 2D Loading Screen (ticks 0 to 60, ~1.0 sec)
                 // Display authentic loading artwork while initializing archives
@@ -3743,11 +3785,11 @@ static void __fastcall DetourFrameTick(void* pThis, void* /*edx*/) {
                     *reinterpret_cast<float*>(clientBase + 0x008E357C) = 0.0f;
                 }
                 // ============================================================
-                // PHASE 2: Matrix Digital Code Rain Stream (ticks 60 to 300, ~4-5 sec)
+                // PHASE 2: Matrix Digital Code Rain Stream (ticks >= 60 until world fully loads!)
                 // Authentic 2005 Matrix digital rain stream cascades down while
                 // sector geometry, textures, buildings, and ground fully stream in!
                 // ============================================================
-                else if (s_state4Ticks >= 60 && s_state4Ticks < 300) {
+                else if (s_dissolveStartTick == 0 && (s_state4Ticks < 300 || (!bWorldFullyLoaded && s_state4Ticks < 900))) {
                     // 1. Dismiss 2D loading screens (0x57, 0x04) to reveal the falling code stream
                     void* pUI = *reinterpret_cast<void**>(clientBase + 0x00898C54);
                     if (pUI && OriginalHideControl) {
@@ -3776,16 +3818,21 @@ static void __fastcall DetourFrameTick(void* pThis, void* /*edx*/) {
                     }
                 }
                 // ============================================================
-                // PHASE 3: Digital Rain Dissolve / World Rez-In (ticks 300 to 420, ~2 sec)
+                // PHASE 3: Digital Rain Dissolve / World Rez-In (runs for 120 ticks once world is fully loaded)
                 // World has finished streaming; falling green code eases out into reality!
                 // ============================================================
-                else if (s_state4Ticks >= 300 && s_state4Ticks < 420) {
+                else if (s_dissolveStartTick == 0 || (s_state4Ticks < s_dissolveStartTick + 120)) {
+                    if (s_dissolveStartTick == 0) {
+                        s_dissolveStartTick = s_state4Ticks;
+                        Log("[mxohax] DetourFrameTick: World confirmed fully loaded! Beginning Phase 3 digital rain dissolve at tick %d...\n", s_dissolveStartTick);
+                    }
+
                     // Enable 3D scene rendering flags in WorldMgr
                     *reinterpret_cast<BYTE*>(reinterpret_cast<DWORD>(pWorldMgr) + 0x20) = 1;
                     *reinterpret_cast<BYTE*>(reinterpret_cast<DWORD>(pWorldMgr) + 0x22) = 1;
 
                     // Calculate smooth ease-out dissolve: starts at 1.0f (pure code) and dissolves to 0.0f
-                    float rezProgress = (float)(s_state4Ticks - 300) / 120.0f;
+                    float rezProgress = (float)(s_state4Ticks - s_dissolveStartTick) / 120.0f;
                     if (rezProgress > 1.0f) rezProgress = 1.0f;
                     float rezBlend = 1.0f - (rezProgress * rezProgress); // quadratic ease-out dissolve
                     *reinterpret_cast<float*>(clientBase + 0x008E357C) = rezBlend;
@@ -3795,10 +3842,10 @@ static void __fastcall DetourFrameTick(void* pThis, void* /*edx*/) {
                     }
                 }
                 // ============================================================
-                // PHASE 4: Full World Emergence & Promotion to State 3 (ticks >= 420)
+                // PHASE 4: Full World Emergence & Promotion to State 3 (after dissolve completes)
                 // Fully loaded 3D world emerges from code, solid gameplay active!
                 // ============================================================
-                else if (s_state4Ticks >= 420) {
+                else {
                     Log("[mxohax] DetourFrameTick: Matrix code streaming fully complete (ticks=%d)! World 100%% rezzed. Promoting to State 3...\n", s_state4Ticks);
 
                     // Ensure active world geometry buffer is ready (0xE0 = 1, 0xB9 = 1)
@@ -3822,6 +3869,7 @@ static void __fastcall DetourFrameTick(void* pThis, void* /*edx*/) {
                     *reinterpret_cast<float*>(clientBase + 0x008E357C) = 0.0f;
 
                     s_inStreamingState4 = false;
+                    s_dissolveStartTick = 0;
                     EnsureInWorldRendering(clientBase, pWorldMgr, pShell, true /* promoteToState3 */);
                 }
             }
@@ -4206,6 +4254,34 @@ static void ApplyClientPatches(HMODULE hClient) {
     if (MH_CreateHook(pSetWidgetPos, &DetourWidgetSetPosition, reinterpret_cast<LPVOID*>(&OriginalWidgetSetPosition)) == MH_OK) {
         MH_EnableHook(pSetWidgetPos);
         Log("[mxohax] SUCCESS: client.dll CLTWidget::SetPosition hooked at 0x%p to permanently immobilize HUD widgets!\n", pSetWidgetPos);
+    }
+
+    // 3d. Hook CUI::BeginDrag (0x000184E0) to permanently block drag initiation
+    LPVOID pBeginDrag = reinterpret_cast<LPVOID>(clientBase + 0x000184E0);
+    if (MH_CreateHook(pBeginDrag, &DetourBeginDrag, reinterpret_cast<LPVOID*>(&OriginalBeginDrag)) == MH_OK) {
+        MH_EnableHook(pBeginDrag);
+        Log("[mxohax] SUCCESS: client.dll CUI::BeginDrag hooked at 0x%p to permanently block dragging!\n", pBeginDrag);
+    }
+
+    // 3e. Hook CUI::OnDragMove (0x00018540) to permanently block drag movement
+    LPVOID pOnDragMove = reinterpret_cast<LPVOID>(clientBase + 0x00018540);
+    if (MH_CreateHook(pOnDragMove, &DetourOnDragMove, reinterpret_cast<LPVOID*>(&OriginalOnDragMove)) == MH_OK) {
+        MH_EnableHook(pOnDragMove);
+        Log("[mxohax] SUCCESS: client.dll CUI::OnDragMove hooked at 0x%p to permanently block drag move!\n", pOnDragMove);
+    }
+
+    // 3f. Hook CUI::BeginResize (0x00018590) to permanently block resize initiation
+    LPVOID pBeginResize = reinterpret_cast<LPVOID>(clientBase + 0x00018590);
+    if (MH_CreateHook(pBeginResize, &DetourBeginResize, reinterpret_cast<LPVOID*>(&OriginalBeginResize)) == MH_OK) {
+        MH_EnableHook(pBeginResize);
+        Log("[mxohax] SUCCESS: client.dll CUI::BeginResize hooked at 0x%p to permanently block resizing!\n", pBeginResize);
+    }
+
+    // 3g. Hook CUI::OnResizeMove (0x000187B0) to permanently block resize movement
+    LPVOID pOnResizeMove = reinterpret_cast<LPVOID>(clientBase + 0x000187B0);
+    if (MH_CreateHook(pOnResizeMove, &DetourOnResizeMove, reinterpret_cast<LPVOID*>(&OriginalOnResizeMove)) == MH_OK) {
+        MH_EnableHook(pOnResizeMove);
+        Log("[mxohax] SUCCESS: client.dll CUI::OnResizeMove hooked at 0x%p to permanently block resize move!\n", pOnResizeMove);
     }
 
     // 4. Hook GetPlayerActiveObject (0x0010A210) to guard against NULL player entity dereference
