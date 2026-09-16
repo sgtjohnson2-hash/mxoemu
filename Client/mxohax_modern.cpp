@@ -679,6 +679,27 @@ typedef void (__thiscall *SetControlPos_t)(void* pControl, const int* pt);
 static SetControlPos_t OriginalSetControlPos = nullptr;
 static bool g_bAllowControlMove = false;
 
+// Hook for internal CLTWidget virtual repositioning function (client.dll + 0x00382360)
+typedef int (__thiscall *CLTWidget_SetPosition_t)(void* pThis, int x, int y, void* pRel, int bMoveChildren);
+static CLTWidget_SetPosition_t OriginalWidgetSetPosition = nullptr;
+
+static int __fastcall DetourWidgetSetPosition(void* pThis, void* /*edx*/, int x, int y, void* pRel, int bMoveChildren) {
+    if (!pThis) return 0;
+    if (g_bAllowControlMove) {
+        if (OriginalWidgetSetPosition) return OriginalWidgetSetPosition(pThis, x, y, pRel, bMoveChildren);
+        return 0;
+    }
+
+    // During in-world gameplay, ALL HUD widgets are permanently locked to fixed canvas coordinates.
+    // Completely drop any mouse drag, window movement, or relative offset!
+    if (s_inWorldSticky || s_playerEnteredWorld) {
+        return 0; // Dropped unauthorized repositioning!
+    }
+
+    if (OriginalWidgetSetPosition) return OriginalWidgetSetPosition(pThis, x, y, pRel, bMoveChildren);
+    return 0;
+}
+
 static inline void NeutralizeDragGlobals(uintptr_t clientBase) {
     if (!clientBase) return;
     *reinterpret_cast<DWORD*>(clientBase + 0x00849394) = 0xFFFFFFFF; // Active dragged control ID
@@ -696,6 +717,10 @@ static void __fastcall DetourSetControlPos(void* pControl, void* /*edx*/, const 
     }
 
     // Hard clamp: HUD widgets CANNOT change screen position once placed!
+    if (s_inWorldSticky || s_playerEnteredWorld) {
+        return; // Dropped unauthorized repositioning
+    }
+
     if (!IsBadReadPtr(reinterpret_cast<void*>(reinterpret_cast<uintptr_t>(pControl) + 0x1C), 4)) {
         DWORD ctrlId = *reinterpret_cast<DWORD*>(reinterpret_cast<uintptr_t>(pControl) + 0x1C);
         // Block ALL HUD controls:
@@ -1596,20 +1621,26 @@ static double GetCalibratedGroundElevation(double x, double z) {
     }
 
     // 2. High-precision continuous surface model for MegaCity Slums Sector
-    // Zone A: Elevated platform / overpass concourse (where operative spawns at 16710, 3230)
-    // Runs from X: 16560 to 16830, Z: 2850 to 3720
-    if (x >= 16560.0 && x <= 16830.0 && z >= 2850.0 && z <= 3720.0) {
+    // Zone A: Elevated platform / overpass concourse plaza (where operative spawns at 16710, 3230)
+    // Full concourse plaza runs from X: 16500 to 16900, Z: 2400 to 3720
+    if (x >= 16500.0 && x <= 16900.0 && z >= 2400.0 && z <= 3720.0) {
         return 603.5; // True pavement tile surface (soles flush against concrete mesh)
     }
 
     // Zone B: Ledge / curb concrete barrier bordering the platform
-    if (x > 16830.0 && x <= 16845.0 && z >= 2850.0 && z <= 3720.0) {
+    if (((x > 16830.0 && x <= 16860.0) || (x >= 16470.0 && x < 16510.0)) && z >= 2400.0 && z <= 3720.0) {
         return 615.0; // Raised curb barrier
     }
 
-    // Zone C: North ramp / stairs transition leading down to church / street level
-    if (z > 3720.0 && z <= 3850.0 && x >= 16650.0 && x <= 16840.0) {
-        double t = (z - 3720.0) / 130.0;
+    // Zone C1: South ramp / stairs transition leading down to street level
+    if (z >= 2250.0 && z < 2400.0 && x >= 16600.0 && x <= 16850.0) {
+        double t = (2400.0 - z) / 150.0;
+        return 603.5 - t * (603.5 - 572.0); // Smooth continuous ramp transition down to 572.0
+    }
+
+    // Zone C2: North ramp / stairs transition leading down to church / street level
+    if (z > 3720.0 && z <= 3870.0 && x >= 16650.0 && x <= 16850.0) {
+        double t = (z - 3720.0) / 150.0;
         return 603.5 - t * (603.5 - 572.0); // Smooth continuous ramp transition down to 572.0
     }
 
@@ -1766,20 +1797,24 @@ enum HudButtonId {
 };
 
 static inline bool IsPointInAnyHudRect(int normX, int normY) {
-    // 1. Quickbar & Tactics (top-center: [600, 0] to [1260, 115])
-    if (normX >= 600 && normX <= 1260 && normY >= 0 && normY <= 115) return true;
-    // 2. Target Status (top-right: [1550, 0] to [1920, 110])
-    if (normX >= 1550 && normX <= 1920 && normY >= 0 && normY <= 110) return true;
-    // 3. Player Vitals & Status (top-left: [0, 0] to [400, 110])
-    if (normX >= 0 && normX <= 400 && normY >= 0 && normY <= 110) return true;
-    // 4. Compass & Flanking Controls (bottom-center: [660, 900] to [1260, 1080])
-    if (normX >= 660 && normX <= 1260 && normY >= 900 && normY <= 1080) return true;
-    // 5. Fallback for Compass if at legacy coordinates [740, 110] to [1080, 290]
+    // 1. Top HUD bar: Quickbar, Tactics, Vitals, Portrait, Target (normY: 0..140 across entire width)
+    if (normY >= 0 && normY <= 140) return true;
+
+    // 2. Target / Vitals / Buffs panel on right side (normX: 1300..1920, normY: 350..650)
+    if (normX >= 1300 && normX <= 1920 && normY >= 350 && normY <= 650) return true;
+
+    // 3. Minimap / Radar (top-right corner: 1450..1920, normY: 0..320)
+    if (normX >= 1450 && normX <= 1920 && normY >= 0 && normY <= 320) return true;
+
+    // 4. Bottom HUD bar: Compass, Flanking, Latency, Options, Chat Toolbar (normY: 860..1080)
+    if (normY >= 860 && normY <= 1080) return true;
+
+    // 5. Main Chat Window (bottom-left: 0..650, 600..1080)
+    if (normX >= 0 && normX <= 650 && normY >= 600 && normY <= 1080) return true;
+
+    // 6. Legacy Compass coordinates if at [740, 110] to [1080, 290]
     if (normX >= 740 && normX <= 1080 && normY >= 110 && normY <= 290) return true;
-    // 6. Main Chat Window & Toolbar (bottom-left: [0, 700] to [540, 1080])
-    if (normX >= 0 && normX <= 540 && normY >= 700 && normY <= 1080) return true;
-    // 7. Network Latency & Options (bottom-right: [1740, 980] to [1920, 1080])
-    if (normX >= 1740 && normX <= 1920 && normY >= 980 && normY <= 1080) return true;
+
     return false;
 }
 
@@ -2282,25 +2317,18 @@ static LRESULT CALLBACK SubclassWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPA
             if (normY < 0) normY = 0;
             if (normY > 1080) normY = 1080;
 
-            // Intercept WM_MOUSEMOVE when left button is down:
-            // Ensure that if the mouse is moving while clicked on the UI or over any HUD frame,
-            // client.dll never gets a message that tells it to drag or offset controls,
-            // and camera rotation is completely prevented.
-            if ((wParam & MK_LBUTTON) && (g_bMouseDownOnUI || IsPointInAnyHudRect(normX, normY))) {
-                g_lastMouseX = mx;
-                g_lastMouseY = my;
-                NeutralizeDragGlobals(clientBase);
-                return 0; // Handled and dropped so client never drags or offsets controls
-            }
+            // Intercept WM_MOUSEMOVE when left or right button is down:
+            if (wParam & MK_LBUTTON) {
+                // If dragging while mouse is over any HUD frame or started on UI:
+                // Completely consume and block the message so client never drags or offsets controls!
+                if (g_bMouseDownOnUI || IsPointInAnyHudRect(normX, normY)) {
+                    g_lastMouseX = mx;
+                    g_lastMouseY = my;
+                    NeutralizeDragGlobals(clientBase);
+                    return 0; // Dropped so UI controls never move
+                }
 
-            if (clientBase && !g_bMouseDownOnUI && !IsPointInAnyHudRect(normX, normY)) {
-                DispatchInputEventToClient(clientBase, 0x65766F4D, normX, normY); // 'Move'
-            }
-
-            // Camera orbiting:
-            // Right mouse drag ALWAYS orbits camera.
-            // Left mouse drag ONLY orbits camera if the click started in 3D world space (NOT on UI).
-            if ((wParam & MK_RBUTTON) || ((wParam & MK_LBUTTON) && !g_bMouseDownOnUI && !IsPointInAnyHudRect(normX, normY))) {
+                // Left click in 3D world space: purely orbit the 3D camera
                 if (g_lastMouseX >= 0 && g_lastMouseY >= 0) {
                     int dx = mx - g_lastMouseX;
                     int dy = my - g_lastMouseY;
@@ -2313,8 +2341,31 @@ static LRESULT CALLBACK SubclassWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPA
                 g_lastMouseX = mx;
                 g_lastMouseY = my;
                 NeutralizeDragGlobals(clientBase);
-                return 0; // Consumed camera rotation! Prevent native turning interference
+                return 0; // Consumed camera rotation!
             }
+
+            if (wParam & MK_RBUTTON) {
+                // Right click drag: purely orbit the 3D camera
+                if (g_lastMouseX >= 0 && g_lastMouseY >= 0) {
+                    int dx = mx - g_lastMouseX;
+                    int dy = my - g_lastMouseY;
+                    g_camYaw += dx * 0.005f;
+                    g_camPitch += dy * 0.005f;
+                    if (g_camPitch < -0.45f) g_camPitch = -0.45f;
+                    if (g_camPitch > 1.15f)  g_camPitch = 1.15f;
+                    g_bHumanInputActive = true;
+                }
+                g_lastMouseX = mx;
+                g_lastMouseY = my;
+                NeutralizeDragGlobals(clientBase);
+                return 0; // Consumed camera rotation!
+            }
+
+            // Normal hovering with NO mouse buttons pressed:
+            if (clientBase && !g_bMouseDownOnUI && !IsPointInAnyHudRect(normX, normY)) {
+                DispatchInputEventToClient(clientBase, 0x65766F4D, normX, normY); // 'Move'
+            }
+
             g_lastMouseX = mx;
             g_lastMouseY = my;
 
@@ -2367,15 +2418,10 @@ static LRESULT CALLBACK SubclassWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPA
             } else {
                 g_bMouseDownOnUI = false;
                 g_pressedHudButton = (int)HUD_BTN_NONE;
+                // 3D scene click: initiate camera orbit without passing MLDn to CUI
+                NeutralizeDragGlobals(clientBase);
+                return 0;
             }
-
-            if (clientBase) {
-                DispatchInputEventToClient(clientBase, 0x6E444C4D, normX, normY); // 'MLDn'
-            }
-
-            LRESULT lRes = OriginalWndProc ? CallWindowProcA(OriginalWndProc, hWnd, uMsg, wParam, lParam) : DefWindowProcA(hWnd, uMsg, wParam, lParam);
-            NeutralizeDragGlobals(clientBase);
-            return lRes;
         }
         case WM_LBUTTONUP: {
             NeutralizeDragGlobals(clientBase);
@@ -2417,15 +2463,9 @@ static LRESULT CALLBACK SubclassWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPA
             }
             g_bMouseDownOnUI = false;
             g_pressedHudButton = (int)HUD_BTN_NONE;
-
-            if (clientBase) {
-                DispatchInputEventToClient(clientBase, 0x70554C4D, normX, normY); // 'MLUp'
-            }
-
-            LRESULT lRes = OriginalWndProc ? CallWindowProcA(OriginalWndProc, hWnd, uMsg, wParam, lParam) : DefWindowProcA(hWnd, uMsg, wParam, lParam);
             NeutralizeDragGlobals(clientBase);
             ReleaseCapture();
-            return lRes;
+            return 0;
         }
         case WM_RBUTTONDOWN: {
             NeutralizeDragGlobals(clientBase);
@@ -2586,7 +2626,7 @@ static void UpdatePlayerPositionAndPhysics(uintptr_t clientBase, void* curPlayer
     // Expanded roaming boundary: allows exploring platform, curb, stairs, and church courtyard
     if (g_playerX < 16400.0) g_playerX = 16400.0;
     if (g_playerX > 17200.0) g_playerX = 17200.0;
-    if (g_playerZ < 2700.0)  g_playerZ = 2700.0;
+    if (g_playerZ < 2300.0)  g_playerZ = 2300.0;
     if (g_playerZ > 4200.0)  g_playerZ = 4200.0;
 
     // 1. Update player float position buffer
@@ -3678,10 +3718,10 @@ static void __fastcall DetourFrameTick(void* pThis, void* /*edx*/) {
                 }
 
                 // ============================================================
-                // PHASE 1: 2D Loading Screen (ticks 0 to 25)
-                // Display authentic loading artwork while indexing sector files
+                // PHASE 1: 2D Loading Screen (ticks 0 to 60, ~1.0 sec)
+                // Display authentic loading artwork while initializing archives
                 // ============================================================
-                if (s_state4Ticks < 25) {
+                if (s_state4Ticks < 60) {
                     void* pUI = *reinterpret_cast<void**>(clientBase + 0x00898C54);
                     if (pUI) {
                         CreateControl_t pCreateControl = reinterpret_cast<CreateControl_t>(clientBase + 0x0001BC10);
@@ -3703,10 +3743,11 @@ static void __fastcall DetourFrameTick(void* pThis, void* /*edx*/) {
                     *reinterpret_cast<float*>(clientBase + 0x008E357C) = 0.0f;
                 }
                 // ============================================================
-                // PHASE 2: Matrix Digital Code Rain Stream (ticks 25 to 50)
-                // Sector geometry & player stream in from the iconic falling green code
+                // PHASE 2: Matrix Digital Code Rain Stream (ticks 60 to 300, ~4-5 sec)
+                // Authentic 2005 Matrix digital rain stream cascades down while
+                // sector geometry, textures, buildings, and ground fully stream in!
                 // ============================================================
-                else if (s_state4Ticks >= 25 && s_state4Ticks < 50) {
+                else if (s_state4Ticks >= 60 && s_state4Ticks < 300) {
                     // 1. Dismiss 2D loading screens (0x57, 0x04) to reveal the falling code stream
                     void* pUI = *reinterpret_cast<void**>(clientBase + 0x00898C54);
                     if (pUI && OriginalHideControl) {
@@ -3726,25 +3767,39 @@ static void __fastcall DetourFrameTick(void* pThis, void* /*edx*/) {
                     *reinterpret_cast<BYTE*>(clientBase + 0x008E3590) = 1;
                     *reinterpret_cast<BYTE*>(clientBase + 0x008AACC8) = 1;
                     *reinterpret_cast<BYTE*>(clientBase + 0x008AACC9) = 1;
+                    *reinterpret_cast<float*>(clientBase + 0x008E357C) = 1.0f; // Pure full digital code rain
 
-                    // 4. Calculate smooth rez-in ease-out dissolve: starts at 1.0f (pure code) and dissolves to 0.0f
-                    float rezProgress = (float)(s_state4Ticks - 25) / 25.0f;
-                    if (rezProgress > 1.0f) rezProgress = 1.0f;
-                    float rezBlend = 1.0f - (rezProgress * rezProgress); // quadratic ease-out dissolve
-                    *reinterpret_cast<float*>(clientBase + 0x008E357C) = rezBlend;
-
-                    // 5. Initialize in-world scene/player for State 4 streaming rez-in
+                    // 4. Initialize in-world scene/player for State 4 streaming rez-in
                     if (!s_playerEnteredWorld) {
                         Log("[mxohax] DetourFrameTick: Initializing in-world scene/player for Phase 2 State 4 streaming rez-in...\n");
                         EnsureInWorldRendering(clientBase, pWorldMgr, pShell, false /* keepInState4 */);
                     }
                 }
                 // ============================================================
-                // PHASE 3: Game World Emergence (ticks >= 50)
-                // World streams in from code, promoting to State 3 simulation
+                // PHASE 3: Digital Rain Dissolve / World Rez-In (ticks 300 to 420, ~2 sec)
+                // World has finished streaming; falling green code eases out into reality!
                 // ============================================================
-                else if (s_state4Ticks >= 50) {
-                    Log("[mxohax] DetourFrameTick: Matrix code streaming complete (ticks=%d)! Promoting to State 3...\n", s_state4Ticks);
+                else if (s_state4Ticks >= 300 && s_state4Ticks < 420) {
+                    // Enable 3D scene rendering flags in WorldMgr
+                    *reinterpret_cast<BYTE*>(reinterpret_cast<DWORD>(pWorldMgr) + 0x20) = 1;
+                    *reinterpret_cast<BYTE*>(reinterpret_cast<DWORD>(pWorldMgr) + 0x22) = 1;
+
+                    // Calculate smooth ease-out dissolve: starts at 1.0f (pure code) and dissolves to 0.0f
+                    float rezProgress = (float)(s_state4Ticks - 300) / 120.0f;
+                    if (rezProgress > 1.0f) rezProgress = 1.0f;
+                    float rezBlend = 1.0f - (rezProgress * rezProgress); // quadratic ease-out dissolve
+                    *reinterpret_cast<float*>(clientBase + 0x008E357C) = rezBlend;
+
+                    if (!s_playerEnteredWorld) {
+                        EnsureInWorldRendering(clientBase, pWorldMgr, pShell, false /* keepInState4 */);
+                    }
+                }
+                // ============================================================
+                // PHASE 4: Full World Emergence & Promotion to State 3 (ticks >= 420)
+                // Fully loaded 3D world emerges from code, solid gameplay active!
+                // ============================================================
+                else if (s_state4Ticks >= 420) {
+                    Log("[mxohax] DetourFrameTick: Matrix code streaming fully complete (ticks=%d)! World 100%% rezzed. Promoting to State 3...\n", s_state4Ticks);
 
                     // Ensure active world geometry buffer is ready (0xE0 = 1, 0xB9 = 1)
                     void* pLevelSys = *reinterpret_cast<void**>(clientBase + 0x008A6004);
@@ -4144,6 +4199,13 @@ static void ApplyClientPatches(HMODULE hClient) {
     if (MH_CreateHook(pSetCtrlPos, &DetourSetControlPos, reinterpret_cast<LPVOID*>(&OriginalSetControlPos)) == MH_OK) {
         MH_EnableHook(pSetCtrlPos);
         Log("[mxohax] SUCCESS: client.dll SetControlPos hooked at 0x%p!\n", pSetCtrlPos);
+    }
+
+    // 3c. Hook CLTWidget::SetPosition (0x00382360) to permanently block HUD widget dragging & movement
+    LPVOID pSetWidgetPos = reinterpret_cast<LPVOID>(clientBase + 0x00382360);
+    if (MH_CreateHook(pSetWidgetPos, &DetourWidgetSetPosition, reinterpret_cast<LPVOID*>(&OriginalWidgetSetPosition)) == MH_OK) {
+        MH_EnableHook(pSetWidgetPos);
+        Log("[mxohax] SUCCESS: client.dll CLTWidget::SetPosition hooked at 0x%p to permanently immobilize HUD widgets!\n", pSetWidgetPos);
     }
 
     // 4. Hook GetPlayerActiveObject (0x0010A210) to guard against NULL player entity dereference
