@@ -674,6 +674,51 @@ static void __fastcall DetourSetControlVisible(void* pUI, void* /*edx*/, DWORD c
     if (OriginalSetControlVisible) OriginalSetControlVisible(pUI, ctrlId, bVisible);
 }
 
+// Hook for internal CUI control repositioning function (client.dll + 0x00015D60)
+typedef void (__thiscall *SetControlPos_t)(void* pControl, const int* pt);
+static SetControlPos_t OriginalSetControlPos = nullptr;
+static bool g_bAllowControlMove = false;
+
+static inline void NeutralizeDragGlobals(uintptr_t clientBase) {
+    if (!clientBase) return;
+    *reinterpret_cast<DWORD*>(clientBase + 0x00849394) = 0xFFFFFFFF; // Active dragged control ID
+    *reinterpret_cast<DWORD*>(clientBase + 0x00849390) = 0xFFFFFFFF; // Active resize mode
+    *reinterpret_cast<DWORD*>(clientBase + 0x00899800) = 0;          // Drag offset X
+    *reinterpret_cast<DWORD*>(clientBase + 0x00899804) = 0;          // Drag offset Y
+    *reinterpret_cast<DWORD*>(clientBase + 0x00898C50) = 0;          // Captured control pointer
+}
+
+static void __fastcall DetourSetControlPos(void* pControl, void* /*edx*/, const int* pt) {
+    if (!pControl || !pt) return;
+    if (g_bAllowControlMove) {
+        if (OriginalSetControlPos) OriginalSetControlPos(pControl, pt);
+        return;
+    }
+
+    HMODULE hClient = GetModuleHandleA("client.dll");
+    uintptr_t clientBase = (uintptr_t)hClient;
+    if (clientBase) {
+        DWORD dragId = *reinterpret_cast<DWORD*>(clientBase + 0x00849394);
+        if (dragId != 0xFFFFFFFF) {
+            // Drag repositioning blocked
+            return;
+        }
+    }
+
+    if (!IsBadReadPtr(reinterpret_cast<void*>(reinterpret_cast<uintptr_t>(pControl) + 0x1C), 4)) {
+        DWORD ctrlId = *reinterpret_cast<DWORD*>(reinterpret_cast<uintptr_t>(pControl) + 0x1C);
+        // Protected HUD controls: 0x1B (Quickbar), 0x27 (Compass), 0x22 (Target), 0x02 (Chat),
+        // 0x03 (Chat Toolbar), 0x4D (Latency), 0x24 (Tactics), 0x23 (Tabs), 0x3D (Buffs)
+        if (ctrlId == 0x27 || ctrlId == 0x1B || ctrlId == 0x22 || ctrlId == 0x02 || ctrlId == 0x03 ||
+            ctrlId == 0x4D || ctrlId == 0x24 || ctrlId == 0x23 || ctrlId == 0x3D) {
+            return; // Dropped unauthorized repositioning
+        }
+    }
+
+    if (OriginalSetControlPos) OriginalSetControlPos(pControl, pt);
+}
+
+
 // Hook for client.dll export InitClientDLL (client.dll + 0x00001270)
 typedef int (__cdecl *InitClientDLL_t)(
     void* p1, void* p2, void* p3, void* p4,
@@ -1794,37 +1839,98 @@ static void EnforceControlRect(void* pUI, DWORD ctrlId, int left, int top, int w
     SetRect_t pSetRect = reinterpret_cast<SetRect_t>(vtbl[0x10 / 4]);
     int rect[4] = { left, top, width, height };
     __try {
+        g_bAllowControlMove = true;
         pSetRect(pCtrl, rect);
-    } __except (EXCEPTION_EXECUTE_HANDLER) {}
+        g_bAllowControlMove = false;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        g_bAllowControlMove = false;
+    }
 }
 
 static void LockAllHudFrames(uintptr_t clientBase, void* pUI) {
     if (!pUI) return;
-    int screenW = clientBase ? *reinterpret_cast<int*>(clientBase + 0x00896CCC) : 1920;
-    int screenH = clientBase ? *reinterpret_cast<int*>(clientBase + 0x00896D04) : 1080;
-    if (screenW <= 0 || screenH <= 0) {
-        if (g_hGameWindow && IsWindow(g_hGameWindow)) {
-            RECT rc;
-            GetClientRect(g_hGameWindow, &rc);
+    HWND hWnd = g_hGameWindow;
+    if (!hWnd || !IsWindow(hWnd)) {
+        hWnd = FindWindowA("MatrixWindowClass", NULL);
+        if (!hWnd) hWnd = FindWindowA(NULL, "The Matrix Online");
+    }
+    int screenW = 0;
+    int screenH = 0;
+    if (hWnd && IsWindow(hWnd)) {
+        RECT rc;
+        if (GetClientRect(hWnd, &rc) && rc.right > 0 && rc.bottom > 0) {
             screenW = rc.right - rc.left;
             screenH = rc.bottom - rc.top;
         }
     }
+    if (screenW <= 0 || screenH <= 0) {
+        screenW = clientBase ? *reinterpret_cast<int*>(clientBase + 0x00896CCC) : 1920;
+        screenH = clientBase ? *reinterpret_cast<int*>(clientBase + 0x00896D04) : 1080;
+    }
     if (screenW <= 0) screenW = 1920;
     if (screenH <= 0) screenH = 1080;
 
-    // 1. Compass / Radar (0x27): Docked bottom-center, exactly centered at screenW / 2
-    EnforceControlRect(pUI, 0x27, (screenW / 2) - 128, screenH - 66, 256, 66);
+    // Synchronize client.dll internal screen dimensions to dynamic window client dimensions
+    if (clientBase) {
+        *reinterpret_cast<int*>(clientBase + 0x00896CCC) = screenW;
+        *reinterpret_cast<int*>(clientBase + 0x00896D04) = screenH;
+    }
+
+    if (hWnd && IsWindow(hWnd)) {
+        static DWORD s_lastWndFileWrite = 0;
+        DWORD nowTick = GetTickCount();
+        if (nowTick - s_lastWndFileWrite > 500) {
+            s_lastWndFileWrite = nowTick;
+            FILE* fWnd = fopen("E:\\Games\\The Matrix Online\\active_game_wnd.txt", "w");
+            if (fWnd) {
+                fprintf(fWnd, "%u %d %d\n", (DWORD)(uintptr_t)hWnd, screenW, screenH);
+                fclose(fWnd);
+            }
+        }
+    }
+
+    // 1. Compass / Radar (0x27): Docked bottom-center, exactly centered horizontally, flush with bottom
+    int compassWidth = 256;
+    int compassHeight = 66;
+    int compassX = (screenW / 2) - (compassWidth / 2);
+    int compassY = screenH - compassHeight;
+    EnforceControlRect(pUI, 0x27, compassX, compassY, compassWidth, compassHeight);
+
     // 2. Player Window (Quickbar, IS/Health meters, Combat tactics) (0x1B): Docked top-center
-    EnforceControlRect(pUI, 0x1B, (screenW / 2) - 280, 0, 560, 105);
+    int qbWidth = 560;
+    int qbHeight = 105;
+    int qbX = (screenW / 2) - (qbWidth / 2);
+    int qbY = 0;
+    EnforceControlRect(pUI, 0x1B, qbX, qbY, qbWidth, qbHeight);
+
     // 3. Target Status Frame (0x22): Docked top-right
-    EnforceControlRect(pUI, 0x22, screenW - 240, 0, 240, 90);
+    int targetWidth = 240;
+    int targetHeight = 90;
+    int targetX = screenW - targetWidth;
+    int targetY = 0;
+    EnforceControlRect(pUI, 0x22, targetX, targetY, targetWidth, targetHeight);
+
     // 4. Main Chat Window (0x02): Docked bottom-left
-    EnforceControlRect(pUI, 0x02, 10, screenH - 300, 500, 260);
+    int chatW = (screenW > 550) ? 500 : (screenW - 20);
+    int chatH = (screenH > 600) ? 260 : (screenH / 3);
+    int chatX = 10;
+    int chatY = screenH - 40 - chatH;
+    EnforceControlRect(pUI, 0x02, chatX, chatY, chatW, chatH);
+
     // 5. Chat Toolbar (0x03): Below chat window
-    EnforceControlRect(pUI, 0x03, 10, screenH - 40, 500, 35);
+    int tbW = chatW;
+    int tbH = 35;
+    int tbX = 10;
+    int tbY = screenH - 40;
+    EnforceControlRect(pUI, 0x03, tbX, tbY, tbW, tbH);
+
     // 6. Network Latency Meter (0x4D): Docked bottom-right
-    EnforceControlRect(pUI, 0x4D, screenW - 120, screenH - 40, 110, 35);
+    int meterW = 110;
+    int meterH = 35;
+    int meterX = screenW - meterW - 10;
+    int meterY = screenH - 40;
+    EnforceControlRect(pUI, 0x4D, meterX, meterY, meterW, meterH);
+
     // 7. Character Status (0x42): Centered popup dialog (only if active)
     if (s_charSheetVisible) {
         EnforceControlRect(pUI, 0x42, (screenW / 2) - 200, (screenH / 2) - 200, 400, 400);
@@ -2059,6 +2165,7 @@ static void ExecuteHudButtonAction(uintptr_t clientBase, HudButtonId btnId, int 
 static LRESULT CALLBACK SubclassWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam) {
     HMODULE hClient = GetModuleHandleA("client.dll");
     uintptr_t clientBase = (uintptr_t)hClient;
+    NeutralizeDragGlobals(clientBase);
 
     RECT clientRc;
     GetClientRect(hWnd, &clientRc);
@@ -2070,16 +2177,33 @@ static LRESULT CALLBACK SubclassWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPA
     switch (uMsg) {
         case WM_ACTIVATE:
         case WM_SETFOCUS: {
+            NeutralizeDragGlobals(clientBase);
             break;
         }
         case WM_KILLFOCUS: {
             memset(s_keysDown, 0, sizeof(s_keysDown));
             g_bPlayerIsMoving = false;
+            g_bMouseDownOnUI = false;
+            g_bLeftMouseDown = false;
+            g_bRightMouseDown = false;
+            ReleaseCapture();
+            NeutralizeDragGlobals(clientBase);
             break;
         }
         case WM_MOUSEMOVE: {
+            NeutralizeDragGlobals(clientBase);
             short mx = (short)LOWORD(lParam);
             short my = (short)HIWORD(lParam);
+
+            // Intercept WM_MOUSEMOVE when wParam & MK_LBUTTON:
+            // Ensure that if the mouse is moving while clicked on the UI,
+            // client.dll never gets a message that tells it to drag or offset controls.
+            if ((wParam & MK_LBUTTON) && g_bMouseDownOnUI) {
+                g_lastMouseX = mx;
+                g_lastMouseY = my;
+                NeutralizeDragGlobals(clientBase);
+                return 0; // Handled and dropped so client never drags or offsets controls
+            }
 
             int normX = (winW > 0) ? (int)((double)mx * 1920.0 / (double)winW) : mx;
             int normY = (winH > 0) ? (int)((double)my * 1080.0 / (double)winH) : my;
@@ -2088,9 +2212,7 @@ static LRESULT CALLBACK SubclassWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPA
             if (normY < 0) normY = 0;
             if (normY > 1080) normY = 1080;
 
-            if (clientBase) {
-                // Permanently keep dragging active control global neutralized
-                *reinterpret_cast<DWORD*>(clientBase + 0x00849394) = 0xFFFFFFFF;
+            if (clientBase && !g_bMouseDownOnUI) {
                 DispatchInputEventToClient(clientBase, 0x65766F4D, normX, normY); // 'Move'
             }
 
@@ -2111,9 +2233,12 @@ static LRESULT CALLBACK SubclassWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPA
             g_lastMouseX = mx;
             g_lastMouseY = my;
 
-            return OriginalWndProc ? CallWindowProcA(OriginalWndProc, hWnd, uMsg, wParam, lParam) : DefWindowProcA(hWnd, uMsg, wParam, lParam);
+            LRESULT lRes = OriginalWndProc ? CallWindowProcA(OriginalWndProc, hWnd, uMsg, wParam, lParam) : DefWindowProcA(hWnd, uMsg, wParam, lParam);
+            NeutralizeDragGlobals(clientBase);
+            return lRes;
         }
         case WM_LBUTTONDOWN: {
+            NeutralizeDragGlobals(clientBase);
             SetFocus(hWnd);
             SetActiveWindow(hWnd);
 
@@ -2126,10 +2251,6 @@ static LRESULT CALLBACK SubclassWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPA
             if (normX > 1920) normX = 1920;
             if (normY < 0) normY = 0;
             if (normY > 1080) normY = 1080;
-
-            if (clientBase) {
-                *reinterpret_cast<DWORD*>(clientBase + 0x00849394) = 0xFFFFFFFF;
-            }
 
             g_bLeftMouseDown = true;
             g_lastMouseX = mx;
@@ -2164,9 +2285,12 @@ static LRESULT CALLBACK SubclassWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPA
                 DispatchInputEventToClient(clientBase, 0x6E444C4D, normX, normY); // 'MLDn'
             }
 
-            return OriginalWndProc ? CallWindowProcA(OriginalWndProc, hWnd, uMsg, wParam, lParam) : DefWindowProcA(hWnd, uMsg, wParam, lParam);
+            LRESULT lRes = OriginalWndProc ? CallWindowProcA(OriginalWndProc, hWnd, uMsg, wParam, lParam) : DefWindowProcA(hWnd, uMsg, wParam, lParam);
+            NeutralizeDragGlobals(clientBase);
+            return lRes;
         }
         case WM_LBUTTONUP: {
+            NeutralizeDragGlobals(clientBase);
             ReleaseCapture(); // Ensure no mouse capture holds UI controls
             short mx = (short)LOWORD(lParam);
             short my = (short)HIWORD(lParam);
@@ -2177,10 +2301,6 @@ static LRESULT CALLBACK SubclassWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPA
             if (normX > 1920) normX = 1920;
             if (normY < 0) normY = 0;
             if (normY > 1080) normY = 1080;
-
-            if (clientBase) {
-                *reinterpret_cast<DWORD*>(clientBase + 0x00849394) = 0xFFFFFFFF;
-            }
 
             g_bLeftMouseDown = false;
             g_bHumanInputActive = true;
@@ -2211,9 +2331,13 @@ static LRESULT CALLBACK SubclassWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPA
                 DispatchInputEventToClient(clientBase, 0x70554C4D, normX, normY); // 'MLUp'
             }
 
-            return OriginalWndProc ? CallWindowProcA(OriginalWndProc, hWnd, uMsg, wParam, lParam) : DefWindowProcA(hWnd, uMsg, wParam, lParam);
+            LRESULT lRes = OriginalWndProc ? CallWindowProcA(OriginalWndProc, hWnd, uMsg, wParam, lParam) : DefWindowProcA(hWnd, uMsg, wParam, lParam);
+            NeutralizeDragGlobals(clientBase);
+            ReleaseCapture();
+            return lRes;
         }
         case WM_RBUTTONDOWN: {
+            NeutralizeDragGlobals(clientBase);
             SetFocus(hWnd);
             g_bRightMouseDown = true;
             g_lastMouseX = (short)LOWORD(lParam);
@@ -2225,9 +2349,12 @@ static LRESULT CALLBACK SubclassWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPA
             if (clientBase) {
                 DispatchInputEventToClient(clientBase, 0x6E44524D, normX, normY); // 'MRDn'
             }
-            return OriginalWndProc ? CallWindowProcA(OriginalWndProc, hWnd, uMsg, wParam, lParam) : DefWindowProcA(hWnd, uMsg, wParam, lParam);
+            LRESULT lRes = OriginalWndProc ? CallWindowProcA(OriginalWndProc, hWnd, uMsg, wParam, lParam) : DefWindowProcA(hWnd, uMsg, wParam, lParam);
+            NeutralizeDragGlobals(clientBase);
+            return lRes;
         }
         case WM_RBUTTONUP: {
+            NeutralizeDragGlobals(clientBase);
             ReleaseCapture();
             g_bRightMouseDown = false;
             short mx = (short)LOWORD(lParam);
@@ -2237,7 +2364,10 @@ static LRESULT CALLBACK SubclassWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPA
             if (clientBase) {
                 DispatchInputEventToClient(clientBase, 0x7055524D, normX, normY); // 'MRUp'
             }
-            return OriginalWndProc ? CallWindowProcA(OriginalWndProc, hWnd, uMsg, wParam, lParam) : DefWindowProcA(hWnd, uMsg, wParam, lParam);
+            LRESULT lRes = OriginalWndProc ? CallWindowProcA(OriginalWndProc, hWnd, uMsg, wParam, lParam) : DefWindowProcA(hWnd, uMsg, wParam, lParam);
+            NeutralizeDragGlobals(clientBase);
+            ReleaseCapture();
+            return lRes;
         }
         case WM_CAPTURECHANGED: {
             ReleaseCapture();
@@ -2245,6 +2375,7 @@ static LRESULT CALLBACK SubclassWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPA
             g_bLeftMouseDown = false;
             g_bRightMouseDown = false;
             g_pressedHudButton = (int)HUD_BTN_NONE;
+            NeutralizeDragGlobals(clientBase);
             return OriginalWndProc ? CallWindowProcA(OriginalWndProc, hWnd, uMsg, wParam, lParam) : DefWindowProcA(hWnd, uMsg, wParam, lParam);
         }
         case WM_MOUSEWHEEL: {
@@ -2966,7 +3097,7 @@ static void __fastcall DetourFrameTick(void* pThis, void* /*edx*/) {
 
     // Neutralize dragging global before tick
     if (clientBase) {
-        *reinterpret_cast<DWORD*>(clientBase + 0x00849394) = 0xFFFFFFFF;
+        NeutralizeDragGlobals(clientBase);
         void* curPlayer = *reinterpret_cast<void**>(clientBase + 0x008A4378);
         if (curPlayer && !IsBadReadPtr(curPlayer, 0xB0)) {
             void* pActor = *reinterpret_cast<void**>(reinterpret_cast<uintptr_t>(curPlayer) + 0xA8);
@@ -2991,7 +3122,7 @@ static void __fastcall DetourFrameTick(void* pThis, void* /*edx*/) {
     s_tickCount++;
 
     if (!clientBase) return;
-    *reinterpret_cast<DWORD*>(clientBase + 0x00849394) = 0xFFFFFFFF;
+    NeutralizeDragGlobals(clientBase);
 
     // Monitor in-world status via CClientShell (at clientBase + 0x00896A38)
     DWORD pShell = clientBase + 0x00896A38;
@@ -3081,14 +3212,16 @@ static void __fastcall DetourFrameTick(void* pThis, void* /*edx*/) {
         }
 
         // Reset subclass if current hooked window was destroyed
-        if (OriginalWndProc && (!g_hGameWindow || !IsWindow(g_hGameWindow))) {
-            Log("[mxohax] Subclassed window 0x%p died or invalid. Resetting OriginalWndProc.\n", g_hGameWindow);
+        static bool s_windowSubclassed = false;
+        if (s_windowSubclassed && (!g_hGameWindow || !IsWindow(g_hGameWindow))) {
+            Log("[mxohax] Subclassed window 0x%p died or invalid. Resetting subclass state.\n", g_hGameWindow);
             OriginalWndProc = nullptr;
             g_hGameWindow = NULL;
+            s_windowSubclassed = false;
         }
 
         // Subclass window if not yet hooked
-        if (!OriginalWndProc) {
+        if (!s_windowSubclassed) {
             HWND hWnd = NULL;
             if (pShell && !IsBadReadPtr((void*)pShell, 0x30)) {
                 HWND shellWnd = *reinterpret_cast<HWND*>(pShell + 0x14);
@@ -3096,6 +3229,10 @@ static void __fastcall DetourFrameTick(void* pThis, void* /*edx*/) {
             }
             if (!hWnd && g_hGameWindow && IsWindow(g_hGameWindow)) {
                 hWnd = g_hGameWindow;
+            }
+            if (!hWnd) {
+                hWnd = FindWindowA("MatrixWindowClass", NULL);
+                if (!hWnd) hWnd = FindWindowA(NULL, "The Matrix Online");
             }
             if (!hWnd) {
                 HWND act = GetActiveWindow();
@@ -3108,6 +3245,7 @@ static void __fastcall DetourFrameTick(void* pThis, void* /*edx*/) {
             if (hWnd && IsWindow(hWnd)) {
                 g_hGameWindow = hWnd;
                 OriginalWndProc = (WNDPROC)SetWindowLongPtrA(hWnd, GWLP_WNDPROC, (LONG_PTR)SubclassWndProc);
+                s_windowSubclassed = true;
                 Log("[mxohax] Subclassed game window 0x%p for full input handling! (OriginalWndProc=0x%p)\n", hWnd, OriginalWndProc);
             }
         }
@@ -3910,6 +4048,13 @@ static void ApplyClientPatches(HMODULE hClient) {
         Log("[mxohax] SUCCESS: client.dll SetControlVisible hooked at 0x%p!\n", pSetCtrlVis);
     }
 
+    // 3b. Hook SetControlPos (0x00015D60) to block unauthorized HUD frame movement
+    LPVOID pSetCtrlPos = reinterpret_cast<LPVOID>(clientBase + 0x00015D60);
+    if (MH_CreateHook(pSetCtrlPos, &DetourSetControlPos, reinterpret_cast<LPVOID*>(&OriginalSetControlPos)) == MH_OK) {
+        MH_EnableHook(pSetCtrlPos);
+        Log("[mxohax] SUCCESS: client.dll SetControlPos hooked at 0x%p!\n", pSetCtrlPos);
+    }
+
     // 4. Hook GetPlayerActiveObject (0x0010A210) to guard against NULL player entity dereference
     LPVOID pGetActiveObj = reinterpret_cast<LPVOID>(clientBase + 0x0010A210);
     if (MH_CreateHook(pGetActiveObj, &Safe_GetPlayerActiveObject, reinterpret_cast<LPVOID*>(&OriginalGetPlayerActiveObject)) == MH_OK) {
@@ -4159,21 +4304,10 @@ static void ApplyClientPatches(HMODULE hClient) {
         Log("[mxohax] SUCCESS: Patched client.dll + 0x000EAAC0 (ret 0) to permanently neutralize client exit loop!\n");
     }
 
-    // Patch N0: 0x000182E0: 5 bytes: xor eax, eax; ret 0x0C (31 C0 C2 0C 00)
-    // Completely disables internal CUI control drag repositioning without stack corruption
-    LPVOID pDragHandler = reinterpret_cast<LPVOID>(clientBase + 0x000182E0);
-    DWORD oldProtDrag = 0;
-    if (VirtualProtect(pDragHandler, 5, PAGE_EXECUTE_READWRITE, &oldProtDrag)) {
-        BYTE patchDrag0[5] = { 0x31, 0xC0, 0xC2, 0x0C, 0x00 }; // xor eax, eax; ret 0x0C
-        memcpy(pDragHandler, patchDrag0, 5);
-        VirtualProtect(pDragHandler, 5, oldProtDrag, &oldProtDrag);
-        FlushInstructionCache(GetCurrentProcess(), pDragHandler, 5);
-        Log("[mxohax] SUCCESS: Patched client.dll + 0x000182E0 (xor eax, eax; ret 0x0C) to permanently disable CUI control repositioning!\n");
-    }
-
     // Patch N1: 0x000184E0: 3 bytes: xor eax, eax; ret (31 C0 C3)
     // Completely disables CUI::StartDraggingControl so dragging is never initiated
     LPVOID pStartDrag = reinterpret_cast<LPVOID>(clientBase + 0x000184E0);
+    DWORD oldProtDrag = 0;
     if (VirtualProtect(pStartDrag, 3, PAGE_EXECUTE_READWRITE, &oldProtDrag)) {
         BYTE patchDrag[3] = { 0x31, 0xC0, 0xC3 }; // xor eax, eax; ret
         memcpy(pStartDrag, patchDrag, 3);
@@ -4182,19 +4316,45 @@ static void ApplyClientPatches(HMODULE hClient) {
         Log("[mxohax] SUCCESS: Patched client.dll + 0x000184E0 (xor eax, eax; ret) to permanently disable CUI dragging!\n");
     }
 
-    // Patch N2: 0x000187B0: 1 byte: ret (C3)
+    // Patch N2: 0x00018540: 3 bytes: xor eax, eax; ret (31 C0 C3)
     // Completely disables CUI::UpdateDraggingControl so mouse moves never reposition controls
-    LPVOID pUpdateDrag = reinterpret_cast<LPVOID>(clientBase + 0x000187B0);
-    if (VirtualProtect(pUpdateDrag, 1, PAGE_EXECUTE_READWRITE, &oldProtDrag)) {
-        BYTE patchUpd[1] = { 0xC3 }; // ret
-        memcpy(pUpdateDrag, patchUpd, 1);
-        VirtualProtect(pUpdateDrag, 1, oldProtDrag, &oldProtDrag);
-        FlushInstructionCache(GetCurrentProcess(), pUpdateDrag, 1);
-        Log("[mxohax] SUCCESS: Patched client.dll + 0x000187B0 (ret) to permanently disable CUI drag updates!\n");
+    LPVOID pUpdateDrag = reinterpret_cast<LPVOID>(clientBase + 0x00018540);
+    if (VirtualProtect(pUpdateDrag, 3, PAGE_EXECUTE_READWRITE, &oldProtDrag)) {
+        BYTE patchUpd[3] = { 0x31, 0xC0, 0xC3 }; // xor eax, eax; ret
+        memcpy(pUpdateDrag, patchUpd, 3);
+        VirtualProtect(pUpdateDrag, 3, oldProtDrag, &oldProtDrag);
+        FlushInstructionCache(GetCurrentProcess(), pUpdateDrag, 3);
+        Log("[mxohax] SUCCESS: Patched client.dll + 0x00018540 (xor eax, eax; ret) to permanently disable CUI drag updates!\n");
     }
 
-    // Neutralize active dragging global
-    *reinterpret_cast<DWORD*>(clientBase + 0x00849394) = 0xFFFFFFFF;
+    // Patch N3: 0x00018590: 3 bytes: xor eax, eax; ret (31 C0 C3)
+    // Completely disables CUI::StartResizeControl so resizing is never initiated
+    LPVOID pStartResize = reinterpret_cast<LPVOID>(clientBase + 0x00018590);
+    if (VirtualProtect(pStartResize, 3, PAGE_EXECUTE_READWRITE, &oldProtDrag)) {
+        BYTE patchResize[3] = { 0x31, 0xC0, 0xC3 }; // xor eax, eax; ret
+        memcpy(pStartResize, patchResize, 3);
+        VirtualProtect(pStartResize, 3, oldProtDrag, &oldProtDrag);
+        FlushInstructionCache(GetCurrentProcess(), pStartResize, 3);
+        Log("[mxohax] SUCCESS: Patched client.dll + 0x00018590 (xor eax, eax; ret) to permanently disable CUI resize!\n");
+    }
+
+    // Patch N4: 0x000187B0: 3 bytes: xor eax, eax; ret (31 C0 C3)
+    // Completely disables CUI::UpdateResizeControl so mouse moves never resize controls
+    LPVOID pUpdateResize = reinterpret_cast<LPVOID>(clientBase + 0x000187B0);
+    if (VirtualProtect(pUpdateResize, 3, PAGE_EXECUTE_READWRITE, &oldProtDrag)) {
+        BYTE patchUpdResize[3] = { 0x31, 0xC0, 0xC3 }; // xor eax, eax; ret
+        memcpy(pUpdateResize, patchUpdResize, 3);
+        VirtualProtect(pUpdateResize, 3, oldProtDrag, &oldProtDrag);
+        FlushInstructionCache(GetCurrentProcess(), pUpdateResize, 3);
+        Log("[mxohax] SUCCESS: Patched client.dll + 0x000187B0 (xor eax, eax; ret) to permanently disable CUI resize updates!\n");
+    }
+
+    // Neutralize active dragging and resizing globals
+    *reinterpret_cast<DWORD*>(clientBase + 0x00849394) = 0xFFFFFFFF; // Active dragged control ID
+    *reinterpret_cast<DWORD*>(clientBase + 0x00849390) = 0xFFFFFFFF; // Active resize mode
+    *reinterpret_cast<DWORD*>(clientBase + 0x00899800) = 0;          // Drag offset X
+    *reinterpret_cast<DWORD*>(clientBase + 0x00899804) = 0;          // Drag offset Y
+    *reinterpret_cast<DWORD*>(clientBase + 0x00898C50) = 0;          // Captured control pointer
 
     // Patch N3: 0x001A4D25: disabled (client.dll handles [pActor + 0x4EE] naturally during movement; DetourFrameTick synchronizes moving/idle state)
 
