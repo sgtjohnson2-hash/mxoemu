@@ -714,12 +714,7 @@ static void __cdecl DetourOnResizeMove(const int* pt, void* pControl) {
 
 static int __fastcall DetourWidgetSetPosition(void* pThis, void* /*edx*/, int x, int y, void* pRel, int bMoveChildren) {
     if (!pThis) return 0;
-    if (g_bAllowControlMove) {
-        if (OriginalWidgetSetPosition) return OriginalWidgetSetPosition(pThis, x, y, pRel, bMoveChildren);
-        return 0;
-    }
-
-    // Unconditionally drop all unauthorized widget movement from mouse drag, resize, or relative offsets!
+    if (OriginalWidgetSetPosition) return OriginalWidgetSetPosition(pThis, x, y, pRel, bMoveChildren);
     return 0;
 }
 
@@ -736,14 +731,7 @@ static inline void NeutralizeDragGlobals(uintptr_t clientBase) {
 
 static void __fastcall DetourSetControlPos(void* pControl, void* /*edx*/, const int* pt) {
     if (!pControl || !pt) return;
-    if (g_bAllowControlMove) {
-        if (OriginalSetControlPos) OriginalSetControlPos(pControl, pt);
-        return;
-    }
-
-    // Hard clamp: HUD widgets CANNOT change screen position once placed!
-    // Unconditionally drop any movement attempt from mouse drag, resize, or unapproved routines!
-    return;
+    if (OriginalSetControlPos) OriginalSetControlPos(pControl, pt);
 }
 
 
@@ -1976,11 +1964,6 @@ static void LockAllHudFrames(uintptr_t clientBase, void* pUI) {
         if (!hWnd) hWnd = FindWindowA(NULL, "The Matrix Online");
     }
 
-    // Direct3D 9 backbuffer is permanently 1920x1080.
-    // In-game HUD controls are positioned in backbuffer coordinate space [0..1920, 0..1080].
-    // Direct3D 9 handles presentation scaling to whatever client window size exists.
-    // Locking controls to 1920x1080 ensures HUD frames are always docked properly at edges
-    // and never get displaced, shrunk, or float detached in windowed mode.
     const int screenW = 1920;
     const int screenH = 1080;
 
@@ -2009,22 +1992,40 @@ static void LockAllHudFrames(uintptr_t clientBase, void* pUI) {
         }
     }
 
-    // 1. Compass / Radar (0x27): Docked bottom-center, exactly centered horizontally, flush with bottom
+    // Ensure all 14 authentic retail 2005 HUD elements have WIDGET_VISIBLE (0x10) and ACTIVE (0x02) bits set
+    static const DWORD s_hudControlIds[] = {
+        0x02, 0x03, 0x0E, 0x1B, 0x1F, 0x20, 0x22, 0x23, 0x24, 0x27, 0x3D, 0x4D
+    };
+    for (DWORD cid : s_hudControlIds) {
+        void** ppCtrl = reinterpret_cast<void**>(reinterpret_cast<uintptr_t>(pUI) + 0x28 + (cid * 4));
+        if (ppCtrl && !IsBadReadPtr(ppCtrl, sizeof(void*)) && *ppCtrl) {
+            void* pCtrl = *ppCtrl;
+            if (!IsBadReadPtr(pCtrl, 0x60)) {
+                void* p50 = *reinterpret_cast<void**>(reinterpret_cast<uintptr_t>(pCtrl) + 0x50);
+                if (p50 && !IsBadReadPtr(p50, 0x30)) {
+                    void* pRoot = *reinterpret_cast<void**>(reinterpret_cast<uintptr_t>(p50) + 0x24);
+                    if (pRoot && !IsBadReadPtr(pRoot, 0x80)) {
+                        *reinterpret_cast<DWORD*>(reinterpret_cast<uintptr_t>(pRoot) + 0x28) |= 0x00000013;
+                        *reinterpret_cast<DWORD*>(reinterpret_cast<uintptr_t>(pRoot) + 0x30) |= 0x00010000;
+                    }
+                }
+                void* p54 = *reinterpret_cast<void**>(reinterpret_cast<uintptr_t>(pCtrl) + 0x54);
+                if (p54 && !IsBadReadPtr(p54, 0x80)) {
+                    *reinterpret_cast<DWORD*>(reinterpret_cast<uintptr_t>(p54) + 0x28) |= 0x00000013;
+                    *reinterpret_cast<DWORD*>(reinterpret_cast<uintptr_t>(p54) + 0x30) |= 0x00010000;
+                }
+            }
+        }
+    }
+
+    // 1. Compass / Radar (0x27): Docked bottom-center
     RepositionCompass(clientBase, pUI);
 
-    // 2. Player Window (Quickbar, IS/Health meters, Combat tactics) (0x1B): Docked top-center
-    int qbWidth = 560;
-    int qbHeight = 105;
-    int qbX = (screenW / 2) - (qbWidth / 2);
-    int qbY = 0;
-    EnforceControlRect(pUI, 0x1B, qbX, qbY, qbWidth, qbHeight);
+    // 2. Player Window (Quickbar, IS/Health meters, Combat tactics) (0x1B): Docked top-left
+    EnforceControlRect(pUI, 0x1B, 0, 0, 560, 105);
 
     // 3. Target Status Frame (0x22): Docked top-right
-    int targetWidth = 240;
-    int targetHeight = 90;
-    int targetX = screenW - targetWidth;
-    int targetY = 0;
-    EnforceControlRect(pUI, 0x22, targetX, targetY, targetWidth, targetHeight);
+    EnforceControlRect(pUI, 0x22, 1660, 10, 240, 90);
 
     // 4. Main Chat Window (0x02): Docked bottom-left
     int chatW = 500;
@@ -2032,6 +2033,16 @@ static void LockAllHudFrames(uintptr_t clientBase, void* pUI) {
     int chatX = 10;
     int chatY = screenH - 40 - chatH;
     EnforceControlRect(pUI, 0x02, chatX, chatY, chatW, chatH);
+    void** ppChat = reinterpret_cast<void**>(reinterpret_cast<uintptr_t>(pUI) + 0x28 + (0x02 * 4));
+    if (ppChat && *ppChat && !IsBadReadPtr(*ppChat, 0x60)) {
+        void* p54 = *reinterpret_cast<void**>(reinterpret_cast<uintptr_t>(*ppChat) + 0x54);
+        if (p54 && !IsBadReadPtr(p54, 0x80)) {
+            *reinterpret_cast<int*>(reinterpret_cast<uintptr_t>(p54) + 0x6C) = chatX;
+            *reinterpret_cast<int*>(reinterpret_cast<uintptr_t>(p54) + 0x70) = chatY;
+            *reinterpret_cast<int*>(reinterpret_cast<uintptr_t>(p54) + 0x74) = chatW;
+            *reinterpret_cast<int*>(reinterpret_cast<uintptr_t>(p54) + 0x78) = chatH;
+        }
+    }
 
     // 5. Chat Toolbar (0x03): Below chat window
     int tbW = chatW;
@@ -2041,14 +2052,18 @@ static void LockAllHudFrames(uintptr_t clientBase, void* pUI) {
     EnforceControlRect(pUI, 0x03, tbX, tbY, tbW, tbH);
 
     // 6. Network Latency Meter (0x4D): Docked bottom-right
-    int meterW = 110;
-    int meterH = 35;
+    int meterW = 64;
+    int meterH = 27;
     int meterX = screenW - meterW - 10;
-    int meterY = screenH - 40;
+    int meterY = screenH - 35;
     EnforceControlRect(pUI, 0x4D, meterX, meterY, meterW, meterH);
 
-    // 7. Action Toolbar (0x24): Docked right above compass or centered
-    EnforceControlRect(pUI, 0x24, (screenW / 2) - 200, screenH - 160, 400, 36);
+    // 7. Action / Combat Tactics Bar (0x24): Docked bottom-center right above compass
+    int tacW = 429;
+    int tacH = 53;
+    int tacX = (screenW / 2) - (tacW / 2);
+    int tacY = 890;
+    EnforceControlRect(pUI, 0x24, tacX, tacY, tacW, tacH);
 
     // 8. Active Buffs HUD (0x3D): Docked top-right below target frame
     EnforceControlRect(pUI, 0x3D, screenW - 360, 95, 350, 45);
@@ -2710,26 +2725,7 @@ static void UpdatePlayerPositionAndPhysics(uintptr_t clientBase, void* curPlayer
             }
         }
 
-        bool shouldAddSample = isMoving || g_isJumping || stateChanged || (++s_idleSampleTicks % 30 == 0);
-
-        if (shouldAddSample) {
-            BYTE sample[128] = {0};
-            *reinterpret_cast<DWORD*>(sample + 0x00) = GetTickCount();
-            *reinterpret_cast<double*>(sample + 0x08) = g_playerX;
-            *reinterpret_cast<double*>(sample + 0x10) = g_playerY;
-            *reinterpret_cast<double*>(sample + 0x18) = g_playerZ;
-            *reinterpret_cast<float*>(sample + 0x20) = playerQuat[0];
-            *reinterpret_cast<float*>(sample + 0x24) = playerQuat[1];
-            *reinterpret_cast<float*>(sample + 0x28) = playerQuat[2];
-            *reinterpret_cast<float*>(sample + 0x2C) = playerQuat[3];
-
-            typedef void (__thiscall *AddPosSample_t)(void* pActor, const void* pSample);
-            AddPosSample_t pAddSample = reinterpret_cast<AddPosSample_t>(clientBase + 0x004F3920);
-            __try {
-                pAddSample(pActor, sample);
-            } __except (EXCEPTION_EXECUTE_HANDLER) {}
-        }
-
+        // Native Lithtech MoveMgr and PhysicsMgr drive position samples naturally
         typedef void (__thiscall *CalcExtents_t)(void* pActor);
         CalcExtents_t pCalcExtents = reinterpret_cast<CalcExtents_t>(clientBase + 0x004E9BF0);
         __try {
@@ -4241,33 +4237,8 @@ static void ApplyClientPatches(HMODULE hClient) {
         Log("[mxohax] SUCCESS: client.dll CLTWidget::SetPosition hooked at 0x%p to permanently immobilize HUD widgets!\n", pSetWidgetPos);
     }
 
-    // 3d. Hook CUI::BeginDrag (0x000184E0) to permanently block drag initiation
-    LPVOID pBeginDrag = reinterpret_cast<LPVOID>(clientBase + 0x000184E0);
-    if (MH_CreateHook(pBeginDrag, &DetourBeginDrag, reinterpret_cast<LPVOID*>(&OriginalBeginDrag)) == MH_OK) {
-        MH_EnableHook(pBeginDrag);
-        Log("[mxohax] SUCCESS: client.dll CUI::BeginDrag hooked at 0x%p to permanently block dragging!\n", pBeginDrag);
-    }
+    // 3d-3g. Native CUI drag & resize preserved without interference
 
-    // 3e. Hook CUI::OnDragMove (0x00018540) to permanently block drag movement
-    LPVOID pOnDragMove = reinterpret_cast<LPVOID>(clientBase + 0x00018540);
-    if (MH_CreateHook(pOnDragMove, &DetourOnDragMove, reinterpret_cast<LPVOID*>(&OriginalOnDragMove)) == MH_OK) {
-        MH_EnableHook(pOnDragMove);
-        Log("[mxohax] SUCCESS: client.dll CUI::OnDragMove hooked at 0x%p to permanently block drag move!\n", pOnDragMove);
-    }
-
-    // 3f. Hook CUI::BeginResize (0x00018590) to permanently block resize initiation
-    LPVOID pBeginResize = reinterpret_cast<LPVOID>(clientBase + 0x00018590);
-    if (MH_CreateHook(pBeginResize, &DetourBeginResize, reinterpret_cast<LPVOID*>(&OriginalBeginResize)) == MH_OK) {
-        MH_EnableHook(pBeginResize);
-        Log("[mxohax] SUCCESS: client.dll CUI::BeginResize hooked at 0x%p to permanently block resizing!\n", pBeginResize);
-    }
-
-    // 3g. Hook CUI::OnResizeMove (0x000187B0) to permanently block resize movement
-    LPVOID pOnResizeMove = reinterpret_cast<LPVOID>(clientBase + 0x000187B0);
-    if (MH_CreateHook(pOnResizeMove, &DetourOnResizeMove, reinterpret_cast<LPVOID*>(&OriginalOnResizeMove)) == MH_OK) {
-        MH_EnableHook(pOnResizeMove);
-        Log("[mxohax] SUCCESS: client.dll CUI::OnResizeMove hooked at 0x%p to permanently block resize move!\n", pOnResizeMove);
-    }
 
     // 4. Hook GetPlayerActiveObject (0x0010A210) to guard against NULL player entity dereference
     LPVOID pGetActiveObj = reinterpret_cast<LPVOID>(clientBase + 0x0010A210);
@@ -4518,51 +4489,6 @@ static void ApplyClientPatches(HMODULE hClient) {
         Log("[mxohax] SUCCESS: Patched client.dll + 0x000EAAC0 (ret 0) to permanently neutralize client exit loop!\n");
     }
 
-    // Patch N1: 0x000184E0: 3 bytes: xor eax, eax; ret (31 C0 C3)
-    // Completely disables CUI::StartDraggingControl so dragging is never initiated
-    LPVOID pStartDrag = reinterpret_cast<LPVOID>(clientBase + 0x000184E0);
-    DWORD oldProtDrag = 0;
-    if (VirtualProtect(pStartDrag, 3, PAGE_EXECUTE_READWRITE, &oldProtDrag)) {
-        BYTE patchDrag[3] = { 0x31, 0xC0, 0xC3 }; // xor eax, eax; ret
-        memcpy(pStartDrag, patchDrag, 3);
-        VirtualProtect(pStartDrag, 3, oldProtDrag, &oldProtDrag);
-        FlushInstructionCache(GetCurrentProcess(), pStartDrag, 3);
-        Log("[mxohax] SUCCESS: Patched client.dll + 0x000184E0 (xor eax, eax; ret) to permanently disable CUI dragging!\n");
-    }
-
-    // Patch N2: 0x00018540: 3 bytes: xor eax, eax; ret (31 C0 C3)
-    // Completely disables CUI::UpdateDraggingControl so mouse moves never reposition controls
-    LPVOID pUpdateDrag = reinterpret_cast<LPVOID>(clientBase + 0x00018540);
-    if (VirtualProtect(pUpdateDrag, 3, PAGE_EXECUTE_READWRITE, &oldProtDrag)) {
-        BYTE patchUpd[3] = { 0x31, 0xC0, 0xC3 }; // xor eax, eax; ret
-        memcpy(pUpdateDrag, patchUpd, 3);
-        VirtualProtect(pUpdateDrag, 3, oldProtDrag, &oldProtDrag);
-        FlushInstructionCache(GetCurrentProcess(), pUpdateDrag, 3);
-        Log("[mxohax] SUCCESS: Patched client.dll + 0x00018540 (xor eax, eax; ret) to permanently disable CUI drag updates!\n");
-    }
-
-    // Patch N3: 0x00018590: 3 bytes: xor eax, eax; ret (31 C0 C3)
-    // Completely disables CUI::StartResizeControl so resizing is never initiated
-    LPVOID pStartResize = reinterpret_cast<LPVOID>(clientBase + 0x00018590);
-    if (VirtualProtect(pStartResize, 3, PAGE_EXECUTE_READWRITE, &oldProtDrag)) {
-        BYTE patchResize[3] = { 0x31, 0xC0, 0xC3 }; // xor eax, eax; ret
-        memcpy(pStartResize, patchResize, 3);
-        VirtualProtect(pStartResize, 3, oldProtDrag, &oldProtDrag);
-        FlushInstructionCache(GetCurrentProcess(), pStartResize, 3);
-        Log("[mxohax] SUCCESS: Patched client.dll + 0x00018590 (xor eax, eax; ret) to permanently disable CUI resize!\n");
-    }
-
-    // Patch N4: 0x000187B0: 3 bytes: xor eax, eax; ret (31 C0 C3)
-    // Completely disables CUI::UpdateResizeControl so mouse moves never resize controls
-    LPVOID pUpdateResize = reinterpret_cast<LPVOID>(clientBase + 0x000187B0);
-    if (VirtualProtect(pUpdateResize, 3, PAGE_EXECUTE_READWRITE, &oldProtDrag)) {
-        BYTE patchUpdResize[3] = { 0x31, 0xC0, 0xC3 }; // xor eax, eax; ret
-        memcpy(pUpdateResize, patchUpdResize, 3);
-        VirtualProtect(pUpdateResize, 3, oldProtDrag, &oldProtDrag);
-        FlushInstructionCache(GetCurrentProcess(), pUpdateResize, 3);
-        Log("[mxohax] SUCCESS: Patched client.dll + 0x000187B0 (xor eax, eax; ret) to permanently disable CUI resize updates!\n");
-    }
-
     // Neutralize active dragging and resizing globals
     *reinterpret_cast<DWORD*>(clientBase + 0x00849394) = 0xFFFFFFFF; // Active dragged control ID
     *reinterpret_cast<DWORD*>(clientBase + 0x00849390) = 0xFFFFFFFF; // Active resize mode
@@ -4572,18 +4498,16 @@ static void ApplyClientPatches(HMODULE hClient) {
     *reinterpret_cast<DWORD*>(clientBase + 0x008997F8) = 0;          // Drag start X
     *reinterpret_cast<DWORD*>(clientBase + 0x008997FC) = 0;          // Drag start Y
 
-    // Patch N3: 0x001A4D25: disabled (client.dll handles [pActor + 0x4EE] naturally during movement; DetourFrameTick synchronizes moving/idle state)
-
-    // Patch N4: 0x004EC9D4: 6 bytes: NOP * 6 (90 90 90 90 90 90)
-    // Prevents skipping position sample evaluation for local player
+    // Restore client.dll + 0x004EC9D4 to authentic retail (0F 84 5F 02 00 00: je 0x104ecc39)
+    // Skips remote sample queue processing for local player, keeping native upright posture and locomotion!
     LPVOID pSampleSkip = reinterpret_cast<LPVOID>(clientBase + 0x004EC9D4);
     DWORD oldProtSample = 0;
     if (VirtualProtect(pSampleSkip, 6, PAGE_EXECUTE_READWRITE, &oldProtSample)) {
-        BYTE nop6[6] = { 0x90, 0x90, 0x90, 0x90, 0x90, 0x90 };
-        memcpy(pSampleSkip, nop6, 6);
+        BYTE origJe[6] = { 0x0F, 0x84, 0x5F, 0x02, 0x00, 0x00 };
+        memcpy(pSampleSkip, origJe, 6);
         VirtualProtect(pSampleSkip, 6, oldProtSample, &oldProtSample);
         FlushInstructionCache(GetCurrentProcess(), pSampleSkip, 6);
-        Log("[mxohax] SUCCESS: Patched client.dll + 0x004EC9D4 (NOP * 6) to enable local player sample processing!\n");
+        Log("[mxohax] SUCCESS: Restored client.dll + 0x004EC9D4 (0F 84 5F 02 00 00) for authentic retail posture!\n");
     }
 
     // Enforce in-world locomotion controller flag
