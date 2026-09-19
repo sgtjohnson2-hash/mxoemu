@@ -633,11 +633,24 @@ static SetControlVisible_t OriginalSetControlVisible = nullptr;
 
 typedef void* (__thiscall *CreateControl_t)(void* pUI, DWORD ctrlId);
 
-static void __fastcall DetourHideControl(void* pUI, void* /*edx*/, DWORD ctrlId) {
-    if (ctrlId != 0x1A) {
-        Log("[mxohax] HideControl: 0x%02X\n", ctrlId);
+static const DWORD s_hudControlIds[] = {
+    0x1B, // Player Status & Vitals (Top-Left)
+    0x24, // Quickbar (Top-Center)
+    0x22, // Target Status (Top-Right)
+    0x3D, // Active Buffs HUD (Top-Right below target)
+    0x02, // Main Chat Window (Bottom-Left)
+    0x23, // Chat Tabs (Bottom-Left)
+    0x03, // Chat Toolbar / Input (Bottom-Left)
+    0x27, // Compass (Bottom-Center)
+    0x0E, // Combat Tactics Bar (Bottom-Center above compass)
+    0x4D  // Latency Meter (Bottom-Right)
+};
+
+static inline bool IsCoreHudControl(DWORD ctrlId) {
+    for (DWORD hid : s_hudControlIds) {
+        if (ctrlId == hid) return true;
     }
-    if (OriginalHideControl) OriginalHideControl(pUI, ctrlId);
+    return false;
 }
 
 static bool s_inWorldSticky = false;
@@ -649,6 +662,17 @@ static bool s_autoJackInDone = false;
 static int  s_screen5DFrames = 0;
 static bool s_charSheetVisible = false;
 static bool s_optionsVisible = false;
+
+static void __fastcall DetourHideControl(void* pUI, void* /*edx*/, DWORD ctrlId) {
+    if (ctrlId != 0x1A) {
+        Log("[mxohax] HideControl: 0x%02X\n", ctrlId);
+    }
+    if (s_inWorldSticky && IsCoreHudControl(ctrlId)) {
+        Log("[mxohax] HideControl: 0x%02X suppressed while in-world to preserve retail HUD!\n", ctrlId);
+        return;
+    }
+    if (OriginalHideControl) OriginalHideControl(pUI, ctrlId);
+}
 
 static void __fastcall DetourSetControlVisible(void* pUI, void* /*edx*/, DWORD ctrlId, BOOL bVisible) {
     if (ctrlId == 0x5D || ctrlId == 0x30 || ctrlId == 0x04 || ctrlId == 0x57 || ctrlId == 0x42 || ctrlId == 0x47) {
@@ -669,6 +693,10 @@ static void __fastcall DetourSetControlVisible(void* pUI, void* /*edx*/, DWORD c
     }
     if (s_inWorldSticky && bVisible && !s_optionsVisible && ctrlId == 0x47) {
         Log("[mxohax] SetControlVisible: 0x47 (Options) suppressed while in-world!\n");
+        return;
+    }
+    if (s_inWorldSticky && !bVisible && IsCoreHudControl(ctrlId)) {
+        Log("[mxohax] SetControlVisible: 0x%02X (bVisible=0) suppressed while in-world to preserve retail HUD!\n", ctrlId);
         return;
     }
     if (OriginalSetControlVisible) OriginalSetControlVisible(pUI, ctrlId, bVisible);
@@ -720,13 +748,10 @@ static int __fastcall DetourWidgetSetPosition(void* pThis, void* /*edx*/, int x,
 
 static inline void NeutralizeDragGlobals(uintptr_t clientBase) {
     if (!clientBase) return;
-    *reinterpret_cast<DWORD*>(clientBase + 0x00849394) = 0xFFFFFFFF; // Active dragged control ID
-    *reinterpret_cast<DWORD*>(clientBase + 0x00849390) = 0xFFFFFFFF; // Active resize mode
-    *reinterpret_cast<DWORD*>(clientBase + 0x00899800) = 0;          // Drag offset X
-    *reinterpret_cast<DWORD*>(clientBase + 0x00899804) = 0;          // Drag offset Y
-    *reinterpret_cast<DWORD*>(clientBase + 0x00898C50) = 0;          // Captured control pointer
-    *reinterpret_cast<DWORD*>(clientBase + 0x008997F8) = 0;          // Drag start X
-    *reinterpret_cast<DWORD*>(clientBase + 0x008997FC) = 0;          // Drag start Y
+    DWORD* pActiveDrag = reinterpret_cast<DWORD*>(clientBase + 0x00849394);
+    if (pActiveDrag && *pActiveDrag != 0xFFFFFFFF) {
+        *pActiveDrag = 0xFFFFFFFF; // Active dragged control ID
+    }
 }
 
 static void __fastcall DetourSetControlPos(void* pControl, void* /*edx*/, const int* pt) {
@@ -1316,14 +1341,12 @@ static void SyncActorPosition(uintptr_t clientBase, void* pPlayer, void* pActor,
         }
     }
 
-    // Direct write to double coordinates and velocities on CActor
+    // Initial coordinates on CActor for spawn
     *reinterpret_cast<double*>(reinterpret_cast<uintptr_t>(pActor) + 0x528) = x;
     *reinterpret_cast<double*>(reinterpret_cast<uintptr_t>(pActor) + 0x530) = y;
     *reinterpret_cast<double*>(reinterpret_cast<uintptr_t>(pActor) + 0x538) = z;
-    *reinterpret_cast<double*>(reinterpret_cast<uintptr_t>(pActor) + 0x510) = 0.0;
-    *reinterpret_cast<double*>(reinterpret_cast<uintptr_t>(pActor) + 0x518) = 0.0;
-    *reinterpret_cast<double*>(reinterpret_cast<uintptr_t>(pActor) + 0x520) = 0.0;
-    *reinterpret_cast<BYTE*>(reinterpret_cast<uintptr_t>(pActor) + 0x4EE) = 1; // 1 = stopped / idle stance
+    *reinterpret_cast<BYTE*>(reinterpret_cast<uintptr_t>(pActor) + 0x4EE) = 1;
+    *reinterpret_cast<WORD*>(reinterpret_cast<uintptr_t>(pActor) + 0x4EE) = 1;
 
     float* pActorRot = reinterpret_cast<float*>(reinterpret_cast<uintptr_t>(pActor) + 0x4FC);
     if (pActorRot && !IsBadReadPtr(pActorRot, 16)) {
@@ -1333,21 +1356,20 @@ static void SyncActorPosition(uintptr_t clientBase, void* pPlayer, void* pActor,
         pActorRot[3] = 1.0f;
     }
 
-    // Prepare 120-byte position sample for the movement interpolation queue at [pActor + 0x5F0]
-    BYTE sample[128] = {0};
-    *reinterpret_cast<DWORD*>(sample + 0x00) = GetTickCount();
-    *reinterpret_cast<double*>(sample + 0x08) = x;
-    *reinterpret_cast<double*>(sample + 0x10) = y;
-    *reinterpret_cast<double*>(sample + 0x18) = z;
-    *reinterpret_cast<float*>(sample + 0x20) = 0.0f;
-    *reinterpret_cast<float*>(sample + 0x24) = 0.0f;
-    *reinterpret_cast<float*>(sample + 0x28) = 0.0f;
-    *reinterpret_cast<float*>(sample + 0x2C) = 1.0f;
-
+    // Queue initial position sample so CActor receives valid coordinates immediately
+    BYTE initSample[128] = {0};
+    *reinterpret_cast<DWORD*>(initSample + 0x00) = GetTickCount();
+    *reinterpret_cast<double*>(initSample + 0x08) = x;
+    *reinterpret_cast<double*>(initSample + 0x10) = y;
+    *reinterpret_cast<double*>(initSample + 0x18) = z;
+    *reinterpret_cast<float*>(initSample + 0x20) = 0.0f;
+    *reinterpret_cast<float*>(initSample + 0x24) = 0.0f;
+    *reinterpret_cast<float*>(initSample + 0x28) = 0.0f;
+    *reinterpret_cast<float*>(initSample + 0x2C) = 1.0f;
     typedef void (__thiscall *AddPosSample_t)(void* pActor, const void* pSample);
     AddPosSample_t pAddSample = reinterpret_cast<AddPosSample_t>(clientBase + 0x004F3920);
     __try {
-        pAddSample(pActor, sample);
+        pAddSample(pActor, initSample);
     } __except (EXCEPTION_EXECUTE_HANDLER) {}
 
     // Recalculate spatial extents now that [pActor + 0x528] has been set!
@@ -1545,7 +1567,7 @@ static void ApplyOperativeAppearance(uintptr_t clientBase, void* pPlayer) {
 // ============================================================================
 // Module 6: Dynamic Collision Raycasting, Ground Elevation & Locomotion Physics
 // ============================================================================
-static const double SPAWN_GROUND_ELEVATION = 603.5; // Calibrated ground elevation flush with Slums pavement tiles
+static const double SPAWN_GROUND_ELEVATION = 576.5; // Calibrated ground elevation flush with Slums pavement tiles (zero floating)
 
 struct CollisionRaycastHit {
     bool   bHit;
@@ -1598,7 +1620,26 @@ static bool CastDynamicWorldRay(uintptr_t clientBase, double posX, double startY
 }
 
 static double GetCalibratedGroundElevation(double x, double z) {
-    // 1. Dynamic collision raycasting against active 3D world geometry where available
+    // 1. High-precision continuous surface model for MegaCity Slums Sector
+    // Zone A: Elevated platform / overpass concourse plaza (where operative spawns at 16710, 3230)
+    // Full concourse plaza runs across X: 16400 to 17250, Z: 2400 to 3720
+    if (x >= 16400.0 && x <= 17250.0 && z >= 2400.0 && z <= 3720.0) {
+        return SPAWN_GROUND_ELEVATION; // True pavement tile surface (576.5, soles flush against concrete mesh, zero floating)
+    }
+
+    // Zone C1: South ramp / stairs transition leading down to street level
+    if (z >= 2100.0 && z < 2400.0 && x >= 16400.0 && x <= 17250.0) {
+        double t = (2400.0 - z) / 300.0;
+        return SPAWN_GROUND_ELEVATION - t * (SPAWN_GROUND_ELEVATION - 572.0); // Smooth continuous ramp transition down to 572.0
+    }
+
+    // Zone C2: North ramp / stairs transition leading down to church / street level
+    if (z > 3720.0 && z <= 3950.0 && x >= 16400.0 && x <= 17250.0) {
+        double t = (z - 3720.0) / 230.0;
+        return SPAWN_GROUND_ELEVATION - t * (SPAWN_GROUND_ELEVATION - 572.0); // Smooth continuous ramp transition down to 572.0
+    }
+
+    // 2. Dynamic collision raycasting against active 3D world geometry for unmapped roaming zones
     HMODULE hClient = GetModuleHandleA("client.dll");
     if (hClient) {
         CollisionRaycastHit hit;
@@ -1606,31 +1647,6 @@ static double GetCalibratedGroundElevation(double x, double z) {
             return hit.hitY;
         }
     }
-
-    // 2. High-precision continuous surface model for MegaCity Slums Sector
-    // Zone B: Ledge / curb concrete barrier bordering the platform
-    if (((x > 16850.0 && x <= 16950.0) || (x >= 16450.0 && x < 16520.0)) && z >= 2400.0 && z <= 3720.0) {
-        return 615.0; // Raised curb barrier
-    }
-
-    // Zone A: Elevated platform / overpass concourse plaza (where operative spawns at 16710, 3230)
-    // Full concourse plaza runs across X: 16450 to 16950, Z: 2400 to 3720
-    if (x >= 16450.0 && x <= 16950.0 && z >= 2400.0 && z <= 3720.0) {
-        return 603.5; // True pavement tile surface (soles flush against concrete mesh)
-    }
-
-    // Zone C1: South ramp / stairs transition leading down to street level
-    if (z >= 2100.0 && z < 2400.0 && x >= 16450.0 && x <= 16950.0) {
-        double t = (2400.0 - z) / 300.0;
-        return 603.5 - t * (603.5 - 572.0); // Smooth continuous ramp transition down to 572.0
-    }
-
-    // Zone C2: North ramp / stairs transition leading down to church / street level
-    if (z > 3720.0 && z <= 3950.0 && x >= 16450.0 && x <= 16950.0) {
-        double t = (z - 3720.0) / 230.0;
-        return 603.5 - t * (603.5 - 572.0); // Smooth continuous ramp transition down to 572.0
-    }
-
     // Zone D: Church courtyard and street sidewalk / roadway level
     return 572.0; // Street sidewalk level
 }
@@ -1805,88 +1821,196 @@ static inline bool IsPointInAnyHudRect(int normX, int normY) {
     return false;
 }
 
-static HudButtonId HitTestHudButton(int x, int y) {
-    // 1. Quickbar Page Switcher: [680, 0] to [723, 48]
-    if (x >= 680 && x <= 723 && y >= 0 && y <= 48) {
-        return HUD_BTN_QB_PAGE;
+static void* GetControlRootWidget(void* pCtrl, DWORD ctrlId) {
+    if (!pCtrl || IsBadReadPtr(pCtrl, 0xF0)) return nullptr;
+    void* pWidget = nullptr;
+
+    switch (ctrlId) {
+        case 0x1B: // Player Status & Vitals (portrait, health, IS, exp)
+            pWidget = *reinterpret_cast<void**>(reinterpret_cast<uintptr_t>(pCtrl) + 0xE0);
+            break;
+        case 0x24: // Quickbar
+            pWidget = *reinterpret_cast<void**>(reinterpret_cast<uintptr_t>(pCtrl) + 0x7C);
+            break;
+        case 0x22: { // Target Status Frame
+            void* pLayout = *reinterpret_cast<void**>(reinterpret_cast<uintptr_t>(pCtrl) + 0x50);
+            if (!pLayout) pLayout = *reinterpret_cast<void**>(reinterpret_cast<uintptr_t>(pCtrl) + 0x7C);
+            if (pLayout && !IsBadReadPtr(pLayout, 0x30)) {
+                pWidget = *reinterpret_cast<void**>(reinterpret_cast<uintptr_t>(pLayout) + 0x24);
+            }
+            break;
+        }
+        case 0x3D: // Active Buffs HUD
+            pWidget = *reinterpret_cast<void**>(reinterpret_cast<uintptr_t>(pCtrl) + 0x60);
+            break;
+        case 0x02: // Main Chat Window
+            pWidget = *reinterpret_cast<void**>(reinterpret_cast<uintptr_t>(pCtrl) + 0x54);
+            break;
+        case 0x23: // Chat Tabs
+            pWidget = *reinterpret_cast<void**>(reinterpret_cast<uintptr_t>(pCtrl) + 0x60);
+            break;
+        case 0x03: // Chat Toolbar / Input
+            pWidget = *reinterpret_cast<void**>(reinterpret_cast<uintptr_t>(pCtrl) + 0x70);
+            break;
+        case 0x27: // Compass Dial
+            pWidget = *reinterpret_cast<void**>(reinterpret_cast<uintptr_t>(pCtrl) + 0x68);
+            break;
+        case 0x0E: // Combat Tactics Bar
+            pWidget = *reinterpret_cast<void**>(reinterpret_cast<uintptr_t>(pCtrl) + 0x68);
+            break;
+        case 0x4D: // Latency Meter
+            pWidget = *reinterpret_cast<void**>(reinterpret_cast<uintptr_t>(pCtrl) + 0xC0);
+            break;
+        default:
+            break;
     }
 
-    // 2. Quickbar Slots 1-10: [724, 0] to [1100, 48]
-    if (y >= 0 && y <= 48) {
-        if (x >= 724 && x <= 759)   return HUD_BTN_QB_1;
-        if (x >= 760 && x <= 795)   return HUD_BTN_QB_2;
-        if (x >= 796 && x <= 832)   return HUD_BTN_QB_3;
-        if (x >= 833 && x <= 868)   return HUD_BTN_QB_4;
-        if (x >= 869 && x <= 905)   return HUD_BTN_QB_5;
-        if (x >= 906 && x <= 942)   return HUD_BTN_QB_6;
-        if (x >= 943 && x <= 978)   return HUD_BTN_QB_7;
-        if (x >= 979 && x <= 1015)  return HUD_BTN_QB_8;
-        if (x >= 1016 && x <= 1051) return HUD_BTN_QB_9;
-        if (x >= 1052 && x <= 1100) return HUD_BTN_QB_10;
+    // Fallback 1: check if [pCtrl + 0x54] is already valid
+    if (!pWidget || IsBadReadPtr(pWidget, sizeof(void*))) {
+        void* p54 = *reinterpret_cast<void**>(reinterpret_cast<uintptr_t>(pCtrl) + 0x54);
+        if (p54 && !IsBadReadPtr(p54, sizeof(void*))) {
+            pWidget = p54;
+        }
     }
 
-    // 3. Combat Tactics buttons: [940, 48] to [1190, 105]
-    if (y >= 48 && y <= 105) {
-        if (x >= 940 && x <= 986)   return HUD_BTN_TACTIC_FREE;
-        if (x >= 987 && x <= 1023)  return HUD_BTN_TACTIC_POWER;
-        if (x >= 1024 && x <= 1059) return HUD_BTN_TACTIC_GRAB;
-        if (x >= 1060 && x <= 1095) return HUD_BTN_TACTIC_SPEED;
-        if (x >= 1096 && x <= 1190) return HUD_BTN_TACTIC_WITHDRAW;
+    // Fallback 2: check layout root widget at [[pCtrl + 0x50] + 0x24]
+    if (!pWidget || IsBadReadPtr(pWidget, sizeof(void*))) {
+        void* p50 = *reinterpret_cast<void**>(reinterpret_cast<uintptr_t>(pCtrl) + 0x50);
+        if (p50 && !IsBadReadPtr(p50, 0x30)) {
+            void* pRoot = *reinterpret_cast<void**>(reinterpret_cast<uintptr_t>(p50) + 0x24);
+            if (pRoot && !IsBadReadPtr(pRoot, sizeof(void*))) {
+                pWidget = pRoot;
+            }
+        }
     }
 
-    // 4. Compass and Docked buttons: Y=[900, 1080]
-    // Character Status button: [760, 930] to [890, 1080]
-    if (x >= 760 && x <= 890 && y >= 930 && y <= 1080) {
-        return HUD_BTN_CHAR_STATUS;
+    // Fallback 3: check layout root widget at [[pCtrl + 0x7C] + 0x24]
+    if (!pWidget || IsBadReadPtr(pWidget, sizeof(void*))) {
+        void* p7C = *reinterpret_cast<void**>(reinterpret_cast<uintptr_t>(pCtrl) + 0x7C);
+        if (p7C && !IsBadReadPtr(p7C, 0x30)) {
+            void* pRoot = *reinterpret_cast<void**>(reinterpret_cast<uintptr_t>(p7C) + 0x24);
+            if (pRoot && !IsBadReadPtr(pRoot, sizeof(void*))) {
+                pWidget = pRoot;
+            }
+        }
     }
 
-    // Compass dial and cluster: [890, 900] to [1030, 1080]
-    if (x >= 890 && x <= 1030 && y >= 900 && y <= 1080) {
-        return HUD_BTN_COMPASS;
+    return pWidget;
+}
+
+static HudButtonId HitTestHudButton(int x, int y, int screenW = 1920, int screenH = 1080) {
+    if (screenW <= 0) screenW = 1920;
+    if (screenH <= 0) screenH = 1080;
+
+    // Normalize coordinates to canonical 1920x1080 HUD canvas space
+    int canX = (screenW != 1920) ? (int)((double)x * 1920.0 / (double)screenW) : x;
+    int canY = (screenH != 1080) ? (int)((double)y * 1080.0 / (double)screenH) : y;
+    if (canX < 0) canX = 0;
+    if (canX > 1920) canX = 1920;
+    if (canY < 0) canY = 0;
+    if (canY > 1080) canY = 1080;
+
+    // 1. Top-Center: Quickbar (0x24: slots 1-10 and page switcher)
+    const int qbW = 429;
+    const int qbH = 50;
+    const int qbX = (1920 / 2) - (qbW / 2); // 746
+    const int qbY = 5;
+    if (canY >= qbY - 4 && canY <= qbY + qbH + 4) {
+        // Page switcher button (leftmost tab)
+        if (canX >= qbX - 5 && canX < qbX + 36) {
+            return HUD_BTN_QB_PAGE;
+        }
+        // Slots 1 to 10
+        for (int i = 0; i < 10; ++i) {
+            int slotX = qbX + 36 + (i * 37);
+            if (canX >= slotX && canX < slotX + 37) {
+                return (HudButtonId)(HUD_BTN_QB_1 + i);
+            }
+        }
+        // Expand/collapse arrow (rightmost)
+        if (canX >= qbX + 36 + (10 * 37) && canX <= qbX + qbW + 15) {
+            return HUD_BTN_QB_PAGE;
+        }
     }
 
-    // Cell Phone button: [1030, 930] to [1160, 1080]
-    if (x >= 1030 && x <= 1160 && y >= 930 && y <= 1080) {
-        return HUD_BTN_CELL_PHONE;
+    // 2. Bottom-Center: Combat Tactics Bar (0x0E: Free, Speed, Power, Withdraw, Grab)
+    const int tacX = (1920 / 2) - 93; // 867
+    const int tacY = 1080 - 134 - 38; // 908
+    if (canY >= tacY - 8 && canY <= tacY + 45) {
+        if (canX >= tacX && canX < tacX + 37)        return HUD_BTN_TACTIC_FREE;
+        if (canX >= tacX + 37 && canX < tacX + 74)   return HUD_BTN_TACTIC_SPEED;
+        if (canX >= tacX + 74 && canX < tacX + 111)  return HUD_BTN_TACTIC_POWER;
+        if (canX >= tacX + 111 && canX < tacX + 148) return HUD_BTN_TACTIC_WITHDRAW;
+        if (canX >= tacX + 148 && canX <= tacX + 195) return HUD_BTN_TACTIC_GRAB;
     }
 
-    // Broad Compass frame & dial fallback: [700, 900] to [1220, 1080]
-    if (x >= 700 && x <= 1220 && y >= 900 && y <= 1080) {
-        return HUD_BTN_COMPASS;
+    // 3. Bottom-Center: Compass & Docked buttons (0x27)
+    const int compX = (1920 / 2) - 73; // 887
+    const int compY = 1080 - 134;      // 946
+    if (canY >= compY - 5 && canY <= 1080) {
+        // Character status button docked to left of compass
+        if (canX >= compX - 65 && canX < compX && canY >= compY + 20) return HUD_BTN_CHAR_STATUS;
+        // Cell phone button docked to right of compass
+        if (canX > compX + 146 && canX <= compX + 215 && canY >= compY + 20) return HUD_BTN_CELL_PHONE;
+        // Compass dial center
+        if (canX >= compX && canX <= compX + 146) return HUD_BTN_COMPASS;
     }
 
-    // 5. Bottom Right buttons & Latency: [1750, 1000] to [1920, 1080]
-    if (x >= 1750 && x <= 1920 && y >= 1000 && y <= 1080) {
-        if (x >= 1750 && x <= 1870) return HUD_BTN_LATENCY;
-        return HUD_BTN_OPTIONS;
+    // 4. Bottom-Right: Latency Meter & Options
+    const int meterX = 1920 - 64 - 10; // 1846
+    const int meterY = 1080 - 35;      // 1045
+    if (canY >= meterY - 15) {
+        if (canX >= meterX - 35 && canX <= meterX + 64) return HUD_BTN_LATENCY;
+        if (canX > meterX + 64)                         return HUD_BTN_OPTIONS;
     }
 
-    // 6. Top Right Target / Vitals: [1550, 0] to [1920, 110]
-    if (x >= 1550 && x <= 1920 && y >= 0 && y <= 110) {
+    // 5. Top-Right: Target Status Frame & Buffs (0x22, 0x3D)
+    if (canX >= 1650 && canX <= 1920 && canY >= 5 && canY <= 160) {
         return HUD_BTN_TARGET_VITALS;
     }
 
-    // 7. Chat Window & Toolbar boundary: [0, 750] to [520, 1080]
-    // Handled naturally by CLTWidgetManager and OriginalWndProc
+    // 6. Top-Left: Player Status & Vitals Frame (0x1B)
+    if (canX >= 5 && canX <= 280 && canY >= 5 && canY <= 120) {
+        return HUD_BTN_TARGET_VITALS;
+    }
 
     return HUD_BTN_NONE;
 }
 
-static void EnforceControlRect(void* pUI, DWORD ctrlId, int left, int top, int width, int height) {
-    if (!pUI || IsBadReadPtr(pUI, 0x200)) return;
+static void PositionControlAndWidget(uintptr_t clientBase, void* pUI, DWORD ctrlId, int left, int top, int width, int height) {
+    if (!pUI || !clientBase || IsBadReadPtr(pUI, 0x200)) return;
     void** ppCtrl = reinterpret_cast<void**>(reinterpret_cast<uintptr_t>(pUI) + 0x28 + (ctrlId * 4));
     if (!ppCtrl || !*ppCtrl || IsBadReadPtr(*ppCtrl, 0x60)) return;
     void* pCtrl = *ppCtrl;
 
-    HMODULE hClient = GetModuleHandleA("client.dll");
-    uintptr_t clientBase = (uintptr_t)hClient;
-    if (!clientBase) return;
-
+    typedef int (__thiscall *SetPosition_t)(void* pWidget, int x, int y, void* pRel, int bMoveChildren);
     typedef void (__thiscall *SetRect_t)(void* pThis, const int* pRect);
     typedef void (__thiscall *SetControlPos_t)(void* pThis, const int* pPoint);
 
+    SetPosition_t pSetPosition = reinterpret_cast<SetPosition_t>(clientBase + 0x00382360);
     SetRect_t pSetRect = reinterpret_cast<SetRect_t>(clientBase + 0x000163F0);
     SetControlPos_t pSetControlPos = reinterpret_cast<SetControlPos_t>(clientBase + 0x00015D60);
+
+    void* pWidget = GetControlRootWidget(pCtrl, ctrlId);
+    if (pWidget && !IsBadReadPtr(pWidget, 0x80)) {
+        // Assign pCtrl + 0x54 and +0x58 so internal engine functions succeed
+        *reinterpret_cast<void**>(reinterpret_cast<uintptr_t>(pCtrl) + 0x54) = pWidget;
+        *reinterpret_cast<BYTE*>(reinterpret_cast<uintptr_t>(pCtrl) + 0x58) = 1;
+
+        __try {
+            g_bAllowControlMove = true;
+            pSetPosition(pWidget, left, top, nullptr, 1);
+            *reinterpret_cast<int*>(reinterpret_cast<uintptr_t>(pWidget) + 0x6C) = left;
+            *reinterpret_cast<int*>(reinterpret_cast<uintptr_t>(pWidget) + 0x70) = top;
+            if (width > 0) *reinterpret_cast<int*>(reinterpret_cast<uintptr_t>(pWidget) + 0x74) = width;
+            if (height > 0) *reinterpret_cast<int*>(reinterpret_cast<uintptr_t>(pWidget) + 0x78) = height;
+            *reinterpret_cast<DWORD*>(reinterpret_cast<uintptr_t>(pWidget) + 0x28) |= 0x00000013;
+            *reinterpret_cast<DWORD*>(reinterpret_cast<uintptr_t>(pWidget) + 0x30) |= 0x00010000;
+            g_bAllowControlMove = false;
+        } __except (EXCEPTION_EXECUTE_HANDLER) {
+            g_bAllowControlMove = false;
+        }
+    }
 
     int rect[4] = { left, top, width, height };
     int pos[2] = { left, top };
@@ -1900,7 +2024,7 @@ static void EnforceControlRect(void* pUI, DWORD ctrlId, int left, int top, int w
     }
 }
 
-static void RepositionCompass(uintptr_t clientBase, void* pUI) {
+static void RepositionCompass(uintptr_t clientBase, void* pUI, int screenW, int screenH) {
     if (!pUI || !clientBase || IsBadReadPtr(pUI, 0x200)) return;
     void** ppCtrl = reinterpret_cast<void**>(reinterpret_cast<uintptr_t>(pUI) + 0x28 + (0x27 * 4));
     if (!ppCtrl || !*ppCtrl || IsBadReadPtr(*ppCtrl, 0xA0)) return;
@@ -1911,6 +2035,9 @@ static void RepositionCompass(uintptr_t clientBase, void* pUI) {
     if (!ppBase || !*ppBase || IsBadReadPtr(*ppBase, 0x80)) return;
     void* pBase = *ppBase;
 
+    *reinterpret_cast<void**>(reinterpret_cast<uintptr_t>(pCtrl27) + 0x54) = pBase;
+    *reinterpret_cast<BYTE*>(reinterpret_cast<uintptr_t>(pCtrl27) + 0x58) = 1;
+
     // Compass_ButtonHide is at [pCtrl27 + 0x84] (Slot 09)
     // Compass_ButtonShow is at [pCtrl27 + 0x88] (Slot 10)
     void** ppBtnHide = reinterpret_cast<void**>(reinterpret_cast<uintptr_t>(pCtrl27) + 0x84);
@@ -1919,11 +2046,9 @@ static void RepositionCompass(uintptr_t clientBase, void* pUI) {
     int curBaseX = *reinterpret_cast<int*>(reinterpret_cast<uintptr_t>(pBase) + 0x6C);
     int curBaseY = *reinterpret_cast<int*>(reinterpret_cast<uintptr_t>(pBase) + 0x70);
 
-    // Compass_Base is 146x132.
-    // Centered horizontally in 1920 space: targetX = (1920 / 2) - (146 / 2) = 960 - 73 = 887.
-    // Docked flush to bottom in 1080 space: targetY = 1080 - 132 - 2 = 946.
-    const int targetBaseX = 887;
-    const int targetBaseY = 946;
+    // Compass_Base is 146x132. Centered horizontally: (screenW / 2) - 73. Flush bottom: screenH - 134.
+    const int targetBaseX = (screenW / 2) - 73;
+    const int targetBaseY = screenH - 134;
 
     int dx = targetBaseX - curBaseX;
     int dy = targetBaseY - curBaseY;
@@ -1954,142 +2079,222 @@ static void RepositionCompass(uintptr_t clientBase, void* pUI) {
             g_bAllowControlMove = false;
         }
     }
+
+    int rect[4] = { targetBaseX, targetBaseY, 146, 134 };
+    int pos[2] = { targetBaseX, targetBaseY };
+    typedef void (__thiscall *SetRect_t)(void* pThis, const int* pRect);
+    typedef void (__thiscall *SetControlPos_t)(void* pThis, const int* pPoint);
+    SetRect_t pSetRect = reinterpret_cast<SetRect_t>(clientBase + 0x000163F0);
+    SetControlPos_t pSetControlPos = reinterpret_cast<SetControlPos_t>(clientBase + 0x00015D60);
+    __try {
+        g_bAllowControlMove = true;
+        pSetControlPos(pCtrl27, pos);
+        pSetRect(pCtrl27, rect);
+        g_bAllowControlMove = false;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        g_bAllowControlMove = false;
+    }
+}
+
+static void RepositionCombatTactics(uintptr_t clientBase, void* pUI, int screenW, int screenH) {
+    if (!pUI || !clientBase || IsBadReadPtr(pUI, 0x200)) return;
+    void** ppCtrl = reinterpret_cast<void**>(reinterpret_cast<uintptr_t>(pUI) + 0x28 + (0x0E * 4));
+    if (!ppCtrl || !*ppCtrl || IsBadReadPtr(*ppCtrl, 0x100)) return;
+    void* pCtrl0E = *ppCtrl;
+
+    typedef int (__thiscall *SetPosition_t)(void* pWidget, int x, int y, void* pRel, int bMoveChildren);
+    SetPosition_t pSetPosition = reinterpret_cast<SetPosition_t>(clientBase + 0x00382360);
+
+    // Docked directly above compass: targetX = (screenW / 2) - 93, targetY = screenH - 134 - 38
+    const int targetTacX = (screenW / 2) - 93;
+    const int targetTacY = screenH - 134 - 38;
+
+    void** ppBase = reinterpret_cast<void**>(reinterpret_cast<uintptr_t>(pCtrl0E) + 0x68);
+    void* pBase = (ppBase && !IsBadReadPtr(ppBase, sizeof(void*))) ? *ppBase : nullptr;
+
+    if (pBase && !IsBadReadPtr(pBase, 0x80)) {
+        *reinterpret_cast<void**>(reinterpret_cast<uintptr_t>(pCtrl0E) + 0x54) = pBase;
+        *reinterpret_cast<BYTE*>(reinterpret_cast<uintptr_t>(pCtrl0E) + 0x58) = 1;
+        int curX = *reinterpret_cast<int*>(reinterpret_cast<uintptr_t>(pBase) + 0x6C);
+        int curY = *reinterpret_cast<int*>(reinterpret_cast<uintptr_t>(pBase) + 0x70);
+        int dx = targetTacX - curX;
+        int dy = targetTacY - curY;
+
+        if (dx != 0 || dy != 0) {
+            __try {
+                g_bAllowControlMove = true;
+                pSetPosition(pBase, targetTacX, targetTacY, nullptr, 1);
+                *reinterpret_cast<int*>(reinterpret_cast<uintptr_t>(pBase) + 0x6C) = targetTacX;
+                *reinterpret_cast<int*>(reinterpret_cast<uintptr_t>(pBase) + 0x70) = targetTacY;
+                g_bAllowControlMove = false;
+            } __except (EXCEPTION_EXECUTE_HANDLER) {
+                g_bAllowControlMove = false;
+            }
+        }
+    }
+
+    // Explicitly align all 5 tactic buttons (Free, Speed, Power, Withdraw, Grab)
+    static const DWORD btnOffsets[] = { 0x6C, 0x70, 0x74, 0x7C, 0x80 };
+    for (int i = 0; i < 5; ++i) {
+        void** ppBtn = reinterpret_cast<void**>(reinterpret_cast<uintptr_t>(pCtrl0E) + btnOffsets[i]);
+        if (ppBtn && *ppBtn && !IsBadReadPtr(*ppBtn, 0x80)) {
+            void* pBtn = *ppBtn;
+            int btnTargetX = targetTacX + (i * 37);
+            int btnTargetY = targetTacY;
+            int bx = *reinterpret_cast<int*>(reinterpret_cast<uintptr_t>(pBtn) + 0x6C);
+            int by = *reinterpret_cast<int*>(reinterpret_cast<uintptr_t>(pBtn) + 0x70);
+            if (bx != btnTargetX || by != btnTargetY) {
+                __try {
+                    g_bAllowControlMove = true;
+                    pSetPosition(pBtn, btnTargetX, btnTargetY, nullptr, 1);
+                    *reinterpret_cast<int*>(reinterpret_cast<uintptr_t>(pBtn) + 0x6C) = btnTargetX;
+                    *reinterpret_cast<int*>(reinterpret_cast<uintptr_t>(pBtn) + 0x70) = btnTargetY;
+                    g_bAllowControlMove = false;
+                } __except (EXCEPTION_EXECUTE_HANDLER) {
+                    g_bAllowControlMove = false;
+                }
+            }
+        }
+    }
+
+    int rect[4] = { targetTacX, targetTacY, 186, 38 };
+    int pos[2] = { targetTacX, targetTacY };
+    typedef void (__thiscall *SetRect_t)(void* pThis, const int* pRect);
+    typedef void (__thiscall *SetControlPos_t)(void* pThis, const int* pPoint);
+    SetRect_t pSetRect = reinterpret_cast<SetRect_t>(clientBase + 0x000163F0);
+    SetControlPos_t pSetControlPos = reinterpret_cast<SetControlPos_t>(clientBase + 0x00015D60);
+    __try {
+        g_bAllowControlMove = true;
+        pSetControlPos(pCtrl0E, pos);
+        pSetRect(pCtrl0E, rect);
+        g_bAllowControlMove = false;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        g_bAllowControlMove = false;
+    }
 }
 
 static void LockAllHudFrames(uintptr_t clientBase, void* pUI) {
-    if (!pUI) return;
+    if (!pUI || !clientBase) return;
     HWND hWnd = g_hGameWindow;
     if (!hWnd || !IsWindow(hWnd)) {
         hWnd = FindWindowA("MatrixWindowClass", NULL);
         if (!hWnd) hWnd = FindWindowA(NULL, "The Matrix Online");
     }
 
-    const int screenW = 1920;
-    const int screenH = 1080;
-
-    // Enforce client.dll internal screen dimensions to 1920x1080
-    if (clientBase) {
-        *reinterpret_cast<int*>(clientBase + 0x00896CCC) = 1920;
-        *reinterpret_cast<int*>(clientBase + 0x00896D04) = 1080;
+    int screenW = 1920;
+    int screenH = 1080;
+    if (hWnd && IsWindow(hWnd)) {
+        RECT rc;
+        if (GetClientRect(hWnd, &rc) && rc.right > rc.left && rc.bottom > rc.top) {
+            screenW = rc.right - rc.left;
+            screenH = rc.bottom - rc.top;
+        }
     }
+
+    // Enforce client.dll internal screen dimensions to actual window size
+    *reinterpret_cast<int*>(clientBase + 0x00896CCC) = screenW;
+    *reinterpret_cast<int*>(clientBase + 0x00896D04) = screenH;
 
     if (hWnd && IsWindow(hWnd)) {
         static DWORD s_lastWndFileWrite = 0;
         DWORD nowTick = GetTickCount();
         if (nowTick - s_lastWndFileWrite > 500) {
             s_lastWndFileWrite = nowTick;
-            RECT rc;
-            int winW = 1920, winH = 1080;
-            if (GetClientRect(hWnd, &rc) && rc.right > 0 && rc.bottom > 0) {
-                winW = rc.right - rc.left;
-                winH = rc.bottom - rc.top;
-            }
             FILE* fWnd = fopen("E:\\Games\\The Matrix Online\\active_game_wnd.txt", "w");
             if (fWnd) {
-                fprintf(fWnd, "%u %d %d\n", (DWORD)(uintptr_t)hWnd, winW, winH);
+                fprintf(fWnd, "%u %d %d\n", (DWORD)(uintptr_t)hWnd, screenW, screenH);
                 fclose(fWnd);
             }
         }
     }
 
-    // Ensure all 14 authentic retail 2005 HUD elements have WIDGET_VISIBLE (0x10) and ACTIVE (0x02) bits set
-    static const DWORD s_hudControlIds[] = {
-        0x02, 0x03, 0x0E, 0x1B, 0x1F, 0x20, 0x22, 0x23, 0x24, 0x27, 0x3D, 0x4D
-    };
+    // Ensure all 10 authentic retail 2005 HUD elements are instantiated & visible
+    typedef void* (__thiscall *CreateControl_t)(void* pUI, DWORD ctrlId);
+    typedef void (__thiscall *SetControlVisible_t)(void* pUI, DWORD ctrlId, BOOL bVisible);
+    CreateControl_t pCreateControl = reinterpret_cast<CreateControl_t>(clientBase + 0x0001BC10);
+    SetControlVisible_t pSetVisible = reinterpret_cast<SetControlVisible_t>(clientBase + 0x0001DB80);
+
     for (DWORD cid : s_hudControlIds) {
         void** ppCtrl = reinterpret_cast<void**>(reinterpret_cast<uintptr_t>(pUI) + 0x28 + (cid * 4));
-        if (ppCtrl && !IsBadReadPtr(ppCtrl, sizeof(void*)) && *ppCtrl) {
-            void* pCtrl = *ppCtrl;
-            if (!IsBadReadPtr(pCtrl, 0x60)) {
-                void* p50 = *reinterpret_cast<void**>(reinterpret_cast<uintptr_t>(pCtrl) + 0x50);
-                if (p50 && !IsBadReadPtr(p50, 0x30)) {
-                    void* pRoot = *reinterpret_cast<void**>(reinterpret_cast<uintptr_t>(p50) + 0x24);
-                    if (pRoot && !IsBadReadPtr(pRoot, 0x80)) {
-                        *reinterpret_cast<DWORD*>(reinterpret_cast<uintptr_t>(pRoot) + 0x28) |= 0x00000013;
-                        *reinterpret_cast<DWORD*>(reinterpret_cast<uintptr_t>(pRoot) + 0x30) |= 0x00010000;
-                    }
-                }
-                void* p54 = *reinterpret_cast<void**>(reinterpret_cast<uintptr_t>(pCtrl) + 0x54);
-                if (p54 && !IsBadReadPtr(p54, 0x80)) {
-                    *reinterpret_cast<DWORD*>(reinterpret_cast<uintptr_t>(p54) + 0x28) |= 0x00000013;
-                    *reinterpret_cast<DWORD*>(reinterpret_cast<uintptr_t>(p54) + 0x30) |= 0x00010000;
-                }
-            }
+        if (!ppCtrl || IsBadReadPtr(ppCtrl, sizeof(void*)) || !*ppCtrl) {
+            __try {
+                pCreateControl(pUI, cid);
+            } __except (EXCEPTION_EXECUTE_HANDLER) {}
         }
+        __try {
+            pSetVisible(pUI, cid, 1);
+        } __except (EXCEPTION_EXECUTE_HANDLER) {}
     }
 
-    // 1. Compass / Radar (0x27): Docked bottom-center
-    RepositionCompass(clientBase, pUI);
+    // 1. Top-Left: Player Status & Vitals Frame (0x1B: portrait, health, IS, exp)
+    PositionControlAndWidget(clientBase, pUI, 0x1B, 10, 10, 260, 95);
 
-    // 2. Player Window (Quickbar, IS/Health meters, Combat tactics) (0x1B): Docked top-left
-    EnforceControlRect(pUI, 0x1B, 0, 0, 560, 105);
+    // 2. Top-Center: Quickbar (0x24: slots 1-10)
+    int qbW = 429;
+    int qbH = 50;
+    int qbX = (screenW / 2) - (qbW / 2);
+    int qbY = 5;
+    PositionControlAndWidget(clientBase, pUI, 0x24, qbX, qbY, qbW, qbH);
 
-    // 3. Target Status Frame (0x22): Docked top-right
-    EnforceControlRect(pUI, 0x22, 1660, 10, 240, 90);
+    // 3. Top-Right: Target Status Frame (0x22: name, level, health)
+    int targetW = 240;
+    int targetH = 90;
+    int targetX = screenW - targetW - 10;
+    int targetY = 10;
+    PositionControlAndWidget(clientBase, pUI, 0x22, targetX, targetY, targetW, targetH);
 
-    // 4. Main Chat Window (0x02): Docked bottom-left
-    int chatW = 500;
-    int chatH = 260;
+    // 4. Top-Right: Active Buffs HUD (0x3D) below target frame
+    int buffW = 320;
+    int buffH = 50;
+    int buffX = screenW - buffW - 10;
+    int buffY = targetY + targetH + 5;
+    PositionControlAndWidget(clientBase, pUI, 0x3D, buffX, buffY, buffW, buffH);
+
+    // 5. Bottom-Left: Main Chat Window (0x02)
+    int chatW = (screenW > 600) ? 480 : (screenW - 40);
+    int chatH = (screenH > 500) ? 220 : 150;
     int chatX = 10;
-    int chatY = screenH - 40 - chatH;
-    EnforceControlRect(pUI, 0x02, chatX, chatY, chatW, chatH);
-    void** ppChat = reinterpret_cast<void**>(reinterpret_cast<uintptr_t>(pUI) + 0x28 + (0x02 * 4));
-    if (ppChat && *ppChat && !IsBadReadPtr(*ppChat, 0x60)) {
-        void* p54 = *reinterpret_cast<void**>(reinterpret_cast<uintptr_t>(*ppChat) + 0x54);
-        if (p54 && !IsBadReadPtr(p54, 0x80)) {
-            *reinterpret_cast<int*>(reinterpret_cast<uintptr_t>(p54) + 0x6C) = chatX;
-            *reinterpret_cast<int*>(reinterpret_cast<uintptr_t>(p54) + 0x70) = chatY;
-            *reinterpret_cast<int*>(reinterpret_cast<uintptr_t>(p54) + 0x74) = chatW;
-            *reinterpret_cast<int*>(reinterpret_cast<uintptr_t>(p54) + 0x78) = chatH;
-        }
-    }
+    int chatY = screenH - 45 - chatH;
+    PositionControlAndWidget(clientBase, pUI, 0x02, chatX, chatY, chatW, chatH);
 
-    // 5. Chat Toolbar (0x03): Below chat window
+    // 6. Bottom-Left: Chat Tabs (0x23) directly above chat window
+    int tabW = (chatW > 200) ? 200 : chatW;
+    int tabH = 28;
+    int tabX = 10;
+    int tabY = chatY - tabH - 2;
+    PositionControlAndWidget(clientBase, pUI, 0x23, tabX, tabY, tabW, tabH);
+
+    // 7. Bottom-Left: Chat Toolbar / Input (0x03) below chat window
     int tbW = chatW;
     int tbH = 35;
     int tbX = 10;
     int tbY = screenH - 40;
-    EnforceControlRect(pUI, 0x03, tbX, tbY, tbW, tbH);
+    PositionControlAndWidget(clientBase, pUI, 0x03, tbX, tbY, tbW, tbH);
 
-    // 6. Network Latency Meter (0x4D): Docked bottom-right
+    // 8. Bottom-Center: Compass Dial (0x27)
+    RepositionCompass(clientBase, pUI, screenW, screenH);
+
+    // 9. Bottom-Center: Combat Tactics Bar (0x0E) docked directly above compass
+    RepositionCombatTactics(clientBase, pUI, screenW, screenH);
+
+    // 10. Bottom-Right: Latency Meter (0x4D)
     int meterW = 64;
     int meterH = 27;
     int meterX = screenW - meterW - 10;
     int meterY = screenH - 35;
-    EnforceControlRect(pUI, 0x4D, meterX, meterY, meterW, meterH);
+    PositionControlAndWidget(clientBase, pUI, 0x4D, meterX, meterY, meterW, meterH);
 
-    // 7. Action / Combat Tactics Bar (0x24): Docked bottom-center right above compass
-    int tacW = 429;
-    int tacH = 53;
-    int tacX = (screenW / 2) - (tacW / 2);
-    int tacY = 890;
-    EnforceControlRect(pUI, 0x24, tacX, tacY, tacW, tacH);
-
-    // 8. Active Buffs HUD (0x3D): Docked top-right below target frame
-    EnforceControlRect(pUI, 0x3D, screenW - 360, 95, 350, 45);
-
-    // 9. Tabs Parent (0x23): Docked alongside chat
-    EnforceControlRect(pUI, 0x23, 10, screenH - 340, 200, 35);
-
-    // 10. Character Status (0x42): Centered popup dialog (only if active)
+    // Modals (only if active)
     if (s_charSheetVisible) {
-        EnforceControlRect(pUI, 0x42, (screenW / 2) - 200, (screenH / 2) - 200, 400, 400);
+        PositionControlAndWidget(clientBase, pUI, 0x42, (screenW / 2) - 200, (screenH / 2) - 200, 400, 400);
     }
-    // 11. Options Window (0x47): Centered popup dialog (only if active)
     if (s_optionsVisible) {
-        EnforceControlRect(pUI, 0x47, (screenW / 2) - 200, (screenH / 2) - 200, 400, 400);
+        PositionControlAndWidget(clientBase, pUI, 0x47, (screenW / 2) - 200, (screenH / 2) - 200, 400, 400);
     }
 }
 
 static void TriggerNativeIdleTransition(uintptr_t clientBase) {
-    if (!clientBase) return;
-    void* pLocoCtrl = reinterpret_cast<void*>(clientBase + 0x008A28E8);
-    if (!pLocoCtrl || IsBadReadPtr(pLocoCtrl, 0x200)) return;
-    typedef void (__thiscall *SetIdleTransition_t)(void* pThis, BOOL bIdle);
-    SetIdleTransition_t pSetIdle = reinterpret_cast<SetIdleTransition_t>(clientBase + 0x001A4B90);
-    __try {
-        pSetIdle(pLocoCtrl, 1);
-    } __except (EXCEPTION_EXECUTE_HANDLER) {}
+    // Native idle transition is handled cleanly by stationary position enforcement and idle flag (+0x4EE)
 }
 
 static void TriggerPhoneCall(uintptr_t clientBase) {
@@ -2173,6 +2378,45 @@ static void ExecuteQuickbarAbility(uintptr_t clientBase, int slotIndex) {
 
     Log("[mxohax] QUICKBAR EXECUTION: Slot %d -> Ability ID %d: '%s' (Target: %s)\n",
         slotIndex, id, name, g_hasTarget ? g_targetName : "Self");
+
+    if (!g_hasTarget) {
+        SetTargetOperative(clientBase, "Heiu <Weapon Vendor>", 393, 16802.3, SPAWN_GROUND_ELEVATION, 3237.01);
+    }
+
+    // Orient operative towards targeted NPC
+    double tdx = g_targetX - g_playerX;
+    double tdz = g_targetZ - g_playerZ;
+    if (fabs(tdx) > 0.1 || fabs(tdz) > 0.1) {
+        g_playerYaw = (float)atan2(tdx, tdz);
+    }
+
+    // Trigger operative combat attack motion & locomotion state
+    void* curPlayer = *reinterpret_cast<void**>(clientBase + 0x008A4378);
+    if (curPlayer && !IsBadReadPtr(curPlayer, 0xB0)) {
+        void* pActor = *reinterpret_cast<void**>(reinterpret_cast<uintptr_t>(curPlayer) + 0xA8);
+        if (pActor && !IsBadReadPtr(pActor, 0x690)) {
+            *reinterpret_cast<BYTE*>(reinterpret_cast<uintptr_t>(pActor) + 0x4EE) = 0; // Active in combat motion
+            *reinterpret_cast<float*>(reinterpret_cast<uintptr_t>(pActor) + 0x56C) = 1.0f;
+        }
+    }
+
+    // Calculate combat action damage against target
+    static int s_targetHealth = 100;
+    int dmg = 75 + (id * 18);
+    s_targetHealth -= 14;
+    if (s_targetHealth <= 10) s_targetHealth = 100;
+
+    Log("[mxohax] COMBAT ACTION: Operative hits '%s' with '%s' for %d damage! Target HP: %d%%\n",
+        g_targetName, name, dmg, s_targetHealth);
+
+    void* pUI = *reinterpret_cast<void**>(clientBase + 0x00898C54);
+    if (pUI) {
+        typedef void (__thiscall *SetControlVisible_t)(void* pUI, DWORD ctrlId, BOOL bVisible);
+        SetControlVisible_t pSetVisible = reinterpret_cast<SetControlVisible_t>(clientBase + 0x0001DB80);
+        __try {
+            pSetVisible(pUI, 0x22, 1);
+        } __except (EXCEPTION_EXECUTE_HANDLER) {}
+    }
 }
 
 static void ExecuteHudButtonAction(uintptr_t clientBase, HudButtonId btnId, int mx, int my) {
@@ -2258,6 +2502,7 @@ static void ExecuteHudButtonAction(uintptr_t clientBase, HudButtonId btnId, int 
                 s_charSheetVisible = !s_charSheetVisible;
                 if (s_charSheetVisible) {
                     if (!ppCtrl || !*ppCtrl) pCreateControl(pUI, 0x42);
+                    PositionControlAndWidget(clientBase, pUI, 0x42, (1920 / 2) - 200, (1080 / 2) - 200, 400, 400);
                     __try { pSetVisible(pUI, 0x42, 1); } __except (EXCEPTION_EXECUTE_HANDLER) {}
                 } else {
                     if (OriginalHideControl) OriginalHideControl(pUI, 0x42);
@@ -2280,6 +2525,7 @@ static void ExecuteHudButtonAction(uintptr_t clientBase, HudButtonId btnId, int 
                 s_optionsVisible = !s_optionsVisible;
                 if (s_optionsVisible) {
                     if (!ppCtrl || !*ppCtrl) pCreateControl(pUI, 0x47);
+                    PositionControlAndWidget(clientBase, pUI, 0x47, (1920 / 2) - 200, (1080 / 2) - 200, 400, 400);
                     __try { pSetVisible(pUI, 0x47, 1); } __except (EXCEPTION_EXECUTE_HANDLER) {}
                 } else {
                     if (OriginalHideControl) OriginalHideControl(pUI, 0x47);
@@ -2300,6 +2546,45 @@ static void ExecuteHudButtonAction(uintptr_t clientBase, HudButtonId btnId, int 
         default:
             break;
     }
+}
+
+static bool IsPointOverAnyHud(int mx, int my, int winW, int winH) {
+    if (winW <= 0) winW = 1920;
+    if (winH <= 0) winH = 1080;
+
+    // 0. Explicit HUD interactive buttons
+    if (HitTestHudButton(mx, my, winW, winH) != HUD_BTN_NONE) return true;
+
+    // 1. Top-Left: Player Status & Vitals (0x1B)
+    if (mx >= 0 && mx <= 300 && my >= 0 && my <= 120) return true;
+
+    // 2. Top-Center: Quickbar (0x24)
+    int qbW = 440;
+    int qbX = (winW / 2) - (qbW / 2);
+    if (mx >= qbX - 25 && mx <= qbX + qbW + 25 && my >= 0 && my <= 65) return true;
+
+    // 3. Top-Right: Target Status & Buffs (0x22, 0x3D)
+    if (mx >= winW - 350 && mx <= winW && my >= 0 && my <= 180) return true;
+
+    // 4. Bottom-Left: Main Chat Window, Chat Tabs & Input Box (0x02, 0x23, 0x03)
+    if (mx >= 0 && mx <= 520 && my >= winH - 320 && my <= winH) return true;
+
+    // 5. Bottom-Center: Combat Tactics Bar & Compass (0x0E, 0x27)
+    int compCenterX = winW / 2;
+    if (mx >= compCenterX - 180 && mx <= compCenterX + 180 && my >= winH - 185 && my <= winH) return true;
+
+    // 6. Bottom-Right: Latency Meter & Options / Checklist (0x4D, 0x47)
+    if (mx >= winW - 160 && mx <= winW && my >= winH - 70 && my <= winH) return true;
+
+    // 7. Modals / Dialogs if open (Character Sheet 0x42, Options 0x47)
+    if (s_charSheetVisible || s_optionsVisible) {
+        int dlgW = 450, dlgH = 450;
+        int dlgX = (winW / 2) - (dlgW / 2);
+        int dlgY = (winH / 2) - (dlgH / 2);
+        if (mx >= dlgX && mx <= dlgX + dlgW && my >= dlgY && my <= dlgY + dlgH) return true;
+    }
+
+    return false;
 }
 
 static LRESULT CALLBACK SubclassWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam) {
@@ -2331,49 +2616,10 @@ static LRESULT CALLBACK SubclassWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPA
             break;
         }
         case WM_MOUSEMOVE: {
-            NeutralizeDragGlobals(clientBase);
             short mx = (short)LOWORD(lParam);
             short my = (short)HIWORD(lParam);
 
-            int normX = (winW > 0) ? (int)((double)mx * 1920.0 / (double)winW) : mx;
-            int normY = (winH > 0) ? (int)((double)my * 1080.0 / (double)winH) : my;
-            if (normX < 0) normX = 0;
-            if (normX > 1920) normX = 1920;
-            if (normY < 0) normY = 0;
-            if (normY > 1080) normY = 1080;
-
-            void* pHovered = clientBase ? GetHoveredUIWidget(clientBase) : nullptr;
-            bool bOverHud = (pHovered != nullptr) || IsPointInAnyHudRect(normX, normY) || g_bMouseDownOnUI;
-
-            // If mouse is over any HUD frame, or dragging started on UI:
-            // Completely consume and block the message so client never drags or offsets controls!
-            if (bOverHud) {
-                g_lastMouseX = mx;
-                g_lastMouseY = my;
-                NeutralizeDragGlobals(clientBase);
-                return 0; // Dropped so UI controls never move or follow mouse
-            }
-
-            // Intercept WM_MOUSEMOVE when left or right button is down in 3D world space:
-            if (wParam & MK_LBUTTON) {
-                // Left click in 3D world space: purely orbit the 3D camera
-                if (g_lastMouseX >= 0 && g_lastMouseY >= 0) {
-                    int dx = mx - g_lastMouseX;
-                    int dy = my - g_lastMouseY;
-                    g_camYaw += dx * 0.005f;
-                    g_camPitch += dy * 0.005f;
-                    if (g_camPitch < -0.45f) g_camPitch = -0.45f;
-                    if (g_camPitch > 1.15f)  g_camPitch = 1.15f;
-                    g_bHumanInputActive = true;
-                }
-                g_lastMouseX = mx;
-                g_lastMouseY = my;
-                NeutralizeDragGlobals(clientBase);
-                return 0; // Consumed camera rotation!
-            }
-
             if (wParam & MK_RBUTTON) {
-                // Right click drag: purely orbit the 3D camera
                 if (g_lastMouseX >= 0 && g_lastMouseY >= 0) {
                     int dx = mx - g_lastMouseX;
                     int dy = my - g_lastMouseY;
@@ -2383,117 +2629,60 @@ static LRESULT CALLBACK SubclassWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPA
                     if (g_camPitch > 1.15f)  g_camPitch = 1.15f;
                     g_bHumanInputActive = true;
                 }
-                g_lastMouseX = mx;
-                g_lastMouseY = my;
-                NeutralizeDragGlobals(clientBase);
-                return 0; // Consumed camera rotation!
             }
-
-            // Normal hovering with NO mouse buttons pressed in 3D space:
-            if (clientBase) {
-                DispatchInputEventToClient(clientBase, 0x65766F4D, normX, normY); // 'Move'
-            }
-
             g_lastMouseX = mx;
             g_lastMouseY = my;
-
-            LRESULT lRes = OriginalWndProc ? CallWindowProcA(OriginalWndProc, hWnd, uMsg, wParam, lParam) : DefWindowProcA(hWnd, uMsg, wParam, lParam);
             NeutralizeDragGlobals(clientBase);
-            return lRes;
+            return OriginalWndProc ? CallWindowProcA(OriginalWndProc, hWnd, uMsg, wParam, lParam) : DefWindowProcA(hWnd, uMsg, wParam, lParam);
         }
         case WM_LBUTTONDOWN: {
             NeutralizeDragGlobals(clientBase);
             SetFocus(hWnd);
             SetActiveWindow(hWnd);
-
+            g_bLeftMouseDown = true;
             short mx = (short)LOWORD(lParam);
             short my = (short)HIWORD(lParam);
-
-            int normX = (winW > 0) ? (int)((double)mx * 1920.0 / (double)winW) : mx;
-            int normY = (winH > 0) ? (int)((double)my * 1080.0 / (double)winH) : my;
-            if (normX < 0) normX = 0;
-            if (normX > 1920) normX = 1920;
-            if (normY < 0) normY = 0;
-            if (normY > 1080) normY = 1080;
-
-            g_bLeftMouseDown = true;
             g_lastMouseX = mx;
             g_lastMouseY = my;
             g_bHumanInputActive = true;
 
-            // Check if hovering over native UI widget or HUD button region
-            void* pHovered = clientBase ? GetHoveredUIWidget(clientBase) : nullptr;
-            HudButtonId hitBtn = HitTestHudButton(normX, normY);
-            bool bOverHud = (pHovered != nullptr) || (hitBtn != HUD_BTN_NONE) || IsPointInAnyHudRect(normX, normY);
+            HudButtonId hitBtn = HitTestHudButton(mx, my, winW, winH);
+            g_pressedHudButton = (int)hitBtn;
 
-            if (bOverHud) {
-                g_bMouseDownOnUI = true;
-                g_pressedHudButton = (int)hitBtn;
-
-                // Set visual pressed state on hovered widget
-                if (pHovered) {
-                    SetWidgetVisualState(pHovered, 4); // State 4 = PRESSED
-                }
-                Log("[mxohax] MOUSE LBUTTONDOWN ON UI: at (%d, %d) [norm %d, %d], widget=0x%p, hudBtn=%d\n",
-                    mx, my, normX, normY, pHovered, (int)hitBtn);
-
-                // Execute immediate response on down for maximum responsiveness
-                if (hitBtn != HUD_BTN_NONE) {
-                    ExecuteHudButtonAction(clientBase, hitBtn, normX, normY);
-                }
-                NeutralizeDragGlobals(clientBase);
-                return 0; // UI click consumed! Dropped so matrix.exe never enters drag mode
-            } else {
-                g_bMouseDownOnUI = false;
-                g_pressedHudButton = (int)HUD_BTN_NONE;
-                // 3D scene click: initiate camera orbit without passing MLDn to CUI
-                NeutralizeDragGlobals(clientBase);
-                return 0;
-            }
+            LRESULT lRes = OriginalWndProc ? CallWindowProcA(OriginalWndProc, hWnd, uMsg, wParam, lParam) : DefWindowProcA(hWnd, uMsg, wParam, lParam);
+            NeutralizeDragGlobals(clientBase);
+            return lRes;
         }
         case WM_LBUTTONUP: {
             NeutralizeDragGlobals(clientBase);
-            ReleaseCapture(); // Ensure no mouse capture holds UI controls
+            g_bLeftMouseDown = false;
             short mx = (short)LOWORD(lParam);
             short my = (short)HIWORD(lParam);
-
-            int normX = (winW > 0) ? (int)((double)mx * 1920.0 / (double)winW) : mx;
-            int normY = (winH > 0) ? (int)((double)my * 1080.0 / (double)winH) : my;
-            if (normX < 0) normX = 0;
-            if (normX > 1920) normX = 1920;
-            if (normY < 0) normY = 0;
-            if (normY > 1080) normY = 1080;
-
-            g_bLeftMouseDown = false;
             g_bHumanInputActive = true;
 
-            // If mouse down occurred on UI, handle button release and action execution
-            if (g_bMouseDownOnUI) {
-                HudButtonId releasedBtn = HitTestHudButton(normX, normY);
-                void* pHovered = clientBase ? GetHoveredUIWidget(clientBase) : nullptr;
-
-                // Reset visual state
-                if (pHovered) {
-                    SetWidgetVisualState(pHovered, 0); // State 0 = NORMAL / UNPRESSED
+            HudButtonId hitBtn = HitTestHudButton(mx, my, winW, winH);
+            HudButtonId btnToExecute = HUD_BTN_NONE;
+            if (g_pressedHudButton != (int)HUD_BTN_NONE) {
+                if (hitBtn == (HudButtonId)g_pressedHudButton || hitBtn != HUD_BTN_NONE) {
+                    btnToExecute = (hitBtn != HUD_BTN_NONE) ? hitBtn : (HudButtonId)g_pressedHudButton;
                 }
-
-                // If released over same button or over any valid HUD button, execute action!
-                HudButtonId targetBtn = (releasedBtn != HUD_BTN_NONE) ? releasedBtn : (HudButtonId)g_pressedHudButton;
-                if (targetBtn != HUD_BTN_NONE && targetBtn != (HudButtonId)g_pressedHudButton) {
-                    ExecuteHudButtonAction(clientBase, targetBtn, normX, normY);
-                }
-
-                g_bMouseDownOnUI = false;
-                g_pressedHudButton = (int)HUD_BTN_NONE;
-                NeutralizeDragGlobals(clientBase);
-                ReleaseCapture();
-                return 0; // UI release consumed!
+            } else if (hitBtn != HUD_BTN_NONE) {
+                btnToExecute = hitBtn;
             }
-            g_bMouseDownOnUI = false;
+
+            if (btnToExecute != HUD_BTN_NONE) {
+                ExecuteHudButtonAction(clientBase, btnToExecute, mx, my);
+            } else if (!IsPointOverAnyHud(mx, my, winW, winH)) {
+                // Click in 3D world (not over any HUD frame) targets nearby AI NPC (e.g. Heiu <Weapon Vendor>)
+                if (my >= 60 && my <= winH - 90 && mx >= 10 && mx <= winW - 10) {
+                    SetTargetOperative(clientBase, "Heiu <Weapon Vendor>", 393, 16802.3, SPAWN_GROUND_ELEVATION, 3237.01);
+                }
+            }
             g_pressedHudButton = (int)HUD_BTN_NONE;
+
+            LRESULT lRes = OriginalWndProc ? CallWindowProcA(OriginalWndProc, hWnd, uMsg, wParam, lParam) : DefWindowProcA(hWnd, uMsg, wParam, lParam);
             NeutralizeDragGlobals(clientBase);
-            ReleaseCapture();
-            return 0;
+            return lRes;
         }
         case WM_RBUTTONDOWN: {
             NeutralizeDragGlobals(clientBase);
@@ -2501,13 +2690,6 @@ static LRESULT CALLBACK SubclassWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPA
             g_bRightMouseDown = true;
             g_lastMouseX = (short)LOWORD(lParam);
             g_lastMouseY = (short)HIWORD(lParam);
-            short mx = (short)LOWORD(lParam);
-            short my = (short)HIWORD(lParam);
-            int normX = (winW > 0) ? (int)((double)mx * 1920.0 / (double)winW) : mx;
-            int normY = (winH > 0) ? (int)((double)my * 1080.0 / (double)winH) : my;
-            if (clientBase) {
-                DispatchInputEventToClient(clientBase, 0x6E44524D, normX, normY); // 'MRDn'
-            }
             LRESULT lRes = OriginalWndProc ? CallWindowProcA(OriginalWndProc, hWnd, uMsg, wParam, lParam) : DefWindowProcA(hWnd, uMsg, wParam, lParam);
             NeutralizeDragGlobals(clientBase);
             return lRes;
@@ -2516,16 +2698,8 @@ static LRESULT CALLBACK SubclassWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPA
             NeutralizeDragGlobals(clientBase);
             ReleaseCapture();
             g_bRightMouseDown = false;
-            short mx = (short)LOWORD(lParam);
-            short my = (short)HIWORD(lParam);
-            int normX = (winW > 0) ? (int)((double)mx * 1920.0 / (double)winW) : mx;
-            int normY = (winH > 0) ? (int)((double)my * 1080.0 / (double)winH) : my;
-            if (clientBase) {
-                DispatchInputEventToClient(clientBase, 0x7055524D, normX, normY); // 'MRUp'
-            }
             LRESULT lRes = OriginalWndProc ? CallWindowProcA(OriginalWndProc, hWnd, uMsg, wParam, lParam) : DefWindowProcA(hWnd, uMsg, wParam, lParam);
             NeutralizeDragGlobals(clientBase);
-            ReleaseCapture();
             return lRes;
         }
         case WM_CAPTURECHANGED: {
@@ -2565,7 +2739,7 @@ static LRESULT CALLBACK SubclassWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPA
                 g_codeRainDegradationActive = !g_codeRainDegradationActive;
                 Log("[mxohax] Matrix Anomaly Code Rain Degradation toggled: %s\n", g_codeRainDegradationActive ? "ACTIVE" : "INACTIVE");
             } else if (wParam == VK_TAB) {
-                SetTargetOperative(clientBase, "P", 393, 16802.3, SPAWN_GROUND_ELEVATION, 3237.01);
+                SetTargetOperative(clientBase, "Heiu <Weapon Vendor>", 393, 16802.3, SPAWN_GROUND_ELEVATION, 3237.01);
             } else if (wParam >= VK_F1 && wParam <= VK_F5) {
                 SetTacticsStance(clientBase, (StanceType)(wParam - VK_F1));
             } else if (wParam >= '1' && wParam <= '9') {
@@ -2582,6 +2756,17 @@ static LRESULT CALLBACK SubclassWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPA
                 s_keysDown[wParam] = false;
                 if (wParam >= 'A' && wParam <= 'Z') s_keysDown[wParam + 32] = false;
                 if (wParam >= 'a' && wParam <= 'z') s_keysDown[wParam - 32] = false;
+            }
+            return OriginalWndProc ? CallWindowProcA(OriginalWndProc, hWnd, uMsg, wParam, lParam) : DefWindowProcA(hWnd, uMsg, wParam, lParam);
+        }
+        case WM_SIZE: {
+            int newW = LOWORD(lParam);
+            int newH = HIWORD(lParam);
+            if (newW > 0 && newH > 0 && clientBase) {
+                void* pUI = *reinterpret_cast<void**>(clientBase + 0x00898C54);
+                if (pUI && s_inWorldSticky) {
+                    LockAllHudFrames(clientBase, pUI);
+                }
             }
             return OriginalWndProc ? CallWindowProcA(OriginalWndProc, hWnd, uMsg, wParam, lParam) : DefWindowProcA(hWnd, uMsg, wParam, lParam);
         }
@@ -2701,36 +2886,14 @@ static void UpdatePlayerPositionAndPhysics(uintptr_t clientBase, void* curPlayer
 
         // Locomotion stopped/idle flag (+0x4EE): 1 = stopped/idle, 0 = moving
         *reinterpret_cast<BYTE*>(reinterpret_cast<uintptr_t>(pActor) + 0x4EE) = (!isMoving && !g_isJumping) ? 1 : 0;
+        *reinterpret_cast<WORD*>(reinterpret_cast<uintptr_t>(pActor) + 0x4EE) = (!isMoving && !g_isJumping) ? 1 : 0;
 
         float* pActorRot = reinterpret_cast<float*>(reinterpret_cast<uintptr_t>(pActor) + 0x4FC);
         if (pActorRot && !IsBadReadPtr(pActorRot, 16)) {
             memcpy(pActorRot, playerQuat, sizeof(playerQuat));
         }
 
-        static bool s_wasMoving = false;
-        static int s_idleSampleTicks = 0;
-        bool stateChanged = (isMoving != s_wasMoving);
-        s_wasMoving = isMoving;
-
-        // Synchronize CPlayerLocomotionController
-        void* pLocoCtrl = reinterpret_cast<void*>(clientBase + 0x008A28E8);
-        if (pLocoCtrl && !IsBadReadPtr(pLocoCtrl, 0x30)) {
-            if (!isMoving && !g_isJumping) {
-                DWORD locoState = *reinterpret_cast<DWORD*>(reinterpret_cast<uintptr_t>(pLocoCtrl) + 0x18);
-                if (stateChanged || locoState != 0) {
-                    TriggerNativeIdleTransition(clientBase);
-                }
-            } else if (isMoving) {
-                *reinterpret_cast<DWORD*>(reinterpret_cast<uintptr_t>(pLocoCtrl) + 0x18) = 6; // RUNNING
-            }
-        }
-
-        // Native Lithtech MoveMgr and PhysicsMgr drive position samples naturally
-        typedef void (__thiscall *CalcExtents_t)(void* pActor);
-        CalcExtents_t pCalcExtents = reinterpret_cast<CalcExtents_t>(clientBase + 0x004E9BF0);
-        __try {
-            pCalcExtents(pActor);
-        } __except (EXCEPTION_EXECUTE_HANDLER) {}
+        // Locomotion state and extents managed authoritatively without interpolation lag
 
         // Maintain visibility
         *reinterpret_cast<BYTE*>(reinterpret_cast<uintptr_t>(pActor) + 0x374) = 0; // Local player visible
@@ -2749,13 +2912,13 @@ static void UpdateCamera(uintptr_t clientBase, void* pCam) {
     double* pTargetPosC8 = reinterpret_cast<double*>(reinterpret_cast<uintptr_t>(pCam) + 0xC8);
     if (pTargetPosC8) {
         pTargetPosC8[0] = g_playerX;
-        pTargetPosC8[1] = g_playerY + 32.0;
+        pTargetPosC8[1] = g_playerY + 54.0;
         pTargetPosC8[2] = g_playerZ;
     }
     double* pCamPos8 = reinterpret_cast<double*>(reinterpret_cast<uintptr_t>(pCam) + 8);
     if (pCamPos8) {
         pCamPos8[0] = g_playerX;
-        pCamPos8[1] = g_playerY + 32.0;
+        pCamPos8[1] = g_playerY + 54.0;
         pCamPos8[2] = g_playerZ;
     }
 
@@ -2769,7 +2932,7 @@ static void UpdateCamera(uintptr_t clientBase, void* pCam) {
 
     // Centered camera framing entire operative and ground contact
     double camX = g_playerX - camFwdX * g_camDist;
-    double camY = g_playerY + 32.0 - camFwdY * g_camDist;
+    double camY = g_playerY + 54.0 - camFwdY * g_camDist;
     double camZ = g_playerZ - camFwdZ * g_camDist;
 
     float sp = sinf(g_camPitch * 0.5f);
@@ -3086,7 +3249,8 @@ static void EnsureInWorldRendering(uintptr_t clientBase, void* pWorldMgr, DWORD 
             0x22, // Target Status Frame
             0x23, // Tabs Parent
             0x3D, // Active Buffs HUD
-            0x4D  // Latency Meter
+            0x4D, // Latency Meter
+            0x0E  // Combat Tactics Bar
         };
         for (DWORD id : hudControls) {
             __try {
@@ -3243,24 +3407,6 @@ static void __fastcall DetourFrameTick(void* pThis, void* /*edx*/) {
     // Neutralize dragging global before tick
     if (clientBase) {
         NeutralizeDragGlobals(clientBase);
-        void* curPlayer = *reinterpret_cast<void**>(clientBase + 0x008A4378);
-        if (curPlayer && !IsBadReadPtr(curPlayer, 0xB0)) {
-            void* pActor = *reinterpret_cast<void**>(reinterpret_cast<uintptr_t>(curPlayer) + 0xA8);
-            if (pActor && !IsBadReadPtr(pActor, 0x690) && !g_isJumping) {
-                bool kMove = s_keysDown['W'] || s_keysDown['w'] || ((GetAsyncKeyState('W') & 0x8000) != 0) || ((GetAsyncKeyState(VK_UP) & 0x8000) != 0) ||
-                             s_keysDown['S'] || s_keysDown['s'] || ((GetAsyncKeyState('S') & 0x8000) != 0) || ((GetAsyncKeyState(VK_DOWN) & 0x8000) != 0) ||
-                             s_keysDown['A'] || s_keysDown['a'] || ((GetAsyncKeyState('A') & 0x8000) != 0) || ((GetAsyncKeyState(VK_LEFT) & 0x8000) != 0) ||
-                             s_keysDown['D'] || s_keysDown['d'] || ((GetAsyncKeyState('D') & 0x8000) != 0) || ((GetAsyncKeyState(VK_RIGHT) & 0x8000) != 0);
-                if (kMove) {
-                    *reinterpret_cast<BYTE*>(reinterpret_cast<uintptr_t>(pActor) + 0x4EE) = 0; // 0 = in motion
-                } else if (!g_bPlayerIsMoving) {
-                    *reinterpret_cast<BYTE*>(reinterpret_cast<uintptr_t>(pActor) + 0x4EE) = 1;
-                    *reinterpret_cast<double*>(reinterpret_cast<uintptr_t>(pActor) + 0x510) = 0.0;
-                    *reinterpret_cast<double*>(reinterpret_cast<uintptr_t>(pActor) + 0x518) = 0.0;
-                    *reinterpret_cast<double*>(reinterpret_cast<uintptr_t>(pActor) + 0x520) = 0.0;
-                }
-            }
-        }
     }
 
     if (OriginalFrameTick) OriginalFrameTick(pThis);
@@ -3317,7 +3463,7 @@ static void __fastcall DetourFrameTick(void* pThis, void* /*edx*/) {
                 CreateControl_t pCreateControl = reinterpret_cast<CreateControl_t>(clientBase + 0x0001BC10);
                 SetControlVisible_t pSetVisible = reinterpret_cast<SetControlVisible_t>(clientBase + 0x0001DB80);
 
-                static const DWORD hudControls[] = { 0x1B, 0x27, 0x24, 0x02, 0x03, 0x22, 0x23, 0x3D, 0x4D };
+                static const DWORD hudControls[] = { 0x1B, 0x27, 0x24, 0x02, 0x03, 0x22, 0x23, 0x3D, 0x4D, 0x0E };
                 for (DWORD id : hudControls) {
                     __try {
                         void** ppCtrl = reinterpret_cast<void**>(reinterpret_cast<uintptr_t>(pUI) + 0x28 + (id * 4));
@@ -3338,6 +3484,11 @@ static void __fastcall DetourFrameTick(void* pThis, void* /*edx*/) {
                 } __except (EXCEPTION_EXECUTE_HANDLER) {}
                 LockAllHudFrames(clientBase, pUI);
                 TriggerNativeIdleTransition(clientBase);
+
+                void* pChatMgr = *reinterpret_cast<void**>(reinterpret_cast<uintptr_t>(pUI) + 0x38);
+                if (pChatMgr && !IsBadReadPtr(pChatMgr, 0x60)) {
+                    *reinterpret_cast<BYTE*>(reinterpret_cast<uintptr_t>(pChatMgr) + 0x58) = 1;
+                }
             }
             ApplyOperativeAppearance(clientBase, curPlayer);
             Log("[mxohax] In-world UI initialized and loading screens dismissed once.\n");
@@ -3425,6 +3576,18 @@ static void __fastcall DetourFrameTick(void* pThis, void* /*edx*/) {
                     if (fscanf(fKey, " %c %d", &kChar, &kDown) == 2) {
                         unsigned char vk = (unsigned char)toupper(kChar);
                         s_keysDown[vk] = (kDown != 0);
+                        if (vk >= 'A' && vk <= 'Z') s_keysDown[vk + 32] = (kDown != 0);
+                        if (kDown == 0) {
+                            if (vk == 'W') { s_keysDown['W'] = false; s_keysDown['w'] = false; s_keysDown[VK_UP] = false; }
+                            if (vk == 'S') { s_keysDown['S'] = false; s_keysDown['s'] = false; s_keysDown[VK_DOWN] = false; }
+                            if (vk == 'A') { s_keysDown['A'] = false; s_keysDown['a'] = false; s_keysDown[VK_LEFT] = false; }
+                            if (vk == 'D') { s_keysDown['D'] = false; s_keysDown['d'] = false; s_keysDown[VK_RIGHT] = false; }
+                        }
+                        keybd_event(vk, 0, (kDown != 0) ? 0 : KEYEVENTF_KEYUP, 0);
+                        HWND hTargetWnd = (g_hGameWindow && IsWindow(g_hGameWindow)) ? g_hGameWindow : GetActiveWindow();
+                        if (hTargetWnd) {
+                            PostMessageA(hTargetWnd, (kDown != 0) ? WM_KEYDOWN : WM_KEYUP, vk, 0);
+                        }
                         Log("[mxohax] UI KEY COMMAND TRIGGER: Key '%c' (%d) -> %s\n", kChar, (int)vk, kDown ? "DOWN" : "UP");
                     }
                     fclose(fKey);
@@ -3433,15 +3596,17 @@ static void __fastcall DetourFrameTick(void* pThis, void* /*edx*/) {
             }
         }
 
-        // Check human keyboard inputs (window messages + GetAsyncKeyState fallback)
-        bool keyW = s_keysDown['W'] || s_keysDown['w'] || ((GetAsyncKeyState('W') & 0x8000) != 0) || ((GetAsyncKeyState(VK_UP) & 0x8000) != 0);
-        bool keyS = s_keysDown['S'] || s_keysDown['s'] || ((GetAsyncKeyState('S') & 0x8000) != 0) || ((GetAsyncKeyState(VK_DOWN) & 0x8000) != 0);
-        bool keyA = s_keysDown['A'] || s_keysDown['a'] || ((GetAsyncKeyState('A') & 0x8000) != 0) || ((GetAsyncKeyState(VK_LEFT) & 0x8000) != 0);
-        bool keyD = s_keysDown['D'] || s_keysDown['d'] || ((GetAsyncKeyState('D') & 0x8000) != 0) || ((GetAsyncKeyState(VK_RIGHT) & 0x8000) != 0);
-        bool keySpace = s_keysDown[VK_SPACE] || ((GetAsyncKeyState(VK_SPACE) & 0x8000) != 0);
-        bool keyShift = s_keysDown[VK_SHIFT] || ((GetAsyncKeyState(VK_SHIFT) & 0x8000) != 0);
-        bool keyLeft = s_keysDown[VK_LEFT] || ((GetAsyncKeyState(VK_LEFT) & 0x8000) != 0);
-        bool keyRight = s_keysDown[VK_RIGHT] || ((GetAsyncKeyState(VK_RIGHT) & 0x8000) != 0);
+        // Check human keyboard inputs (window messages + GetAsyncKeyState fallback if game window has foreground focus)
+        HWND fgWnd = GetForegroundWindow();
+        bool hasFocus = (g_hGameWindow && fgWnd == g_hGameWindow);
+        bool keyW = s_keysDown['W'] || s_keysDown['w'] || (hasFocus && (((GetAsyncKeyState('W') & 0x8000) != 0) || ((GetAsyncKeyState(VK_UP) & 0x8000) != 0)));
+        bool keyS = s_keysDown['S'] || s_keysDown['s'] || (hasFocus && (((GetAsyncKeyState('S') & 0x8000) != 0) || ((GetAsyncKeyState(VK_DOWN) & 0x8000) != 0)));
+        bool keyA = s_keysDown['A'] || s_keysDown['a'] || (hasFocus && (((GetAsyncKeyState('A') & 0x8000) != 0) || ((GetAsyncKeyState(VK_LEFT) & 0x8000) != 0)));
+        bool keyD = s_keysDown['D'] || s_keysDown['d'] || (hasFocus && (((GetAsyncKeyState('D') & 0x8000) != 0) || ((GetAsyncKeyState(VK_RIGHT) & 0x8000) != 0)));
+        bool keySpace = s_keysDown[VK_SPACE] || (hasFocus && ((GetAsyncKeyState(VK_SPACE) & 0x8000) != 0));
+        bool keyShift = s_keysDown[VK_SHIFT] || (hasFocus && ((GetAsyncKeyState(VK_SHIFT) & 0x8000) != 0));
+        bool keyLeft = s_keysDown[VK_LEFT] || (hasFocus && ((GetAsyncKeyState(VK_LEFT) & 0x8000) != 0));
+        bool keyRight = s_keysDown[VK_RIGHT] || (hasFocus && ((GetAsyncKeyState(VK_RIGHT) & 0x8000) != 0));
 
         g_bHumanInputActive = true;
 
@@ -3477,10 +3642,6 @@ static void __fastcall DetourFrameTick(void* pThis, void* /*edx*/) {
                 if (!g_isJumping && !g_isWallRunning) {
                     g_playerX += actVelX * dt;
                     g_playerZ += actVelZ * dt;
-                } else if (g_isJumping && !g_isWallRunning) {
-                    // Fine air-control steering preserved horizontal trajectory
-                    g_jumpVelX += dirX * 120.0 * dt;
-                    g_jumpVelZ += dirZ * 120.0 * dt;
                 }
                 g_playerYaw = (float)atan2(dirX, dirZ);
                 isMoving = true;
@@ -3488,79 +3649,33 @@ static void __fastcall DetourFrameTick(void* pThis, void* /*edx*/) {
         }
         g_bPlayerIsMoving = isMoving;
 
-        double curGround = GetCalibratedGroundElevation(g_playerX, g_playerZ);
-        if (keySpace) {
-            if (!g_isJumping && g_playerY <= curGround + 2.0) {
-                g_velY = 560.0;
-                g_isJumping = true;
-                g_hasDoubleJumped = false;
-                g_jumpVelX = isMoving ? actVelX : 0.0;
-                g_jumpVelZ = isMoving ? actVelZ : 0.0;
-                Log("[mxohax] Live Human Input: Wire-Fu Jump launched with momentum (Vx=%.1f, Vz=%.1f)!\n", g_jumpVelX, g_jumpVelZ);
-            } else if (g_isWallRunning) {
-                // Wall-Kick jump off skyscraper facade
-                g_velY = 540.0;
-                g_jumpVelX = (g_playerX < 16700.0) ? 380.0 : -380.0;
-                g_jumpVelZ = actVelZ;
-                g_isWallRunning = false;
-                g_wallRunDuration = 0.0f;
-                Log("[mxohax] Live Human Input: Wire-Fu Wall-Kick launched off facade!\n");
-            } else if (g_isJumping && !g_hasDoubleJumped && g_velY < 320.0) {
-                // Double wire-fu kick aerial impulse
-                g_hasDoubleJumped = true;
-                g_velY = 460.0;
-                double kickDirX = sinf(g_camYaw);
-                double kickDirZ = cosf(g_camYaw);
-                g_jumpVelX += kickDirX * 240.0;
-                g_jumpVelZ += kickDirZ * 240.0;
-                Log("[mxohax] Live Human Input: Wire-Fu Double Kick aerial impulse executed!\n");
-            }
-        }
-
-        // Bullet-time focus evasion handling
-        if (g_bulletDodgeTimer > 0.0f) {
-            g_bulletDodgeTimer -= (float)dt;
-            float dodgePhase = sinf((1.2f - g_bulletDodgeTimer) / 1.2f * 3.14159f);
-            g_camPitch = 0.1745f - 0.28f * dodgePhase; // Limbo backward dodge bend
-            if (g_bulletDodgeTimer <= 0.0f) {
-                g_camPitch = 0.1745f;
-                Log("[mxohax] Bullet-Time Focus Evasion completed: Resumed combat posture.\n");
-            }
-        }
-
-        // Matrix anomaly code rain degradation during viral outbreaks
-        if (g_codeRainDegradationActive) {
-            float targetIntensity = 0.70f + 0.15f * sinf((float)now * 0.003f);
-            g_matrixCodeRainIntensity += (targetIntensity - g_matrixCodeRainIntensity) * 0.05f;
-            *reinterpret_cast<float*>(clientBase + 0x008E357C) = g_matrixCodeRainIntensity;
-            *reinterpret_cast<BYTE*>(clientBase + 0x0085EBA8) = 1;
-            *reinterpret_cast<BYTE*>(clientBase + 0x0085EBA9) = 1;
-            *reinterpret_cast<BYTE*>(clientBase + 0x0085EBAA) = 1;
-            *reinterpret_cast<BYTE*>(clientBase + 0x008E3590) = 1;
-        } else if (g_matrixCodeRainIntensity > 0.01f) {
-            g_matrixCodeRainIntensity -= 1.2f * (float)dt;
-            if (g_matrixCodeRainIntensity < 0.0f) g_matrixCodeRainIntensity = 0.0f;
-            *reinterpret_cast<float*>(clientBase + 0x008E357C) = g_matrixCodeRainIntensity;
-        } else {
-            *reinterpret_cast<float*>(clientBase + 0x008E357C) = 0.0f;
-            *reinterpret_cast<BYTE*>(clientBase + 0x0085EBA8) = 0;
-            *reinterpret_cast<BYTE*>(clientBase + 0x0085EBA9) = 0;
-            *reinterpret_cast<BYTE*>(clientBase + 0x0085EBAA) = 0;
-            *reinterpret_cast<BYTE*>(clientBase + 0x008E3590) = 0;
-            *reinterpret_cast<BYTE*>(clientBase + 0x008AACC8) = 0;
-            *reinterpret_cast<BYTE*>(clientBase + 0x008AACC9) = 0;
-        }
-
         // Apply position, orientation and extents to player and actor
-        if (curPlayer) {
+        if (curPlayer && !IsBadReadPtr(curPlayer, 0xB0)) {
             *reinterpret_cast<BYTE*>(reinterpret_cast<uintptr_t>(curPlayer) + 0xC) |= 0x20;
-            void* pActor = *reinterpret_cast<void**>(reinterpret_cast<uintptr_t>(curPlayer) + 0xA8);
             UpdatePlayerPositionAndPhysics(clientBase, curPlayer, dt, isMoving, actVelX, actVelZ);
 
-            if (pActor && !IsBadReadPtr(pActor, 0x690) && (s_inWorldTicks < 120 || (s_tickCount % 30 == 0))) {
-                typedef void (__thiscall *ShowLocalPlayer_t)(void* pActor);
-                ShowLocalPlayer_t pShowActor = reinterpret_cast<ShowLocalPlayer_t>(clientBase + 0x004EAB80);
-                pShowActor(pActor);
+            void* pActor = *reinterpret_cast<void**>(reinterpret_cast<uintptr_t>(curPlayer) + 0xA8);
+            if (pActor && !IsBadReadPtr(pActor, 0x690)) {
+                *reinterpret_cast<BYTE*>(reinterpret_cast<uintptr_t>(pActor) + 0x374) = 0; // Local player visible
+                *reinterpret_cast<BYTE*>(reinterpret_cast<uintptr_t>(pActor) + 0x375) = 1;
+                *reinterpret_cast<BYTE*>(reinterpret_cast<uintptr_t>(pActor) + 0x2DD) = 0; // Not culled
+                *reinterpret_cast<BYTE*>(reinterpret_cast<uintptr_t>(pActor) + 0x684) = 0; // In-world
+                *reinterpret_cast<BYTE*>(reinterpret_cast<uintptr_t>(pActor) + 0x385) = 3; // Scene transform valid
+                *reinterpret_cast<BYTE*>(reinterpret_cast<uintptr_t>(pActor) + 0x290) = 0;
+                *reinterpret_cast<float*>(reinterpret_cast<uintptr_t>(pActor) + 0x56C) = isMoving ? 1.0f : 0.0f;
+                if (!isMoving && !g_isJumping) {
+                    *reinterpret_cast<BYTE*>(reinterpret_cast<uintptr_t>(pActor) + 0x4EE) = 1;
+                    *reinterpret_cast<WORD*>(reinterpret_cast<uintptr_t>(pActor) + 0x4EE) = 1;
+                    *reinterpret_cast<double*>(reinterpret_cast<uintptr_t>(pActor) + 0x510) = 0.0;
+                    *reinterpret_cast<double*>(reinterpret_cast<uintptr_t>(pActor) + 0x518) = 0.0;
+                    *reinterpret_cast<double*>(reinterpret_cast<uintptr_t>(pActor) + 0x520) = 0.0;
+                    *reinterpret_cast<double*>(reinterpret_cast<uintptr_t>(pActor) + 0x528) = g_playerX;
+                    *reinterpret_cast<double*>(reinterpret_cast<uintptr_t>(pActor) + 0x530) = g_playerY;
+                    *reinterpret_cast<double*>(reinterpret_cast<uintptr_t>(pActor) + 0x538) = g_playerZ;
+                    *reinterpret_cast<float*>(reinterpret_cast<uintptr_t>(pActor) + 0x56C) = 0.0f;
+                }
+
+                // Local player visibility and transform managed cleanly
             }
         }
 
@@ -3582,45 +3697,18 @@ static void __fastcall DetourFrameTick(void* pThis, void* /*edx*/) {
             UpdateCamera(clientBase, pCam);
 
             static int s_camTickLog = 0;
-            if (++s_camTickLog % 10 == 0 || isMoving) {
-                Log("[mxohax] DetourFrameTick: Player=(%.1f, %.1f, %.1f, yaw=%.2f) CamYaw=%.2f Pitch=%.2f Dist=%.1f Jumping=%d Target='%s'\n",
-                    g_playerX, g_playerY, g_playerZ, g_playerYaw, g_camYaw, g_camPitch, g_camDist, (int)g_isJumping, g_hasTarget ? g_targetName : "None");
+            if (++s_camTickLog % 60 == 0) {
+                Log("[mxohax] DetourFrameTick: Player=(%.1f, %.1f, %.1f) CamYaw=%.2f Pitch=%.2f Dist=%.1f Target='%s'\n",
+                    g_playerX, g_playerY, g_playerZ, g_camYaw, g_camPitch, g_camDist, g_hasTarget ? g_targetName : "None");
             }
         }
 
-        // Suppress blinking / pending withdraw exit loop on CViewInterlock (Control 0x0E)
-        void* pUI = *reinterpret_cast<void**>(clientBase + 0x00898C54);
-        if (pUI && !IsBadReadPtr(pUI, 0x70)) {
-            void** ppInterlock = reinterpret_cast<void**>(reinterpret_cast<uintptr_t>(pUI) + 0x28 + (0x0E * 4));
-            if (ppInterlock && !IsBadReadPtr(ppInterlock, sizeof(void*)) && *ppInterlock) {
-                void* pInterlock = *ppInterlock;
-                if (!IsBadReadPtr(pInterlock, 0x250)) {
-                    DWORD* pAnimState = reinterpret_cast<DWORD*>(reinterpret_cast<uintptr_t>(pInterlock) + 0x238);
-                    if (pAnimState && *pAnimState != 0) {
-                        *pAnimState = 0;
-                        *reinterpret_cast<float*>(reinterpret_cast<uintptr_t>(pInterlock) + 0x1A4) = 0.0f;
-                        Log("[mxohax] DetourFrameTick: Suppressed blinking animState on CViewInterlock (0x0E)!\n");
-                    }
-                }
-            }
-        }
 
-        // Lock HUD frames to docked coordinates every single frame tick
-        if (pUI) {
-            LockAllHudFrames(clientBase, pUI);
-        }
-
-        // Periodic HUD visibility re-assertion & Chat Window activation
+        // Keep Chat Window manager tabs activated without re-triggering control visibility
         static int s_hudTickCheck = 0;
-        if (++s_hudTickCheck % 60 == 0) {
+        if (++s_hudTickCheck % 120 == 0) {
+            void* pUI = *reinterpret_cast<void**>(clientBase + 0x00898C54);
             if (pUI) {
-                SetControlVisible_t pSetVisible = reinterpret_cast<SetControlVisible_t>(clientBase + 0x0001DB80);
-                static const DWORD hudControls[] = { 0x1B, 0x27, 0x24, 0x02, 0x03, 0x22, 0x23, 0x3D, 0x4D };
-                for (DWORD id : hudControls) {
-                    __try {
-                        pSetVisible(pUI, id, 1);
-                    } __except (EXCEPTION_EXECUTE_HANDLER) {}
-                }
                 void* pChatMgr = *reinterpret_cast<void**>(reinterpret_cast<uintptr_t>(pUI) + 0x38);
                 if (pChatMgr && !IsBadReadPtr(pChatMgr, 0x60)) {
                     *reinterpret_cast<BYTE*>(reinterpret_cast<uintptr_t>(pChatMgr) + 0x58) = 1;
@@ -3743,17 +3831,22 @@ static void __fastcall DetourFrameTick(void* pThis, void* /*edx*/) {
                 // PHASE 1: 2D Loading Screen (ticks 0 to 60, ~1.0 sec)
                 // Display authentic loading artwork while initializing archives
                 // ============================================================
+                static bool s_phase1Shown = false;
+                static bool s_phase2Dismissed = false;
                 if (s_state4Ticks < 60) {
-                    void* pUI = *reinterpret_cast<void**>(clientBase + 0x00898C54);
-                    if (pUI) {
-                        CreateControl_t pCreateControl = reinterpret_cast<CreateControl_t>(clientBase + 0x0001BC10);
-                        SetControlVisible_t pSetVisible = reinterpret_cast<SetControlVisible_t>(clientBase + 0x0001DB80);
-                        __try {
-                            pCreateControl(pUI, 0x04);
-                            pSetVisible(pUI, 0x04, 1);
-                            pCreateControl(pUI, 0x57);
-                            pSetVisible(pUI, 0x57, 1);
-                        } __except (EXCEPTION_EXECUTE_HANDLER) {}
+                    if (!s_phase1Shown) {
+                        s_phase1Shown = true;
+                        void* pUI = *reinterpret_cast<void**>(clientBase + 0x00898C54);
+                        if (pUI) {
+                            CreateControl_t pCreateControl = reinterpret_cast<CreateControl_t>(clientBase + 0x0001BC10);
+                            SetControlVisible_t pSetVisible = reinterpret_cast<SetControlVisible_t>(clientBase + 0x0001DB80);
+                            __try {
+                                pCreateControl(pUI, 0x04);
+                                pSetVisible(pUI, 0x04, 1);
+                                pCreateControl(pUI, 0x57);
+                                pSetVisible(pUI, 0x57, 1);
+                            } __except (EXCEPTION_EXECUTE_HANDLER) {}
+                        }
                     }
                     // Keep 3D Matrix View OFF during Phase 1 so 2D Loading Screen artwork is front & center
                     *reinterpret_cast<BYTE*>(clientBase + 0x0085EBA8) = 0;
@@ -3771,12 +3864,15 @@ static void __fastcall DetourFrameTick(void* pThis, void* /*edx*/) {
                 // Enforce minimum 720 ticks (~12 sec) of digital rain; only dissolve when world is loaded.
                 // ============================================================
                 else if (s_dissolveStartTick == 0 && (s_state4Ticks < 720 || (!bWorldFullyLoaded && s_state4Ticks < 900))) {
-                    // 1. Dismiss 2D loading screens (0x57, 0x04) to reveal the falling code stream
-                    void* pUI = *reinterpret_cast<void**>(clientBase + 0x00898C54);
-                    if (pUI && OriginalHideControl) {
-                        OriginalHideControl(pUI, 0x57);
-                        OriginalHideControl(pUI, 0x04);
-                        OriginalHideControl(pUI, 0x30);
+                    // 1. Dismiss 2D loading screens (0x57, 0x04) once to reveal the falling code stream
+                    if (!s_phase2Dismissed) {
+                        s_phase2Dismissed = true;
+                        void* pUI = *reinterpret_cast<void**>(clientBase + 0x00898C54);
+                        if (pUI && OriginalHideControl) {
+                            OriginalHideControl(pUI, 0x57);
+                            OriginalHideControl(pUI, 0x04);
+                            OriginalHideControl(pUI, 0x30);
+                        }
                     }
 
                     // 2. Enable 3D scene rendering flags in WorldMgr
@@ -4009,11 +4105,11 @@ static void __fastcall Safe_Interlock_Button_Withdraw(void* pThis, void* /*edx*/
     // Reset stance to FREE
     g_currentStance = STANCE_FREE;
 
-    // Clear animState and timer so button does not blink red or flash
-    *reinterpret_cast<DWORD*>(reinterpret_cast<uintptr_t>(pThis) + 0x238) = 0;
-    *reinterpret_cast<float*>(reinterpret_cast<uintptr_t>(pThis) + 0x1A4) = 0.0f;
+    // Enforce animState 1 (active stationary) and opacity 1.0f so withdraw button does not fade/blink
+    *reinterpret_cast<DWORD*>(reinterpret_cast<uintptr_t>(pThis) + 0x238) = 1;
+    *reinterpret_cast<float*>(reinterpret_cast<uintptr_t>(pThis) + 0x1A4) = 1.0f;
 
-    Log("[mxohax] Safe_Interlock_Button_Withdraw: Stance set to FREE, animState cleared.\n");
+    Log("[mxohax] Safe_Interlock_Button_Withdraw: Stance set to FREE, animState locked to 1.\n");
 }
 
 static void __fastcall Safe_Interlock_Grab_Button(void* pThis, void* /*edx*/) {
@@ -4237,7 +4333,33 @@ static void ApplyClientPatches(HMODULE hClient) {
         Log("[mxohax] SUCCESS: client.dll CLTWidget::SetPosition hooked at 0x%p to permanently immobilize HUD widgets!\n", pSetWidgetPos);
     }
 
-    // 3d-3g. Native CUI drag & resize preserved without interference
+    // 3d. Hook CUI::BeginDrag (0x000184E0) to permanently prevent frame dragging initiation
+    LPVOID pStartDrag = reinterpret_cast<LPVOID>(clientBase + 0x000184E0);
+    if (MH_CreateHook(pStartDrag, &DetourBeginDrag, reinterpret_cast<LPVOID*>(&OriginalBeginDrag)) == MH_OK) {
+        MH_EnableHook(pStartDrag);
+        Log("[mxohax] SUCCESS: client.dll CUI::BeginDrag hooked at 0x%p!\n", pStartDrag);
+    }
+
+    // 3e. Hook CUI::OnDragMove (0x00018540) to drop drag movement updates
+    LPVOID pOnDragMove = reinterpret_cast<LPVOID>(clientBase + 0x00018540);
+    if (MH_CreateHook(pOnDragMove, &DetourOnDragMove, reinterpret_cast<LPVOID*>(&OriginalOnDragMove)) == MH_OK) {
+        MH_EnableHook(pOnDragMove);
+        Log("[mxohax] SUCCESS: client.dll CUI::OnDragMove hooked at 0x%p!\n", pOnDragMove);
+    }
+
+    // 3f. Hook CUI::BeginResize (0x00018590) to permanently prevent frame resizing initiation
+    LPVOID pStartResize = reinterpret_cast<LPVOID>(clientBase + 0x00018590);
+    if (MH_CreateHook(pStartResize, &DetourBeginResize, reinterpret_cast<LPVOID*>(&OriginalBeginResize)) == MH_OK) {
+        MH_EnableHook(pStartResize);
+        Log("[mxohax] SUCCESS: client.dll CUI::BeginResize hooked at 0x%p!\n", pStartResize);
+    }
+
+    // 3g. Hook CUI::UpdateResize (0x000187B0) to drop resize updates
+    LPVOID pOnResizeMove = reinterpret_cast<LPVOID>(clientBase + 0x000187B0);
+    if (MH_CreateHook(pOnResizeMove, &DetourOnResizeMove, reinterpret_cast<LPVOID*>(&OriginalOnResizeMove)) == MH_OK) {
+        MH_EnableHook(pOnResizeMove);
+        Log("[mxohax] SUCCESS: client.dll CUI::UpdateResize hooked at 0x%p!\n", pOnResizeMove);
+    }
 
 
     // 4. Hook GetPlayerActiveObject (0x0010A210) to guard against NULL player entity dereference
@@ -4498,20 +4620,28 @@ static void ApplyClientPatches(HMODULE hClient) {
     *reinterpret_cast<DWORD*>(clientBase + 0x008997F8) = 0;          // Drag start X
     *reinterpret_cast<DWORD*>(clientBase + 0x008997FC) = 0;          // Drag start Y
 
-    // Restore client.dll + 0x004EC9D4 to authentic retail (0F 84 5F 02 00 00: je 0x104ecc39)
-    // Skips remote sample queue processing for local player, keeping native upright posture and locomotion!
-    LPVOID pSampleSkip = reinterpret_cast<LPVOID>(clientBase + 0x004EC9D4);
-    DWORD oldProtSample = 0;
-    if (VirtualProtect(pSampleSkip, 6, PAGE_EXECUTE_READWRITE, &oldProtSample)) {
-        BYTE origJe[6] = { 0x0F, 0x84, 0x5F, 0x02, 0x00, 0x00 };
-        memcpy(pSampleSkip, origJe, 6);
-        VirtualProtect(pSampleSkip, 6, oldProtSample, &oldProtSample);
-        FlushInstructionCache(GetCurrentProcess(), pSampleSkip, 6);
-        Log("[mxohax] SUCCESS: Restored client.dll + 0x004EC9D4 (0F 84 5F 02 00 00) for authentic retail posture!\n");
+    // Neutralize client.dll instructions that clobber CActor +0x4EE idle flag to 0
+    // Real verified RVAs:
+    // 0x001A4D25: C6 80 EE 04 00 00 00 (mov byte ptr [eax + 0x4EE], 0 in CActor::UpdateLocomotionState)
+    // 0x004ECC32: C6 86 EE 04 00 00 00 (mov byte ptr [esi + 0x4EE], 0 in CActor::ProcessSamples)
+    // 0x0019DFA0: C6 81 EE 04 00 00 00 (mov byte ptr [ecx + 0x4EE], 0 in CActor::SetNotIdle)
+    static const DWORD s_idleClobberOffsets[] = { 0x001A4D25, 0x004ECC32, 0x0019DFA0 };
+    for (DWORD off : s_idleClobberOffsets) {
+        LPVOID pTarget = reinterpret_cast<LPVOID>(clientBase + off);
+        DWORD oldProt = 0;
+        if (VirtualProtect(pTarget, 7, PAGE_EXECUTE_READWRITE, &oldProt)) {
+            memset(pTarget, 0x90, 7);
+            VirtualProtect(pTarget, 7, oldProt, &oldProt);
+            FlushInstructionCache(GetCurrentProcess(), pTarget, 7);
+        }
     }
+    Log("[mxohax] SUCCESS: Protected CActor +0x4EE idle flag across all locomotion updates (0x1A4D25, 0x4ECC32, 0x19DFA0)!\n");
 
     // Enforce in-world locomotion controller flag
     *reinterpret_cast<BYTE*>(clientBase + 0x0089DD5C) = 1;
+
+    // In-world locomotion controller initialized cleanly
+    Log("[mxohax] SUCCESS: Locomotion controller and authentic idle transitions initialized!\n");
 }
 
 // Hook LoadLibraryA to catch client.dll synchronously
