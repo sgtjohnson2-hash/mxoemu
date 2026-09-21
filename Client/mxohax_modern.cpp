@@ -46,6 +46,33 @@ static inline bool IsSafeReadPointer(const void* ptr, size_t size) {
 #undef IsBadReadPtr
 #define IsBadReadPtr(ptr, sz) (!IsSafeReadPointer(ptr, sz))
 
+static inline bool SafeWriteFloat(void* ptr, float val) {
+    if (!ptr || (uintptr_t)ptr < 0x10000 || (uintptr_t)ptr >= 0x7FFE0000) return false;
+    __try {
+        MEMORY_BASIC_INFORMATION mbi;
+        if (VirtualQuery(ptr, &mbi, sizeof(mbi)) != 0 && mbi.State == MEM_COMMIT) {
+            if (!(mbi.Protect & (PAGE_READWRITE | PAGE_EXECUTE_READWRITE))) {
+                DWORD oldProt = 0;
+                VirtualProtect(mbi.BaseAddress, mbi.RegionSize, PAGE_EXECUTE_READWRITE, &oldProt);
+            }
+            *reinterpret_cast<float*>(ptr) = val;
+            return true;
+        }
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return false;
+    }
+    return false;
+}
+
+static inline void SetCVarFloat(uintptr_t cvarBase, float val) {
+    if (!cvarBase) return;
+    SafeWriteFloat(reinterpret_cast<void*>(cvarBase + 0x1C), val);
+    SafeWriteFloat(reinterpret_cast<void*>(cvarBase + 0x24), val);
+    SafeWriteFloat(reinterpret_cast<void*>(cvarBase + 0x28), val);
+    SafeWriteFloat(reinterpret_cast<void*>(cvarBase + 0x2C), val);
+    SafeWriteFloat(reinterpret_cast<void*>(cvarBase + 0x30), val);
+}
+
 static LONG WINAPI CrashHandler(PEXCEPTION_POINTERS pExc) {
     if (pExc && pExc->ExceptionRecord) {
         DWORD code = pExc->ExceptionRecord->ExceptionCode;
@@ -2091,10 +2118,10 @@ static HudButtonId HitTestHudButton(int x, int y, int screenW = 1920, int screen
     if (canY < 0) canY = 0;
     if (canY > 1080) canY = 1080;
 
-    // 1. Quickbar / Hotbar (0x24: centered at bottom, x = 746..1174, y = 894..944)
+    // 1. Quickbar / Hotbar (0x24: centered at bottom, x = 746..1174, y = 859..944)
     const int qbX = (1920 - 428) / 2; // 746
     const int qbY = 1080 - 186;        // 894
-    if (canY >= qbY && canY <= qbY + 50 && canX >= qbX && canX <= qbX + 428) {
+    if (((canY >= 850 && canY <= 910) || (canY >= qbY && canY <= qbY + 50)) && canX >= qbX && canX <= qbX + 428) {
         // Page switcher button (leftmost tab: x = qbX..qbX+35)
         if (canX >= qbX && canX < qbX + 36) {
             return HUD_BTN_QB_PAGE;
@@ -2263,7 +2290,8 @@ static void RepositionQuickbar(uintptr_t clientBase, void* pUI, int screenW, int
                 *reinterpret_cast<int*>(reinterpret_cast<uintptr_t>(pLayoutRoot) + 0x70) = qbY;
                 *reinterpret_cast<int*>(reinterpret_cast<uintptr_t>(pLayoutRoot) + 0x74) = qbW;
                 *reinterpret_cast<int*>(reinterpret_cast<uintptr_t>(pLayoutRoot) + 0x78) = qbH;
-                *reinterpret_cast<DWORD*>(reinterpret_cast<uintptr_t>(pLayoutRoot) + 0x28) |= 0x11;
+                *reinterpret_cast<DWORD*>(reinterpret_cast<uintptr_t>(pLayoutRoot) + 0x28) &= ~0x00000001;
+                *reinterpret_cast<DWORD*>(reinterpret_cast<uintptr_t>(pLayoutRoot) + 0x28) |= 0x00000010;
             }
         }
 
@@ -2275,7 +2303,8 @@ static void RepositionQuickbar(uintptr_t clientBase, void* pUI, int screenW, int
             *reinterpret_cast<int*>(reinterpret_cast<uintptr_t>(pRoot24) + 0x70) = qbY;
             *reinterpret_cast<int*>(reinterpret_cast<uintptr_t>(pRoot24) + 0x74) = qbW;
             *reinterpret_cast<int*>(reinterpret_cast<uintptr_t>(pRoot24) + 0x78) = qbH;
-            *reinterpret_cast<DWORD*>(reinterpret_cast<uintptr_t>(pRoot24) + 0x28) |= 0x11;
+            *reinterpret_cast<DWORD*>(reinterpret_cast<uintptr_t>(pRoot24) + 0x28) &= ~0x00000001;
+            *reinterpret_cast<DWORD*>(reinterpret_cast<uintptr_t>(pRoot24) + 0x28) |= 0x00000010;
         }
 
         // 2. Hide untextured Text_ToolBar_Pane (+0x74) so no stretched brown box renders
@@ -2330,33 +2359,29 @@ static void RepositionQuickbar(uintptr_t clientBase, void* pUI, int screenW, int
                 pSetPosition(pBtn, slotX, slotY, nullptr, 1);
                 *reinterpret_cast<int*>(reinterpret_cast<uintptr_t>(pBtn) + 0x6C) = slotX;
                 *reinterpret_cast<int*>(reinterpret_cast<uintptr_t>(pBtn) + 0x70) = slotY;
-                *reinterpret_cast<int*>(reinterpret_cast<uintptr_t>(pBtn) + 0x74) = 34;
-                *reinterpret_cast<int*>(reinterpret_cast<uintptr_t>(pBtn) + 0x78) = 34;
-                *reinterpret_cast<DWORD*>(reinterpret_cast<uintptr_t>(pBtn) + 0x28) &= ~0x10;
-                *reinterpret_cast<DWORD*>(reinterpret_cast<uintptr_t>(pBtn) + 0x28) |= 0x01;
+                *reinterpret_cast<int*>(reinterpret_cast<uintptr_t>(pBtn) + 0x74) = 0;
+                *reinterpret_cast<int*>(reinterpret_cast<uintptr_t>(pBtn) + 0x78) = 0;
+                *reinterpret_cast<DWORD*>(reinterpret_cast<uintptr_t>(pBtn) + 0x28) &= ~0x11;
             }
 
-            // Slot static/empty frame icon (+0x0C: Image_IconStatic) - recessed bevel
+            // Slot static/empty frame icon (+0x0C: Image_IconStatic)
+            // Empty slots have no static icon texture assigned, which previously rendered as flat solid white squares.
+            // Clear flags and zero size so the slot shows the authentic textured background housing (pToolbarImg).
             void* pIconStatic = *reinterpret_cast<void**>(slotBase + 12);
             if (pIconStatic && IsValidWidget(clientBase, pIconStatic)) {
-                pSetPosition(pIconStatic, slotX + 1, slotY + 1, nullptr, 0);
-                *reinterpret_cast<int*>(reinterpret_cast<uintptr_t>(pIconStatic) + 0x6C) = slotX + 1;
-                *reinterpret_cast<int*>(reinterpret_cast<uintptr_t>(pIconStatic) + 0x70) = slotY + 1;
-                *reinterpret_cast<int*>(reinterpret_cast<uintptr_t>(pIconStatic) + 0x74) = 32;
-                *reinterpret_cast<int*>(reinterpret_cast<uintptr_t>(pIconStatic) + 0x78) = 32;
-                *reinterpret_cast<DWORD*>(reinterpret_cast<uintptr_t>(pIconStatic) + 0x28) |= 0x13;
-                SetWidgetVisualState(pIconStatic, 3);
+                *reinterpret_cast<DWORD*>(reinterpret_cast<uintptr_t>(pIconStatic) + 0x28) &= ~0x11;
+                *reinterpret_cast<int*>(reinterpret_cast<uintptr_t>(pIconStatic) + 0x74) = 0;
+                *reinterpret_cast<int*>(reinterpret_cast<uintptr_t>(pIconStatic) + 0x78) = 0;
             }
 
             // Slot active ability icon (+0x04: Image_Icon)
+            // Empty slots have no active ability texture assigned.
+            // Clear flags and zero size to prevent flat solid white quad fills and eliminate invalid offset dereferences.
             void* pIcon = *reinterpret_cast<void**>(slotBase + 4);
             if (pIcon && IsValidWidget(clientBase, pIcon)) {
-                pSetPosition(pIcon, slotX + 1, slotY + 1, nullptr, 0);
-                *reinterpret_cast<int*>(reinterpret_cast<uintptr_t>(pIcon) + 0x6C) = slotX + 1;
-                *reinterpret_cast<int*>(reinterpret_cast<uintptr_t>(pIcon) + 0x70) = slotY + 1;
-                *reinterpret_cast<int*>(reinterpret_cast<uintptr_t>(pIcon) + 0x74) = 32;
-                *reinterpret_cast<int*>(reinterpret_cast<uintptr_t>(pIcon) + 0x78) = 32;
-                *reinterpret_cast<DWORD*>(reinterpret_cast<uintptr_t>(pIcon) + 0x28) |= 0x11;
+                *reinterpret_cast<DWORD*>(reinterpret_cast<uintptr_t>(pIcon) + 0x28) &= ~0x11;
+                *reinterpret_cast<int*>(reinterpret_cast<uintptr_t>(pIcon) + 0x74) = 0;
+                *reinterpret_cast<int*>(reinterpret_cast<uintptr_t>(pIcon) + 0x78) = 0;
             }
 
             // Slot number (+0x10: Image_Number)
@@ -2447,20 +2472,14 @@ static void RepositionCompass(uintptr_t clientBase, void* pUI, int screenW, int 
     int curBaseX = *reinterpret_cast<int*>(reinterpret_cast<uintptr_t>(pBase) + 0x6C);
     int curBaseY = *reinterpret_cast<int*>(reinterpret_cast<uintptr_t>(pBase) + 0x70);
 
-    // Left wing: Cyan Operative (+0x94 or +0x98, w=42, h=30)
-    // Symmetrical to Right Wing (center 960 - 80 - 42 = 838, or targetBaseX - 49)
-    void* pBtnLeftBig = *reinterpret_cast<void**>(reinterpret_cast<uintptr_t>(pCtrl27) + 0x94);
-    void* pBtnLeftSmall = *reinterpret_cast<void**>(reinterpret_cast<uintptr_t>(pCtrl27) + 0x98);
-    void* pBtnLeft = (pBtnLeftBig && IsValidWidget(clientBase, pBtnLeftBig)) ? pBtnLeftBig : pBtnLeftSmall;
-    int targetLeftX = (screenW / 2) - 80 - 42; // 838 at 1920p
-    int targetLeftY = targetBaseY + 99;         // 1045 at 1080p
+    // Left wing: Cyan Operative (+0x94, +0x98, +0x9C, w=42, h=30)
+    // Symmetrical to Right Wing (center 960 - 80 - 42 = 838 at 1080p)
+    const int targetLeftX = (screenW / 2) - 80 - 42; // 838 at 1920p
+    const int targetLeftY = targetBaseY + 99;         // 1045 at 1080p
 
     // Right wing: Cell Phone / Mission (+0x8C or +0x90, w=42, h=30)
-    void* pBtnRightBig = *reinterpret_cast<void**>(reinterpret_cast<uintptr_t>(pCtrl27) + 0x8C);
-    void* pBtnRightSmall = *reinterpret_cast<void**>(reinterpret_cast<uintptr_t>(pCtrl27) + 0x90);
-    void* pBtnRight = (pBtnRightBig && IsValidWidget(clientBase, pBtnRightBig)) ? pBtnRightBig : pBtnRightSmall;
-    int targetRightX = (screenW / 2) + 80;     // 1040 at 1920p
-    int targetRightY = targetBaseY + 99;        // 1045 at 1080p
+    const int targetRightX = (screenW / 2) + 80;     // 1040 at 1920p
+    const int targetRightY = targetBaseY + 99;        // 1045 at 1080p
 
     __try {
         g_bAllowControlMove = true;
@@ -2479,40 +2498,37 @@ static void RepositionCompass(uintptr_t clientBase, void* pUI, int screenW, int 
             *reinterpret_cast<DWORD*>(reinterpret_cast<uintptr_t>(pBG) + 0x28) |= 0x11;
         }
 
-        // 3. Left wing: Cyan Operative button (+0x94 / +0x98) [targetLeftX = 838, targetLeftY = 1045]
-        if (pBtnLeft && IsValidWidget(clientBase, pBtnLeft)) {
-            pSetPosition(pBtnLeft, targetLeftX, targetLeftY, nullptr, 1);
-            *reinterpret_cast<int*>(reinterpret_cast<uintptr_t>(pBtnLeft) + 0x6C) = targetLeftX;
-            *reinterpret_cast<int*>(reinterpret_cast<uintptr_t>(pBtnLeft) + 0x70) = targetLeftY;
-            *reinterpret_cast<int*>(reinterpret_cast<uintptr_t>(pBtnLeft) + 0x74) = 42;
-            *reinterpret_cast<int*>(reinterpret_cast<uintptr_t>(pBtnLeft) + 0x78) = 30;
-            *reinterpret_cast<DWORD*>(reinterpret_cast<uintptr_t>(pBtnLeft) + 0x28) |= 0x11;
-        }
-        if (pBtnLeftSmall && pBtnLeftSmall != pBtnLeft && IsValidWidget(clientBase, pBtnLeftSmall)) {
-            pSetPosition(pBtnLeftSmall, targetLeftX, targetLeftY, nullptr, 1);
-            *reinterpret_cast<int*>(reinterpret_cast<uintptr_t>(pBtnLeftSmall) + 0x6C) = targetLeftX;
-            *reinterpret_cast<int*>(reinterpret_cast<uintptr_t>(pBtnLeftSmall) + 0x70) = targetLeftY;
-            *reinterpret_cast<int*>(reinterpret_cast<uintptr_t>(pBtnLeftSmall) + 0x74) = 42;
-            *reinterpret_cast<int*>(reinterpret_cast<uintptr_t>(pBtnLeftSmall) + 0x78) = 30;
-            *reinterpret_cast<DWORD*>(reinterpret_cast<uintptr_t>(pBtnLeftSmall) + 0x28) |= 0x11;
+        // 3. Left wing: Cyan Operative button (+0x94 / +0x98 / +0x9C) [targetLeftX = 838, targetLeftY = 1045]
+        void* leftWidgets[] = {
+            *reinterpret_cast<void**>(reinterpret_cast<uintptr_t>(pCtrl27) + 0x94),
+            *reinterpret_cast<void**>(reinterpret_cast<uintptr_t>(pCtrl27) + 0x98),
+            *reinterpret_cast<void**>(reinterpret_cast<uintptr_t>(pCtrl27) + 0x9C)
+        };
+        for (void* pBtnLeft : leftWidgets) {
+            if (pBtnLeft && IsValidWidget(clientBase, pBtnLeft)) {
+                pSetPosition(pBtnLeft, targetLeftX, targetLeftY, nullptr, 1);
+                *reinterpret_cast<int*>(reinterpret_cast<uintptr_t>(pBtnLeft) + 0x6C) = targetLeftX;
+                *reinterpret_cast<int*>(reinterpret_cast<uintptr_t>(pBtnLeft) + 0x70) = targetLeftY;
+                *reinterpret_cast<int*>(reinterpret_cast<uintptr_t>(pBtnLeft) + 0x74) = 42;
+                *reinterpret_cast<int*>(reinterpret_cast<uintptr_t>(pBtnLeft) + 0x78) = 30;
+                *reinterpret_cast<DWORD*>(reinterpret_cast<uintptr_t>(pBtnLeft) + 0x28) |= 0x11;
+            }
         }
 
         // 4. Right wing: Cell Phone button (+0x8C / +0x90) [targetRightX = 1040, targetRightY = 1045]
-        if (pBtnRight && IsValidWidget(clientBase, pBtnRight)) {
-            pSetPosition(pBtnRight, targetRightX, targetRightY, nullptr, 1);
-            *reinterpret_cast<int*>(reinterpret_cast<uintptr_t>(pBtnRight) + 0x6C) = targetRightX;
-            *reinterpret_cast<int*>(reinterpret_cast<uintptr_t>(pBtnRight) + 0x70) = targetRightY;
-            *reinterpret_cast<int*>(reinterpret_cast<uintptr_t>(pBtnRight) + 0x74) = 42;
-            *reinterpret_cast<int*>(reinterpret_cast<uintptr_t>(pBtnRight) + 0x78) = 30;
-            *reinterpret_cast<DWORD*>(reinterpret_cast<uintptr_t>(pBtnRight) + 0x28) |= 0x11;
-        }
-        if (pBtnRightSmall && pBtnRightSmall != pBtnRight && IsValidWidget(clientBase, pBtnRightSmall)) {
-            pSetPosition(pBtnRightSmall, targetRightX, targetRightY, nullptr, 1);
-            *reinterpret_cast<int*>(reinterpret_cast<uintptr_t>(pBtnRightSmall) + 0x6C) = targetRightX;
-            *reinterpret_cast<int*>(reinterpret_cast<uintptr_t>(pBtnRightSmall) + 0x70) = targetRightY;
-            *reinterpret_cast<int*>(reinterpret_cast<uintptr_t>(pBtnRightSmall) + 0x74) = 42;
-            *reinterpret_cast<int*>(reinterpret_cast<uintptr_t>(pBtnRightSmall) + 0x78) = 30;
-            *reinterpret_cast<DWORD*>(reinterpret_cast<uintptr_t>(pBtnRightSmall) + 0x28) |= 0x11;
+        void* rightWidgets[] = {
+            *reinterpret_cast<void**>(reinterpret_cast<uintptr_t>(pCtrl27) + 0x8C),
+            *reinterpret_cast<void**>(reinterpret_cast<uintptr_t>(pCtrl27) + 0x90)
+        };
+        for (void* pBtnRight : rightWidgets) {
+            if (pBtnRight && IsValidWidget(clientBase, pBtnRight)) {
+                pSetPosition(pBtnRight, targetRightX, targetRightY, nullptr, 1);
+                *reinterpret_cast<int*>(reinterpret_cast<uintptr_t>(pBtnRight) + 0x6C) = targetRightX;
+                *reinterpret_cast<int*>(reinterpret_cast<uintptr_t>(pBtnRight) + 0x70) = targetRightY;
+                *reinterpret_cast<int*>(reinterpret_cast<uintptr_t>(pBtnRight) + 0x74) = 42;
+                *reinterpret_cast<int*>(reinterpret_cast<uintptr_t>(pBtnRight) + 0x78) = 30;
+                *reinterpret_cast<DWORD*>(reinterpret_cast<uintptr_t>(pBtnRight) + 0x28) |= 0x11;
+            }
         }
 
         // 5. Compass toggle buttons: Compass_ButtonHide (+0x84) and Compass_ButtonShow (+0x88)
@@ -2576,7 +2592,7 @@ static void RepositionCombatTactics(uintptr_t clientBase, void* pUI, int screenW
     __try {
         g_bAllowControlMove = true;
 
-        // Neutralize root widget background so no large duel window or grey box renders over the center screen
+        // Neutralize root widget background so no solid white rectangle or duel window covers the posture buttons
         void* pRootWidget = GetControlRootWidget(pInterlock, 0x0E);
         if (pRootWidget && !IsBadReadPtr(pRootWidget, 0x80)) {
             pSetPosition(pRootWidget, startX, btnY, nullptr, 0);
@@ -2584,19 +2600,55 @@ static void RepositionCombatTactics(uintptr_t clientBase, void* pUI, int screenW
             *reinterpret_cast<int*>(reinterpret_cast<uintptr_t>(pRootWidget) + 0x70) = btnY;
             *reinterpret_cast<int*>(reinterpret_cast<uintptr_t>(pRootWidget) + 0x74) = totalW;
             *reinterpret_cast<int*>(reinterpret_cast<uintptr_t>(pRootWidget) + 0x78) = btnH;
-            *reinterpret_cast<DWORD*>(reinterpret_cast<uintptr_t>(pRootWidget) + 0x28) &= ~0x10;
-            *reinterpret_cast<DWORD*>(reinterpret_cast<uintptr_t>(pRootWidget) + 0x28) |= 0x01;
+            *reinterpret_cast<DWORD*>(reinterpret_cast<uintptr_t>(pRootWidget) + 0x28) &= ~0x00000001;
+            *reinterpret_cast<DWORD*>(reinterpret_cast<uintptr_t>(pRootWidget) + 0x28) |= 0x00000010;
         }
 
-        // Retrieve the Combat Posture stance buttons:
-        // 1. Focus / Stance Free (+0x6C, Speed_Button)
+        // Layout container handling for CViewInterlock
+        uintptr_t pInterlockLayout = *reinterpret_cast<uintptr_t*>(reinterpret_cast<uintptr_t>(pInterlock) + 0x50);
+        void* pInterlockLayoutRoot = nullptr;
+        if (pInterlockLayout && !IsBadReadPtr(reinterpret_cast<void*>(pInterlockLayout), 0x30)) {
+            pInterlockLayoutRoot = *reinterpret_cast<void**>(pInterlockLayout + 0x24);
+            if (pInterlockLayoutRoot && IsValidWidget(clientBase, pInterlockLayoutRoot)) {
+                *reinterpret_cast<DWORD*>(reinterpret_cast<uintptr_t>(pInterlockLayoutRoot) + 0x28) &= ~0x00000001;
+                *reinterpret_cast<DWORD*>(reinterpret_cast<uintptr_t>(pInterlockLayoutRoot) + 0x28) |= 0x00000010;
+            }
+        }
+
+        // Retrieve and persist the Combat Posture stance buttons:
+        // 1. Focus / Stance Free (+0x6C, Interlock_Speed_Button - Blue/Cyan icon)
+        static void* s_savedBtnFocus = nullptr;
+        static void* s_savedBtnPower = nullptr;
+        static void* s_savedBtnAttack = nullptr;
+        static void* s_savedBtnDefense = nullptr;
+
         void* pBtnFocus = *reinterpret_cast<void**>(reinterpret_cast<uintptr_t>(pInterlock) + 0x6C);
-        // 2. Power (+0x70, Power_Button - Red fist icon)
+        if (pBtnFocus && IsValidWidget(clientBase, pBtnFocus)) s_savedBtnFocus = pBtnFocus;
+        else if (s_savedBtnFocus && IsValidWidget(clientBase, s_savedBtnFocus)) pBtnFocus = s_savedBtnFocus;
+
+        // 2. Power (+0x70, Interlock_Power_Button - Red fist icon)
         void* pBtnPower = *reinterpret_cast<void**>(reinterpret_cast<uintptr_t>(pInterlock) + 0x70);
-        // 3. Attack / Grab (+0x74, Grab_Button - Green claw icon)
+        if (pBtnPower && IsValidWidget(clientBase, pBtnPower)) s_savedBtnPower = pBtnPower;
+        else if (s_savedBtnPower && IsValidWidget(clientBase, s_savedBtnPower)) pBtnPower = s_savedBtnPower;
+
+        // 3. Attack / Grab (+0x74, Interlock_Grab_Button - Green claw icon)
         void* pBtnAttack = *reinterpret_cast<void**>(reinterpret_cast<uintptr_t>(pInterlock) + 0x74);
-        // 4. Defense / Block (+0x80, Block_Button - Yellow shield/hand icon)
+        if (pBtnAttack && IsValidWidget(clientBase, pBtnAttack)) s_savedBtnAttack = pBtnAttack;
+        else if (s_savedBtnAttack && IsValidWidget(clientBase, s_savedBtnAttack)) pBtnAttack = s_savedBtnAttack;
+
+        // 4. Defense / Block (+0x80, Interlock_Block_Button / +0x7C Withdraw - Yellow shield/hand icon)
         void* pBtnDefense = *reinterpret_cast<void**>(reinterpret_cast<uintptr_t>(pInterlock) + 0x80);
+        if (!pBtnDefense || !IsValidWidget(clientBase, pBtnDefense)) {
+            pBtnDefense = *reinterpret_cast<void**>(reinterpret_cast<uintptr_t>(pInterlock) + 0x7C);
+        }
+        if (pBtnDefense && IsValidWidget(clientBase, pBtnDefense)) s_savedBtnDefense = pBtnDefense;
+        else if (s_savedBtnDefense && IsValidWidget(clientBase, s_savedBtnDefense)) pBtnDefense = s_savedBtnDefense;
+
+        static int s_tacticsLogCount = 0;
+        if (s_tacticsLogCount++ < 3) {
+            Log("[mxohax] RepositionCombatTactics: pInterlock=0x%p, pRootWidget=0x%p, focus=0x%p, power=0x%p, grab=0x%p, block=0x%p\n",
+                pInterlock, pRootWidget, pBtnFocus, pBtnPower, pBtnAttack, pBtnDefense);
+        }
 
         void* btns[4] = { pBtnFocus, pBtnPower, pBtnAttack, pBtnDefense };
         StanceType stances[4] = { STANCE_FREE, STANCE_POWER, STANCE_GRAB, STANCE_WITHDRAW };
@@ -2605,7 +2657,7 @@ static void RepositionCombatTactics(uintptr_t clientBase, void* pUI, int screenW
             void* pBtn = btns[i];
             if (pBtn && IsValidWidget(clientBase, pBtn)) {
                 int posX = startX + i * (btnW + btnGap);
-                pSetPosition(pBtn, posX, btnY, nullptr, 0);
+                pSetPosition(pBtn, posX, btnY, nullptr, 1);
                 *reinterpret_cast<int*>(reinterpret_cast<uintptr_t>(pBtn) + 0x6C) = posX;
                 *reinterpret_cast<int*>(reinterpret_cast<uintptr_t>(pBtn) + 0x70) = btnY;
                 *reinterpret_cast<int*>(reinterpret_cast<uintptr_t>(pBtn) + 0x74) = btnW;
@@ -2617,11 +2669,13 @@ static void RepositionCombatTactics(uintptr_t clientBase, void* pUI, int screenW
 
         // Hide all duel-specific widgets (timer, vs cards, bash fx, background boxes, style buttons)
         // so that floating duel widgets at the top center are 100% eliminated!
-        for (uintptr_t off = 0x54; off <= 0x350; off += 4) {
-            if (off == 0x6C || off == 0x70 || off == 0x74 || off == 0x80) continue; // Keep the 4 stance buttons!
+        for (uintptr_t off = 0x04; off <= 0x350; off += 4) {
+            if (off == 0x50 || off == 0x6C || off == 0x70 || off == 0x74 || off == 0x7C || off == 0x80) continue; // Keep layout and 4 stance buttons!
             void* pW = *reinterpret_cast<void**>(reinterpret_cast<uintptr_t>(pInterlock) + off);
-            if (pW && pW != pBtnFocus && pW != pBtnPower && pW != pBtnAttack && pW != pBtnDefense && pW != pRootWidget && IsValidWidget(clientBase, pW)) {
-                *reinterpret_cast<DWORD*>(reinterpret_cast<uintptr_t>(pW) + 0x28) &= ~0x00000001;
+            if (pW && pW != pBtnFocus && pW != pBtnPower && pW != pBtnAttack && pW != pBtnDefense &&
+                pW != pRootWidget && pW != pInterlock && pW != reinterpret_cast<void*>(pInterlockLayout) &&
+                pW != pInterlockLayoutRoot && IsValidWidget(clientBase, pW)) {
+                *reinterpret_cast<DWORD*>(reinterpret_cast<uintptr_t>(pW) + 0x28) &= ~0x00000011;
                 *reinterpret_cast<int*>(reinterpret_cast<uintptr_t>(pW) + 0x74) = 0;
                 *reinterpret_cast<int*>(reinterpret_cast<uintptr_t>(pW) + 0x78) = 0;
             }
@@ -2818,7 +2872,10 @@ static void SetTacticsStance(uintptr_t clientBase, StanceType newStance) {
             void* pBtnPower = *reinterpret_cast<void**>(reinterpret_cast<uintptr_t>(pInterlock) + 0x70);
             void* pBtnGrab  = *reinterpret_cast<void**>(reinterpret_cast<uintptr_t>(pInterlock) + 0x74);
             void* pBtnBlock = *reinterpret_cast<void**>(reinterpret_cast<uintptr_t>(pInterlock) + 0x80);
-            if (pBtnFree)  SetWidgetVisualState(pBtnFree,  (newStance == STANCE_FREE)  ? 4 : 0);
+            if (!pBtnBlock || !IsValidWidget(clientBase, pBtnBlock)) {
+                pBtnBlock = *reinterpret_cast<void**>(reinterpret_cast<uintptr_t>(pInterlock) + 0x7C);
+            }
+            if (pBtnFree)  SetWidgetVisualState(pBtnFree,  (newStance == STANCE_FREE || newStance == STANCE_SPEED) ? 4 : 0);
             if (pBtnPower) SetWidgetVisualState(pBtnPower, (newStance == STANCE_POWER) ? 4 : 0);
             if (pBtnGrab)  SetWidgetVisualState(pBtnGrab,  (newStance == STANCE_GRAB)  ? 4 : 0);
             if (pBtnBlock) SetWidgetVisualState(pBtnBlock, (newStance == STANCE_WITHDRAW) ? 4 : 0);
@@ -3050,6 +3107,7 @@ static void ExecuteHudButtonAction(uintptr_t clientBase, HudButtonId btnId, int 
         case HUD_BTN_COMPASS: {
             Log("[mxohax] UI BUTTON CLICK: Compass dial clicked at (%d, %d) -> Resetting camera yaw to player facing\n", mx, my);
             g_camYaw = g_playerYaw;
+            g_camPitch = 0.17f;
             break;
         }
         case HUD_BTN_OPTIONS: {
@@ -4100,48 +4158,28 @@ static void __fastcall DetourFrameTick(void* pThis, void* /*edx*/) {
         *reinterpret_cast<BYTE*>(clientBase + 0x008E3590) = 0;
         *reinterpret_cast<BYTE*>(clientBase + 0x008AACC8) = 0;
         *reinterpret_cast<BYTE*>(clientBase + 0x008AACC9) = 0;
+        *reinterpret_cast<BYTE*>(clientBase + 0x0084A02C) = 0; // Lens flare active flag
         *reinterpret_cast<float*>(clientBase + 0x008E357C) = 0.0f;
 
         // Tame Blinding "Nuclear Glare" & Auto-Inflating Bloom (Restore Launch-Era 2005 Matrix Noir Atmosphere)
-        // 1. Cone downlight on character and concourse (offsets +0x30 and +0x2C)
-        *reinterpret_cast<float*>(clientBase + 0x008BAE74 + 0x30) = 0.0f;
-        *reinterpret_cast<float*>(clientBase + 0x008BAE74 + 0x2C) = 0.0f;
-
-        // 2. Light glare alpha: 0.0f
-        *reinterpret_cast<float*>(clientBase + 0x008A9B44 + 0x30) = 0.0f;
-        *reinterpret_cast<float*>(clientBase + 0x008A9B44 + 0x2C) = 0.0f;
-
-        // 3. World renderer lens flare scale: 0.0f
-        *reinterpret_cast<float*>(clientBase + 0x00909694 + 0x30) = 0.0f;
-        *reinterpret_cast<float*>(clientBase + 0x00909694 + 0x2C) = 0.0f;
-
-        // 4. Glow bright factor (matrix noir high contrast: 0.25f)
-        *reinterpret_cast<float*>(clientBase + 0x008A3390 + 0x30) = 0.25f;
-        *reinterpret_cast<float*>(clientBase + 0x008A3390 + 0x2C) = 0.25f;
-
-        // 5. Glow AutoSetVals (disable dynamic bloom blowouts)
-        *reinterpret_cast<float*>(clientBase + 0x008A33C4 + 0x30) = 0.0f;
-        *reinterpret_cast<float*>(clientBase + 0x008A33C4 + 0x2C) = 0.0f;
-
-        // 6. Glow outdoor day bright factor: 0.25f (tames outdoor sky glare)
-        *reinterpret_cast<float*>(clientBase + 0x008A350C + 0x30) = 0.25f;
-        *reinterpret_cast<float*>(clientBase + 0x008A350C + 0x2C) = 0.25f;
-
-        // 7. Glow blur scale (tame blurry washout): 0.0f
-        *reinterpret_cast<float*>(clientBase + 0x008A335C + 0x30) = 0.0f;
-        *reinterpret_cast<float*>(clientBase + 0x008A335C + 0x2C) = 0.0f;
-        *reinterpret_cast<float*>(clientBase + 0x008A34D8 + 0x30) = 0.0f;
-        *reinterpret_cast<float*>(clientBase + 0x008A34D8 + 0x2C) = 0.0f;
-
-        // 8. Glow subval thresholds (0.8f prevents background sky bloom blowout)
-        *reinterpret_cast<float*>(clientBase + 0x008A3328 + 0x30) = 0.8f;
-        *reinterpret_cast<float*>(clientBase + 0x008A3328 + 0x2C) = 0.8f;
-        *reinterpret_cast<float*>(clientBase + 0x008A34A4 + 0x30) = 0.8f;
-        *reinterpret_cast<float*>(clientBase + 0x008A34A4 + 0x2C) = 0.8f;
-
-        // 9. DL_FloorHeight (track player elevation)
-        *reinterpret_cast<float*>(clientBase + 0x00908C90 + 0x30) = (float)g_playerY;
-        *reinterpret_cast<float*>(clientBase + 0x00908C90 + 0x2C) = (float)g_playerY;
+        // Verified exact CVar object addresses in client.dll:
+        SetCVarFloat(clientBase + 0x008A9B44, 0.0f); // FX_Light_Glare_Alpha (eliminates blinding solar blowout)
+        SetCVarFloat(clientBase + 0x008A9C18, 0.0f); // FX_Light_Glare_HalfSize (eliminates blinding solar disk)
+        SetCVarFloat(clientBase + 0x008A9BBC, 0.0f); // FX_Light_Glare_Dst_0
+        SetCVarFloat(clientBase + 0x008A9C54, 0.0f); // FX_Light_Glare_Dst_1
+        SetCVarFloat(clientBase + 0x00909694, 0.0f); // WR_LensFlare_Scale (zero lens flare blinding)
+        SetCVarFloat(clientBase + 0x009096C8, 0.0f); // WR_LensFlare_InOut
+        SetCVarFloat(clientBase + 0x009096FC, 0.0f); // WR_LensFlare_Y_Limit
+        SetCVarFloat(clientBase + 0x0090962C, 0.0f); // WR_SkyBox_Base_Sprite_Size (zero sun sprite size)
+        SetCVarFloat(clientBase + 0x008A2FAC, 0.0f); // ScreenFilters_Enable (disable bloom / glow screen filters)
+        SetCVarFloat(clientBase + 0x008A3390, 0.0f); // ScreenFilters_Screen_Glow_BrightFactor (zero bloom blowout)
+        SetCVarFloat(clientBase + 0x008A33C4, 0.0f); // ScreenFilters_Screen_Glow_AutoSetVals (disable dynamic bloom blowouts)
+        SetCVarFloat(clientBase + 0x008A350C, 0.0f); // ScreenFilters_Screen_Glow_Trg_OutDoors_Day_BrightFactor (tames outdoor sky glare)
+        SetCVarFloat(clientBase + 0x008A335C, 0.0f); // ScreenFilters_Screen_Glow_BlurScale (tame blurry washout)
+        SetCVarFloat(clientBase + 0x008A34D8, 0.0f); // ScreenFilters_Screen_Glow_Trg_OutDoors_Day_BlurScale
+        SetCVarFloat(clientBase + 0x008A3328, 1.0f); // ScreenFilters_Screen_Glow_SubVal (prevents background sky bloom blowout)
+        SetCVarFloat(clientBase + 0x008A34A4, 1.0f); // ScreenFilters_Screen_Glow_Trg_OutDoors_Day_SubVal
+        SetCVarFloat(clientBase + 0x00908C90, (float)g_playerY); // DL_FloorHeight (track player elevation)
 
         // Re-enforce HUD frame positions periodically (every 30 ticks ~ 0.5s) to guarantee zero layout drift
         if (s_inWorldTicks % 30 == 0) {
@@ -4806,12 +4844,15 @@ static void __fastcall Safe_Interlock_Grab_Button(void* pThis, void* /*edx*/) {
 }
 
 static void __fastcall Safe_Interlock_Block_Button(void* pThis, void* /*edx*/) {
-    Log("[mxohax] Safe_Interlock_Block_Button (+0x80 Block/Defense) called (pThis=0x%p)\n", pThis);
+    Log("[mxohax] Safe_Interlock_Block_Button (+0x80/+0x7C Block/Defense) called (pThis=0x%p)\n", pThis);
     g_currentStance = STANCE_WITHDRAW;
     if (!pThis || IsBadReadPtr(pThis, 0x100)) return;
     void* pBtn = *reinterpret_cast<void**>(reinterpret_cast<uintptr_t>(pThis) + 0x80);
     if (!pBtn || IsBadReadPtr(pBtn, sizeof(void*))) {
-        Log("[mxohax] Safe_Interlock_Block_Button: button ptr (+0x80) is null/invalid\n");
+        pBtn = *reinterpret_cast<void**>(reinterpret_cast<uintptr_t>(pThis) + 0x7C);
+    }
+    if (!pBtn || IsBadReadPtr(pBtn, sizeof(void*))) {
+        Log("[mxohax] Safe_Interlock_Block_Button: button ptr (+0x80/+0x7C) is null/invalid\n");
         return;
     }
     void* vtbl = *reinterpret_cast<void**>(pBtn);
@@ -5263,6 +5304,107 @@ static void ApplyClientPatches(HMODULE hClient) {
         VirtualProtect(pClientQuitPatch, 3, oldProt, &oldProt);
         FlushInstructionCache(GetCurrentProcess(), pClientQuitPatch, 3);
         Log("[mxohax] SUCCESS: Patched client.dll + 0x000EAAC0 (ret 0) to permanently neutralize client exit loop!\n");
+    }
+
+    // Permanently neutralize lens flare and solar blowout / nuclear light glare
+    LPVOID pLensFlareRender = reinterpret_cast<LPVOID>(clientBase + 0x0014A250);
+    if (VirtualProtect(pLensFlareRender, 3, PAGE_EXECUTE_READWRITE, &oldProt)) {
+        BYTE ret4[3] = { 0xC2, 0x04, 0x00 }; // ret 4
+        memcpy(pLensFlareRender, ret4, 3);
+        VirtualProtect(pLensFlareRender, 3, oldProt, &oldProt);
+        FlushInstructionCache(GetCurrentProcess(), pLensFlareRender, 3);
+        Log("[mxohax] SUCCESS: Patched client.dll + 0x0014A250 (ret 4) to permanently neutralize CLensFlare::Render!\n");
+    }
+
+    LPVOID pLensFlareHasFlare = reinterpret_cast<LPVOID>(clientBase + 0x0014A0A0);
+    if (VirtualProtect(pLensFlareHasFlare, 3, PAGE_EXECUTE_READWRITE, &oldProt)) {
+        BYTE xorRet[3] = { 0x31, 0xC0, 0xC3 }; // xor eax, eax; ret
+        memcpy(pLensFlareHasFlare, xorRet, 3);
+        VirtualProtect(pLensFlareHasFlare, 3, oldProt, &oldProt);
+        FlushInstructionCache(GetCurrentProcess(), pLensFlareHasFlare, 3);
+        Log("[mxohax] SUCCESS: Patched client.dll + 0x0014A0A0 (xor eax, eax; ret) to bypass lens flare rendering!\n");
+    }
+
+    LPVOID pLightGlareRender = reinterpret_cast<LPVOID>(clientBase + 0x002412B0);
+    if (VirtualProtect(pLightGlareRender, 3, PAGE_EXECUTE_READWRITE, &oldProt)) {
+        BYTE ret4[3] = { 0xC2, 0x04, 0x00 }; // ret 4
+        memcpy(pLightGlareRender, ret4, 3);
+        VirtualProtect(pLightGlareRender, 3, oldProt, &oldProt);
+        FlushInstructionCache(GetCurrentProcess(), pLightGlareRender, 3);
+        Log("[mxohax] SUCCESS: Patched client.dll + 0x002412B0 (ret 4) to permanently neutralize CLightGlareFX::Render!\n");
+    }
+
+    LPVOID pSkySprite1 = reinterpret_cast<LPVOID>(clientBase + 0x003F1410);
+    if (VirtualProtect(pSkySprite1, 3, PAGE_EXECUTE_READWRITE, &oldProt)) {
+        BYTE retC[3] = { 0xC2, 0x0C, 0x00 }; // ret 0xC
+        memcpy(pSkySprite1, retC, 3);
+        VirtualProtect(pSkySprite1, 3, oldProt, &oldProt);
+        FlushInstructionCache(GetCurrentProcess(), pSkySprite1, 3);
+        Log("[mxohax] SUCCESS: Patched client.dll + 0x003F1410 (ret 0xC) to neutralize sky sun sprites!\n");
+    }
+
+    LPVOID pSkySprite2 = reinterpret_cast<LPVOID>(clientBase + 0x003F1250);
+    if (VirtualProtect(pSkySprite2, 3, PAGE_EXECUTE_READWRITE, &oldProt)) {
+        BYTE retC[3] = { 0xC2, 0x0C, 0x00 }; // ret 0xC
+        memcpy(pSkySprite2, retC, 3);
+        VirtualProtect(pSkySprite2, 3, oldProt, &oldProt);
+        FlushInstructionCache(GetCurrentProcess(), pSkySprite2, 3);
+        Log("[mxohax] SUCCESS: Patched client.dll + 0x003F1250 (ret 0xC) to neutralize sky sun corona!\n");
+    }
+
+    LPVOID pSkyBoxLensFlare = reinterpret_cast<LPVOID>(clientBase + 0x003F21D0);
+    if (VirtualProtect(pSkyBoxLensFlare, 1, PAGE_EXECUTE_READWRITE, &oldProt)) {
+        BYTE retInst = 0xC3; // ret
+        memcpy(pSkyBoxLensFlare, &retInst, 1);
+        VirtualProtect(pSkyBoxLensFlare, 1, oldProt, &oldProt);
+        FlushInstructionCache(GetCurrentProcess(), pSkyBoxLensFlare, 1);
+        Log("[mxohax] SUCCESS: Patched client.dll + 0x003F21D0 (ret) to permanently neutralize SkyBox::RenderLensFlare!\n");
+    }
+
+    LPVOID pSkyBoxLensFlareImpl = reinterpret_cast<LPVOID>(clientBase + 0x003F1DA0);
+    if (VirtualProtect(pSkyBoxLensFlareImpl, 3, PAGE_EXECUTE_READWRITE, &oldProt)) {
+        BYTE ret8[3] = { 0xC2, 0x08, 0x00 }; // ret 8
+        memcpy(pSkyBoxLensFlareImpl, ret8, 3);
+        VirtualProtect(pSkyBoxLensFlareImpl, 3, oldProt, &oldProt);
+        FlushInstructionCache(GetCurrentProcess(), pSkyBoxLensFlareImpl, 3);
+        Log("[mxohax] SUCCESS: Patched client.dll + 0x003F1DA0 (ret 8) to neutralize SkyBox lens flare geometry builder!\n");
+    }
+
+    LPVOID pRenderAllLightGlares = reinterpret_cast<LPVOID>(clientBase + 0x000E1140);
+    if (VirtualProtect(pRenderAllLightGlares, 1, PAGE_EXECUTE_READWRITE, &oldProt)) {
+        BYTE retInst = 0xC3; // ret
+        memcpy(pRenderAllLightGlares, &retInst, 1);
+        VirtualProtect(pRenderAllLightGlares, 1, oldProt, &oldProt);
+        FlushInstructionCache(GetCurrentProcess(), pRenderAllLightGlares, 1);
+        Log("[mxohax] SUCCESS: Patched client.dll + 0x000E1140 (ret) to neutralize RenderAllLightGlares!\n");
+    }
+
+    LPVOID pScreenFXRender = reinterpret_cast<LPVOID>(clientBase + 0x00240351);
+    if (VirtualProtect(pScreenFXRender, 6, PAGE_EXECUTE_READWRITE, &oldProt)) {
+        BYTE jmpCleanup[6] = { 0xE9, 0x4D, 0x02, 0x00, 0x00, 0x90 }; // jmp 0x102405a3; nop
+        memcpy(pScreenFXRender, jmpCleanup, 6);
+        VirtualProtect(pScreenFXRender, 6, oldProt, &oldProt);
+        FlushInstructionCache(GetCurrentProcess(), pScreenFXRender, 6);
+        Log("[mxohax] SUCCESS: Patched client.dll + 0x00240351 (jmp) to safely bypass ScreenFX glare quad rendering!\n");
+    }
+
+    LPVOID pScreenFiltersRender = reinterpret_cast<LPVOID>(clientBase + 0x001A7130);
+    if (VirtualProtect(pScreenFiltersRender, 5, PAGE_EXECUTE_READWRITE, &oldProt)) {
+        BYTE xorRet4[5] = { 0x31, 0xC0, 0xC2, 0x04, 0x00 }; // xor eax, eax; ret 4
+        memcpy(pScreenFiltersRender, xorRet4, 5);
+        VirtualProtect(pScreenFiltersRender, 5, oldProt, &oldProt);
+        FlushInstructionCache(GetCurrentProcess(), pScreenFiltersRender, 5);
+        Log("[mxohax] SUCCESS: Patched client.dll + 0x001A7130 (xor eax, eax; ret 4) to neutralize ScreenFilters bloom rendering!\n");
+    }
+
+    LPVOID pDaylightSkyPaneColor = reinterpret_cast<LPVOID>(clientBase + 0x003F16A8);
+    if (VirtualProtect(pDaylightSkyPaneColor, 7, PAGE_EXECUTE_READWRITE, &oldProt)) {
+        // C7 45 FC 14 22 14 00 -> mov dword ptr [ebp - 4], 0x00142214 (authentic Matrix noir green)
+        BYTE noirGreen[7] = { 0xC7, 0x45, 0xFC, 0x14, 0x22, 0x14, 0x00 };
+        memcpy(pDaylightSkyPaneColor, noirGreen, 7);
+        VirtualProtect(pDaylightSkyPaneColor, 7, oldProt, &oldProt);
+        FlushInstructionCache(GetCurrentProcess(), pDaylightSkyPaneColor, 7);
+        Log("[mxohax] SUCCESS: Patched client.dll + 0x003F16A8 to Matrix noir green atmosphere (0x00142214)!\n");
     }
 
     // Neutralize active dragging and resizing globals
