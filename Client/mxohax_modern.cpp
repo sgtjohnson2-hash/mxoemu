@@ -29,6 +29,23 @@ static void Log(const char* fmt, ...) {
     fclose(f);
 }
 
+static inline bool IsSafeReadPointer(const void* ptr, size_t size) {
+    if (!ptr || (uintptr_t)ptr < 0x10000 || (uintptr_t)ptr >= 0x7FFE0000) return false;
+    MEMORY_BASIC_INFORMATION mbi;
+    if (VirtualQuery(ptr, &mbi, sizeof(mbi)) == 0) return false;
+    if (mbi.State != MEM_COMMIT) return false;
+    if (mbi.Protect & (PAGE_NOACCESS | PAGE_GUARD)) return false;
+    uintptr_t end = (uintptr_t)ptr + size;
+    uintptr_t regionEnd = (uintptr_t)mbi.BaseAddress + mbi.RegionSize;
+    if (end > regionEnd) {
+        return IsSafeReadPointer((const void*)regionEnd, end - regionEnd);
+    }
+    return true;
+}
+
+#undef IsBadReadPtr
+#define IsBadReadPtr(ptr, sz) (!IsSafeReadPointer(ptr, sz))
+
 static LONG WINAPI CrashHandler(PEXCEPTION_POINTERS pExc) {
     if (pExc && pExc->ExceptionRecord) {
         DWORD code = pExc->ExceptionRecord->ExceptionCode;
@@ -39,6 +56,17 @@ static LONG WINAPI CrashHandler(PEXCEPTION_POINTERS pExc) {
             uintptr_t clientBase = (uintptr_t)hClient;
             HMODULE hMatrix = GetModuleHandleA("matrix.exe");
             uintptr_t matrixBase = (uintptr_t)hMatrix;
+            HMODULE hSelf = GetModuleHandleA("mxohax_modern.dll");
+            uintptr_t selfBase = (uintptr_t)hSelf;
+
+            bool isGameCrash = false;
+            if (clientBase && (uintptr_t)addr >= clientBase && (uintptr_t)addr < clientBase + 0x1000000) isGameCrash = true;
+            if (matrixBase && (uintptr_t)addr >= matrixBase && (uintptr_t)addr < matrixBase + 0x1000000) isGameCrash = true;
+            if (selfBase && (uintptr_t)addr >= selfBase && (uintptr_t)addr < selfBase + 0x100000) isGameCrash = true;
+
+            if (!isGameCrash) {
+                return EXCEPTION_CONTINUE_SEARCH;
+            }
 
             Log("[mxohax] !!! CRASH EXCEPTION 0x%08X at 0x%p !!!\n", code, addr);
             if (clientBase && (uintptr_t)addr >= clientBase && (uintptr_t)addr < clientBase + 0x1000000) {
@@ -664,6 +692,7 @@ static const DWORD s_hudControlIds[] = {
     0x23, // Chat Tabs (Bottom-Left)
     0x03, // Chat Toolbar / Input (Bottom-Left)
     0x27, // Compass (Bottom-Center)
+    0x0E, // Combat Tactics Bar (4 Combat Posture Buttons docked above Compass)
     0x4D  // Latency Meter (Bottom-Right)
 };
 
@@ -1665,6 +1694,9 @@ static void ApplyOperativeAppearance(uintptr_t clientBase, void* pPlayer) {
 // Module 6: Dynamic Collision Raycasting, Ground Elevation & Locomotion Physics
 // ============================================================================
 static const double SPAWN_GROUND_ELEVATION = 603.5; // Calibrated ground elevation flush with Slums concourse pavement tiles (zero sinking or floating)
+static double g_playerX = 16710.0;
+static double g_playerY = SPAWN_GROUND_ELEVATION;
+static double g_playerZ = 3230.0;
 
 struct CollisionRaycastHit {
     bool   bHit;
@@ -1717,40 +1749,63 @@ static bool CastDynamicWorldRay(uintptr_t clientBase, double posX, double startY
 }
 
 static double GetCalibratedGroundElevation(double x, double z) {
-    // 1. High-precision continuous surface model for MegaCity Slums Sector
-    // Zone A: Elevated platform / overpass concourse plaza (where operative spawns at 16710, 3230)
-    // Full concourse plaza runs across X: 16400 to 17250, Z: 2400 to 3720
-    if (x >= 16400.0 && x <= 17250.0 && z >= 2400.0 && z <= 3720.0) {
-        return SPAWN_GROUND_ELEVATION; // True pavement tile surface (603.5, soles flush against concrete mesh, zero floating or sinking)
-    }
-
-    // Zone C1: South ramp / stairs transition leading down to street level
-    if (z >= 2100.0 && z < 2400.0 && x >= 16400.0 && x <= 17250.0) {
-        double t = (2400.0 - z) / 300.0;
-        return SPAWN_GROUND_ELEVATION - t * (SPAWN_GROUND_ELEVATION - 572.0); // Smooth continuous ramp transition down to 572.0
-    }
-
-    // Zone C2: North ramp / stairs transition leading down to church / street level
-    if (z > 3720.0 && z <= 3950.0 && x >= 16400.0 && x <= 17250.0) {
-        double t = (z - 3720.0) / 230.0;
-        return SPAWN_GROUND_ELEVATION - t * (SPAWN_GROUND_ELEVATION - 572.0); // Smooth continuous ramp transition down to 572.0
-    }
-
-    // 2. Dynamic collision raycasting against active 3D world geometry for unmapped roaming zones
+    // 1. Dynamic continuous collision raycasting against active 3D sector geometry
     HMODULE hClient = GetModuleHandleA("client.dll");
     if (hClient) {
         CollisionRaycastHit hit;
-        if (CastDynamicWorldRay(reinterpret_cast<uintptr_t>(hClient), x, 750.0, z, 350.0, hit)) {
-            return hit.hitY;
+        double probeStartY = (g_playerY > 500.0 && g_playerY < 1200.0) ? (g_playerY + 40.0) : 750.0;
+        if (CastDynamicWorldRay(reinterpret_cast<uintptr_t>(hClient), x, probeStartY, z, 450.0, hit)) {
+            if (hit.bHit && hit.hitY >= 500.0 && hit.hitY <= 900.0) {
+                return hit.hitY;
+            }
         }
     }
-    // Zone D: Church courtyard and street sidewalk / roadway level
-    return 572.0; // Street sidewalk level
+
+    // 2. High-precision continuous polygon collision mesh model for MegaCity Slums Sector
+    // Zone A: Concourse curbs and perimeter edges (elevated curb lip of +1.0 units)
+    bool isConcourseCurb = (x >= 16400.0 && x <= 17250.0 && z >= 2400.0 && z <= 3720.0) &&
+                           ((x <= 16425.0 || x >= 17225.0) || (z <= 2420.0 || z >= 3700.0));
+    if (isConcourseCurb) {
+        return SPAWN_GROUND_ELEVATION + 1.0; // 604.5 curb lip
+    }
+
+    // Zone B: Elevated overpass concourse plaza walkway
+    if (x >= 16400.0 && x <= 17250.0 && z >= 2400.0 && z <= 3720.0) {
+        return SPAWN_GROUND_ELEVATION; // 603.5 concourse tile surface
+    }
+
+    // Zone C1: South stairs & ramp transition to street level (Z: 2100 to 2400)
+    // Modeled with discrete stair treads (run = 15.0 units, rise = 1.575 units)
+    if (z >= 2100.0 && z < 2400.0 && x >= 16400.0 && x <= 17250.0) {
+        double distFromTop = 2400.0 - z;
+        int stepIdx = (int)(distFromTop / 15.0);
+        if (stepIdx > 19) stepIdx = 19;
+        return SPAWN_GROUND_ELEVATION - (stepIdx * 1.575); // Steps down smoothly from 603.5 to 572.0
+    }
+
+    // Zone C2: North church stairs transition to street level (Z: 3720 to 3950)
+    // Modeled with discrete stair treads (run = 15.3 units, rise = 2.1 units)
+    if (z > 3720.0 && z <= 3950.0 && x >= 16400.0 && x <= 17250.0) {
+        double distFromTop = z - 3720.0;
+        int stepIdx = (int)(distFromTop / 15.3);
+        if (stepIdx > 14) stepIdx = 14;
+        return SPAWN_GROUND_ELEVATION - (stepIdx * 2.1); // Steps down smoothly from 603.5 to 572.0
+    }
+
+    // Zone D1: Church entrance steps and courtyard (Z > 3950)
+    if (z > 3950.0 && x >= 16650.0 && x <= 16850.0) {
+        return 576.0; // Church porch elevation (+4.0 above street sidewalk)
+    }
+
+    // Zone D2: Street sidewalk (572.0) vs Street asphalt roadway (570.5)
+    bool isSidewalk = (x < 16550.0 || x > 17100.0 || z < 2150.0 || (z > 3650.0 && z < 4000.0));
+    if (isSidewalk) {
+        return 572.0; // Street sidewalk level
+    }
+
+    return 570.5; // Street roadway asphalt level
 }
 
-static double g_playerX = 16710.0;
-static double g_playerY = SPAWN_GROUND_ELEVATION;
-static double g_playerZ = 3230.0;
 static float  g_playerYaw = 0.0f; // Facing North (+Z)
 static double g_velY = 0.0;
 static bool   g_isJumping = false;
@@ -2052,6 +2107,21 @@ static HudButtonId HitTestHudButton(int x, int y, int screenW = 1920, int screen
     }
 
     // 2. Bottom-Center: Compass Dial & Satellite Wings (0x27)
+    // 2a. 4 Combat Posture Buttons docked directly above Compass ring (Focus, Power, Attack, Defense)
+    const int compassTopY = 1080 - 134; // 946
+    const int postureY = compassTopY - 33; // 913
+    if (canY >= postureY - 2 && canY <= postureY + 34) {
+        const int totalW = (4 * 32) + (3 * 2); // 134
+        const int startX = 960 - (totalW / 2); // 893
+        if (canX >= startX && canX <= startX + totalW) {
+            int idx = (canX - startX) / (32 + 2);
+            if (idx == 0) return HUD_BTN_TACTIC_FREE;     // Focus / Free (Blue)
+            if (idx == 1) return HUD_BTN_TACTIC_POWER;    // Power (Red)
+            if (idx == 2) return HUD_BTN_TACTIC_GRAB;     // Attack / Grab (Green)
+            if (idx >= 3) return HUD_BTN_TACTIC_WITHDRAW; // Defense / Withdraw (Yellow)
+        }
+    }
+
     // Left Wing (Character Status button):
     if (canY >= 950 && canY <= 1070 && canX >= 835 && canX <= 915) {
         return HUD_BTN_CHAR_STATUS;
@@ -2161,7 +2231,7 @@ static void RepositionQuickbar(uintptr_t clientBase, void* pUI, int screenW, int
     const int qbW = 428;
     const int qbH = 50;
     const int qbX = (screenW - qbW) / 2;
-    const int qbY = screenH - 186;
+    const int qbY = screenH - 225;
 
     EnforceControlRect(clientBase, pUI, 0x24, qbX, qbY, qbW, qbH);
 
@@ -2213,13 +2283,14 @@ static void RepositionQuickbar(uintptr_t clientBase, void* pUI, int screenW, int
         }
 
         // 3. Position all slot buttons 1..10 cleanly into Quickbar slot coordinates (+0xD0 + i * 0x1C)
-        // AND position each slot's icon (+0x04) and slot number (+0x0C)
+        // Ensure recessed grid borders (Toolbar_EmptySlot_REF at slotBase + 8) and ability icons render authentically
         for (int i = 0; i < 10; ++i) {
             uintptr_t slotBase = reinterpret_cast<uintptr_t>(pCtrl24) + 0xD0 + (i * 0x1C);
             void** ppBtn = reinterpret_cast<void**>(slotBase);
             int slotX = qbX + 36 + (i * 37) + 2;
             int slotY = qbY + 8;
 
+            // Slot button
             if (ppBtn && *ppBtn && IsValidWidget(clientBase, *ppBtn)) {
                 void* pBtn = *ppBtn;
                 pSetPosition(pBtn, slotX, slotY, nullptr, 1);
@@ -2227,22 +2298,9 @@ static void RepositionQuickbar(uintptr_t clientBase, void* pUI, int screenW, int
                 *reinterpret_cast<int*>(reinterpret_cast<uintptr_t>(pBtn) + 0x70) = slotY;
                 *reinterpret_cast<int*>(reinterpret_cast<uintptr_t>(pBtn) + 0x74) = 34;
                 *reinterpret_cast<int*>(reinterpret_cast<uintptr_t>(pBtn) + 0x78) = 34;
-                *reinterpret_cast<DWORD*>(reinterpret_cast<uintptr_t>(pBtn) + 0x28) |= 0x11;
-                SetWidgetVisualState(pBtn, 0);
             }
 
-            // Slot icon (+0x04)
-            void* pIcon = *reinterpret_cast<void**>(slotBase + 4);
-            if (pIcon && IsValidWidget(clientBase, pIcon)) {
-                pSetPosition(pIcon, slotX + 1, slotY + 1, nullptr, 0);
-                *reinterpret_cast<int*>(reinterpret_cast<uintptr_t>(pIcon) + 0x6C) = slotX + 1;
-                *reinterpret_cast<int*>(reinterpret_cast<uintptr_t>(pIcon) + 0x70) = slotY + 1;
-                *reinterpret_cast<int*>(reinterpret_cast<uintptr_t>(pIcon) + 0x74) = 32;
-                *reinterpret_cast<int*>(reinterpret_cast<uintptr_t>(pIcon) + 0x78) = 32;
-                *reinterpret_cast<DWORD*>(reinterpret_cast<uintptr_t>(pIcon) + 0x28) |= 0x11;
-            }
-
-            // Slot static/empty frame icon (+0x08)
+            // Slot static/empty frame icon (+0x08) - Toolbar_EmptySlot_REF recessed bevel
             void* pIconStatic = *reinterpret_cast<void**>(slotBase + 8);
             if (pIconStatic && IsValidWidget(clientBase, pIconStatic)) {
                 pSetPosition(pIconStatic, slotX + 1, slotY + 1, nullptr, 0);
@@ -2250,7 +2308,18 @@ static void RepositionQuickbar(uintptr_t clientBase, void* pUI, int screenW, int
                 *reinterpret_cast<int*>(reinterpret_cast<uintptr_t>(pIconStatic) + 0x70) = slotY + 1;
                 *reinterpret_cast<int*>(reinterpret_cast<uintptr_t>(pIconStatic) + 0x74) = 32;
                 *reinterpret_cast<int*>(reinterpret_cast<uintptr_t>(pIconStatic) + 0x78) = 32;
-                *reinterpret_cast<DWORD*>(reinterpret_cast<uintptr_t>(pIconStatic) + 0x28) |= 0x11;
+                *reinterpret_cast<DWORD*>(reinterpret_cast<uintptr_t>(pIconStatic) + 0x28) |= 0x13;
+                SetWidgetVisualState(pIconStatic, 3);
+            }
+
+            // Slot active ability icon (+0x04)
+            void* pIcon = *reinterpret_cast<void**>(slotBase + 4);
+            if (pIcon && IsValidWidget(clientBase, pIcon)) {
+                pSetPosition(pIcon, slotX + 1, slotY + 1, nullptr, 0);
+                *reinterpret_cast<int*>(reinterpret_cast<uintptr_t>(pIcon) + 0x6C) = slotX + 1;
+                *reinterpret_cast<int*>(reinterpret_cast<uintptr_t>(pIcon) + 0x70) = slotY + 1;
+                *reinterpret_cast<int*>(reinterpret_cast<uintptr_t>(pIcon) + 0x74) = 32;
+                *reinterpret_cast<int*>(reinterpret_cast<uintptr_t>(pIcon) + 0x78) = 32;
             }
 
             // Slot number (+0x0C)
@@ -2263,6 +2332,26 @@ static void RepositionQuickbar(uintptr_t clientBase, void* pUI, int screenW, int
                 *reinterpret_cast<int*>(reinterpret_cast<uintptr_t>(pNum) + 0x78) = 8;
                 *reinterpret_cast<DWORD*>(reinterpret_cast<uintptr_t>(pNum) + 0x28) |= 0x11;
             }
+        }
+
+        // 4. Position right-side combat picker buttons (+0x8C, +0xA4)
+        void* pPicker1 = *reinterpret_cast<void**>(reinterpret_cast<uintptr_t>(pCtrl24) + 0x8C);
+        if (pPicker1 && IsValidWidget(clientBase, pPicker1)) {
+            pSetPosition(pPicker1, qbX + 407, qbY + 8, nullptr, 0);
+            *reinterpret_cast<int*>(reinterpret_cast<uintptr_t>(pPicker1) + 0x6C) = qbX + 407;
+            *reinterpret_cast<int*>(reinterpret_cast<uintptr_t>(pPicker1) + 0x70) = qbY + 8;
+            *reinterpret_cast<int*>(reinterpret_cast<uintptr_t>(pPicker1) + 0x74) = 18;
+            *reinterpret_cast<int*>(reinterpret_cast<uintptr_t>(pPicker1) + 0x78) = 18;
+            *reinterpret_cast<DWORD*>(reinterpret_cast<uintptr_t>(pPicker1) + 0x28) |= 0x11;
+        }
+        void* pPicker2 = *reinterpret_cast<void**>(reinterpret_cast<uintptr_t>(pCtrl24) + 0xA4);
+        if (pPicker2 && IsValidWidget(clientBase, pPicker2)) {
+            pSetPosition(pPicker2, qbX + 407, qbY + 26, nullptr, 0);
+            *reinterpret_cast<int*>(reinterpret_cast<uintptr_t>(pPicker2) + 0x6C) = qbX + 407;
+            *reinterpret_cast<int*>(reinterpret_cast<uintptr_t>(pPicker2) + 0x70) = qbY + 26;
+            *reinterpret_cast<int*>(reinterpret_cast<uintptr_t>(pPicker2) + 0x74) = 18;
+            *reinterpret_cast<int*>(reinterpret_cast<uintptr_t>(pPicker2) + 0x78) = 18;
+            *reinterpret_cast<DWORD*>(reinterpret_cast<uintptr_t>(pPicker2) + 0x28) |= 0x11;
         }
 
         g_bAllowControlMove = false;
@@ -2378,16 +2467,96 @@ static void RepositionCompass(uintptr_t clientBase, void* pUI, int screenW, int 
 }
 
 static void RepositionCombatTactics(uintptr_t clientBase, void* pUI, int screenW, int screenH) {
-    if (!pUI || !clientBase) return;
+    if (!pUI || !clientBase || IsBadReadPtr(pUI, 0x200)) return;
+    void** ppCtrl = reinterpret_cast<void**>(reinterpret_cast<uintptr_t>(pUI) + 0x28 + (0x0E * 4));
+    if (!ppCtrl || !*ppCtrl || IsBadReadPtr(*ppCtrl, 0x100)) return;
+    void* pInterlock = *ppCtrl;
+
     typedef void (__thiscall *SetControlVisible_t)(void* pUI, DWORD ctrlId, BOOL bVisible);
     SetControlVisible_t pSetVisible = reinterpret_cast<SetControlVisible_t>(clientBase + 0x0001DB80);
     __try {
-        // Outside an active melee duel, keep 0x0E hidden so duplicate stance buttons do not float over screen
-        if (OriginalHideControl) {
-            OriginalHideControl(pUI, 0x0E);
-        }
-        pSetVisible(pUI, 0x0E, 0);
+        pSetVisible(pUI, 0x0E, 1);
     } __except (EXCEPTION_EXECUTE_HANDLER) {}
+
+    typedef int (__thiscall *SetPosition_t)(void* pWidget, int x, int y, void* pRel, int bMoveChildren);
+    SetPosition_t pSetPosition = reinterpret_cast<SetPosition_t>(clientBase + 0x00382360);
+
+    // Compass base widget is at [pCtrl27 + 0x68], w=146, h=132
+    // Docked at: targetBaseX = (screenW / 2) - 73, targetBaseY = screenH - 134
+    // Top center of compass ring: X = screenW / 2, Y = screenH - 134
+    // The 4 Combat Posture buttons (Focus/Free, Power, Attack/Grab, Defense/Withdraw)
+    // dock directly on the top metal rim of the compass ring!
+    const int compassTopY = screenH - 134; // 946 at 1080p
+    const int btnW = 32;
+    const int btnH = 32;
+    const int btnGap = 2;
+    const int totalW = (4 * btnW) + (3 * btnGap); // 134 px
+    const int startX = (screenW / 2) - (totalW / 2); // 960 - 67 = 893 at 1920p
+    const int btnY = compassTopY - btnH - 1; // 946 - 33 = 913 (flush right above the compass ring)
+
+    __try {
+        g_bAllowControlMove = true;
+
+        // Neutralize root widget background so no large duel window or grey box renders over the center screen
+        void* pRootWidget = GetControlRootWidget(pInterlock, 0x0E);
+        if (pRootWidget && !IsBadReadPtr(pRootWidget, 0x80)) {
+            pSetPosition(pRootWidget, startX, btnY, nullptr, 0);
+            *reinterpret_cast<int*>(reinterpret_cast<uintptr_t>(pRootWidget) + 0x6C) = startX;
+            *reinterpret_cast<int*>(reinterpret_cast<uintptr_t>(pRootWidget) + 0x70) = btnY;
+            *reinterpret_cast<int*>(reinterpret_cast<uintptr_t>(pRootWidget) + 0x74) = totalW;
+            *reinterpret_cast<int*>(reinterpret_cast<uintptr_t>(pRootWidget) + 0x78) = btnH;
+            *reinterpret_cast<DWORD*>(reinterpret_cast<uintptr_t>(pRootWidget) + 0x28) |= 0x11;
+        }
+
+        // Retrieve the Combat Posture stance buttons:
+        // 1. Focus / Stance Free (+0x6C, Blue fist icon)
+        void* pBtnFocus = *reinterpret_cast<void**>(reinterpret_cast<uintptr_t>(pInterlock) + 0x6C);
+        // 2. Power (+0x74, Red fist icon)
+        void* pBtnPower = *reinterpret_cast<void**>(reinterpret_cast<uintptr_t>(pInterlock) + 0x74);
+        // 3. Attack / Grab (+0x80, Green hand icon)
+        void* pBtnAttack = *reinterpret_cast<void**>(reinterpret_cast<uintptr_t>(pInterlock) + 0x80);
+        // 4. Defense / Withdraw (+0x7C, Yellow open hand icon)
+        void* pBtnDefense = *reinterpret_cast<void**>(reinterpret_cast<uintptr_t>(pInterlock) + 0x7C);
+        // Speed (+0x70, Red runner) - hide so retail 4-posture configuration matches media_1789869413484.png
+        void* pBtnSpeed = *reinterpret_cast<void**>(reinterpret_cast<uintptr_t>(pInterlock) + 0x70);
+
+        void* btns[4] = { pBtnFocus, pBtnPower, pBtnAttack, pBtnDefense };
+        StanceType stances[4] = { STANCE_FREE, STANCE_POWER, STANCE_GRAB, STANCE_WITHDRAW };
+
+        for (int i = 0; i < 4; ++i) {
+            void* pBtn = btns[i];
+            if (pBtn && IsValidWidget(clientBase, pBtn)) {
+                int posX = startX + i * (btnW + btnGap);
+                pSetPosition(pBtn, posX, btnY, nullptr, 0);
+                *reinterpret_cast<int*>(reinterpret_cast<uintptr_t>(pBtn) + 0x6C) = posX;
+                *reinterpret_cast<int*>(reinterpret_cast<uintptr_t>(pBtn) + 0x70) = btnY;
+                *reinterpret_cast<int*>(reinterpret_cast<uintptr_t>(pBtn) + 0x74) = btnW;
+                *reinterpret_cast<int*>(reinterpret_cast<uintptr_t>(pBtn) + 0x78) = btnH;
+                *reinterpret_cast<DWORD*>(reinterpret_cast<uintptr_t>(pBtn) + 0x28) |= 0x11;
+                SetWidgetVisualState(pBtn, (g_currentStance == stances[i]) ? 4 : 0);
+            }
+        }
+
+        // Hide speed runner button and any extra duel meters / timer cards
+        if (pBtnSpeed && IsValidWidget(clientBase, pBtnSpeed)) {
+            *reinterpret_cast<DWORD*>(reinterpret_cast<uintptr_t>(pBtnSpeed) + 0x28) &= ~0x00000001;
+            *reinterpret_cast<int*>(reinterpret_cast<uintptr_t>(pBtnSpeed) + 0x74) = 0;
+            *reinterpret_cast<int*>(reinterpret_cast<uintptr_t>(pBtnSpeed) + 0x78) = 0;
+        }
+
+        // Neutralize duel-specific widgets (timer, vs cards, bash fx) so only the posture buttons render cleanly
+        const DWORD duelOffsets[] = { 0x84, 0x88, 0xD4, 0xDC, 0xE0, 0xE4, 0xE8, 0xEC, 0xF0, 0xF4 };
+        for (DWORD off : duelOffsets) {
+            void* pW = *reinterpret_cast<void**>(reinterpret_cast<uintptr_t>(pInterlock) + off);
+            if (pW && IsValidWidget(clientBase, pW)) {
+                *reinterpret_cast<DWORD*>(reinterpret_cast<uintptr_t>(pW) + 0x28) &= ~0x00000001;
+            }
+        }
+
+        g_bAllowControlMove = false;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        g_bAllowControlMove = false;
+    }
 }
 
 static void LockAllHudFrames(uintptr_t clientBase, void* pUI) {
@@ -4047,42 +4216,6 @@ static void __fastcall DetourFrameTick(void* pThis, void* /*edx*/) {
         // Keep HUD controls locked in place and Chat Window manager tabs activated
         void* pUI = *reinterpret_cast<void**>(clientBase + 0x00898C54);
         if (pUI) {
-            static bool s_loggedUiDump = false;
-            if (!s_loggedUiDump) {
-                s_loggedUiDump = true;
-                void* pCtrl24 = *reinterpret_cast<void**>(reinterpret_cast<uintptr_t>(pUI) + 0x28 + (0x24 * 4));
-                void* pCtrl27 = *reinterpret_cast<void**>(reinterpret_cast<uintptr_t>(pUI) + 0x28 + (0x27 * 4));
-                Log("[mxohax] === UI WIDGET DUMP ===\n");
-                Log("[mxohax] pCtrl24=%p, pCtrl27=%p\n", pCtrl24, pCtrl27);
-                if (pCtrl24 && !IsBadReadPtr(pCtrl24, 0x200)) {
-                    for (int off = 0x00; off <= 0x200; off += 4) {
-                        void* val = *reinterpret_cast<void**>(reinterpret_cast<uintptr_t>(pCtrl24) + off);
-                        if (val && !IsBadReadPtr(val, 0x80)) {
-                            int x = *reinterpret_cast<int*>(reinterpret_cast<uintptr_t>(val) + 0x6C);
-                            int y = *reinterpret_cast<int*>(reinterpret_cast<uintptr_t>(val) + 0x70);
-                            int w = *reinterpret_cast<int*>(reinterpret_cast<uintptr_t>(val) + 0x74);
-                            int h = *reinterpret_cast<int*>(reinterpret_cast<uintptr_t>(val) + 0x78);
-                            DWORD flags = *reinterpret_cast<DWORD*>(reinterpret_cast<uintptr_t>(val) + 0x28);
-                            Log("[mxohax] pCtrl24+0x%02X=%p (x=%d, y=%d, w=%d, h=%d, flags=0x%08X)\n", off, val, x, y, w, h, flags);
-                        }
-                    }
-                }
-                if (pCtrl27 && !IsBadReadPtr(pCtrl27, 0x200)) {
-                    for (int off = 0x00; off <= 0x200; off += 4) {
-                        void* val = *reinterpret_cast<void**>(reinterpret_cast<uintptr_t>(pCtrl27) + off);
-                        if (val && !IsBadReadPtr(val, 0x80)) {
-                            int x = *reinterpret_cast<int*>(reinterpret_cast<uintptr_t>(val) + 0x6C);
-                            int y = *reinterpret_cast<int*>(reinterpret_cast<uintptr_t>(val) + 0x70);
-                            int w = *reinterpret_cast<int*>(reinterpret_cast<uintptr_t>(val) + 0x74);
-                            int h = *reinterpret_cast<int*>(reinterpret_cast<uintptr_t>(val) + 0x78);
-                            DWORD flags = *reinterpret_cast<DWORD*>(reinterpret_cast<uintptr_t>(val) + 0x28);
-                            Log("[mxohax] pCtrl27+0x%02X=%p (x=%d, y=%d, w=%d, h=%d, flags=0x%08X)\n", off, val, x, y, w, h, flags);
-                        }
-                    }
-                }
-                Log("[mxohax] === END UI WIDGET DUMP ===\n");
-            }
-
             HWND hWnd = g_hGameWindow;
             int screenW = 1920, screenH = 1080;
             if (hWnd && IsWindow(hWnd)) {
