@@ -66,7 +66,7 @@ static inline bool SafeWriteFloat(void* ptr, float val) {
 
 static inline void* GetCUIPointer(uintptr_t clientBase) {
     if (!clientBase) return nullptr;
-    void** ppUI = reinterpret_cast<void**>(clientBase + 0x009E05BC);
+    void** ppUI = reinterpret_cast<void**>(clientBase + 0x00898C54);
     if (!ppUI || IsBadReadPtr(ppUI, sizeof(void*))) return nullptr;
     void* pUI = *ppUI;
     if (!pUI || IsBadReadPtr(pUI, 0x240)) return nullptr;
@@ -104,6 +104,179 @@ static LONG WINAPI CrashHandler(PEXCEPTION_POINTERS pExc) {
                 return EXCEPTION_CONTINUE_SEARCH;
             }
 
+            // 1. CreateControl crash recovery (0x0001BC10 - 0x0001BC90) -> jump to epilogue ret null (0x0001BC28)
+            if (clientBase && (uintptr_t)addr >= clientBase + 0x0001BC10 && (uintptr_t)addr <= clientBase + 0x0001BC90 && ctx) {
+                Log("[mxohax] Recovered from crash in CreateControl at client.dll + 0x%08X: jumping to safe ret null (0x%p)\n",
+                    (uintptr_t)addr - clientBase, (void*)(clientBase + 0x0001BC28));
+                ctx->Eip = static_cast<DWORD>(clientBase + 0x0001BC28);
+                return EXCEPTION_CONTINUE_EXECUTION;
+            }
+
+            // 2. SetControlPos crash recovery (0x00015D60 - 0x00015DA0) -> jump to ret (0x00015DA1)
+            if (clientBase && (uintptr_t)addr >= clientBase + 0x00015D60 && (uintptr_t)addr <= clientBase + 0x00015DA0 && ctx) {
+                Log("[mxohax] Recovered from crash in SetControlPos at client.dll + 0x%08X: jumping to safe ret (0x%p)\n",
+                    (uintptr_t)addr - clientBase, (void*)(clientBase + 0x00015DA1));
+                ctx->Eip = static_cast<DWORD>(clientBase + 0x00015DA1);
+                return EXCEPTION_CONTINUE_EXECUTION;
+            }
+
+            // 3. CLTWidget_SetPosition crash recovery (0x00382360 - 0x00382490) -> jump to epilogue (0x00382492)
+            if (clientBase && (uintptr_t)addr >= clientBase + 0x00382360 && (uintptr_t)addr <= clientBase + 0x00382490 && ctx) {
+                Log("[mxohax] Recovered from crash in CLTWidget_SetPosition at client.dll + 0x%08X: jumping to safe epilogue (0x%p)\n",
+                    (uintptr_t)addr - clientBase, (void*)(clientBase + 0x00382492));
+                ctx->Eip = static_cast<DWORD>(clientBase + 0x00382492);
+                return EXCEPTION_CONTINUE_EXECUTION;
+            }
+
+            // 4. CViewTarget methods (0x000D3970 - 0x000D3D60) -> unwind frame
+            if (clientBase && (uintptr_t)addr >= clientBase + 0x000D3970 && (uintptr_t)addr <= clientBase + 0x000D3D60 && ctx) {
+                Log("[mxohax] Recovered from crash in CViewTarget at client.dll + 0x%08X: unwinding frame safely\n",
+                    (uintptr_t)addr - clientBase);
+                if (ctx->Ebp && !IsBadReadPtr((void*)(ctx->Ebp + 4), 4)) {
+                    DWORD retAddr = *reinterpret_cast<DWORD*>(ctx->Ebp + 4);
+                    if (retAddr >= clientBase && retAddr < clientBase + 0x1000000) {
+                        ctx->Eip = retAddr;
+                        ctx->Esp = ctx->Ebp + 12; // __thiscall with 2 args (8 bytes)
+                        ctx->Ebp = *reinterpret_cast<DWORD*>(ctx->Ebp);
+                        return EXCEPTION_CONTINUE_EXECUTION;
+                    }
+                }
+            }
+
+            // 5. Epilogue crash at 0x0016D495
+            if (clientBase && (uintptr_t)addr == clientBase + 0x0016D495 && ctx) {
+                Log("[mxohax] Recovered from crash at client.dll + 0x0016D495: jumping to epilogue (0x%p)\n", (void*)(clientBase + 0x0016D4DD));
+                ctx->Eip = static_cast<DWORD>(clientBase + 0x0016D4DD);
+                return EXCEPTION_CONTINUE_EXECUTION;
+            }
+
+            // 6. Range 0x00162270 - 0x001622DC
+            if (clientBase && (uintptr_t)addr >= clientBase + 0x00162270 && (uintptr_t)addr <= clientBase + 0x001622DC && ctx) {
+                Log("[mxohax] Recovered from crash at client.dll + 0x%08X: jumping to epilogue (0x%p)\n", (uintptr_t)addr - clientBase, (void*)(clientBase + 0x001622DC));
+                ctx->Eip = static_cast<DWORD>(clientBase + 0x001622DC);
+                return EXCEPTION_CONTINUE_EXECUTION;
+            }
+
+            // 7. Null deref at 0x000A20E6
+            if (clientBase && (uintptr_t)addr == clientBase + 0x000A20E6 && ctx) {
+                Log("[mxohax] Recovered from null deref at client.dll + 0x000A20E6: jumping to safe return (0x%p)\n", (void*)(clientBase + 0x000A2213));
+                ctx->Eip = static_cast<DWORD>(clientBase + 0x000A2213);
+                return EXCEPTION_CONTINUE_EXECUTION;
+            }
+
+            // 8. Null deref at 0x0033FB13
+            if (clientBase && (uintptr_t)addr == clientBase + 0x0033FB13 && ctx) {
+                Log("[mxohax] Recovered from null deref at client.dll + 0x0033FB13 (eax=0x%08X): returning NULL\n", ctx->Eax);
+                ctx->Eax = 0;
+                ctx->Eip = static_cast<DWORD>(clientBase + 0x0033FB19);
+                return EXCEPTION_CONTINUE_EXECUTION;
+            }
+
+            // 9. Viewport vtable crash at 0x001152D7
+            if (clientBase && (uintptr_t)addr == clientBase + 0x001152D7 && ctx) {
+                Log("[mxohax] Recovered from crash at client.dll + 0x001152D7 (Viewport vtable): jumping to safe return (0x%p)\n", (void*)(clientBase + 0x001155A9));
+                ctx->Eip = static_cast<DWORD>(clientBase + 0x001155A9);
+                return EXCEPTION_CONTINUE_EXECUTION;
+            }
+
+            // 10. CamCtor crash 0x0012F020 - 0x0012F350
+            if (clientBase && (uintptr_t)addr >= clientBase + 0x0012F020 && (uintptr_t)addr <= clientBase + 0x0012F350 && ctx) {
+                Log("[mxohax] Recovered from crash in CamCtor at client.dll + 0x%08X: jumping to safe ret\n", (uintptr_t)addr - clientBase);
+                if (ctx->Ebp && !IsBadReadPtr((void*)(ctx->Ebp + 4), 4)) {
+                    DWORD retAddr = *reinterpret_cast<DWORD*>(ctx->Ebp + 4);
+                    ctx->Eip = retAddr;
+                    ctx->Esp = ctx->Ebp + 8;
+                    ctx->Ebp = *reinterpret_cast<DWORD*>(ctx->Ebp);
+                    return EXCEPTION_CONTINUE_EXECUTION;
+                }
+            }
+
+            // 11. HUD UpdateControls 0x0009B9B0 - 0x0009BB10
+            if (clientBase && (uintptr_t)addr >= clientBase + 0x0009B9B0 && (uintptr_t)addr <= clientBase + 0x0009BB10 && ctx) {
+                Log("[mxohax] Recovered from null player deref in HUD UpdateControls at client.dll + 0x%08X: jumping to epilogue (0x%p)\n",
+                    (uintptr_t)addr - clientBase, (void*)(clientBase + 0x0009BB0A));
+                ctx->Eip = static_cast<DWORD>(clientBase + 0x0009BB0A);
+                return EXCEPTION_CONTINUE_EXECUTION;
+            }
+
+            // 12. viewinterlock UI 0x0009A000 - 0x0009B000
+            if (clientBase && (uintptr_t)addr >= clientBase + 0x0009A000 && (uintptr_t)addr <= clientBase + 0x0009B000 && ctx) {
+                Log("[mxohax] Recovered from crash in viewinterlock UI at client.dll + 0x%08X: unwinding frame safely\n", (uintptr_t)addr - clientBase);
+                if (ctx->Ebp && !IsBadReadPtr((void*)(ctx->Ebp + 4), 4)) {
+                    DWORD retAddr = *reinterpret_cast<DWORD*>(ctx->Ebp + 4);
+                    if (retAddr >= clientBase && retAddr < clientBase + 0x1000000) {
+                        ctx->Eip = retAddr;
+                        ctx->Esp = ctx->Ebp + 8;
+                        ctx->Ebp = *reinterpret_cast<DWORD*>(ctx->Ebp);
+                        return EXCEPTION_CONTINUE_EXECUTION;
+                    }
+                }
+                if (ctx->Esp && !IsBadReadPtr((void*)ctx->Esp, 4)) {
+                    DWORD retAddr = *reinterpret_cast<DWORD*>(ctx->Esp);
+                    if (retAddr >= clientBase && retAddr < clientBase + 0x1000000) {
+                        ctx->Eip = retAddr;
+                        ctx->Esp += 4;
+                        return EXCEPTION_CONTINUE_EXECUTION;
+                    }
+                }
+            }
+
+            // 13. Contact / Mission / PDA UI (0x000AC000-0x000ACD00, 0x0018C000-0x0018D000, 0x000BF000-0x000C1000)
+            if (clientBase && (
+                ((uintptr_t)addr >= clientBase + 0x000AC000 && (uintptr_t)addr <= clientBase + 0x000ACD00) ||
+                ((uintptr_t)addr >= clientBase + 0x0018C000 && (uintptr_t)addr <= clientBase + 0x0018D000) ||
+                ((uintptr_t)addr >= clientBase + 0x000BF000 && (uintptr_t)addr <= clientBase + 0x000C1000)
+            ) && ctx) {
+                Log("[mxohax] Recovered from crash in Contact/PDA UI at client.dll + 0x%08X: unwinding frame safely\n", (uintptr_t)addr - clientBase);
+                if (ctx->Ebp && !IsBadReadPtr((void*)(ctx->Ebp + 4), 4)) {
+                    DWORD retAddr = *reinterpret_cast<DWORD*>(ctx->Ebp + 4);
+                    if (retAddr >= clientBase && retAddr < clientBase + 0x1000000) {
+                        ctx->Eip = retAddr;
+                        ctx->Esp = ctx->Ebp + 8;
+                        ctx->Ebp = *reinterpret_cast<DWORD*>(ctx->Ebp);
+                        return EXCEPTION_CONTINUE_EXECUTION;
+                    }
+                }
+                if (ctx->Esp && !IsBadReadPtr((void*)ctx->Esp, 4)) {
+                    DWORD retAddr = *reinterpret_cast<DWORD*>(ctx->Esp);
+                    if (retAddr >= clientBase && retAddr < clientBase + 0x1000000) {
+                        ctx->Eip = retAddr;
+                        ctx->Esp += 4;
+                        return EXCEPTION_CONTINUE_EXECUTION;
+                    }
+                }
+            }
+
+            // 14. Wild indirect call recovery
+            if (ctx && ctx->Esp && !IsBadReadPtr((void*)ctx->Esp, 4)) {
+                DWORD retAddr = *reinterpret_cast<DWORD*>(ctx->Esp);
+                if (clientBase && retAddr >= clientBase && retAddr < clientBase + 0x1000000) {
+                    Log("[mxohax] Recovered from wild indirect call at 0x%p (caller client.dll + 0x%08X): popping return address\n",
+                        addr, retAddr - clientBase);
+                    ctx->Eip = retAddr;
+                    ctx->Esp += 4;
+                    return EXCEPTION_CONTINUE_EXECUTION;
+                }
+            }
+
+            // 15. Memcpy crash in 0x10255710 (client.dll + 0x0025581B)
+            if (ctx && ctx->Esp) {
+                DWORD* pStack = reinterpret_cast<DWORD*>(ctx->Esp);
+                for (int i = 0; i < 8; ++i) {
+                    if (!IsBadReadPtr(pStack + i, 4)) {
+                        DWORD retAddr = pStack[i];
+                        if (clientBase && retAddr >= clientBase + 0x0025581B && retAddr <= clientBase + 0x00255825) {
+                            Log("[mxohax] Recovered from memcpy crash in 0x10255710: jumping to epilogue (0x%p)\n",
+                                (void*)(clientBase + 0x00255920));
+                            ctx->Eip = static_cast<DWORD>(clientBase + 0x00255920);
+                            ctx->Eax = 190;
+                            return EXCEPTION_CONTINUE_EXECUTION;
+                        }
+                    }
+                }
+            }
+
+            // If none of the recovery conditions matched, log the unhandled crash exception!
             Log("[mxohax] !!! CRASH EXCEPTION 0x%08X at 0x%p !!!\n", code, addr);
             if (clientBase && (uintptr_t)addr >= clientBase && (uintptr_t)addr < clientBase + 0x1000000) {
                 Log("[mxohax] Crash is inside client.dll + 0x%08X\n", (uintptr_t)addr - clientBase);
@@ -128,135 +301,6 @@ static LONG WINAPI CrashHandler(PEXCEPTION_POINTERS pExc) {
                             } else {
                                 Log("[mxohax] STACK[%02d]: 0x%08X\n", i, val);
                             }
-                        }
-                    }
-                }
-            }
-            if (clientBase && (uintptr_t)addr == clientBase + 0x0016D495 && ctx) {
-                Log("[mxohax] Recovering from crash at client.dll + 0x0016D495: jumping to epilogue (0x%p)\n", (void*)(clientBase + 0x0016D4DD));
-                ctx->Eip = static_cast<DWORD>(clientBase + 0x0016D4DD);
-                return EXCEPTION_CONTINUE_EXECUTION;
-            }
-            if (clientBase && (uintptr_t)addr >= clientBase + 0x00162270 && (uintptr_t)addr <= clientBase + 0x001622DC && ctx) {
-                Log("[mxohax] Recovering from crash at client.dll + 0x%08X: jumping to epilogue (0x%p)\n", (uintptr_t)addr - clientBase, (void*)(clientBase + 0x001622DC));
-                ctx->Eip = static_cast<DWORD>(clientBase + 0x001622DC);
-                return EXCEPTION_CONTINUE_EXECUTION;
-            }
-            if (clientBase && (uintptr_t)addr == clientBase + 0x000A20E6 && ctx) {
-                Log("[mxohax] Recovering from null deref at client.dll + 0x000A20E6 ([pWorldMgr+0xCC]==NULL). Jumping to safe return (0x%p)\n", (void*)(clientBase + 0x000A2213));
-                ctx->Eip = static_cast<DWORD>(clientBase + 0x000A2213);
-                return EXCEPTION_CONTINUE_EXECUTION;
-            }
-            if (clientBase && (uintptr_t)addr == clientBase + 0x0033FB13 && ctx) {
-                Log("[mxohax] Recovering from null deref at client.dll + 0x0033FB13 (eax=0x%08X): returning NULL\n", ctx->Eax);
-                ctx->Eax = 0;
-                ctx->Eip = static_cast<DWORD>(clientBase + 0x0033FB19);
-                return EXCEPTION_CONTINUE_EXECUTION;
-            }
-            if (clientBase && (uintptr_t)addr == clientBase + 0x001152D7 && ctx) {
-                Log("[mxohax] Recovering from crash at client.dll + 0x001152D7 (Viewport vtable). Jumping to safe return (0x%p)\n", (void*)(clientBase + 0x001155A9));
-                ctx->Eip = static_cast<DWORD>(clientBase + 0x001155A9);
-                return EXCEPTION_CONTINUE_EXECUTION;
-            }
-            if (clientBase && (uintptr_t)addr >= clientBase + 0x0012F020 && (uintptr_t)addr <= clientBase + 0x0012F350 && ctx) {
-                Log("[mxohax] Recovering from crash in CamCtor at client.dll + 0x%08X: jumping to safe ret\n", (uintptr_t)addr - clientBase);
-                if (ctx->Ebp && !IsBadReadPtr((void*)(ctx->Ebp + 4), 4)) {
-                    DWORD retAddr = *reinterpret_cast<DWORD*>(ctx->Ebp + 4);
-                    ctx->Eip = retAddr;
-                    ctx->Esp = ctx->Ebp + 8;
-                    ctx->Ebp = *reinterpret_cast<DWORD*>(ctx->Ebp);
-                    return EXCEPTION_CONTINUE_EXECUTION;
-                }
-            }
-            if (clientBase && ((uintptr_t)addr == clientBase + 0x00001C1C || (uintptr_t)addr == clientBase + 0x00001C10) && ctx) {
-                Log("[mxohax] Recovering from invalid pointer write at client.dll + 0x%08X (eax=0x%08X): skipping 2 bytes\n",
-                    (uintptr_t)addr - clientBase, ctx->Eax);
-            }
-            if (clientBase && (uintptr_t)addr >= clientBase + 0x0009B9B0 && (uintptr_t)addr <= clientBase + 0x0009BB10 && ctx) {
-                Log("[mxohax] Recovering from null player deref in HUD UpdateControls at client.dll + 0x%08X: jumping to epilogue (0x%p)\n",
-                    (uintptr_t)addr - clientBase, (void*)(clientBase + 0x0009BB0A));
-                ctx->Eip = static_cast<DWORD>(clientBase + 0x0009BB0A);
-                return EXCEPTION_CONTINUE_EXECUTION;
-            }
-            if (clientBase && (uintptr_t)addr >= clientBase + 0x00382360 && (uintptr_t)addr <= clientBase + 0x00382490 && ctx) {
-                Log("[mxohax] Recovering from crash in CLTWidget_SetPosition at client.dll + 0x%08X: jumping to safe epilogue (0x%p)\n",
-                    (uintptr_t)addr - clientBase, (void*)(clientBase + 0x00382492));
-                ctx->Eip = static_cast<DWORD>(clientBase + 0x00382492);
-                return EXCEPTION_CONTINUE_EXECUTION;
-            }
-            if (clientBase && (uintptr_t)addr >= clientBase + 0x00015D60 && (uintptr_t)addr <= clientBase + 0x00015DA0 && ctx) {
-                Log("[mxohax] Recovering from crash in SetControlPos at client.dll + 0x%08X: jumping to safe ret (0x%p)\n",
-                    (uintptr_t)addr - clientBase, (void*)(clientBase + 0x00015DA1));
-                ctx->Eip = static_cast<DWORD>(clientBase + 0x00015DA1);
-                return EXCEPTION_CONTINUE_EXECUTION;
-            }
-            if (ctx && ctx->Esp && !IsBadReadPtr((void*)ctx->Esp, 4)) {
-                DWORD retAddr = *reinterpret_cast<DWORD*>(ctx->Esp);
-                if (clientBase && retAddr >= clientBase && retAddr < clientBase + 0x1000000) {
-                    Log("[mxohax] Recovering from wild indirect call at 0x%p (caller client.dll + 0x%08X): popping return address\n",
-                        addr, retAddr - clientBase);
-                    ctx->Eip = retAddr;
-                    ctx->Esp += 4;
-                    return EXCEPTION_CONTINUE_EXECUTION;
-                }
-            }
-            if (clientBase && (uintptr_t)addr >= clientBase + 0x0009A000 && (uintptr_t)addr <= clientBase + 0x0009B000 && ctx) {
-                Log("[mxohax] Recovering from crash in viewinterlock UI at client.dll + 0x%08X: unwinding frame safely\n", (uintptr_t)addr - clientBase);
-                if (ctx->Ebp && !IsBadReadPtr((void*)(ctx->Ebp + 4), 4)) {
-                    DWORD retAddr = *reinterpret_cast<DWORD*>(ctx->Ebp + 4);
-                    if (retAddr >= clientBase && retAddr < clientBase + 0x1000000) {
-                        ctx->Eip = retAddr;
-                        ctx->Esp = ctx->Ebp + 8;
-                        ctx->Ebp = *reinterpret_cast<DWORD*>(ctx->Ebp);
-                        return EXCEPTION_CONTINUE_EXECUTION;
-                    }
-                }
-                if (ctx->Esp && !IsBadReadPtr((void*)ctx->Esp, 4)) {
-                    DWORD retAddr = *reinterpret_cast<DWORD*>(ctx->Esp);
-                    if (retAddr >= clientBase && retAddr < clientBase + 0x1000000) {
-                        ctx->Eip = retAddr;
-                        ctx->Esp += 4;
-                        return EXCEPTION_CONTINUE_EXECUTION;
-                    }
-                }
-            }
-            // Guard against crashes in Contact / Mission / PDA UI (e.g. CViewMissionContact 0x000AC000-0x000ACD00, CViewContact 0x0018C000-0x0018D000, CViewPDA 0x000BF000-0x000C1000)
-            if (clientBase && (
-                ((uintptr_t)addr >= clientBase + 0x000AC000 && (uintptr_t)addr <= clientBase + 0x000ACD00) ||
-                ((uintptr_t)addr >= clientBase + 0x0018C000 && (uintptr_t)addr <= clientBase + 0x0018D000) ||
-                ((uintptr_t)addr >= clientBase + 0x000BF000 && (uintptr_t)addr <= clientBase + 0x000C1000)
-            ) && ctx) {
-                Log("[mxohax] Recovering from crash in Contact/PDA UI at client.dll + 0x%08X: unwinding frame safely\n", (uintptr_t)addr - clientBase);
-                if (ctx->Ebp && !IsBadReadPtr((void*)(ctx->Ebp + 4), 4)) {
-                    DWORD retAddr = *reinterpret_cast<DWORD*>(ctx->Ebp + 4);
-                    if (retAddr >= clientBase && retAddr < clientBase + 0x1000000) {
-                        ctx->Eip = retAddr;
-                        ctx->Esp = ctx->Ebp + 8;
-                        ctx->Ebp = *reinterpret_cast<DWORD*>(ctx->Ebp);
-                        return EXCEPTION_CONTINUE_EXECUTION;
-                    }
-                }
-                if (ctx->Esp && !IsBadReadPtr((void*)ctx->Esp, 4)) {
-                    DWORD retAddr = *reinterpret_cast<DWORD*>(ctx->Esp);
-                    if (retAddr >= clientBase && retAddr < clientBase + 0x1000000) {
-                        ctx->Eip = retAddr;
-                        ctx->Esp += 4;
-                        return EXCEPTION_CONTINUE_EXECUTION;
-                    }
-                }
-            }
-            // Guard against memcpy crash in 0x10255710 (client.dll + 0x0025581B)
-            if (ctx && ctx->Esp) {
-                DWORD* pStack = reinterpret_cast<DWORD*>(ctx->Esp);
-                for (int i = 0; i < 8; ++i) {
-                    if (!IsBadReadPtr(pStack + i, 4)) {
-                        DWORD retAddr = pStack[i];
-                        if (clientBase && retAddr >= clientBase + 0x0025581B && retAddr <= clientBase + 0x00255825) {
-                            Log("[mxohax] Recovering from memcpy crash in 0x10255710: jumping to epilogue (0x%p)\n",
-                                (void*)(clientBase + 0x00255920));
-                            ctx->Eip = static_cast<DWORD>(clientBase + 0x00255920);
-                            ctx->Eax = 190;
-                            return EXCEPTION_CONTINUE_EXECUTION;
                         }
                     }
                 }
@@ -2373,9 +2417,9 @@ static void RepositionQuickbar(uintptr_t clientBase, void* pUI, int screenW, int
                 pSetPosition(pBtn, slotX, slotY, nullptr, 1);
                 *reinterpret_cast<int*>(reinterpret_cast<uintptr_t>(pBtn) + 0x6C) = slotX;
                 *reinterpret_cast<int*>(reinterpret_cast<uintptr_t>(pBtn) + 0x70) = slotY;
-                *reinterpret_cast<int*>(reinterpret_cast<uintptr_t>(pBtn) + 0x74) = 0;
-                *reinterpret_cast<int*>(reinterpret_cast<uintptr_t>(pBtn) + 0x78) = 0;
-                *reinterpret_cast<DWORD*>(reinterpret_cast<uintptr_t>(pBtn) + 0x28) &= ~0x11;
+                *reinterpret_cast<int*>(reinterpret_cast<uintptr_t>(pBtn) + 0x74) = 32;
+                *reinterpret_cast<int*>(reinterpret_cast<uintptr_t>(pBtn) + 0x78) = 32;
+                *reinterpret_cast<DWORD*>(reinterpret_cast<uintptr_t>(pBtn) + 0x28) |= 0x11;
             }
 
             // Slot static/empty frame icon (+0x0C: Image_IconStatic)
@@ -2870,15 +2914,20 @@ static void SetTargetOperative(uintptr_t clientBase, const char* name, DWORD cha
         if (ppCtrl && !IsBadReadPtr(ppCtrl, sizeof(void*)) && *ppCtrl && !IsBadReadPtr(*ppCtrl, 0x350)) {
             void* pViewTarget = *ppCtrl;
             __try {
-                // 1. Set Target Level (clientBase + 0x000D3970)
-                typedef void (__thiscall *fnSetTargetLevel)(void* pThis, int lvl, int targetIdx);
-                fnSetTargetLevel pSetLevel = reinterpret_cast<fnSetTargetLevel>(clientBase + 0x000D3970);
-                pSetLevel(pViewTarget, level, 0);
+                BYTE isInit = *reinterpret_cast<BYTE*>(reinterpret_cast<uintptr_t>(pViewTarget) + 0x58);
+                void* pWgt7C = *reinterpret_cast<void**>(reinterpret_cast<uintptr_t>(pViewTarget) + 0x7C);
+                void* pWgt22C = *reinterpret_cast<void**>(reinterpret_cast<uintptr_t>(pViewTarget) + 0x22C);
+                if (isInit && pWgt7C && pWgt22C && !IsBadReadPtr(pWgt22C, 4)) {
+                    // 1. Set Target Level (clientBase + 0x000D3970)
+                    typedef void (__thiscall *fnSetTargetLevel)(void* pThis, int lvl, int targetIdx);
+                    fnSetTargetLevel pSetLevel = reinterpret_cast<fnSetTargetLevel>(clientBase + 0x000D3970);
+                    pSetLevel(pViewTarget, level, 0);
 
-                // 2. Set Target Health (clientBase + 0x000D39F0)
-                typedef void (__thiscall *fnSetTargetHealth)(void* pThis, int targetIdx, int hp);
-                fnSetTargetHealth pSetHealth = reinterpret_cast<fnSetTargetHealth>(clientBase + 0x000D39F0);
-                pSetHealth(pViewTarget, 0, health);
+                    // 2. Set Target Health (clientBase + 0x000D39F0)
+                    typedef void (__thiscall *fnSetTargetHealth)(void* pThis, int targetIdx, int hp);
+                    fnSetTargetHealth pSetHealth = reinterpret_cast<fnSetTargetHealth>(clientBase + 0x000D39F0);
+                    pSetHealth(pViewTarget, 0, health);
+                }
             } __except (EXCEPTION_EXECUTE_HANDLER) {
                 Log("[mxohax] SetTargetOperative: Safe exception handling in CViewTarget updates\n");
             }
@@ -3003,9 +3052,15 @@ static void ExecuteQuickbarAbility(uintptr_t clientBase, int slotIndex) {
             if (pUIHealth) {
                 void** ppCtrl = reinterpret_cast<void**>(reinterpret_cast<uintptr_t>(pUIHealth) + 0x28 + (0x22 * 4));
                 if (ppCtrl && *ppCtrl && !IsBadReadPtr(*ppCtrl, 0x350)) {
-                    typedef void (__thiscall *fnSetTargetHealth)(void* pThis, int targetIdx, int hp);
-                    fnSetTargetHealth pSetHealth = reinterpret_cast<fnSetTargetHealth>(clientBase + 0x000D39F0);
-                    __try { pSetHealth(*ppCtrl, 0, s_targetHealth); } __except (EXCEPTION_EXECUTE_HANDLER) {}
+                    void* pViewTarget = *ppCtrl;
+                    BYTE isInit = *reinterpret_cast<BYTE*>(reinterpret_cast<uintptr_t>(pViewTarget) + 0x58);
+                    void* pWgt7C = *reinterpret_cast<void**>(reinterpret_cast<uintptr_t>(pViewTarget) + 0x7C);
+                    void* pWgt22C = *reinterpret_cast<void**>(reinterpret_cast<uintptr_t>(pViewTarget) + 0x22C);
+                    if (isInit && pWgt7C && pWgt22C && !IsBadReadPtr(pWgt22C, 4)) {
+                        typedef void (__thiscall *fnSetTargetHealth)(void* pThis, int targetIdx, int hp);
+                        fnSetTargetHealth pSetHealth = reinterpret_cast<fnSetTargetHealth>(clientBase + 0x000D39F0);
+                        __try { pSetHealth(pViewTarget, 0, s_targetHealth); } __except (EXCEPTION_EXECUTE_HANDLER) {}
+                    }
                 }
             }
             break;
@@ -3034,9 +3089,15 @@ static void ExecuteQuickbarAbility(uintptr_t clientBase, int slotIndex) {
             if (pUIHealth) {
                 void** ppCtrl = reinterpret_cast<void**>(reinterpret_cast<uintptr_t>(pUIHealth) + 0x28 + (0x22 * 4));
                 if (ppCtrl && *ppCtrl && !IsBadReadPtr(*ppCtrl, 0x350)) {
-                    typedef void (__thiscall *fnSetTargetHealth)(void* pThis, int targetIdx, int hp);
-                    fnSetTargetHealth pSetHealth = reinterpret_cast<fnSetTargetHealth>(clientBase + 0x000D39F0);
-                    __try { pSetHealth(*ppCtrl, 0, s_lbHealth); } __except (EXCEPTION_EXECUTE_HANDLER) {}
+                    void* pViewTarget = *ppCtrl;
+                    BYTE isInit = *reinterpret_cast<BYTE*>(reinterpret_cast<uintptr_t>(pViewTarget) + 0x58);
+                    void* pWgt7C = *reinterpret_cast<void**>(reinterpret_cast<uintptr_t>(pViewTarget) + 0x7C);
+                    void* pWgt22C = *reinterpret_cast<void**>(reinterpret_cast<uintptr_t>(pViewTarget) + 0x22C);
+                    if (isInit && pWgt7C && pWgt22C && !IsBadReadPtr(pWgt22C, 4)) {
+                        typedef void (__thiscall *fnSetTargetHealth)(void* pThis, int targetIdx, int hp);
+                        fnSetTargetHealth pSetHealth = reinterpret_cast<fnSetTargetHealth>(clientBase + 0x000D39F0);
+                        __try { pSetHealth(pViewTarget, 0, s_lbHealth); } __except (EXCEPTION_EXECUTE_HANDLER) {}
+                    }
                 }
             }
             break;
@@ -3224,8 +3285,8 @@ static bool IsPointOverAnyHud(int mx, int my, int winW, int winH) {
     // 3. Bottom-Left: Main Chat Window & Tabs & Toolbar (0..500, 750..1080)
     if (canX >= 0 && canX <= 500 && canY >= 750 && canY <= 1080) return true;
 
-    // 4. Bottom-Center: Quickbar / Hotbar (0x24) (740..1180, 890..950)
-    if (canX >= 740 && canX <= 1180 && canY >= 890 && canY <= 950) return true;
+    // 4. Bottom-Center: Quickbar / Hotbar (0x24) (740..1180, 850..950)
+    if (canX >= 740 && canX <= 1180 && canY >= 850 && canY <= 950) return true;
 
     // 5. Bottom-Center: Compass Dial (0x27) - circular boundary around (960, 1013), radius 75
     int compDx = canX - 960;
@@ -3619,7 +3680,29 @@ static void UpdatePlayerPositionAndPhysics(uintptr_t clientBase, void* curPlayer
             memcpy(pActorRot, playerQuat, sizeof(playerQuat));
         }
 
-        // Locomotion state and extents managed authoritatively without interpolation lag
+        // Prepare 128-byte position sample for the movement interpolation queue at [pActor + 0x5F0]
+        BYTE sample[128] = {0};
+        *reinterpret_cast<DWORD*>(sample + 0x00) = GetTickCount();
+        *reinterpret_cast<double*>(sample + 0x08) = g_playerX;
+        *reinterpret_cast<double*>(sample + 0x10) = g_playerY;
+        *reinterpret_cast<double*>(sample + 0x18) = g_playerZ;
+        *reinterpret_cast<float*>(sample + 0x20) = playerQuat[0];
+        *reinterpret_cast<float*>(sample + 0x24) = playerQuat[1];
+        *reinterpret_cast<float*>(sample + 0x28) = playerQuat[2];
+        *reinterpret_cast<float*>(sample + 0x2C) = playerQuat[3];
+
+        typedef void (__thiscall *AddPosSample_t)(void* pActor, const void* pSample);
+        AddPosSample_t pAddSample = reinterpret_cast<AddPosSample_t>(clientBase + 0x004F3920);
+        __try {
+            pAddSample(pActor, sample);
+        } __except (EXCEPTION_EXECUTE_HANDLER) {}
+
+        // Recalculate spatial extents now that [pActor + 0x528] has been set!
+        typedef void (__thiscall *CalcExtents_t)(void* pActor);
+        CalcExtents_t pCalcExtents = reinterpret_cast<CalcExtents_t>(clientBase + 0x004E9BF0);
+        __try {
+            pCalcExtents(pActor);
+        } __except (EXCEPTION_EXECUTE_HANDLER) {}
 
         // Maintain visibility
         *reinterpret_cast<BYTE*>(reinterpret_cast<uintptr_t>(pActor) + 0x374) = 0; // Local player visible
@@ -3968,6 +4051,7 @@ static void EnsureInWorldRendering(uintptr_t clientBase, void* pWorldMgr, DWORD 
 
         static const DWORD hudControls[] = {
             0x1B, // Player Window (Quickbar, IS/Health meters, Combat tactics)
+            0x0E, // Combat Tactics Bar / Interlock
             0x27, // Compass / Radar HUD
             0x24, // Action Toolbar / Quickbar
             0x02, // Main Chat Window
@@ -4069,17 +4153,19 @@ static void EnsureInWorldRendering(uintptr_t clientBase, void* pWorldMgr, DWORD 
         }
     }
 
-    // Step 7: Ensure pWorldMgr + 8 (viewport count) is 1
-    DWORD* pVpCount = reinterpret_cast<DWORD*>(reinterpret_cast<DWORD>(pWorldMgr) + 8);
-    if (pVpCount) {
-        *pVpCount = 1;
-        Log("[mxohax] EnsureInWorld: Set viewport count [pWorldMgr+8] to 1\n");
-    }
-
-    // Step 8: Set render & in-world flags
-    *reinterpret_cast<BYTE*>(reinterpret_cast<DWORD>(pWorldMgr) + 0x20) = 1;
-    *reinterpret_cast<BYTE*>(reinterpret_cast<DWORD>(pWorldMgr) + 0x22) = 1;
-    *reinterpret_cast<BYTE*>(reinterpret_cast<DWORD>(pWorldMgr) + 0x27) = 1;
+    // Step 7 & 8: Ensure pWorldMgr viewport count and render flags are set safely
+    __try {
+        if (pWorldMgr && !IsBadReadPtr(pWorldMgr, 0x30)) {
+            DWORD* pVpCount = reinterpret_cast<DWORD*>(reinterpret_cast<DWORD>(pWorldMgr) + 8);
+            if (pVpCount) {
+                *pVpCount = 1;
+                Log("[mxohax] EnsureInWorld: Set viewport count [pWorldMgr+8] to 1\n");
+            }
+            *reinterpret_cast<BYTE*>(reinterpret_cast<DWORD>(pWorldMgr) + 0x20) = 1;
+            *reinterpret_cast<BYTE*>(reinterpret_cast<DWORD>(pWorldMgr) + 0x22) = 1;
+            *reinterpret_cast<BYTE*>(reinterpret_cast<DWORD>(pWorldMgr) + 0x27) = 1;
+        }
+    } __except (EXCEPTION_EXECUTE_HANDLER) {}
     if (pShell) {
         HWND hWnd = *reinterpret_cast<HWND*>(pShell + 0x14);
         if (!hWnd) hWnd = g_hGameWindow;
