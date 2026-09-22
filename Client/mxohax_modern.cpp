@@ -1907,35 +1907,8 @@ static bool CastDynamicWorldRay(uintptr_t clientBase, double posX, double startY
     outHit.normalZ = 0.0;
     outHit.surfaceFlags = 0;
 
-    if (!clientBase) return false;
-
-    __try {
-        // Probe Lithtech CLTClient physics / world intersection interface (object at clientBase + 0x00897FE0)
-        void* pPhysics = reinterpret_cast<void*>(clientBase + 0x00897FE0);
-        if (pPhysics && !IsBadReadPtr(pPhysics, 0x40)) {
-            void** vtbl = *reinterpret_cast<void***>(pPhysics);
-            if (vtbl && !IsBadReadPtr(vtbl, 0x40)) {
-                // ILTPhysics::IntersectSegment interface (vtable slot 7 / 0x1C)
-                typedef BOOL (__thiscall *fnIntersectSegment)(void* pThis, const float* pStart, const float* pEnd, void* pInfo);
-                fnIntersectSegment pIntersect = reinterpret_cast<fnIntersectSegment>(vtbl[7]);
-                if (pIntersect) {
-                    float startPt[3] = { (float)posX, (float)startY, (float)posZ };
-                    float endPt[3] = { (float)posX, (float)(startY - maxDownDist), (float)posZ };
-                    BYTE hitInfo[128] = {0};
-                    if (pIntersect(pPhysics, startPt, endPt, hitInfo)) {
-                        float* pHitPos = reinterpret_cast<float*>(hitInfo + 0x10);
-                        if (pHitPos[1] > 400.0f && pHitPos[1] < 1200.0f) {
-                            outHit.bHit = true;
-                            outHit.hitY = (double)pHitPos[1];
-                            return true;
-                        }
-                    }
-                }
-            }
-        }
-    } __except (EXCEPTION_EXECUTE_HANDLER) {
-        // Fallback safely to calibrated spatial surface model
-    }
+    // Dynamic raycasting via client.dll ILTPhysics is not safely exposed at raw RVA 0x00897FE0 (.rdata string literal)
+    // Fall back immediately and safely to calibrated spatial collision mesh model without throwing access violations
     return false;
 }
 
@@ -3006,8 +2979,17 @@ static void SetTargetOperative(uintptr_t clientBase, const char* name, DWORD cha
             }
         }
 
-        // Position Target Vitals (0x22) top-right: (1920 - 250, 10, 240, 90)
-        PositionControlAndWidget(clientBase, pUI, 0x22, 1920 - 250, 10, 240, 90);
+        // Position Target Vitals (0x22) top-right dynamically according to window width
+        HWND hWndTarget = g_hGameWindow;
+        if (!hWndTarget || !IsWindow(hWndTarget)) hWndTarget = FindWindowA(NULL, "The Matrix Online");
+        int screenW = 1920;
+        if (hWndTarget && IsWindow(hWndTarget)) {
+            RECT rc;
+            if (GetClientRect(hWndTarget, &rc) && (rc.right - rc.left) > 0) {
+                screenW = rc.right - rc.left;
+            }
+        }
+        PositionControlAndWidget(clientBase, pUI, 0x22, screenW - 250, 10, 240, 90);
         __try {
             SafeSetControlVisible(clientBase, pUI, 0x22, 1);
         } __except (EXCEPTION_EXECUTE_HANDLER) {}
@@ -3123,6 +3105,7 @@ static void ExecuteQuickbarAbility(uintptr_t clientBase, int slotIndex) {
                     *reinterpret_cast<float*>(reinterpret_cast<uintptr_t>(pActor) + 0x56C) = 1.0f;
                 }
             }
+            g_combatStrikeTimer = 0.65f;
             static int s_targetHealth = 100;
             s_targetHealth -= 14;
             if (s_targetHealth <= 10) s_targetHealth = 100;
@@ -3160,6 +3143,20 @@ static void ExecuteQuickbarAbility(uintptr_t clientBase, int slotIndex) {
             if (!g_hasTarget) {
                 SetTargetOperative(clientBase, "Heiu <Weapon Vendor>", 393, 16802.3, SPAWN_GROUND_ELEVATION, 3237.01, 50, 100);
             }
+            double tdx = g_targetX - g_playerX;
+            double tdz = g_targetZ - g_playerZ;
+            if (fabs(tdx) > 0.1 || fabs(tdz) > 0.1) {
+                g_playerYaw = (float)atan2(tdx, tdz);
+            }
+            void* curPlayer = *reinterpret_cast<void**>(clientBase + 0x008A4378);
+            if (curPlayer && !IsBadReadPtr(curPlayer, 0xB0)) {
+                void* pActor = *reinterpret_cast<void**>(reinterpret_cast<uintptr_t>(curPlayer) + 0xA8);
+                if (pActor && !IsBadReadPtr(pActor, 0x690)) {
+                    *reinterpret_cast<BYTE*>(reinterpret_cast<uintptr_t>(pActor) + 0x4EE) = 0;
+                    *reinterpret_cast<float*>(reinterpret_cast<uintptr_t>(pActor) + 0x56C) = 1.0f;
+                }
+            }
+            g_combatStrikeTimer = 0.65f;
             static int s_lbHealth = 100;
             s_lbHealth -= 28;
             if (s_lbHealth <= 10) s_lbHealth = 100;
@@ -3245,6 +3242,10 @@ static void ExecuteHudButtonAction(uintptr_t clientBase, HudButtonId btnId, int 
         case HUD_BTN_TACTIC_FREE: {
             Log("[mxohax] UI BUTTON CLICK: Combat Tactics [Free] clicked at (%d, %d)\n", mx, my);
             SetTacticsStance(clientBase, STANCE_FREE);
+            if (pUI && !IsBadReadPtr(pUI, 0x200)) {
+                void* pInterlock = *reinterpret_cast<void**>(reinterpret_cast<uintptr_t>(pUI) + 0x28 + 0x0E * 4);
+                if (pInterlock) Safe_Interlock_Speed_Button(pInterlock, nullptr);
+            }
             break;
         }
         case HUD_BTN_TACTIC_POWER: {
@@ -3344,7 +3345,7 @@ static void ExecuteHudButtonAction(uintptr_t clientBase, HudButtonId btnId, int 
     }
 }
 
-static bool IsPointOverAnyHud(int mx, int my, int winW, int winH) {
+static bool IsPointOverAnyHud(int mx, int my, int winW = 1920, int winH = 1080) {
     if (winW <= 0) winW = 1920;
     if (winH <= 0) winH = 1080;
 
@@ -3749,14 +3750,17 @@ static void UpdatePlayerPositionAndPhysics(uintptr_t clientBase, void* curPlayer
         *reinterpret_cast<double*>(reinterpret_cast<uintptr_t>(pActor) + 0x530) = g_playerY;
         *reinterpret_cast<double*>(reinterpret_cast<uintptr_t>(pActor) + 0x538) = g_playerZ;
 
+        float animWeight = (g_combatStrikeTimer > 0.0f) ? 1.0f : g_moveAnimBlend;
+        bool isStationaryIdle = (g_combatStrikeTimer <= 0.0f && g_moveAnimBlend <= 0.05f && !isMoving && !g_isJumping);
+
         // Double precision velocities on CActor
-        *reinterpret_cast<double*>(reinterpret_cast<uintptr_t>(pActor) + 0x510) = isMoving ? actVelX : 0.0;
+        *reinterpret_cast<double*>(reinterpret_cast<uintptr_t>(pActor) + 0x510) = isMoving ? actVelX * (double)g_moveAnimBlend : 0.0;
         *reinterpret_cast<double*>(reinterpret_cast<uintptr_t>(pActor) + 0x518) = g_isJumping ? g_velY : 0.0;
-        *reinterpret_cast<double*>(reinterpret_cast<uintptr_t>(pActor) + 0x520) = isMoving ? actVelZ : 0.0;
+        *reinterpret_cast<double*>(reinterpret_cast<uintptr_t>(pActor) + 0x520) = isMoving ? actVelZ * (double)g_moveAnimBlend : 0.0;
 
         // Locomotion stopped/idle flag (+0x4EE): 1 = stopped/idle, 0 = moving
-        *reinterpret_cast<BYTE*>(reinterpret_cast<uintptr_t>(pActor) + 0x4EE) = (!isMoving && !g_isJumping) ? 1 : 0;
-        *reinterpret_cast<WORD*>(reinterpret_cast<uintptr_t>(pActor) + 0x4EE) = (!isMoving && !g_isJumping) ? 1 : 0;
+        *reinterpret_cast<BYTE*>(reinterpret_cast<uintptr_t>(pActor) + 0x4EE) = isStationaryIdle ? 1 : 0;
+        *reinterpret_cast<WORD*>(reinterpret_cast<uintptr_t>(pActor) + 0x4EE) = isStationaryIdle ? 1 : 0;
 
         float* pActorRot = reinterpret_cast<float*>(reinterpret_cast<uintptr_t>(pActor) + 0x4FC);
         if (pActorRot && !IsBadReadPtr(pActorRot, 16)) {
@@ -3794,7 +3798,7 @@ static void UpdatePlayerPositionAndPhysics(uintptr_t clientBase, void* curPlayer
         *reinterpret_cast<BYTE*>(reinterpret_cast<uintptr_t>(pActor) + 0x684) = 0; // In-world
         *reinterpret_cast<BYTE*>(reinterpret_cast<uintptr_t>(pActor) + 0x385) = 3; // Scene transform valid
         *reinterpret_cast<BYTE*>(reinterpret_cast<uintptr_t>(pActor) + 0x290) = 0;
-        *reinterpret_cast<float*>(reinterpret_cast<uintptr_t>(pActor) + 0x56C) = isMoving ? 1.0f : 0.0f;
+        *reinterpret_cast<float*>(reinterpret_cast<uintptr_t>(pActor) + 0x56C) = animWeight;
     }
 }
 
@@ -4541,6 +4545,11 @@ static void __fastcall DetourFrameTick(void* pThis, void* /*edx*/) {
         if (keyLeft)  g_camYaw -= 2.0f * (float)dt;
         if (keyRight) g_camYaw += 2.0f * (float)dt;
 
+        if (g_combatStrikeTimer > 0.0f) {
+            g_combatStrikeTimer -= (float)dt;
+            if (g_combatStrikeTimer < 0.0f) g_combatStrikeTimer = 0.0f;
+        }
+
         bool isMoving = false;
         double actVelX = 0.0;
         double actVelZ = 0.0;
@@ -4574,6 +4583,12 @@ static void __fastcall DetourFrameTick(void* pThis, void* /*edx*/) {
         }
         g_bPlayerIsMoving = isMoving;
 
+        if (isMoving) {
+            g_moveAnimBlend = fminf(1.0f, g_moveAnimBlend + (float)dt * 8.0f);
+        } else {
+            g_moveAnimBlend = fmaxf(0.0f, g_moveAnimBlend - (float)dt * 8.0f);
+        }
+
         // Apply position, orientation and extents to player and actor
         if (curPlayer && !IsBadReadPtr(curPlayer, 0xB0)) {
             *reinterpret_cast<BYTE*>(reinterpret_cast<uintptr_t>(curPlayer) + 0xC) |= 0x20;
@@ -4587,8 +4602,10 @@ static void __fastcall DetourFrameTick(void* pThis, void* /*edx*/) {
                 *reinterpret_cast<BYTE*>(reinterpret_cast<uintptr_t>(pActor) + 0x684) = 0; // In-world
                 *reinterpret_cast<BYTE*>(reinterpret_cast<uintptr_t>(pActor) + 0x385) = 3; // Scene transform valid
                 *reinterpret_cast<BYTE*>(reinterpret_cast<uintptr_t>(pActor) + 0x290) = 0;
-                *reinterpret_cast<float*>(reinterpret_cast<uintptr_t>(pActor) + 0x56C) = isMoving ? 1.0f : 0.0f;
-                if (!isMoving && !g_isJumping) {
+                float animWeight = (g_combatStrikeTimer > 0.0f) ? 1.0f : g_moveAnimBlend;
+                bool isStationaryIdle = (g_combatStrikeTimer <= 0.0f && g_moveAnimBlend <= 0.05f && !isMoving && !g_isJumping);
+                *reinterpret_cast<float*>(reinterpret_cast<uintptr_t>(pActor) + 0x56C) = animWeight;
+                if (isStationaryIdle) {
                     *reinterpret_cast<BYTE*>(reinterpret_cast<uintptr_t>(pActor) + 0x4EE) = 1;
                     *reinterpret_cast<WORD*>(reinterpret_cast<uintptr_t>(pActor) + 0x4EE) = 1;
                     *reinterpret_cast<double*>(reinterpret_cast<uintptr_t>(pActor) + 0x510) = 0.0;
