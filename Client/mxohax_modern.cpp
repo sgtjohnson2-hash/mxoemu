@@ -64,7 +64,22 @@ static inline bool SafeWriteFloat(void* ptr, float val) {
     return false;
 }
 
-static inline void* GetCUIPointer(uintptr_t clientBase) {
+static uintptr_t g_clientBase = 0;
+
+static inline uintptr_t GetSafeClientBase() {
+    if (g_clientBase && g_clientBase >= 0x1000000 && g_clientBase < 0x7FFE0000) return g_clientBase;
+    HMODULE hClient = GetModuleHandleA("client.dll");
+    if (hClient) {
+        g_clientBase = reinterpret_cast<uintptr_t>(hClient);
+        return g_clientBase;
+    }
+    return 0;
+}
+
+static inline void* GetCUIPointer(uintptr_t clientBase = 0) {
+    if (!clientBase || clientBase < 0x1000000 || clientBase >= 0x7FFE0000) {
+        clientBase = GetSafeClientBase();
+    }
     if (!clientBase) return nullptr;
     void** ppUI = reinterpret_cast<void**>(clientBase + 0x00898C54);
     if (!ppUI || IsBadReadPtr(ppUI, sizeof(void*))) return nullptr;
@@ -272,6 +287,52 @@ static LONG WINAPI CrashHandler(PEXCEPTION_POINTERS pExc) {
                             ctx->Eax = 190;
                             return EXCEPTION_CONTINUE_EXECUTION;
                         }
+                    }
+                }
+            }
+
+            // 16. Recovery for any exception inside mxohax_modern.dll itself
+            if (selfBase && (uintptr_t)addr >= selfBase && (uintptr_t)addr < selfBase + 0x100000 && ctx) {
+                Log("[mxohax] Recovered from exception in mxohax_modern.dll at +0x%08X: unwinding frame safely\n",
+                    (uintptr_t)addr - selfBase);
+                if (ctx->Esp && !IsBadReadPtr(reinterpret_cast<void*>(ctx->Esp), sizeof(DWORD))) {
+                    DWORD retAddr = *reinterpret_cast<DWORD*>(ctx->Esp);
+                    if (retAddr >= 0x10000 && retAddr < 0x7FFE0000) {
+                        ctx->Esp += 4;
+                        ctx->Eip = retAddr;
+                        return EXCEPTION_CONTINUE_EXECUTION;
+                    }
+                }
+                if (ctx->Ebp && !IsBadReadPtr(reinterpret_cast<void*>(ctx->Ebp + 4), sizeof(DWORD))) {
+                    DWORD retAddr = *reinterpret_cast<DWORD*>(ctx->Ebp + 4);
+                    if (retAddr >= 0x10000 && retAddr < 0x7FFE0000) {
+                        ctx->Eip = retAddr;
+                        ctx->Esp = ctx->Ebp + 8;
+                        ctx->Ebp = *reinterpret_cast<DWORD*>(ctx->Ebp);
+                        return EXCEPTION_CONTINUE_EXECUTION;
+                    }
+                }
+            }
+
+            // 17. Linked list cleanup virtual call crash in 0x00578040 - 0x00578120 (specifically 0x005780B3)
+            if (clientBase && (uintptr_t)addr >= clientBase + 0x005780A0 && (uintptr_t)addr <= clientBase + 0x005780C0 && ctx) {
+                Log("[mxohax] Recovered from virtual call crash in linked-list cleanup at client.dll + 0x%08X: advancing to next entry (0x%p)\n",
+                    (uintptr_t)addr - clientBase, (void*)(clientBase + 0x005780B8));
+                ctx->Eip = static_cast<DWORD>(clientBase + 0x005780B8);
+                return EXCEPTION_CONTINUE_EXECUTION;
+            }
+
+            // 18. CUI::DispatchInput crash recovery (0x0001DED0 - 0x0001F580)
+            if (clientBase && (uintptr_t)addr >= clientBase + 0x0001DED0 && (uintptr_t)addr <= clientBase + 0x0001F580 && ctx) {
+                Log("[mxohax] Recovered from crash in CUI::DispatchInput at client.dll + 0x%08X: unwinding frame safely\n",
+                    (uintptr_t)addr - clientBase);
+                if (ctx->Ebp && !IsBadReadPtr((void*)(ctx->Ebp + 4), 4)) {
+                    DWORD retAddr = *reinterpret_cast<DWORD*>(ctx->Ebp + 4);
+                    if (retAddr >= clientBase && retAddr < clientBase + 0x1000000) {
+                        ctx->Eip = retAddr;
+                        ctx->Esp = ctx->Ebp + 8;
+                        ctx->Ebp = *reinterpret_cast<DWORD*>(ctx->Ebp);
+                        return EXCEPTION_CONTINUE_EXECUTION;
                     }
                 }
             }
@@ -936,12 +997,21 @@ static int __fastcall DetourWidgetSetPosition(void* pThis, void* /*edx*/, int x,
     return 0;
 }
 
-static inline void NeutralizeDragGlobals(uintptr_t clientBase) {
-    if (!clientBase) return;
-    DWORD* pActiveDrag = reinterpret_cast<DWORD*>(clientBase + 0x00849394);
-    if (pActiveDrag && *pActiveDrag != 0xFFFFFFFF) {
-        *pActiveDrag = 0xFFFFFFFF; // Active dragged control ID
+static inline void NeutralizeDragGlobals(uintptr_t clientBase = 0) {
+    if (!clientBase || clientBase < 0x1000000 || clientBase >= 0x7FFE0000) {
+        clientBase = GetSafeClientBase();
     }
+    if (!clientBase) return;
+    __try {
+        DWORD* pActiveDrag = reinterpret_cast<DWORD*>(clientBase + 0x00849394);
+        if (pActiveDrag && !IsBadWritePtr(pActiveDrag, sizeof(DWORD)) && *pActiveDrag != 0xFFFFFFFF) {
+            *pActiveDrag = 0xFFFFFFFF; // Active dragged control ID
+        }
+        DWORD* pActiveResize = reinterpret_cast<DWORD*>(clientBase + 0x00849390);
+        if (pActiveResize && !IsBadWritePtr(pActiveResize, sizeof(DWORD)) && *pActiveResize != 0xFFFFFFFF) {
+            *pActiveResize = 0xFFFFFFFF; // Active resize mode
+        }
+    } __except (EXCEPTION_EXECUTE_HANDLER) {}
 }
 
 static void __fastcall DetourSetControlPos(void* pControl, void* /*edx*/, const int* pt) {
@@ -1896,21 +1966,17 @@ static double GetCalibratedGroundElevation(double x, double z) {
     }
 
     // Zone C1: South stairs & ramp transition to street level (Z: 2100 to 2400)
-    // Modeled with discrete stair treads (run = 15.0 units, rise = 1.575 units)
+    // Continuous slope so boot soles track 100% flush without step popping or floating
     if (z >= 2100.0 && z < 2400.0 && x >= 16400.0 && x <= 17250.0) {
-        double distFromTop = 2400.0 - z;
-        int stepIdx = (int)(distFromTop / 15.0);
-        if (stepIdx > 19) stepIdx = 19;
-        return SPAWN_GROUND_ELEVATION - (stepIdx * 1.575); // Steps down smoothly from 603.5 to 572.0
+        double t = (2400.0 - z) / 300.0;
+        return SPAWN_GROUND_ELEVATION - t * (SPAWN_GROUND_ELEVATION - 572.0); // Smooth continuous ramp from 603.5 to 572.0
     }
 
     // Zone C2: North church stairs transition to street level (Z: 3720 to 3950)
-    // Modeled with discrete stair treads (run = 15.3 units, rise = 2.1 units)
+    // Continuous slope so boot soles track 100% flush without step popping or floating
     if (z > 3720.0 && z <= 3950.0 && x >= 16400.0 && x <= 17250.0) {
-        double distFromTop = z - 3720.0;
-        int stepIdx = (int)(distFromTop / 15.3);
-        if (stepIdx > 14) stepIdx = 14;
-        return SPAWN_GROUND_ELEVATION - (stepIdx * 2.1); // Steps down smoothly from 603.5 to 572.0
+        double t = (z - 3720.0) / 230.0;
+        return SPAWN_GROUND_ELEVATION - t * (SPAWN_GROUND_ELEVATION - 572.0); // Smooth continuous ramp from 603.5 to 572.0
     }
 
     // Zone D1: Church entrance steps and courtyard (Z > 3950)
@@ -1933,6 +1999,10 @@ static bool   g_isJumping = false;
 static double g_jumpVelX = 0.0;
 static double g_jumpVelZ = 0.0;
 static bool   g_hasDoubleJumped = false;
+
+// Locomotion & Combat Animation Blending
+static float  g_moveAnimBlend = 0.0f;
+static float  g_combatStrikeTimer = 0.0f;
 
 // Epoch I: Wire-Fu Acrobatics & Skyscraper Facade Wall-Running
 static bool   g_isWallRunning = false;
@@ -2887,6 +2957,9 @@ static void TriggerPhoneCall(uintptr_t clientBase) {
 }
 
 static void SetTargetOperative(uintptr_t clientBase, const char* name, DWORD charId, double x, double y, double z, int level = 50, int health = 100) {
+    if (!clientBase || clientBase < 0x1000000 || clientBase >= 0x7FFE0000) {
+        clientBase = GetSafeClientBase();
+    }
     g_hasTarget = true;
     g_targetCharId = charId;
     strncpy_s(g_targetName, sizeof(g_targetName), name, _TRUNCATE);
@@ -2942,6 +3015,9 @@ static void SetTargetOperative(uintptr_t clientBase, const char* name, DWORD cha
 }
 
 static void SetTacticsStance(uintptr_t clientBase, StanceType newStance) {
+    if (!clientBase || clientBase < 0x1000000 || clientBase >= 0x7FFE0000) {
+        clientBase = GetSafeClientBase();
+    }
     g_currentStance = newStance;
     const char* stanceNames[] = { "Free", "Power", "Grab", "Speed", "Withdraw" };
     const char* sName = (newStance >= 0 && newStance <= 4) ? stanceNames[newStance] : "Unknown";
@@ -2965,13 +3041,13 @@ static void SetTacticsStance(uintptr_t clientBase, StanceType newStance) {
             if (!pBtnBlock || !IsValidWidget(clientBase, pBtnBlock)) {
                 pBtnBlock = *reinterpret_cast<void**>(reinterpret_cast<uintptr_t>(pInterlock) + 0x7C);
             }
-            if (pBtnFree)  SetWidgetVisualState(pBtnFree,  (newStance == STANCE_FREE || newStance == STANCE_SPEED) ? 4 : 0);
-            if (pBtnPower) SetWidgetVisualState(pBtnPower, (newStance == STANCE_POWER) ? 4 : 0);
-            if (pBtnGrab)  SetWidgetVisualState(pBtnGrab,  (newStance == STANCE_GRAB)  ? 4 : 0);
-            if (pBtnBlock) SetWidgetVisualState(pBtnBlock, (newStance == STANCE_WITHDRAW) ? 4 : 0);
+            if (pBtnFree && IsValidWidget(clientBase, pBtnFree))   SetWidgetVisualState(pBtnFree,  (newStance == STANCE_FREE) ? 4 : 0);
+            if (pBtnPower && IsValidWidget(clientBase, pBtnPower)) SetWidgetVisualState(pBtnPower, (newStance == STANCE_POWER) ? 4 : 0);
+            if (pBtnGrab && IsValidWidget(clientBase, pBtnGrab))   SetWidgetVisualState(pBtnGrab,  (newStance == STANCE_GRAB)  ? 4 : 0);
+            if (pBtnBlock && IsValidWidget(clientBase, pBtnBlock)) SetWidgetVisualState(pBtnBlock, (newStance == STANCE_WITHDRAW) ? 4 : 0);
         }
 
-        // Visually update the Quickbar (0x24) slot buttons 1-5 for stances
+        // Visually update the corresponding quickbar hotkey slot (Slots 1-5)
         void* pQuickbar = *reinterpret_cast<void**>(reinterpret_cast<uintptr_t>(pUI) + 0x28 + 0x24 * 4);
         if (pQuickbar && !IsBadReadPtr(pQuickbar, 0x200)) {
             for (int i = 0; i < 5; ++i) {
@@ -2990,6 +3066,9 @@ static void SetTacticsStance(uintptr_t clientBase, StanceType newStance) {
 
 static void ExecuteQuickbarAbility(uintptr_t clientBase, int slotIndex) {
     if (slotIndex < 1 || slotIndex > 10) return;
+    if (!clientBase || clientBase < 0x1000000 || clientBase >= 0x7FFE0000) {
+        clientBase = GetSafeClientBase();
+    }
 
     // Slots 1-5: Tactics Stances (Free, Power, Grab, Speed, Withdraw)
     // Slots 6-9: Combat & Acrobatics (Strike, Hyper-Jump, Subroutine Compile, Logic Bomb)
@@ -3305,9 +3384,8 @@ static bool IsPointOverAnyHud(int mx, int my, int winW, int winH) {
 }
 
 static LRESULT CALLBACK SubclassWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam) {
-    HMODULE hClient = GetModuleHandleA("client.dll");
-    uintptr_t clientBase = (uintptr_t)hClient;
-    NeutralizeDragGlobals(clientBase);
+    uintptr_t clientBase = GetSafeClientBase();
+    NeutralizeDragGlobals();
 
     RECT clientRc;
     GetClientRect(hWnd, &clientRc);
@@ -3319,7 +3397,7 @@ static LRESULT CALLBACK SubclassWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPA
     switch (uMsg) {
         case WM_ACTIVATE:
         case WM_SETFOCUS: {
-            NeutralizeDragGlobals(clientBase);
+            NeutralizeDragGlobals();
             break;
         }
         case WM_KILLFOCUS: {
@@ -3329,7 +3407,7 @@ static LRESULT CALLBACK SubclassWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPA
             g_bLeftMouseDown = false;
             g_bRightMouseDown = false;
             if (GetCapture() == hWnd) ReleaseCapture();
-            NeutralizeDragGlobals(clientBase);
+            NeutralizeDragGlobals();
             break;
         }
         case WM_MOUSEMOVE: {
@@ -3360,13 +3438,14 @@ static LRESULT CALLBACK SubclassWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPA
             g_lastMouseY = my;
 
             // Dispatch input event to client CUI
-            DispatchInputEventToClient(clientBase, 0x65766F4D, mx, my); // 'Move'
+            uintptr_t cb = GetSafeClientBase();
+            DispatchInputEventToClient(cb, 0x65766F4D, mx, my); // 'Move'
 
-            NeutralizeDragGlobals(clientBase);
+            NeutralizeDragGlobals();
             return OriginalWndProc ? CallWindowProcA(OriginalWndProc, hWnd, uMsg, wParam, lParam) : DefWindowProcA(hWnd, uMsg, wParam, lParam);
         }
         case WM_LBUTTONDOWN: {
-            NeutralizeDragGlobals(clientBase);
+            NeutralizeDragGlobals();
             SetFocus(hWnd);
             SetActiveWindow(hWnd);
             g_bLeftMouseDown = true;
@@ -3381,7 +3460,8 @@ static LRESULT CALLBACK SubclassWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPA
             g_pressedHudButton = (int)hitBtn;
             if (hitBtn != HUD_BTN_NONE || IsPointOverAnyHud(mx, my, winW, winH)) {
                 g_bMouseDownOnUI = true;
-                DispatchInputEventToClient(clientBase, 0x6E444C4D, mx, my); // 'MLDn'
+                uintptr_t cb = GetSafeClientBase();
+                DispatchInputEventToClient(cb, 0x6E444C4D, mx, my); // 'MLDn'
             } else {
                 g_bMouseDownOnUI = false;
             }
@@ -3390,11 +3470,11 @@ static LRESULT CALLBACK SubclassWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPA
             if (!g_bMouseDownOnUI) {
                 SetCapture(hWnd); // Capture mouse for smooth 3D camera drag
             }
-            NeutralizeDragGlobals(clientBase);
+            NeutralizeDragGlobals();
             return lRes;
         }
         case WM_LBUTTONUP: {
-            NeutralizeDragGlobals(clientBase);
+            NeutralizeDragGlobals();
             g_bLeftMouseDown = false;
             if (!g_bLeftMouseDown && !g_bRightMouseDown && GetCapture() == hWnd) {
                 ReleaseCapture();
@@ -3404,7 +3484,8 @@ static LRESULT CALLBACK SubclassWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPA
             g_bHumanInputActive = true;
             Log("[mxohax] WM_LBUTTONUP: (%d, %d)\n", mx, my);
 
-            DispatchInputEventToClient(clientBase, 0x70554C4D, mx, my); // 'MLUp'
+            uintptr_t cb = GetSafeClientBase();
+            DispatchInputEventToClient(cb, 0x70554C4D, mx, my); // 'MLUp'
 
             HudButtonId hitBtn = HitTestHudButton(mx, my, winW, winH);
             HudButtonId btnToExecute = HUD_BTN_NONE;
@@ -3417,7 +3498,7 @@ static LRESULT CALLBACK SubclassWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPA
             }
 
             if (btnToExecute != HUD_BTN_NONE) {
-                ExecuteHudButtonAction(clientBase, btnToExecute, mx, my);
+                ExecuteHudButtonAction(cb, btnToExecute, mx, my);
             } else if (!IsPointOverAnyHud(mx, my, winW, winH)) {
                 // Click in 3D world (not over any HUD frame) targets nearby AI NPC / world objects
                 // In Mara Central concourse:
@@ -3425,9 +3506,9 @@ static LRESULT CALLBACK SubclassWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPA
                 // Right side: Heiu <Weapon Vendor>
                 if (my >= 60 && my <= winH - 90 && mx >= 10 && mx <= winW - 10) {
                     if (mx < winW / 2) {
-                        SetTargetOperative(clientBase, "Emergency Hardline <Phone Booth>", 152, 16645.0, SPAWN_GROUND_ELEVATION, 3242.0, 50, 100);
+                        SetTargetOperative(cb, "Emergency Hardline <Phone Booth>", 152, 16645.0, SPAWN_GROUND_ELEVATION, 3242.0, 50, 100);
                     } else {
-                        SetTargetOperative(clientBase, "Heiu <Weapon Vendor>", 393, 16802.3, SPAWN_GROUND_ELEVATION, 3237.01, 50, 100);
+                        SetTargetOperative(cb, "Heiu <Weapon Vendor>", 393, 16802.3, SPAWN_GROUND_ELEVATION, 3237.01, 50, 100);
                     }
                 }
             }
@@ -3435,11 +3516,11 @@ static LRESULT CALLBACK SubclassWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPA
             g_bMouseDownOnUI = false;
 
             LRESULT lRes = OriginalWndProc ? CallWindowProcA(OriginalWndProc, hWnd, uMsg, wParam, lParam) : DefWindowProcA(hWnd, uMsg, wParam, lParam);
-            NeutralizeDragGlobals(clientBase);
+            NeutralizeDragGlobals();
             return lRes;
         }
         case WM_RBUTTONDOWN: {
-            NeutralizeDragGlobals(clientBase);
+            NeutralizeDragGlobals();
             SetFocus(hWnd);
             SetActiveWindow(hWnd);
             g_bRightMouseDown = true;
@@ -3449,14 +3530,15 @@ static LRESULT CALLBACK SubclassWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPA
             g_lastMouseY = my;
             g_bHumanInputActive = true;
             Log("[mxohax] WM_RBUTTONDOWN: (%d, %d)\n", mx, my);
-            DispatchInputEventToClient(clientBase, 0x6E44524D, mx, my); // 'MRDn'
+            uintptr_t cb = GetSafeClientBase();
+            DispatchInputEventToClient(cb, 0x6E44524D, mx, my); // 'MRDn'
             LRESULT lRes = OriginalWndProc ? CallWindowProcA(OriginalWndProc, hWnd, uMsg, wParam, lParam) : DefWindowProcA(hWnd, uMsg, wParam, lParam);
             SetCapture(hWnd); // Capture mouse for smooth 3D camera orbit
-            NeutralizeDragGlobals(clientBase);
+            NeutralizeDragGlobals();
             return lRes;
         }
         case WM_RBUTTONUP: {
-            NeutralizeDragGlobals(clientBase);
+            NeutralizeDragGlobals();
             g_bRightMouseDown = false;
             if (!g_bLeftMouseDown && !g_bRightMouseDown && GetCapture() == hWnd) {
                 ReleaseCapture();
@@ -3465,9 +3547,10 @@ static LRESULT CALLBACK SubclassWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPA
             short my = (short)HIWORD(lParam);
             g_bHumanInputActive = true;
             Log("[mxohax] WM_RBUTTONUP: (%d, %d)\n", mx, my);
-            DispatchInputEventToClient(clientBase, 0x7055524D, mx, my); // 'MRUp'
+            uintptr_t cb = GetSafeClientBase();
+            DispatchInputEventToClient(cb, 0x7055524D, mx, my); // 'MRUp'
             LRESULT lRes = OriginalWndProc ? CallWindowProcA(OriginalWndProc, hWnd, uMsg, wParam, lParam) : DefWindowProcA(hWnd, uMsg, wParam, lParam);
-            NeutralizeDragGlobals(clientBase);
+            NeutralizeDragGlobals();
             return lRes;
         }
         case WM_CAPTURECHANGED: {
@@ -3475,7 +3558,7 @@ static LRESULT CALLBACK SubclassWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPA
             g_bLeftMouseDown = false;
             g_bRightMouseDown = false;
             g_pressedHudButton = (int)HUD_BTN_NONE;
-            NeutralizeDragGlobals(clientBase);
+            NeutralizeDragGlobals();
             return OriginalWndProc ? CallWindowProcA(OriginalWndProc, hWnd, uMsg, wParam, lParam) : DefWindowProcA(hWnd, uMsg, wParam, lParam);
         }
         case WM_MOUSEWHEEL: {
@@ -5154,6 +5237,7 @@ static void ApplyClientPatches(HMODULE hClient) {
     if (InterlockedCompareExchange(&s_patchLock, 1, 0) != 0 || !hClient) return;
 
     DWORD clientBase = reinterpret_cast<DWORD>(hClient);
+    g_clientBase = clientBase;
     Log("[mxohax] Applying client.dll hooks at base 0x%p...\n", (void*)clientBase);
 
     // Hook ParseSubpacket at 0x00255710
@@ -5587,13 +5671,20 @@ static void ApplyClientPatches(HMODULE hClient) {
     }
 
     // Neutralize active dragging and resizing globals
-    *reinterpret_cast<DWORD*>(clientBase + 0x00849394) = 0xFFFFFFFF; // Active dragged control ID
-    *reinterpret_cast<DWORD*>(clientBase + 0x00849390) = 0xFFFFFFFF; // Active resize mode
-    *reinterpret_cast<DWORD*>(clientBase + 0x00899800) = 0;          // Drag offset X
-    *reinterpret_cast<DWORD*>(clientBase + 0x00899804) = 0;          // Drag offset Y
-    *reinterpret_cast<DWORD*>(clientBase + 0x00898C50) = 0;          // Captured control pointer
-    *reinterpret_cast<DWORD*>(clientBase + 0x008997F8) = 0;          // Drag start X
-    *reinterpret_cast<DWORD*>(clientBase + 0x008997FC) = 0;          // Drag start Y
+    NeutralizeDragGlobals(clientBase);
+    __try {
+        if (!IsBadWritePtr(reinterpret_cast<void*>(clientBase + 0x00899800), 8)) {
+            *reinterpret_cast<DWORD*>(clientBase + 0x00899800) = 0;          // Drag offset X
+            *reinterpret_cast<DWORD*>(clientBase + 0x00899804) = 0;          // Drag offset Y
+        }
+        if (!IsBadWritePtr(reinterpret_cast<void*>(clientBase + 0x00898C50), 4)) {
+            *reinterpret_cast<DWORD*>(clientBase + 0x00898C50) = 0;          // Captured control pointer
+        }
+        if (!IsBadWritePtr(reinterpret_cast<void*>(clientBase + 0x008997F8), 8)) {
+            *reinterpret_cast<DWORD*>(clientBase + 0x008997F8) = 0;          // Drag start X
+            *reinterpret_cast<DWORD*>(clientBase + 0x008997FC) = 0;          // Drag start Y
+        }
+    } __except (EXCEPTION_EXECUTE_HANDLER) {}
 
     // Neutralize client.dll instructions that clobber CActor +0x4EE idle flag to 0
     // Real verified RVAs:
