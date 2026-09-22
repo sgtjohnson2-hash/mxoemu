@@ -2207,88 +2207,127 @@ static void* GetControlRootWidget(uintptr_t clientBase, void* pCtrl, DWORD ctrlI
     return nullptr;
 }
 
-static HudButtonId HitTestHudButton(int x, int y, int screenW = 1920, int screenH = 1080) {
-    if (screenW <= 0) screenW = 1920;
-    if (screenH <= 0) screenH = 1080;
+static HudButtonId HitTestGeometry(int testX, int testY, int w, int h) {
+    if (w <= 0) w = 1920;
+    if (h <= 0) h = 1080;
 
-    // Normalize coordinates to canonical 1920x1080 HUD canvas space
-    int canX = (screenW != 1920) ? (int)((double)x * 1920.0 / (double)screenW) : x;
-    int canY = (screenH != 1080) ? (int)((double)y * 1080.0 / (double)screenH) : y;
-    if (canX < 0) canX = 0;
-    if (canX > 1920) canX = 1920;
-    if (canY < 0) canY = 0;
-    if (canY > 1080) canY = 1080;
+    // 1. Combat Posture Buttons (Focus, Power, Attack, Defense)
+    // Docked at startX = (w / 2) - 67, btnY = h - 167; w = 134, h = 32
+    // Exact match to RepositionCombatTactics
+    const int postureW = 134;
+    const int postureH = 32;
+    const int postureX = (w / 2) - (postureW / 2); // (w / 2) - 67
+    const int postureY = h - 167;
+    if (testX >= postureX && testX <= postureX + postureW && testY >= postureY && testY <= postureY + postureH) {
+        int idx = (testX - postureX) / 34;
+        if (idx == 0) return HUD_BTN_TACTIC_FREE;     // Focus / Free (Blue)
+        if (idx == 1) return HUD_BTN_TACTIC_POWER;    // Power (Red)
+        if (idx == 2) return HUD_BTN_TACTIC_GRAB;     // Attack / Grab (Green)
+        if (idx >= 3) return HUD_BTN_TACTIC_WITHDRAW; // Defense / Withdraw (Yellow)
+    }
 
-    // 1. Quickbar / Hotbar (0x24: centered at bottom, x = 746..1174, y = 859..944)
-    const int qbX = (1920 - 428) / 2; // 746
-    const int qbY = 1080 - 186;        // 894
-    if (((canY >= 850 && canY <= 910) || (canY >= qbY && canY <= qbY + 50)) && canX >= qbX && canX <= qbX + 428) {
-        // Page switcher button (leftmost tab: x = qbX..qbX+35)
-        if (canX >= qbX && canX < qbX + 36) {
+    // 2. Quickbar / Hotbar (0x24: centered at bottom, w=428, h=50)
+    // Docked at qbX = (w - 428) / 2, qbY = h - 221; sits strictly above posture buttons (h - 167)
+    // Exact match to RepositionQuickbar
+    const int qbW = 428;
+    const int qbH = 50;
+    const int qbX = (w - qbW) / 2;
+    const int qbY = h - 221;
+    if (testX >= qbX && testX <= qbX + qbW && testY >= qbY && testY <= qbY + qbH) {
+        // Page switcher button (leftmost tab: x = qbX .. qbX + 35)
+        if (testX >= qbX && testX < qbX + 36) {
             return HUD_BTN_QB_PAGE;
         }
         // Slots 1 to 10: slot i starts at qbX + 36 + (i * 37), width 37
         for (int i = 0; i < 10; ++i) {
             int slotX = qbX + 36 + (i * 37);
-            if (canX >= slotX && canX < slotX + 37) {
+            if (testX >= slotX && testX < slotX + 37) {
                 return (HudButtonId)(HUD_BTN_QB_1 + i);
             }
         }
         // Force Combat button (fighting figures icon): qbX + 406..qbX + 428
-        if (canX >= qbX + 406) {
+        if (testX >= qbX + 406) {
             return HUD_BTN_TACTIC_FREE;
         }
     }
 
-    // 2. Bottom-Center: Compass Dial & Satellite Wings (0x27)
-    // 2a. 4 Combat Posture Buttons docked directly above Compass ring (Focus, Power, Attack, Defense)
-    const int compassTopY = 1080 - 134; // 946
-    const int postureY = compassTopY - 33; // 913
-    if (canY >= postureY - 2 && canY <= postureY + 34) {
-        const int totalW = (4 * 32) + (3 * 2); // 134
-        const int startX = 960 - (totalW / 2); // 893
-        if (canX >= startX && canX <= startX + totalW) {
-            int idx = (canX - startX) / (32 + 2);
-            if (idx == 0) return HUD_BTN_TACTIC_FREE;     // Focus / Free (Blue)
-            if (idx == 1) return HUD_BTN_TACTIC_POWER;    // Power (Red)
-            if (idx == 2) return HUD_BTN_TACTIC_GRAB;     // Attack / Grab (Green)
-            if (idx >= 3) return HUD_BTN_TACTIC_WITHDRAW; // Defense / Withdraw (Yellow)
-        }
-    }
-
-    // Left Wing (Character Status button):
-    if (canY >= 950 && canY <= 1070 && canX >= 835 && canX <= 915) {
+    // 3. Left Wing (Character Status button):
+    // targetLeftX = (w / 2) - 122; targetLeftY = h - 35; w=42, h=30
+    const int leftWingX = (w / 2) - 122;
+    const int leftWingY = h - 35;
+    if (testX >= leftWingX && testX <= leftWingX + 42 && testY >= leftWingY && testY <= leftWingY + 30) {
         return HUD_BTN_CHAR_STATUS;
     }
-    // Right Wing (Cell Phone / Operator Call button):
-    if (canY >= 950 && canY <= 1070 && canX >= 1005 && canX <= 1085) {
+
+    // 4. Right Wing (Cell Phone / Operator Call button):
+    // targetRightX = (w / 2) + 80; targetRightY = h - 35; w=42, h=30
+    const int rightWingX = (w / 2) + 80;
+    const int rightWingY = h - 35;
+    if (testX >= rightWingX && testX <= rightWingX + 42 && testY >= rightWingY && testY <= rightWingY + 30) {
         return HUD_BTN_CELL_PHONE;
     }
-    // Central Compass Dial:
-    int compCenterX = 1920 / 2; // 960
-    int compCenterY = 1010;
-    int compDx = canX - compCenterX;
-    int compDy = canY - compCenterY;
-    if (compDx * compDx + compDy * compDy <= 72 * 72) {
+
+    // 5. Central Compass Dial:
+    // center = (w / 2, h - 68), radius 72
+    int compCenterX = w / 2;
+    int compCenterY = h - 68;
+    int cdx = testX - compCenterX;
+    int cdy = testY - compCenterY;
+    if (cdx * cdx + cdy * cdy <= 72 * 72) {
         return HUD_BTN_COMPASS;
     }
 
-    // 3. Bottom-Right: Latency Meter & Options
-    const int meterX = 1920 - 64 - 10; // 1846
-    const int meterY = 1080 - 35;      // 1045
-    if (canY >= meterY - 15) {
-        if (canX >= meterX - 35 && canX <= meterX + 64) return HUD_BTN_LATENCY;
-        if (canX > meterX + 64)                         return HUD_BTN_OPTIONS;
+    // 6. Bottom-Right: Latency Meter & Options
+    const int meterW = 64;
+    const int meterH = 27;
+    const int meterX = w - meterW - 10;
+    const int meterY = h - 35;
+    if (testY >= meterY && testY <= meterY + meterH && testX >= meterX && testX <= meterX + meterW) {
+        return HUD_BTN_LATENCY;
+    }
+    if (testY >= meterY && testX > meterX + meterW) {
+        return HUD_BTN_OPTIONS;
     }
 
-    // 4. Top-Right: Target Status Frame & Buffs (0x22, 0x3D) only when target is active
-    if (g_hasTarget && canX >= 1650 && canX <= 1920 && canY >= 5 && canY <= 160) {
+    // 7. Top-Right: Target Status Frame & Buffs (0x22, 0x3D) only when target is active
+    if (g_hasTarget) {
+        const int targetW = 240;
+        const int targetH = 90;
+        const int targetX = w - targetW - 10;
+        const int targetY = 10;
+        if (testX >= targetX && testX <= w - 5 && testY >= targetY && testY <= targetY + targetH) {
+            return HUD_BTN_TARGET_VITALS;
+        }
+    }
+
+    // 8. Top-Left: Player Status & Vitals Frame (0x1B)
+    if (testX >= 5 && testX <= 270 && testY >= 5 && testY <= 110) {
         return HUD_BTN_TARGET_VITALS;
     }
 
-    // 5. Top-Left: Player Status & Vitals Frame (0x1B)
-    if (canX >= 5 && canX <= 270 && canY >= 5 && canY <= 110) {
-        return HUD_BTN_TARGET_VITALS;
+    return HUD_BTN_NONE;
+}
+
+static HudButtonId HitTestHudButton(int x, int y, int screenW = 1920, int screenH = 1080) {
+    if (screenW <= 0) screenW = 1920;
+    if (screenH <= 0) screenH = 1080;
+
+    // Primary test: Direct window coordinates matching exact runtime resolution
+    HudButtonId btn = HitTestGeometry(x, y, screenW, screenH);
+    if (btn != HUD_BTN_NONE) return btn;
+
+    // Fallback 1: Normalized canonical (1920x1080) coordinates if window differs from 1080p
+    if (screenW != 1920 || screenH != 1080) {
+        int canX = (int)((double)x * 1920.0 / (double)screenW);
+        int canY = (int)((double)y * 1080.0 / (double)screenH);
+        btn = HitTestGeometry(canX, canY, 1920, 1080);
+        if (btn != HUD_BTN_NONE) return btn;
+    }
+
+    // Fallback 2: Raw canonical coordinates (if caller sent unscaled 1080p coords to non-1080p window)
+    if (screenW != 1920 || screenH != 1080) {
+        btn = HitTestGeometry(x, y, 1920, 1080);
+        if (btn != HUD_BTN_NONE) return btn;
     }
 
     return HUD_BTN_NONE;
@@ -3349,36 +3388,41 @@ static bool IsPointOverAnyHud(int mx, int my, int winW = 1920, int winH = 1080) 
     if (winW <= 0) winW = 1920;
     if (winH <= 0) winH = 1080;
 
-    // Normalize coordinates to 1920x1080 canonical HUD space
-    int canX = (winW != 1920) ? (int)((double)mx * 1920.0 / (double)winW) : mx;
-    int canY = (winH != 1080) ? (int)((double)my * 1080.0 / (double)winH) : my;
-
     // 0. Explicit HUD interactive buttons
     if (HitTestHudButton(mx, my, winW, winH) != HUD_BTN_NONE) return true;
 
     // 1. Top-Left HUD: Player Status (0x1B) (0..270, 0..110)
-    if (canX >= 0 && canX <= 270 && canY >= 0 && canY <= 110) return true;
+    if (mx >= 0 && mx <= 270 && my >= 0 && my <= 110) return true;
 
     // 2. Top-Right HUD: Target Status & Buffs (0x22, 0x3D) ONLY when target is active
-    if (g_hasTarget && canX >= 1650 && canX <= 1920 && canY >= 0 && canY <= 200) return true;
+    if (g_hasTarget && mx >= (winW - 270) && mx <= winW && my >= 0 && my <= 200) return true;
 
-    // 3. Bottom-Left: Main Chat Window & Tabs & Toolbar (0..500, 750..1080)
-    if (canX >= 0 && canX <= 500 && canY >= 750 && canY <= 1080) return true;
+    // 3. Bottom-Left: Main Chat Window & Tabs & Toolbar (0..500, winH-330..winH)
+    if (mx >= 0 && mx <= 500 && my >= (winH - 330) && my <= winH) return true;
 
-    // 4. Bottom-Center: Quickbar / Hotbar (0x24) (740..1180, 850..950)
-    if (canX >= 740 && canX <= 1180 && canY >= 850 && canY <= 950) return true;
+    // 4. Bottom-Center: Complete bottom HUD dock (Quickbar, Postures, Compass)
+    // Dock width 460 centered: [winW/2 - 230 .. winW/2 + 230], Y: [winH - 225 .. winH]
+    int centerX = winW / 2;
+    if (mx >= (centerX - 230) && mx <= (centerX + 230) && my >= (winH - 225) && my <= winH) return true;
 
-    // 5. Bottom-Center: Compass Dial (0x27) - circular boundary around (960, 1013), radius 75
-    int compDx = canX - 960;
-    int compDy = canY - 1013;
-    if (compDx * compDx + compDy * compDy <= 75 * 75) return true;
-
-    // 6. Bottom-Right: Latency Meter & Options (1750..1920, 1000..1080)
-    if (canX >= 1750 && canX <= 1920 && canY >= 1000 && canY <= 1080) return true;
+    // 5. Bottom-Right: Latency Meter & Options
+    if (mx >= (winW - 170) && mx <= winW && my >= (winH - 80) && my <= winH) return true;
 
     // 6. Modals / Dialogs if open (Character Sheet 0x42, Options 0x47)
     if (s_charSheetVisible || s_optionsVisible) {
-        if (canX >= 760 && canX <= 1160 && canY >= 340 && canY <= 740) return true;
+        int modalLeft = (winW / 2) - 200;
+        int modalTop = (winH / 2) - 200;
+        if (mx >= modalLeft && mx <= modalLeft + 400 && my >= modalTop && my <= modalTop + 400) return true;
+    }
+
+    // Normalized canonical fallback
+    if (winW != 1920 || winH != 1080) {
+        int canX = (int)((double)mx * 1920.0 / (double)winW);
+        int canY = (int)((double)my * 1080.0 / (double)winH);
+        if (canX >= (960 - 230) && canX <= (960 + 230) && canY >= (1080 - 225) && canY <= 1080) return true;
+        if (canX >= 0 && canX <= 270 && canY >= 0 && canY <= 110) return true;
+        if (g_hasTarget && canX >= (1920 - 270) && canX <= 1920 && canY >= 0 && canY <= 200) return true;
+        if (canX >= 0 && canX <= 500 && canY >= (1080 - 330) && canY <= 1080) return true;
     }
 
     return false;
