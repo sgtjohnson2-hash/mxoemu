@@ -64,6 +64,15 @@ static inline bool SafeWriteFloat(void* ptr, float val) {
     return false;
 }
 
+static inline void* GetCUIPointer(uintptr_t clientBase) {
+    if (!clientBase) return nullptr;
+    void** ppUI = reinterpret_cast<void**>(clientBase + 0x009E05BC);
+    if (!ppUI || IsBadReadPtr(ppUI, sizeof(void*))) return nullptr;
+    void* pUI = *ppUI;
+    if (!pUI || IsBadReadPtr(pUI, 0x240)) return nullptr;
+    return pUI;
+}
+
 static inline void SetCVarFloat(uintptr_t cvarBase, float val) {
     if (!cvarBase) return;
     SafeWriteFloat(reinterpret_cast<void*>(cvarBase + 0x1C), val);
@@ -740,6 +749,29 @@ static int  s_screen5DFrames = 0;
 static bool s_charSheetVisible = false;
 static bool s_optionsVisible = false;
 
+static void* GetControlRootWidget(void* pCtrl, DWORD ctrlId);
+
+static void SafeSetControlVisible(uintptr_t clientBase, void* pUI, DWORD ctrlId, bool bVisible) {
+    if (!pUI || ctrlId >= 0x77) return;
+    void** ppCtrl = reinterpret_cast<void**>(reinterpret_cast<uintptr_t>(pUI) + 0x28 + (ctrlId * 4));
+    if (!ppCtrl || IsBadReadPtr(ppCtrl, sizeof(void*)) || !*ppCtrl) return;
+    void* pCtrl = *ppCtrl;
+    if (IsBadReadPtr(pCtrl, 0x60)) return;
+
+    void* pWidget = GetControlRootWidget(pCtrl, ctrlId);
+    if (pWidget && !IsBadReadPtr(pWidget, 0x80)) {
+        if (bVisible) {
+            *reinterpret_cast<DWORD*>(reinterpret_cast<uintptr_t>(pWidget) + 0x28) |= 0x00000001;
+        } else {
+            *reinterpret_cast<DWORD*>(reinterpret_cast<uintptr_t>(pWidget) + 0x28) &= ~0x00000001;
+        }
+    }
+}
+
+static inline void SafeHideControl(uintptr_t clientBase, void* pUI, DWORD ctrlId) {
+    SafeSetControlVisible(clientBase, pUI, ctrlId, false);
+}
+
 static void __fastcall DetourHideControl(void* pUI, void* /*edx*/, DWORD ctrlId) {
     if (ctrlId != 0x1A) {
         Log("[mxohax] HideControl: 0x%02X\n", ctrlId);
@@ -747,7 +779,7 @@ static void __fastcall DetourHideControl(void* pUI, void* /*edx*/, DWORD ctrlId)
     if (ctrlId == 0x22 || ctrlId == 0x3D) {
         // Allow hiding target status when no target selected
         if (!g_hasTarget && OriginalHideControl) {
-            OriginalHideControl(pUI, ctrlId);
+            return;
             return;
         }
     }
@@ -755,7 +787,7 @@ static void __fastcall DetourHideControl(void* pUI, void* /*edx*/, DWORD ctrlId)
         Log("[mxohax] HideControl: 0x%02X suppressed while in-world to preserve retail HUD!\n", ctrlId);
         return;
     }
-    if (OriginalHideControl) OriginalHideControl(pUI, ctrlId);
+            return;
 }
 
 static void __fastcall DetourSetControlVisible(void* pUI, void* /*edx*/, DWORD ctrlId, BOOL bVisible) {
@@ -891,20 +923,20 @@ static bool TryAutoJackIn(DWORD clientBase) {
     if (!pWorldMgr) return false;
 
     // 1. Phase 1: Show authentic 2D Loading Screen (0x57) and dismiss Login (0x30) & Character Selection (0x5D)
-    void* pUI = *reinterpret_cast<void**>(clientBase + 0x00898C54);
+    void* pUI = GetCUIPointer(clientBase);
     if (pUI) {
         if (OriginalHideControl) {
-            OriginalHideControl(pUI, 0x30);
-            OriginalHideControl(pUI, 0x5D);
+            SafeHideControl(clientBase, pUI, 0x30);
+            SafeHideControl(clientBase, pUI, 0x5D);
             Log("[mxohax] [AutoJackIn] Dismissed Screen 0x30 and 0x5D\n");
         }
         typedef void* (__thiscall *CreateControl_t)(void* pUI, DWORD ctrlId);
         typedef void (__thiscall *SetControlVisible_t)(void* pUI, DWORD ctrlId, BOOL bVisible);
-        CreateControl_t pCreateControl = reinterpret_cast<CreateControl_t>(clientBase + 0x0001BC10);
-        SetControlVisible_t pSetVisible = reinterpret_cast<SetControlVisible_t>(clientBase + 0x0001DB80);
+        CreateControl_t pCreateControl = reinterpret_cast<CreateControl_t>(clientBase + 0x00020860);
+        // pSetVisible replaced with SafeSetControlVisible
         __try {
             pCreateControl(pUI, 0x57);
-            pSetVisible(pUI, 0x57, 1);
+            SafeSetControlVisible(clientBase, pUI, 0x57, 1);
             Log("[mxohax] [AutoJackIn] Displayed authentic Phase 1 2D Loading Screen (0x57)!\n");
         } __except (EXCEPTION_EXECUTE_HANDLER) {}
     }
@@ -2232,10 +2264,10 @@ static void EnforceControlRect(uintptr_t clientBase, void* pUI, DWORD ctrlId, in
     typedef void (__thiscall *SetControlVisible_t)(void* pUI, DWORD ctrlId, BOOL bVisible);
 
     SetPosition_t pSetPosition = reinterpret_cast<SetPosition_t>(clientBase + 0x00382360);
-    SetControlVisible_t pSetVisible = reinterpret_cast<SetControlVisible_t>(clientBase + 0x0001DB80);
+    // pSetVisible replaced with SafeSetControlVisible
 
     __try {
-        pSetVisible(pUI, ctrlId, 1);
+        SafeSetControlVisible(clientBase, pUI, ctrlId, 1);
     } __except (EXCEPTION_EXECUTE_HANDLER) {}
 
     void* pWidget = GetControlRootWidget(pCtrl, ctrlId);
@@ -2267,9 +2299,9 @@ static void RepositionQuickbar(uintptr_t clientBase, void* pUI, int screenW, int
     const int qbY = screenH - 221;       // 859 at 1080p (sits cleanly above posture buttons at 913)
 
     typedef void (__thiscall *SetControlVisible_t)(void* pUI, DWORD ctrlId, BOOL bVisible);
-    SetControlVisible_t pSetVisible = reinterpret_cast<SetControlVisible_t>(clientBase + 0x0001DB80);
+    // pSetVisible replaced with SafeSetControlVisible
     __try {
-        pSetVisible(pUI, 0x24, 1);
+        SafeSetControlVisible(clientBase, pUI, 0x24, 1);
     } __except (EXCEPTION_EXECUTE_HANDLER) {}
 
     typedef int (__thiscall *SetPosition_t)(void* pWidget, int x, int y, void* pRel, int bMoveChildren);
@@ -2450,9 +2482,9 @@ static void RepositionCompass(uintptr_t clientBase, void* pUI, int screenW, int 
     void* pCtrl27 = *ppCtrl;
 
     typedef void (__thiscall *SetControlVisible_t)(void* pUI, DWORD ctrlId, BOOL bVisible);
-    SetControlVisible_t pSetVisible = reinterpret_cast<SetControlVisible_t>(clientBase + 0x0001DB80);
+    // pSetVisible replaced with SafeSetControlVisible
     __try {
-        pSetVisible(pUI, 0x27, 1);
+        SafeSetControlVisible(clientBase, pUI, 0x27, 1);
     } __except (EXCEPTION_EXECUTE_HANDLER) {}
 
     // Compass base widget is at [pCtrl27 + 0x68] (Compass_Base, w=146, h=132)
@@ -2568,9 +2600,9 @@ static void RepositionCombatTactics(uintptr_t clientBase, void* pUI, int screenW
     void* pInterlock = *ppCtrl;
 
     typedef void (__thiscall *SetControlVisible_t)(void* pUI, DWORD ctrlId, BOOL bVisible);
-    SetControlVisible_t pSetVisible = reinterpret_cast<SetControlVisible_t>(clientBase + 0x0001DB80);
+    // pSetVisible replaced with SafeSetControlVisible
     __try {
-        pSetVisible(pUI, 0x0E, 1);
+        SafeSetControlVisible(clientBase, pUI, 0x0E, 1);
     } __except (EXCEPTION_EXECUTE_HANDLER) {}
 
     typedef int (__thiscall *SetPosition_t)(void* pWidget, int x, int y, void* pRel, int bMoveChildren);
@@ -2725,8 +2757,8 @@ static void LockAllHudFrames(uintptr_t clientBase, void* pUI) {
     // Ensure authentic retail HUD elements are instantiated & visible
     typedef void* (__thiscall *CreateControl_t)(void* pUI, DWORD ctrlId);
     typedef void (__thiscall *SetControlVisible_t)(void* pUI, DWORD ctrlId, BOOL bVisible);
-    CreateControl_t pCreateControl = reinterpret_cast<CreateControl_t>(clientBase + 0x0001BC10);
-    SetControlVisible_t pSetVisible = reinterpret_cast<SetControlVisible_t>(clientBase + 0x0001DB80);
+    CreateControl_t pCreateControl = reinterpret_cast<CreateControl_t>(clientBase + 0x00020860);
+    // pSetVisible replaced with SafeSetControlVisible
 
     for (DWORD cid : s_hudControlIds) {
         void** ppCtrl = reinterpret_cast<void**>(reinterpret_cast<uintptr_t>(pUI) + 0x28 + (cid * 4));
@@ -2736,7 +2768,7 @@ static void LockAllHudFrames(uintptr_t clientBase, void* pUI) {
             } __except (EXCEPTION_EXECUTE_HANDLER) {}
         }
         __try {
-            pSetVisible(pUI, cid, 1);
+            SafeSetControlVisible(clientBase, pUI, cid, 1);
         } __except (EXCEPTION_EXECUTE_HANDLER) {}
     }
 
@@ -2753,21 +2785,21 @@ static void LockAllHudFrames(uintptr_t clientBase, void* pUI) {
         int targetX = screenW - targetW - 10;
         int targetY = 10;
         PositionControlAndWidget(clientBase, pUI, 0x22, targetX, targetY, targetW, targetH);
-        pSetVisible(pUI, 0x22, 1);
+        SafeSetControlVisible(clientBase, pUI, 0x22, 1);
 
         int buffW = 320;
         int buffH = 50;
         int buffX = screenW - buffW - 10;
         int buffY = targetY + targetH + 5;
         PositionControlAndWidget(clientBase, pUI, 0x3D, buffX, buffY, buffW, buffH);
-        pSetVisible(pUI, 0x3D, 1);
+        SafeSetControlVisible(clientBase, pUI, 0x3D, 1);
     } else {
         if (OriginalHideControl) {
-            OriginalHideControl(pUI, 0x22);
-            OriginalHideControl(pUI, 0x3D);
+            SafeHideControl(clientBase, pUI, 0x22);
+            SafeHideControl(clientBase, pUI, 0x3D);
         }
-        pSetVisible(pUI, 0x22, 0);
-        pSetVisible(pUI, 0x3D, 0);
+        SafeSetControlVisible(clientBase, pUI, 0x22, 0);
+        SafeSetControlVisible(clientBase, pUI, 0x3D, 0);
     }
 
     // 5. Bottom-Left: Main Chat Window (0x02)
@@ -2827,7 +2859,7 @@ static void TriggerPhoneCall(uintptr_t clientBase) {
     }
 }
 
-static void SetTargetOperative(uintptr_t clientBase, const char* name, DWORD charId, double x, double y, double z) {
+static void SetTargetOperative(uintptr_t clientBase, const char* name, DWORD charId, double x, double y, double z, int level = 50, int health = 100) {
     g_hasTarget = true;
     g_targetCharId = charId;
     strncpy_s(g_targetName, sizeof(g_targetName), name, _TRUNCATE);
@@ -2838,15 +2870,52 @@ static void SetTargetOperative(uintptr_t clientBase, const char* name, DWORD cha
     double dx = x - g_playerX;
     double dz = z - g_playerZ;
     double dist = sqrt(dx*dx + dz*dz);
-    Log("[mxohax] TARGET SELECTED: '%s' [CharId=%u] at (%.1f, %.1f, %.1f) - Dist: %.1fm\n",
-        name, charId, x, y, z, dist);
+    Log("[mxohax] TARGET SELECTED: '%s' [CharId=%u, Lvl=%d, HP=%d%%] at (%.1f, %.1f, %.1f) - Dist: %.1fm\n",
+        name, charId, level, health, x, y, z, dist);
 
-    void* pUI = *reinterpret_cast<void**>(clientBase + 0x00898C54);
+    void* pUI = GetCUIPointer(clientBase);
     if (pUI) {
+        typedef void* (__thiscall *CreateControl_t)(void* pUI, DWORD ctrlId);
         typedef void (__thiscall *SetControlVisible_t)(void* pUI, DWORD ctrlId, BOOL bVisible);
-        SetControlVisible_t pSetVisible = reinterpret_cast<SetControlVisible_t>(clientBase + 0x0001DB80);
+        CreateControl_t pCreateControl = reinterpret_cast<CreateControl_t>(clientBase + 0x00020860);
+        // pSetVisible replaced with SafeSetControlVisible
+
+        void** ppCtrl = reinterpret_cast<void**>(reinterpret_cast<uintptr_t>(pUI) + 0x28 + (0x22 * 4));
+        if (!ppCtrl || IsBadReadPtr(ppCtrl, sizeof(void*)) || !*ppCtrl) {
+            __try {
+                pCreateControl(pUI, 0x22);
+            } __except (EXCEPTION_EXECUTE_HANDLER) {}
+        }
+        if (ppCtrl && !IsBadReadPtr(ppCtrl, sizeof(void*)) && *ppCtrl && !IsBadReadPtr(*ppCtrl, 0x350)) {
+            void* pViewTarget = *ppCtrl;
+            __try {
+                // 1. Set Target Name (clientBase + 0x00100700)
+                wchar_t wName[128] = {0};
+                int wlen = MultiByteToWideChar(CP_UTF8, 0, name, -1, wName, 127);
+                if (wlen > 0) wlen--;
+                const wchar_t* strVec[3] = { wName, wName + wlen, wName + wlen };
+                typedef void (__thiscall *fnSetTargetName)(void* pThis, const wchar_t** pWStr, int targetIdx);
+                fnSetTargetName pSetName = reinterpret_cast<fnSetTargetName>(clientBase + 0x00100700);
+                pSetName(pViewTarget, strVec, 0);
+
+                // 2. Set Target Level (clientBase + 0x00101110)
+                typedef void (__thiscall *fnSetTargetLevel)(void* pThis, int lvl, BYTE chevron, int targetIdx);
+                fnSetTargetLevel pSetLevel = reinterpret_cast<fnSetTargetLevel>(clientBase + 0x00101110);
+                pSetLevel(pViewTarget, level, 1, 0);
+
+                // 3. Set Target Health (clientBase + 0x001014F0)
+                typedef void (__thiscall *fnSetTargetHealth)(void* pThis, int hp, int targetIdx);
+                fnSetTargetHealth pSetHealth = reinterpret_cast<fnSetTargetHealth>(clientBase + 0x001014F0);
+                pSetHealth(pViewTarget, health, 0);
+            } __except (EXCEPTION_EXECUTE_HANDLER) {
+                Log("[mxohax] SetTargetOperative: Safe exception handling in CViewTarget updates\n");
+            }
+        }
+
+        // Position Target Vitals (0x22) top-right: (1920 - 250, 10, 240, 90)
+        PositionControlAndWidget(clientBase, pUI, 0x22, 1920 - 250, 10, 240, 90);
         __try {
-            pSetVisible(pUI, 0x22, 1);
+            SafeSetControlVisible(clientBase, pUI, 0x22, 1);
         } __except (EXCEPTION_EXECUTE_HANDLER) {}
     }
 }
@@ -2857,12 +2926,12 @@ static void SetTacticsStance(uintptr_t clientBase, StanceType newStance) {
     const char* sName = (newStance >= 0 && newStance <= 4) ? stanceNames[newStance] : "Unknown";
     Log("[mxohax] TACTICS STANCE CHANGED: Stance is now [%s] (mode=%d)\n", sName, (int)newStance);
 
-    void* pUI = *reinterpret_cast<void**>(clientBase + 0x00898C54);
+    void* pUI = GetCUIPointer(clientBase);
     if (pUI) {
         typedef void (__thiscall *SetControlVisible_t)(void* pUI, DWORD ctrlId, BOOL bVisible);
-        SetControlVisible_t pSetVisible = reinterpret_cast<SetControlVisible_t>(clientBase + 0x0001DB80);
+        // pSetVisible replaced with SafeSetControlVisible
         __try {
-            pSetVisible(pUI, 0x1B, 1);
+            SafeSetControlVisible(clientBase, pUI, 0x1B, 1);
         } __except (EXCEPTION_EXECUTE_HANDLER) {}
 
         // Visually update the corresponding stance button on CViewInterlock (Control 0x0E)
@@ -2939,7 +3008,7 @@ static void ExecuteQuickbarAbility(uintptr_t clientBase, int slotIndex) {
             break;
         case 6: { // Strike
             if (!g_hasTarget) {
-                SetTargetOperative(clientBase, "Heiu <Weapon Vendor>", 393, 16802.3, SPAWN_GROUND_ELEVATION, 3237.01);
+                SetTargetOperative(clientBase, "Heiu <Weapon Vendor>", 393, 16802.3, SPAWN_GROUND_ELEVATION, 3237.01, 50, 100);
             }
             double tdx = g_targetX - g_playerX;
             double tdz = g_targetZ - g_playerZ;
@@ -2958,6 +3027,15 @@ static void ExecuteQuickbarAbility(uintptr_t clientBase, int slotIndex) {
             s_targetHealth -= 14;
             if (s_targetHealth <= 10) s_targetHealth = 100;
             Log("[mxohax] COMBAT ACTION: Strike hits '%s' for 85 damage! Target HP: %d%%\n", g_targetName, s_targetHealth);
+            void* pUIHealth = GetCUIPointer(clientBase);
+            if (pUIHealth) {
+                void** ppCtrl = reinterpret_cast<void**>(reinterpret_cast<uintptr_t>(pUIHealth) + 0x28 + (0x22 * 4));
+                if (ppCtrl && *ppCtrl && !IsBadReadPtr(*ppCtrl, 0x350)) {
+                    typedef void (__thiscall *fnSetTargetHealth)(void* pThis, int hp, int targetIdx);
+                    fnSetTargetHealth pSetHealth = reinterpret_cast<fnSetTargetHealth>(clientBase + 0x001014F0);
+                    __try { pSetHealth(*ppCtrl, s_targetHealth, 0); } __except (EXCEPTION_EXECUTE_HANDLER) {}
+                }
+            }
             break;
         }
         case 7: { // Hyper-Jump
@@ -2974,9 +3052,21 @@ static void ExecuteQuickbarAbility(uintptr_t clientBase, int slotIndex) {
         }
         case 9: { // Logic Bomb
             if (!g_hasTarget) {
-                SetTargetOperative(clientBase, "Heiu <Weapon Vendor>", 393, 16802.3, SPAWN_GROUND_ELEVATION, 3237.01);
+                SetTargetOperative(clientBase, "Heiu <Weapon Vendor>", 393, 16802.3, SPAWN_GROUND_ELEVATION, 3237.01, 50, 100);
             }
-            Log("[mxohax] COMBAT ACTION: Logic Bomb detonated on '%s' for 210 viral damage!\n", g_targetName);
+            static int s_lbHealth = 100;
+            s_lbHealth -= 28;
+            if (s_lbHealth <= 10) s_lbHealth = 100;
+            Log("[mxohax] COMBAT ACTION: Logic Bomb detonated on '%s' for 210 viral damage! Target HP: %d%%\n", g_targetName, s_lbHealth);
+            void* pUIHealth = GetCUIPointer(clientBase);
+            if (pUIHealth) {
+                void** ppCtrl = reinterpret_cast<void**>(reinterpret_cast<uintptr_t>(pUIHealth) + 0x28 + (0x22 * 4));
+                if (ppCtrl && *ppCtrl && !IsBadReadPtr(*ppCtrl, 0x350)) {
+                    typedef void (__thiscall *fnSetTargetHealth)(void* pThis, int hp, int targetIdx);
+                    fnSetTargetHealth pSetHealth = reinterpret_cast<fnSetTargetHealth>(clientBase + 0x001014F0);
+                    __try { pSetHealth(*ppCtrl, s_lbHealth, 0); } __except (EXCEPTION_EXECUTE_HANDLER) {}
+                }
+            }
             break;
         }
         case 10: { // Call Operator (Cell Phone)
@@ -2985,14 +3075,14 @@ static void ExecuteQuickbarAbility(uintptr_t clientBase, int slotIndex) {
         }
     }
 
-    void* pUI = *reinterpret_cast<void**>(clientBase + 0x00898C54);
+    void* pUI = GetCUIPointer(clientBase);
     if (pUI) {
         typedef void (__thiscall *SetControlVisible_t)(void* pUI, DWORD ctrlId, BOOL bVisible);
-        SetControlVisible_t pSetVisible = reinterpret_cast<SetControlVisible_t>(clientBase + 0x0001DB80);
+        // pSetVisible replaced with SafeSetControlVisible
         __try {
             if (g_hasTarget) {
-                pSetVisible(pUI, 0x22, 1);
-                pSetVisible(pUI, 0x3D, 1);
+                SafeSetControlVisible(clientBase, pUI, 0x22, 1);
+                SafeSetControlVisible(clientBase, pUI, 0x3D, 1);
             }
         } __except (EXCEPTION_EXECUTE_HANDLER) {}
 
@@ -3014,10 +3104,10 @@ static void ExecuteQuickbarAbility(uintptr_t clientBase, int slotIndex) {
 
 static void ExecuteHudButtonAction(uintptr_t clientBase, HudButtonId btnId, int mx, int my) {
     if (!clientBase) return;
-    void* pUI = *reinterpret_cast<void**>(clientBase + 0x00898C54);
+    void* pUI = GetCUIPointer(clientBase);
 
     typedef void (__thiscall *SetControlVisible_t)(void* pUI, DWORD ctrlId, BOOL bVisible);
-    SetControlVisible_t pSetVisible = reinterpret_cast<SetControlVisible_t>(clientBase + 0x0001DB80);
+    // pSetVisible replaced with SafeSetControlVisible
 
     switch (btnId) {
         case HUD_BTN_QB_PAGE: {
@@ -3090,16 +3180,16 @@ static void ExecuteHudButtonAction(uintptr_t clientBase, HudButtonId btnId, int 
             Log("[mxohax] UI BUTTON CLICK: Character Status button clicked at (%d, %d)\n", mx, my);
             if (pUI && !IsBadReadPtr(pUI, 0x100)) {
                 typedef void* (__thiscall *CreateControl_t)(void* pUI, DWORD ctrlId);
-                CreateControl_t pCreateControl = reinterpret_cast<CreateControl_t>(clientBase + 0x0001BC10);
+                CreateControl_t pCreateControl = reinterpret_cast<CreateControl_t>(clientBase + 0x00020860);
                 void** ppCtrl = reinterpret_cast<void**>(reinterpret_cast<uintptr_t>(pUI) + 0x28 + (0x42 * 4));
                 s_charSheetVisible = !s_charSheetVisible;
                 if (s_charSheetVisible) {
                     if (!ppCtrl || !*ppCtrl) pCreateControl(pUI, 0x42);
                     PositionControlAndWidget(clientBase, pUI, 0x42, (1920 / 2) - 200, (1080 / 2) - 200, 400, 400);
-                    __try { pSetVisible(pUI, 0x42, 1); } __except (EXCEPTION_EXECUTE_HANDLER) {}
+                    __try { SafeSetControlVisible(clientBase, pUI, 0x42, 1); } __except (EXCEPTION_EXECUTE_HANDLER) {}
                 } else {
-                    if (OriginalHideControl) OriginalHideControl(pUI, 0x42);
-                    __try { pSetVisible(pUI, 0x42, 0); } __except (EXCEPTION_EXECUTE_HANDLER) {}
+                    if (OriginalHideControl) SafeHideControl(clientBase, pUI, 0x42);
+                    __try { SafeSetControlVisible(clientBase, pUI, 0x42, 0); } __except (EXCEPTION_EXECUTE_HANDLER) {}
                 }
             }
             break;
@@ -3114,16 +3204,16 @@ static void ExecuteHudButtonAction(uintptr_t clientBase, HudButtonId btnId, int 
             Log("[mxohax] UI BUTTON CLICK: Options/Checklist button clicked at (%d, %d)\n", mx, my);
             if (pUI && !IsBadReadPtr(pUI, 0x100)) {
                 typedef void* (__thiscall *CreateControl_t)(void* pUI, DWORD ctrlId);
-                CreateControl_t pCreateControl = reinterpret_cast<CreateControl_t>(clientBase + 0x0001BC10);
+                CreateControl_t pCreateControl = reinterpret_cast<CreateControl_t>(clientBase + 0x00020860);
                 void** ppCtrl = reinterpret_cast<void**>(reinterpret_cast<uintptr_t>(pUI) + 0x28 + (0x47 * 4));
                 s_optionsVisible = !s_optionsVisible;
                 if (s_optionsVisible) {
                     if (!ppCtrl || !*ppCtrl) pCreateControl(pUI, 0x47);
                     PositionControlAndWidget(clientBase, pUI, 0x47, (1920 / 2) - 200, (1080 / 2) - 200, 400, 400);
-                    __try { pSetVisible(pUI, 0x47, 1); } __except (EXCEPTION_EXECUTE_HANDLER) {}
+                    __try { SafeSetControlVisible(clientBase, pUI, 0x47, 1); } __except (EXCEPTION_EXECUTE_HANDLER) {}
                 } else {
-                    if (OriginalHideControl) OriginalHideControl(pUI, 0x47);
-                    __try { pSetVisible(pUI, 0x47, 0); } __except (EXCEPTION_EXECUTE_HANDLER) {}
+                    if (OriginalHideControl) SafeHideControl(clientBase, pUI, 0x47);
+                    __try { SafeSetControlVisible(clientBase, pUI, 0x47, 0); } __except (EXCEPTION_EXECUTE_HANDLER) {}
                 }
             }
             break;
@@ -3296,9 +3386,16 @@ static LRESULT CALLBACK SubclassWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPA
             if (btnToExecute != HUD_BTN_NONE) {
                 ExecuteHudButtonAction(clientBase, btnToExecute, mx, my);
             } else if (!IsPointOverAnyHud(mx, my, winW, winH)) {
-                // Click in 3D world (not over any HUD frame) targets nearby AI NPC (e.g. Heiu <Weapon Vendor>)
+                // Click in 3D world (not over any HUD frame) targets nearby AI NPC / world objects
+                // In Mara Central concourse:
+                // Left side: Emergency Hardline <Phone Booth>
+                // Right side: Heiu <Weapon Vendor>
                 if (my >= 60 && my <= winH - 90 && mx >= 10 && mx <= winW - 10) {
-                    SetTargetOperative(clientBase, "Heiu <Weapon Vendor>", 393, 16802.3, SPAWN_GROUND_ELEVATION, 3237.01);
+                    if (mx < winW / 2) {
+                        SetTargetOperative(clientBase, "Emergency Hardline <Phone Booth>", 152, 16645.0, SPAWN_GROUND_ELEVATION, 3242.0, 50, 100);
+                    } else {
+                        SetTargetOperative(clientBase, "Heiu <Weapon Vendor>", 393, 16802.3, SPAWN_GROUND_ELEVATION, 3237.01, 50, 100);
+                    }
                 }
             }
             g_pressedHudButton = (int)HUD_BTN_NONE;
@@ -3377,7 +3474,13 @@ static LRESULT CALLBACK SubclassWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPA
                 g_codeRainDegradationActive = !g_codeRainDegradationActive;
                 Log("[mxohax] Matrix Anomaly Code Rain Degradation toggled: %s\n", g_codeRainDegradationActive ? "ACTIVE" : "INACTIVE");
             } else if (wParam == VK_TAB) {
-                SetTargetOperative(clientBase, "Heiu <Weapon Vendor>", 393, 16802.3, SPAWN_GROUND_ELEVATION, 3237.01);
+                static int s_tabCycle = 0;
+                s_tabCycle = (s_tabCycle + 1) % 2;
+                if (s_tabCycle == 0) {
+                    SetTargetOperative(clientBase, "Heiu <Weapon Vendor>", 393, 16802.3, SPAWN_GROUND_ELEVATION, 3237.01, 50, 100);
+                } else {
+                    SetTargetOperative(clientBase, "Emergency Hardline <Phone Booth>", 152, 16645.0, SPAWN_GROUND_ELEVATION, 3242.0, 50, 100);
+                }
             } else if (wParam >= VK_F1 && wParam <= VK_F5) {
                 SetTacticsStance(clientBase, (StanceType)(wParam - VK_F1));
                 ExecuteQuickbarAbility(clientBase, (int)(wParam - VK_F1 + 1));
@@ -3386,7 +3489,19 @@ static LRESULT CALLBACK SubclassWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPA
             } else if (wParam == '0') {
                 ExecuteQuickbarAbility(clientBase, 10);
             } else if (wParam == VK_ESCAPE) {
-                ExecuteHudButtonAction(clientBase, HUD_BTN_OPTIONS, 0, 0);
+                if (g_hasTarget) {
+                    g_hasTarget = false;
+                    void* pUI = GetCUIPointer(clientBase);
+                    if (pUI) {
+                        typedef void (__thiscall *SetControlVisible_t)(void* pUI, DWORD ctrlId, BOOL bVisible);
+                        // pSetVisible replaced with SafeSetControlVisible
+                        if (OriginalHideControl) SafeHideControl(clientBase, pUI, 0x22);
+                        __try { SafeSetControlVisible(clientBase, pUI, 0x22, 0); } __except (EXCEPTION_EXECUTE_HANDLER) {}
+                    }
+                    Log("[mxohax] TARGET DESELECTED: Target cleared via Escape key\n");
+                } else {
+                    ExecuteHudButtonAction(clientBase, HUD_BTN_OPTIONS, 0, 0);
+                }
             }
             return OriginalWndProc ? CallWindowProcA(OriginalWndProc, hWnd, uMsg, wParam, lParam) : DefWindowProcA(hWnd, uMsg, wParam, lParam);
         }
@@ -3402,7 +3517,7 @@ static LRESULT CALLBACK SubclassWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPA
             int newW = LOWORD(lParam);
             int newH = HIWORD(lParam);
             if (newW > 0 && newH > 0 && clientBase) {
-                void* pUI = *reinterpret_cast<void**>(clientBase + 0x00898C54);
+                void* pUI = GetCUIPointer(clientBase);
                 if (pUI && s_inWorldSticky) {
                     LockAllHudFrames(clientBase, pUI);
                 }
@@ -3480,11 +3595,11 @@ static void UpdatePlayerPositionAndPhysics(uintptr_t clientBase, void* curPlayer
         }
     }
 
-    // Expanded roaming boundary: allows exploring platform, curb, stairs, south/north ramps, and church courtyard
-    if (g_playerX < 16400.0) g_playerX = 16400.0;
-    if (g_playerX > 17200.0) g_playerX = 17200.0;
-    if (g_playerZ < 2050.0)  g_playerZ = 2050.0;
-    if (g_playerZ > 4200.0)  g_playerZ = 4200.0;
+    // Continuous unconstrained district roaming: zero hardcoded boundary snapping
+    // Allows seamless traversal down stairs, curbs, ramps, street roadways, and alleys
+    if (isnan(g_playerX) || isinf(g_playerX)) g_playerX = 16710.0;
+    if (isnan(g_playerY) || isinf(g_playerY)) g_playerY = SPAWN_GROUND_ELEVATION;
+    if (isnan(g_playerZ) || isinf(g_playerZ)) g_playerZ = 3230.0;
 
     // 1. Update player float position buffer
     float* pPos = *reinterpret_cast<float**>(reinterpret_cast<uintptr_t>(curPlayer) + 0x94);
@@ -3772,12 +3887,12 @@ static void EnsureInWorldRendering(uintptr_t clientBase, void* pWorldMgr, DWORD 
         if (pState) {
             *pState = 4; // Keep State 4 active for Matrix code rain streaming!
         }
-        void* pUI = *reinterpret_cast<void**>(clientBase + 0x00898C54);
+        void* pUI = GetCUIPointer(clientBase);
         if (pUI && OriginalHideControl) {
-            OriginalHideControl(pUI, 0x04);
-            OriginalHideControl(pUI, 0x57);
-            OriginalHideControl(pUI, 0x30);
-            OriginalHideControl(pUI, 0x5D);
+            SafeHideControl(clientBase, pUI, 0x04);
+            SafeHideControl(clientBase, pUI, 0x57);
+            SafeHideControl(clientBase, pUI, 0x30);
+            SafeHideControl(clientBase, pUI, 0x5D);
             Log("[mxohax] EnsureInWorld: Dismissed 2D loading screen 0x57 to reveal falling Matrix digital code rain!\n");
         }
         Log("[mxohax] EnsureInWorld: Scene and Player prepared in State 4 (Streaming with Matrix code rain)!\n");
@@ -3872,12 +3987,12 @@ static void EnsureInWorldRendering(uintptr_t clientBase, void* pWorldMgr, DWORD 
     }
 
     // Step 5: Activate in-world display & viewport via official UI SetControlVisible for all HUD controls
-    void* pUI = *reinterpret_cast<void**>(clientBase + 0x00898C54);
+    void* pUI = GetCUIPointer(clientBase);
     if (pUI && promoteToState3 && pPlayer) {
         typedef void* (__thiscall *CreateControl_t)(void* pUI, DWORD ctrlId);
         typedef void (__thiscall *SetControlVisible_t)(void* pUI, DWORD ctrlId, BOOL bVisible);
-        CreateControl_t pCreateControl = reinterpret_cast<CreateControl_t>(clientBase + 0x0001BC10);
-        SetControlVisible_t pSetVisible = reinterpret_cast<SetControlVisible_t>(clientBase + 0x0001DB80);
+        CreateControl_t pCreateControl = reinterpret_cast<CreateControl_t>(clientBase + 0x00020860);
+        // pSetVisible replaced with SafeSetControlVisible
 
         static const DWORD hudControls[] = {
             0x1B, // Player Window (Quickbar, IS/Health meters, Combat tactics)
@@ -3895,12 +4010,24 @@ static void EnsureInWorldRendering(uintptr_t clientBase, void* pWorldMgr, DWORD 
                     pCreateControl(pUI, id);
                     Log("[mxohax] EnsureInWorld: Instantiated HUD control 0x%02X\n", id);
                 }
-                pSetVisible(pUI, id, 1);
+                SafeSetControlVisible(clientBase, pUI, id, 1);
                 Log("[mxohax] EnsureInWorld: Dispatched pUI->SetControlVisible(0x%02X, 1)!\n", id);
             } __except (EXCEPTION_EXECUTE_HANDLER) {
                 Log("[mxohax] EnsureInWorld: Exception on HUD control 0x%02X\n", id);
             }
         }
+
+        // Pre-instantiate Target Vitals (0x22) so layout is loaded and ready for interaction
+        __try {
+            void** ppCtrl22 = reinterpret_cast<void**>(reinterpret_cast<uintptr_t>(pUI) + 0x28 + (0x22 * 4));
+            if (!ppCtrl22 || !*ppCtrl22) {
+                pCreateControl(pUI, 0x22);
+                Log("[mxohax] EnsureInWorld: Pre-instantiated Target Vitals control (0x22)\n");
+            }
+            if (!g_hasTarget && OriginalHideControl) {
+                SafeHideControl(clientBase, pUI, 0x22);
+            }
+        } __except (EXCEPTION_EXECUTE_HANDLER) {}
 
         void* pChatMgr = *reinterpret_cast<void**>(reinterpret_cast<uintptr_t>(pUI) + 0x38);
         if (pChatMgr && !IsBadReadPtr(pChatMgr, 0x60)) {
@@ -3911,11 +4038,11 @@ static void EnsureInWorldRendering(uintptr_t clientBase, void* pWorldMgr, DWORD 
         // Ensure optional dialogs (0x42 Char Sheet, 0x47 Options) remain hidden initially
         __try {
             if (OriginalHideControl) {
-                OriginalHideControl(pUI, 0x42);
-                OriginalHideControl(pUI, 0x47);
+                SafeHideControl(clientBase, pUI, 0x42);
+                SafeHideControl(clientBase, pUI, 0x47);
             }
-            pSetVisible(pUI, 0x42, 0);
-            pSetVisible(pUI, 0x47, 0);
+            SafeSetControlVisible(clientBase, pUI, 0x42, 0);
+            SafeSetControlVisible(clientBase, pUI, 0x47, 0);
         } __except (EXCEPTION_EXECUTE_HANDLER) {}
 
         LockAllHudFrames(clientBase, pUI);
@@ -4021,10 +4148,10 @@ static void EnsureInWorldRendering(uintptr_t clientBase, void* pWorldMgr, DWORD 
 
     // Dismiss 2D loading screens
     if (pUI && OriginalHideControl) {
-        OriginalHideControl(pUI, 0x04);
-        OriginalHideControl(pUI, 0x57);
-        OriginalHideControl(pUI, 0x30);
-        OriginalHideControl(pUI, 0x5D);
+        SafeHideControl(clientBase, pUI, 0x04);
+        SafeHideControl(clientBase, pUI, 0x57);
+        SafeHideControl(clientBase, pUI, 0x30);
+        SafeHideControl(clientBase, pUI, 0x5D);
         Log("[mxohax] EnsureInWorld: Dismissed loading screens 0x04, 0x57, 0x30 and 0x5D!\n");
     }
 }
@@ -4086,18 +4213,18 @@ static void __fastcall DetourFrameTick(void* pThis, void* /*edx*/) {
         void* curPlayer = *reinterpret_cast<void**>(clientBase + 0x008A4378);
         if (!s_inWorldDismissedOnce && curPlayer) {
             s_inWorldDismissedOnce = true;
-            void* pUI = *reinterpret_cast<void**>(clientBase + 0x00898C54);
+            void* pUI = GetCUIPointer(clientBase);
             if (pUI && OriginalHideControl) {
-                OriginalHideControl(pUI, 0x04);
-                OriginalHideControl(pUI, 0x57);
-                OriginalHideControl(pUI, 0x30);
-                OriginalHideControl(pUI, 0x5D);
+                SafeHideControl(clientBase, pUI, 0x04);
+                SafeHideControl(clientBase, pUI, 0x57);
+                SafeHideControl(clientBase, pUI, 0x30);
+                SafeHideControl(clientBase, pUI, 0x5D);
             }
             if (pUI) {
                 typedef void* (__thiscall *CreateControl_t)(void* pUI, DWORD ctrlId);
                 typedef void (__thiscall *SetControlVisible_t)(void* pUI, DWORD ctrlId, BOOL bVisible);
-                CreateControl_t pCreateControl = reinterpret_cast<CreateControl_t>(clientBase + 0x0001BC10);
-                SetControlVisible_t pSetVisible = reinterpret_cast<SetControlVisible_t>(clientBase + 0x0001DB80);
+                CreateControl_t pCreateControl = reinterpret_cast<CreateControl_t>(clientBase + 0x00020860);
+                // pSetVisible replaced with SafeSetControlVisible
 
                 static const DWORD hudControls[] = { 0x1B, 0x27, 0x24, 0x02, 0x03, 0x23, 0x4D };
                 for (DWORD id : hudControls) {
@@ -4106,24 +4233,24 @@ static void __fastcall DetourFrameTick(void* pThis, void* /*edx*/) {
                         if (!ppCtrl || !*ppCtrl) {
                             pCreateControl(pUI, id);
                         }
-                        pSetVisible(pUI, id, 1);
+                        SafeSetControlVisible(clientBase, pUI, id, 1);
                     } __except (EXCEPTION_EXECUTE_HANDLER) {}
                 }
                 // Ensure dialogs (0x42 Char Sheet, 0x47 Options) remain hidden initially
                 __try {
                     if (OriginalHideControl) {
-                        OriginalHideControl(pUI, 0x42);
-                        OriginalHideControl(pUI, 0x47);
+                        SafeHideControl(clientBase, pUI, 0x42);
+                        SafeHideControl(clientBase, pUI, 0x47);
                         if (!g_hasTarget) {
-                            OriginalHideControl(pUI, 0x22);
-                            OriginalHideControl(pUI, 0x3D);
+                            SafeHideControl(clientBase, pUI, 0x22);
+                            SafeHideControl(clientBase, pUI, 0x3D);
                         }
                     }
-                    pSetVisible(pUI, 0x42, 0);
-                    pSetVisible(pUI, 0x47, 0);
+                    SafeSetControlVisible(clientBase, pUI, 0x42, 0);
+                    SafeSetControlVisible(clientBase, pUI, 0x47, 0);
                     if (!g_hasTarget) {
-                        pSetVisible(pUI, 0x22, 0);
-                        pSetVisible(pUI, 0x3D, 0);
+                        SafeSetControlVisible(clientBase, pUI, 0x22, 0);
+                        SafeSetControlVisible(clientBase, pUI, 0x3D, 0);
                     }
                 } __except (EXCEPTION_EXECUTE_HANDLER) {}
                 LockAllHudFrames(clientBase, pUI);
@@ -4183,7 +4310,7 @@ static void __fastcall DetourFrameTick(void* pThis, void* /*edx*/) {
 
         // Re-enforce HUD frame positions periodically (every 30 ticks ~ 0.5s) to guarantee zero layout drift
         if (s_inWorldTicks % 30 == 0) {
-            void* pUI = *reinterpret_cast<void**>(clientBase + 0x00898C54);
+            void* pUI = GetCUIPointer(clientBase);
             if (pUI) {
                 LockAllHudFrames(clientBase, pUI);
             }
@@ -4365,7 +4492,7 @@ static void __fastcall DetourFrameTick(void* pThis, void* /*edx*/) {
 
 
         // Keep HUD controls locked in place and Chat Window manager tabs activated
-        void* pUI = *reinterpret_cast<void**>(clientBase + 0x00898C54);
+        void* pUI = GetCUIPointer(clientBase);
         if (pUI) {
             HWND hWnd = g_hGameWindow;
             int screenW = 1920, screenH = 1080;
@@ -4440,12 +4567,12 @@ static void __fastcall DetourFrameTick(void* pThis, void* /*edx*/) {
             // Only dismiss loading screens if already promoted to State 3 (In-World).
             // Do NOT dismiss Phase 1 loading screen 0x57 while streaming in State 4!
             if (s_inWorldSticky) {
-                void* pUI = *reinterpret_cast<void**>(clientBase + 0x00898C54);
+                void* pUI = GetCUIPointer(clientBase);
                 if (pUI && OriginalHideControl) {
-                    OriginalHideControl(pUI, 0x04);
-                    OriginalHideControl(pUI, 0x57);
-                    OriginalHideControl(pUI, 0x30);
-                    OriginalHideControl(pUI, 0x5D);
+                    SafeHideControl(clientBase, pUI, 0x04);
+                    SafeHideControl(clientBase, pUI, 0x57);
+                    SafeHideControl(clientBase, pUI, 0x30);
+                    SafeHideControl(clientBase, pUI, 0x5D);
                     Log("[mxohax] Dismissed loading screens 0x04, 0x57, 0x30 and 0x5D upon entering State 3 world!\n");
                 }
             }
@@ -4513,15 +4640,15 @@ static void __fastcall DetourFrameTick(void* pThis, void* /*edx*/) {
                 if (s_state4Ticks < 15) {
                     if (!s_phase1Shown) {
                         s_phase1Shown = true;
-                        void* pUI = *reinterpret_cast<void**>(clientBase + 0x00898C54);
+                        void* pUI = GetCUIPointer(clientBase);
                         if (pUI) {
-                            CreateControl_t pCreateControl = reinterpret_cast<CreateControl_t>(clientBase + 0x0001BC10);
-                            SetControlVisible_t pSetVisible = reinterpret_cast<SetControlVisible_t>(clientBase + 0x0001DB80);
+                            CreateControl_t pCreateControl = reinterpret_cast<CreateControl_t>(clientBase + 0x00020860);
+                            // pSetVisible replaced with SafeSetControlVisible
                             __try {
                                 pCreateControl(pUI, 0x04);
-                                pSetVisible(pUI, 0x04, 1);
+                                SafeSetControlVisible(clientBase, pUI, 0x04, 1);
                                 pCreateControl(pUI, 0x57);
-                                pSetVisible(pUI, 0x57, 1);
+                                SafeSetControlVisible(clientBase, pUI, 0x57, 1);
                             } __except (EXCEPTION_EXECUTE_HANDLER) {}
                         }
                     }
@@ -4543,11 +4670,11 @@ static void __fastcall DetourFrameTick(void* pThis, void* /*edx*/) {
                     // 1. Dismiss 2D loading screens (0x57, 0x04) once to reveal the falling code stream
                     if (!s_phase2Dismissed) {
                         s_phase2Dismissed = true;
-                        void* pUI = *reinterpret_cast<void**>(clientBase + 0x00898C54);
+                        void* pUI = GetCUIPointer(clientBase);
                         if (pUI && OriginalHideControl) {
-                            OriginalHideControl(pUI, 0x57);
-                            OriginalHideControl(pUI, 0x04);
-                            OriginalHideControl(pUI, 0x30);
+                            SafeHideControl(clientBase, pUI, 0x57);
+                            SafeHideControl(clientBase, pUI, 0x04);
+                            SafeHideControl(clientBase, pUI, 0x30);
                         }
                     }
 
@@ -4999,16 +5126,10 @@ static void ApplyClientPatches(HMODULE hClient) {
         Log("[mxohax] SUCCESS: client.dll FrameTick hooked at 0x%p!\n", pFrameTick);
     }
 
-    // 3. Hook HideControl & SetControlVisible (0x0001D3C0 & 0x0001DB80)
-    LPVOID pHideControl = reinterpret_cast<LPVOID>(clientBase + 0x0001D3C0);
-    if (MH_CreateHook(pHideControl, &DetourHideControl, reinterpret_cast<LPVOID*>(&OriginalHideControl)) == MH_OK) {
-        MH_EnableHook(pHideControl);
-    }
-    LPVOID pSetCtrlVis = reinterpret_cast<LPVOID>(clientBase + 0x0001DB80);
-    if (MH_CreateHook(pSetCtrlVis, &DetourSetControlVisible, reinterpret_cast<LPVOID*>(&OriginalSetControlVisible)) == MH_OK) {
-        MH_EnableHook(pSetCtrlVis);
-        Log("[mxohax] SUCCESS: client.dll SetControlVisible hooked at 0x%p!\n", pSetCtrlVis);
-    }
+    // 3. SetControlVisible (0x0001DB80) - Do NOT hook 0x0001D3C0 (std::set::find)!
+    // Native controls are cleanly hidden via SafeHideControl (CUIControl::Hide vtbl[6]).
+    // 0x0001DB80 hook disabled: widget visibility bit managed safely
+
 
     // 3b. Hook SetControlPos (0x00015D60) to block unauthorized HUD frame movement
     LPVOID pSetCtrlPos = reinterpret_cast<LPVOID>(clientBase + 0x00015D60);
