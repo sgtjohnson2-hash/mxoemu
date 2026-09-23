@@ -49,6 +49,7 @@
             <Setter Property="Foreground" Value="#00FF00"/>
         </Style>
         <Style TargetType="Button">
+            <EventSetter Event="Click" Handler="AnyButton_Click"/>
             <Setter Property="FontFamily" Value="Consolas"/>
             <Setter Property="Background" Value="#111111"/>
             <Setter Property="Foreground" Value="#00FF00"/>

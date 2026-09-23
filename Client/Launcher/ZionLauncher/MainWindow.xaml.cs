@@ -170,6 +170,20 @@ namespace ZionLauncher
 
         const uint CREATE_SUSPENDED = 0x00000004;
 
+        private void AnyButton_Click(object sender, RoutedEventArgs e)
+        {
+            try
+            {
+                string wavPath = System.IO.Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "click.wav");
+                if (System.IO.File.Exists(wavPath))
+                {
+                    var player = new System.Media.SoundPlayer(wavPath);
+                    player.Play();
+                }
+            }
+            catch { }
+        }
+
         public MainWindow()
         {
             InitializeComponent();

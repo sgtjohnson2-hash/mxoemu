@@ -21,4 +21,10 @@
     <PackageReference Include="SharpCompress" Version="0.50.4" />
   </ItemGroup>
 
+  <ItemGroup>
+    <None Include="click.wav">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+  </ItemGroup>
+
 </Project>
