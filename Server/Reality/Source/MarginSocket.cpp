@@ -206,7 +206,7 @@ void MarginSocket::ProcessData( const byte *buf,size_t len )
 		{
 			if (m_connState != MARGIN_STATE_AUTHENTICATED && m_connState != MARGIN_STATE_IN_GAME)
 			{
-				WARNING_LOG(format("MarginSocket: Opcode 0x%02X received before authentication (state=%1%), disconnecting")
+				WARNING_LOG(format("MarginSocket: Opcode 0x%1$02X received before authentication (state=%2%), disconnecting")
 					% (uint32)packetOpcode % (uint32)m_connState);
 				SetCloseAndDelete(true);
 				return;
@@ -217,7 +217,7 @@ void MarginSocket::ProcessData( const byte *buf,size_t len )
 	{
 	default:
 		{
-			DEBUG_LOG(format("MarginSocket: Unknown opcode 0x%02X from client, disconnecting") % (uint32)packetOpcode);
+			DEBUG_LOG(format("MarginSocket: Unknown opcode 0x%1$02X from client, disconnecting") % (uint32)packetOpcode);
 			SetCloseAndDelete(true);
 			break;
 		}
@@ -246,7 +246,7 @@ void MarginSocket::ProcessData( const byte *buf,size_t len )
 
 			if (authStart != swap16(0x3601) && authStart != swap16(0x3201))
 			{
-				WARNING_LOG(format("CERT_ConnectRequest auth start not 36 01 or 32 01: 0x%04X") % authStart);
+				WARNING_LOG(format("CERT_ConnectRequest auth start not 36 01 or 32 01: 0x%1$04X") % authStart);
 			}
 
 			byte signature[128];

@@ -135,7 +135,7 @@ void AuthSocket::ProcessData( const byte *buf,size_t len )
 		{
 		default:
 			{
-				DEBUG_LOG(format("AuthSocket: Unknown opcode 0x%02X from client, disconnecting") % (uint32)packetOpcode);
+				DEBUG_LOG(format("AuthSocket: Unknown opcode 0x%1$02X from client, disconnecting") % (uint32)packetOpcode);
 				SetCloseAndDelete(true);
 				break;
 			}
@@ -287,7 +287,7 @@ void AuthSocket::HandleAuthRequest( ByteBuffer &packet )
 		// both are fully valid headers before the 16-byte Twofish key.
 		if (rsaBlobMethod != 4 && (rsaBlobMethod & 0xFFFF) != 0x0015)
 		{
-			DEBUG_LOG(format("rsaMethod/offsets in rsaBlob: 0x%08X") % rsaBlobMethod);
+			DEBUG_LOG(format("rsaMethod/offsets in rsaBlob: 0x%1$08X") % rsaBlobMethod);
 		}
 	}
 
@@ -373,14 +373,14 @@ void AuthSocket::HandleAuthRequest( ByteBuffer &packet )
 			m_publicExponent = field[4].GetUInt16();
 
 			const char *pubModulusStr = field[5].GetString();
-			if (pubModulusStr != NULL)
+			if (pubModulusStr != NULL && strlen(pubModulusStr) >= 96)
 				m_publicModulus = string(pubModulusStr, 96);
 			else
 				m_publicModulus.clear();
 
 			const char *privExponentStr = field[6].GetString();
-			if (privExponentStr != NULL)
-				m_privateExponent = string(field[6].GetString(), 96);
+			if (privExponentStr != NULL && strlen(privExponentStr) >= 96)
+				m_privateExponent = string(privExponentStr, 96);
 			else
 				m_privateExponent.clear();
 
@@ -497,6 +497,10 @@ void AuthSocket::HandleAuthRequest( ByteBuffer &packet )
 
 	PreparedStatement stmt2("SELECT `worldId`, `name`, `type`, `status`, `numPlayers` FROM `worlds`");
 	scoped_ptr<QueryResult> result(sDatabase.QueryPrepared(&stmt2));
+	if (result == NULL || result->GetRowCount() < 1)
+	{
+		result.reset(sDatabase.Query("SELECT `worldId`, `name`, `type`, `status`, `numPlayers` FROM `worlds`"));
+	}
 	if (result == NULL || result->GetRowCount() < 1)
 	{
 		ERROR_LOG("No worlds in db, disconnecting.");

@@ -530,6 +530,11 @@ bool Database::_SendQuery(DatabaseConnection &con, const char* Sql, bool Self)
 	mysql_thread_init();
 
 	if (con.conn) {
+		// Verify socket is alive; auto-reconnect if server dropped connection
+		if (mysql_ping(con.conn) != 0) {
+			_HandleError(con, 2006);
+		}
+
 		// Drain any lingering unread results to prevent Commands out of sync
 		while (mysql_more_results(con.conn)) {
 			if (mysql_next_result(con.conn) == 0) {
@@ -542,7 +547,7 @@ bool Database::_SendQuery(DatabaseConnection &con, const char* Sql, bool Self)
 	}
 
 	int result = mysql_query(con.conn, Sql);
-	if(result > 0)
+	if(result != 0)
 	{
 		if( Self == false && _HandleError(con, mysql_errno( con.conn ) ) )
 		{
@@ -631,6 +636,9 @@ bool Database::_Reconnect(DatabaseConnection &conn)
 	MYSQL * temp, *temp2;
 
 	temp = mysql_init( NULL );
+	my_bool my_true = true;
+	mysql_options(temp, MYSQL_SET_CHARSET_NAME, "utf8");
+	mysql_options(temp, MYSQL_OPT_RECONNECT, &my_true);
 	temp2 = mysql_real_connect( temp, mHostname.c_str(), mUsername.c_str(), mPassword.c_str(), mDatabaseName.c_str(), mPort, NULL , 0 );
 	if( temp2 == NULL )
 	{
@@ -642,7 +650,7 @@ bool Database::_Reconnect(DatabaseConnection &conn)
 	if( conn.conn != NULL )
 		mysql_close( conn.conn );
 
-	conn.conn = temp;
+	conn.conn = temp2;
 	return true;
 }
 
