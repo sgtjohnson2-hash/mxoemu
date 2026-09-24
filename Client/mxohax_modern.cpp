@@ -140,51 +140,24 @@ static LONG WINAPI CrashHandler(PEXCEPTION_POINTERS pExc) {
             if (!isGameCrash) return EXCEPTION_CONTINUE_SEARCH;
             
             if (ctx && ctx->Esp) {
-                // 1. LithTech memory pool free(NULL, size <= 128) dereference at client.dll + 0x00001C1C
+                // LithTech memory pool free(NULL, size <= 128) dereference at client.dll + 0x00001C1C
                 if (g_clientBase && (uintptr_t)addr == g_clientBase + 0x00001C1C) {
                     Log("[mxohax] Recovered from NULL pool free crash at 0x%p (client.dll + 0x00001C1C)\n", addr);
                     ctx->Eip = static_cast<DWORD>(g_clientBase + 0x00001C20);
                     return EXCEPTION_CONTINUE_EXECUTION;
                 }
-                // 2. UI CreateControl recovery at client.dll + 0x0001BC10
-                if (g_clientBase && (uintptr_t)addr >= g_clientBase + 0x0001BC10 && (uintptr_t)addr <= g_clientBase + 0x0001BC90) {
-                    Log("[mxohax] Recovered from CreateControl crash at 0x%p\n", addr);
-                    ctx->Eip = static_cast<DWORD>(g_clientBase + 0x0001BC28);
-                    return EXCEPTION_CONTINUE_EXECUTION;
-                }
-                // 3. Font / text render crash at client.dll + 0x00015D60
-                if (g_clientBase && (uintptr_t)addr >= g_clientBase + 0x00015D60 && (uintptr_t)addr <= g_clientBase + 0x00015DA0) {
-                    Log("[mxohax] Recovered from Font crash at 0x%p\n", addr);
-                    ctx->Eip = static_cast<DWORD>(g_clientBase + 0x00015DA1);
-                    return EXCEPTION_CONTINUE_EXECUTION;
-                }
-                // 4. Vector save routine at client.dll + 0x0016D495
-                if (g_clientBase && (uintptr_t)addr == g_clientBase + 0x0016D495) {
-                    Log("[mxohax] Recovered from Vector crash at 0x%p\n", addr);
-                    ctx->Eip = static_cast<DWORD>(g_clientBase + 0x0016D4DD);
-                    return EXCEPTION_CONTINUE_EXECUTION;
-                }
-                // 5. WorldMgr CC dereference at client.dll + 0x000A20E6
-                if (g_clientBase && (uintptr_t)addr == g_clientBase + 0x000A20E6) {
-                    Log("[mxohax] Recovered from WorldMgr deref at 0x%p\n", addr);
-                    ctx->Eip = static_cast<DWORD>(g_clientBase + 0x000A2213);
-                    return EXCEPTION_CONTINUE_EXECUTION;
-                }
-                // 6. UI cleanup destructor dereference at client.dll + 0x0037BF20..0x0037BF78
-                if (g_clientBase && (uintptr_t)addr >= g_clientBase + 0x0037BF20 && (uintptr_t)addr <= g_clientBase + 0x0037BF78) {
-                    Log("[mxohax] Recovered from UI cleanup destructor crash at 0x%p (client.dll + 0x%08X)\n", addr, (uintptr_t)addr - g_clientBase);
-                    ctx->Eip = static_cast<DWORD>(g_clientBase + 0x0037BF7B);
-                    return EXCEPTION_CONTINUE_EXECUTION;
-                }
             }
-            Log("[mxohax] !!! UNHANDLED CRASH: 0x%08X at 0x%p !!!\n", code, addr);
+            Log("[mxohax] !!! UNHANDLED CRASH: 0x%08X at 0x%p (offset: client+0x%08X, matrix+0x%08X) !!!\n",
+                code, addr,
+                g_clientBase ? (uintptr_t)addr - g_clientBase : 0,
+                g_matrixBase ? (uintptr_t)addr - g_matrixBase : 0);
         }
     }
     return EXCEPTION_CONTINUE_SEARCH;
 }
 
 // ============================================================================
-// Winsock Hooks (Network Redirection to VPS)
+// Winsock Hooks (Network Redirection to Target Server)
 // ============================================================================
 typedef struct hostent* (PASCAL* gethostbyname_t)(const char* name);
 static gethostbyname_t OriginalGetHostByName = nullptr;
@@ -300,42 +273,17 @@ static bool TryAutoJackIn(uintptr_t clientBase) {
         Log("[mxohax] [AutoJackIn] Margin State 9 transition invoked!\n");
     }
 
-    // 4. Ensure character vector has an entry if currently empty
-    DWORD* ppCharBegin = reinterpret_cast<DWORD*>(clientBase + 0x00899B4C);
-    DWORD* ppCharEnd   = reinterpret_cast<DWORD*>(clientBase + 0x00899B50);
-    void* pCharToPass = nullptr;
-
-    if (ppCharBegin && ppCharEnd && *ppCharBegin && *ppCharEnd > *ppCharBegin) {
-        MxoLocalCharEntry* pEntries = reinterpret_cast<MxoLocalCharEntry*>(*ppCharBegin);
-        size_t count = (*ppCharEnd - *ppCharBegin) / sizeof(MxoLocalCharEntry);
-        for (size_t i = 0; i < count; ++i) {
-            if (pEntries[i].charId == g_ActiveCharId) {
-                pCharToPass = &pEntries[i];
-                break;
-            }
-        }
-        if (!pCharToPass && count > 0) {
-            pCharToPass = &pEntries[0];
-            g_ActiveCharId = pEntries[0].charId;
-        }
-    }
-
-    if (!pCharToPass) {
-        s_localCharEntry.pWorldFirst  = s_worldFileName;
-        s_localCharEntry.pWorldLast   = s_worldFileName + strlen(s_worldFileName);
-        s_localCharEntry.pWorldEnd    = s_localCharEntry.pWorldLast;
-        s_localCharEntry.pHandleFirst = s_charHandleStr;
-        s_localCharEntry.pHandleLast  = s_charHandleStr + strlen(s_charHandleStr);
-        s_localCharEntry.pHandleEnd   = s_localCharEntry.pHandleLast;
-        s_localCharEntry.charId       = g_ActiveCharId ? g_ActiveCharId : 360;
-        s_localCharEntry.worldId      = 1;
-        pCharToPass = &s_localCharEntry;
-
-        if (ppCharBegin && ppCharEnd && (!*ppCharBegin || *ppCharBegin == *ppCharEnd)) {
-            *ppCharBegin = reinterpret_cast<DWORD>(&s_localCharEntry);
-            *ppCharEnd   = reinterpret_cast<DWORD>(&s_localCharEntry) + sizeof(s_localCharEntry);
-        }
-    }
+    // 4. Set up local character entry for CWorldMgr::EnterWorldWithCharacter
+    // NOTE: We pass &s_localCharEntry directly to EnterWorldWithCharacter.
+    // We NEVER tamper with the cinematics vector at 0x00899B4C / 0x00899B50!
+    s_localCharEntry.pWorldFirst  = s_worldFileName;
+    s_localCharEntry.pWorldLast   = s_worldFileName + strlen(s_worldFileName);
+    s_localCharEntry.pWorldEnd    = s_localCharEntry.pWorldLast;
+    s_localCharEntry.pHandleFirst = s_charHandleStr;
+    s_localCharEntry.pHandleLast  = s_charHandleStr + strlen(s_charHandleStr);
+    s_localCharEntry.pHandleEnd   = s_localCharEntry.pHandleLast;
+    s_localCharEntry.charId       = g_ActiveCharId ? g_ActiveCharId : 360;
+    s_localCharEntry.worldId      = 1;
 
     // 5. Ensure fallback world pointer at 0x00896E4C points to slums metr
     *reinterpret_cast<const char**>(clientBase + 0x00896E4C) = s_worldFileName;
@@ -343,7 +291,7 @@ static bool TryAutoJackIn(uintptr_t clientBase) {
     // 6. Invoke native CWorldMgr::EnterWorldWithCharacter (0x00124070)
     typedef void (__thiscall *EnterWorld_t)(void* pMgr, void* pChar);
     EnterWorld_t pEnterWorld = reinterpret_cast<EnterWorld_t>(clientBase + 0x00124070);
-    pEnterWorld(pWorldMgr, pCharToPass);
+    pEnterWorld(pWorldMgr, &s_localCharEntry);
 
     DWORD* pCurState = reinterpret_cast<DWORD*>(reinterpret_cast<DWORD>(pWorldMgr) + 0x1C);
     Log("[mxohax] [AutoJackIn] EnterWorld dispatched! WorldMgr State is now %u\n", pCurState ? *pCurState : 0);
@@ -351,59 +299,7 @@ static bool TryAutoJackIn(uintptr_t clientBase) {
     return true;
 }
 
-// 0x0002AC10: UI handler when user clicks "Load" on Character Selection screen
-typedef void (__thiscall *LoadButton_t)(void* pThis);
-static LoadButton_t OriginalLoadButton = nullptr;
-
-static void __fastcall DetourLoadButton(void* pThis, void* /*edx*/) {
-    Log("[mxohax] User clicked 'Load' on Character Selection dialog!\n");
-    if (g_clientBase) {
-        DWORD pNetClient = *reinterpret_cast<DWORD*>(g_clientBase + 0x0089BBA0);
-        if (pNetClient) {
-            *reinterpret_cast<DWORD*>(pNetClient + 0x08) = 2; // CONNECTED (2)
-        }
-        void* pMarginMgr = *reinterpret_cast<void**>(0x004B3A44);
-        if (pMarginMgr) {
-            typedef void (__thiscall *TransitionToState_t)(void* pMgr, DWORD newStateId);
-            TransitionToState_t Transition = reinterpret_cast<TransitionToState_t>(0x00428FF0);
-            Transition(pMarginMgr, 9);
-            Log("[mxohax] [LoadButton] Margin State 9 transition invoked!\n");
-        }
-        *reinterpret_cast<const char**>(g_clientBase + 0x00896E4C) = s_worldFileName;
-    }
-    s_autoJackInDone = true;
-    if (OriginalLoadButton) OriginalLoadButton(pThis);
-}
-
-// 0x0002AC50: UI handler when user selects a character index on Character Selection screen
-typedef void (__thiscall *SelectCharIndex_t)(void* pThis, int index);
-static SelectCharIndex_t OriginalSelectCharIndex = nullptr;
-
-static void __fastcall DetourSelectCharIndex(void* pThis, void* /*edx*/, int index) {
-    Log("[mxohax] DetourSelectCharIndex called with index=%d\n", index);
-    if (g_clientBase) {
-        uintptr_t pBegin = *reinterpret_cast<uintptr_t*>(g_clientBase + 0x00899B4C);
-        uintptr_t pEnd   = *reinterpret_cast<uintptr_t*>(g_clientBase + 0x00899B50);
-        if (pBegin && pEnd && pEnd > pBegin) {
-            size_t count = (pEnd - pBegin) / sizeof(MxoLocalCharEntry);
-            if (index >= 0 && (size_t)index < count) {
-                MxoLocalCharEntry* pEntries = reinterpret_cast<MxoLocalCharEntry*>(pBegin);
-                MxoLocalCharEntry* selected = &pEntries[index];
-                g_ActiveCharId = selected->charId;
-                if (selected->pHandleFirst && selected->pHandleLast && selected->pHandleLast > selected->pHandleFirst) {
-                    size_t len = selected->pHandleLast - selected->pHandleFirst;
-                    if (len >= sizeof(g_ActiveCharName)) len = sizeof(g_ActiveCharName) - 1;
-                    memcpy(g_ActiveCharName, selected->pHandleFirst, len);
-                    g_ActiveCharName[len] = '\0';
-                }
-                Log("[mxohax] Selected character updated: '%s' (charId=%u)\n", g_ActiveCharName, g_ActiveCharId);
-            }
-        }
-    }
-    if (OriginalSelectCharIndex) OriginalSelectCharIndex(pThis, index);
-}
-
-// UI Visibility Hook to detect Screen 0x5D (Character Selection)
+// UI Visibility Hook to detect Screen 0x5D (Character Creation: CLARSICharCreateView)
 typedef void (__thiscall *SetControlVisible_t)(void* pUI, DWORD ctrlId, BOOL bVisible);
 static SetControlVisible_t OriginalSetControlVisible = nullptr;
 
@@ -412,9 +308,9 @@ static void __fastcall DetourSetControlVisible(void* pUI, void* /*edx*/, DWORD c
         s_screen5DActive = (bVisible != FALSE);
         if (bVisible) {
             s_screen5DFrames = 0;
-            Log("[mxohax] Screen 0x5D (Character Selection) is active!\n");
+            Log("[mxohax] Screen 0x5D (Character Creation: CLARSICharCreateView) is active!\n");
         } else {
-            Log("[mxohax] Screen 0x5D (Character Selection) hidden (entering Character Creation or loading)!\n");
+            Log("[mxohax] Screen 0x5D (Character Creation: CLARSICharCreateView) hidden!\n");
         }
     }
     if (OriginalSetControlVisible) OriginalSetControlVisible(pUI, ctrlId, bVisible);
@@ -435,13 +331,17 @@ static void __fastcall DetourFrameTick(void* pThis, void* /*edx*/) {
     DWORD* pState = reinterpret_cast<DWORD*>(reinterpret_cast<DWORD>(pWorldMgr) + 0x1C);
     if (!pState) return;
 
-    // 1. Auto-transition when Screen 0x5D is displayed ONLY if explicitly requested via command-line
-    if (!s_autoJackInDone && s_screen5DActive && g_AutoJackInRequested) {
-        s_screen5DFrames++;
-        if (s_screen5DFrames >= 10) {
-            Log("[mxohax] AutoJackIn triggered after %d frames on Screen 0x5D (-autojackin requested)...\n", s_screen5DFrames);
-            if (TryAutoJackIn(g_clientBase)) {
-                s_autoJackInDone = true;
+    // 1. Auto-transition ONLY when explicitly requested via command-line (-autojackin)
+    // NEVER auto-jackin if user is currently creating a character on Screen 0x5D
+    if (!s_autoJackInDone && g_AutoJackInRequested && !s_screen5DActive) {
+        void* pMarginMgr = *reinterpret_cast<void**>(0x004B3A44);
+        if (pMarginMgr) {
+            s_screen5DFrames++;
+            if (s_screen5DFrames >= 20) {
+                Log("[mxohax] AutoJackIn triggered (-autojackin requested)...\n");
+                if (TryAutoJackIn(g_clientBase)) {
+                    s_autoJackInDone = true;
+                }
             }
         }
     }
@@ -583,16 +483,6 @@ DWORD WINAPI InitThread(LPVOID) {
         Log("[mxohax] SUCCESS: Patched client.dll + 0x0012B4F1 for safe net check!\n");
     }
 
-    // Patch E: 0x0016D410: 3 bytes safe vector population bypass (ret 8: C2 08 00)
-    LPVOID pVecPatch = reinterpret_cast<LPVOID>(g_clientBase + 0x0016D410);
-    if (VirtualProtect(pVecPatch, 3, PAGE_EXECUTE_READWRITE, &oldProt)) {
-        BYTE ret8[3] = { 0xC2, 0x08, 0x00 };
-        memcpy(pVecPatch, ret8, 3);
-        VirtualProtect(pVecPatch, 3, oldProt, &oldProt);
-        FlushInstructionCache(GetCurrentProcess(), pVecPatch, 3);
-        Log("[mxohax] SUCCESS: Patched client.dll + 0x0016D410 (ret 8) to prevent vector crash!\n");
-    }
-
     // Hook LithTech small-allocation pool free to guard against free(NULL) crash at 0x1C1C
     LPVOID pPoolFree = reinterpret_cast<LPVOID>(g_clientBase + 0x00001BC0);
     if (MH_CreateHook(pPoolFree, &DetourPoolFree, reinterpret_cast<LPVOID*>(&OriginalPoolFree)) == MH_OK) {
@@ -600,21 +490,7 @@ DWORD WINAPI InitThread(LPVOID) {
         Log("[mxohax] SUCCESS: Hooked LithTech pool free at client.dll + 0x00001BC0!\n");
     }
 
-    // Hook Load button on Character Selection dialog (0x0002AC10)
-    LPVOID pLoadBtn = reinterpret_cast<LPVOID>(g_clientBase + 0x0002AC10);
-    if (MH_CreateHook(pLoadBtn, &DetourLoadButton, reinterpret_cast<LPVOID*>(&OriginalLoadButton)) == MH_OK) {
-        MH_EnableHook(pLoadBtn);
-        Log("[mxohax] SUCCESS: Hooked Load button at client.dll + 0x0002AC10!\n");
-    }
-
-    // Hook SelectCharIndex on Character Selection dialog (0x0002AC50)
-    LPVOID pSelectCharIndex = reinterpret_cast<LPVOID>(g_clientBase + 0x0002AC50);
-    if (MH_CreateHook(pSelectCharIndex, &DetourSelectCharIndex, reinterpret_cast<LPVOID*>(&OriginalSelectCharIndex)) == MH_OK) {
-        MH_EnableHook(pSelectCharIndex);
-        Log("[mxohax] SUCCESS: Hooked SelectCharIndex at client.dll + 0x0002AC50!\n");
-    }
-
-    // Hook SetControlVisible to detect Character Selection screen (0x0001DB80)
+    // Hook SetControlVisible to detect Character Creation screen (0x0001DB80)
     LPVOID pSetVisible = reinterpret_cast<LPVOID>(g_clientBase + 0x0001DB80);
     if (MH_CreateHook(pSetVisible, &DetourSetControlVisible, reinterpret_cast<LPVOID*>(&OriginalSetControlVisible)) == MH_OK) {
         MH_EnableHook(pSetVisible);
