@@ -22,15 +22,15 @@ static bool g_CommandLineCharSpecified = false;
 static volatile bool s_screen5DActive = false;
 static volatile bool s_screen5DEverOpened = false;
 static volatile int  s_screen5DFrames = 0;
-static volatile bool s_charCreationJustFinished = false;
-static volatile int  s_charCreationFinishedTicks = 0;
+static volatile bool s_charCreationSubmitted = false;
+static volatile int  s_charCreationTicks = 0;
 
 static volatile bool s_interactiveSelectTriggered = false;
 static volatile int  s_interactiveSelectTicks = 0;
 
 static volatile bool s_worldTransitionDone = false;
-static volatile int  s_autoJackInFrames = 0;
 static volatile int  s_state4Ticks = 0;
+static volatile int  s_streamingTicks = 0;
 
 static void Log(const char* fmt, ...) {
     FILE* f = fopen("E:\\Games\\The Matrix Online\\mxohax.log", "a");
@@ -133,7 +133,7 @@ typedef void (__cdecl *PoolFree_t)(void* ptr, size_t size);
 static PoolFree_t OriginalPoolFree = nullptr;
 
 static void __cdecl DetourPoolFree(void* ptr, size_t size) {
-    if (!ptr) return; // Prevent NULL dereference on small pool allocations!
+    if (!ptr) return; // Prevent NULL dereference on small pool allocations
     if (OriginalPoolFree) OriginalPoolFree(ptr, size);
 }
 
@@ -274,19 +274,30 @@ static char s_worldFileName[] = "resource/worlds/final_world/slums_barrens_full.
 static char s_charHandleStr[64] = "Slacker";
 static MxoLocalCharEntry s_localCharEntry;
 
+// UI Visibility Hook
+typedef void (__thiscall *SetControlVisible_t)(void* pUI, DWORD ctrlId, BOOL bVisible);
+static SetControlVisible_t OriginalSetControlVisible = nullptr;
+
 static bool TryAutoJackIn(uintptr_t clientBase) {
     if (!clientBase) return false;
     void* pWorldMgr = *reinterpret_cast<void**>(clientBase + 0x0089DD68);
     if (!pWorldMgr) return false;
 
-    // Check if pMarginMgr has character handle at 0xFC (especially for character creation)
     void* pMarginMgr = *reinterpret_cast<void**>(0x004B3A44);
     if (pMarginMgr) {
+        // 1. Check pMarginMgr + 0xFC (handle from creation or selection)
         const char* pMarginHandle = reinterpret_cast<const char*>(reinterpret_cast<uintptr_t>(pMarginMgr) + 0xFC);
         if (pMarginHandle && pMarginHandle[0] != '\0' && strlen(pMarginHandle) < 32) {
             strncpy(g_ActiveCharName, pMarginHandle, sizeof(g_ActiveCharName) - 1);
             g_ActiveCharName[sizeof(g_ActiveCharName) - 1] = '\0';
             Log("[mxohax] [AutoJackIn] Found handle '%s' in pMarginMgr + 0xFC\n", g_ActiveCharName);
+        }
+
+        // 2. Check pMarginMgr + 0x524 (real charId assigned by server)
+        uint32_t charIdFromMargin = *reinterpret_cast<uint32_t*>(reinterpret_cast<uintptr_t>(pMarginMgr) + 0x524);
+        if (charIdFromMargin != 0) {
+            g_ActiveCharId = charIdFromMargin;
+            Log("[mxohax] [AutoJackIn] Found charId=%u in pMarginMgr + 0x524\n", g_ActiveCharId);
         }
     }
 
@@ -296,8 +307,22 @@ static bool TryAutoJackIn(uintptr_t clientBase) {
     }
     s_charHandleStr[sizeof(s_charHandleStr) - 1] = '\0';
 
+    if (g_ActiveCharId == 0) {
+        if (_stricmp(s_charHandleStr, "s1acker") == 0) g_ActiveCharId = 359;
+        else if (_stricmp(s_charHandleStr, "slacker") == 0) g_ActiveCharId = 360;
+        else g_ActiveCharId = 360;
+    }
+
     Log("[mxohax] [AutoJackIn] Initiating transition into world for '%s' (charId=%u)...\n",
         s_charHandleStr, g_ActiveCharId);
+
+    // Safely hide screens to prevent UI vector clean-up crashes
+    void* pUI = *reinterpret_cast<void**>(clientBase + 0x00898C54);
+    if (pUI && OriginalSetControlVisible) {
+        OriginalSetControlVisible(pUI, 0x5D, FALSE); // Hide Char Creation
+        OriginalSetControlVisible(pUI, 0x4B, FALSE); // Hide Char Select
+    }
+    s_screen5DActive = false;
 
     // 1. Ensure CNetClient at clientBase + 0x0089BBA0 is marked connected (2)
     DWORD pNetClient = *reinterpret_cast<DWORD*>(clientBase + 0x0089BBA0);
@@ -309,30 +334,32 @@ static bool TryAutoJackIn(uintptr_t clientBase) {
     *reinterpret_cast<BYTE*>(clientBase + 0x0089DD5D) = 1;
     *reinterpret_cast<BYTE*>(reinterpret_cast<DWORD>(pWorldMgr) + 0x25) = 1;
 
-    // 3. Transition matrix.exe Margin State Machine to State 9 (Connecting/World Loading)
-    // ONLY if not already in State 9, 10, or 13!
+    // 3. Margin State Machine:
     if (pMarginMgr) {
         int curMarginState = GetMarginStateId();
-        if (curMarginState == 4 || curMarginState < 9) {
+        if (curMarginState == 4) {
+            typedef void (__thiscall *MarginSelectChar_t)(void* pMgr, uint32_t charIndex);
+            MarginSelectChar_t pfnSelect = reinterpret_cast<MarginSelectChar_t>(0x00429F20);
+            pfnSelect(pMarginMgr, 0);
+            Log("[mxohax] [AutoJackIn] Margin SelectCharacter(0x00429F20) invoked!\n");
+        } else if (curMarginState < 8) {
             typedef void (__thiscall *TransitionToState_t)(void* pMgr, DWORD newStateId);
             TransitionToState_t Transition = reinterpret_cast<TransitionToState_t>(0x00428FF0);
             Transition(pMarginMgr, 9);
             Log("[mxohax] [AutoJackIn] Margin State 9 transition invoked (was %d)!\n", curMarginState);
         } else {
-            Log("[mxohax] [AutoJackIn] Margin already in state %d, skipping State 9 transition.\n", curMarginState);
+            Log("[mxohax] [AutoJackIn] Margin already in state %d, skipping manual transition.\n", curMarginState);
         }
     }
 
     // 4. Set up local character entry for CWorldMgr::EnterWorldWithCharacter
-    // NOTE: We pass &s_localCharEntry directly to EnterWorldWithCharacter.
-    // We NEVER tamper with the cinematics vector at 0x00899B4C / 0x00899B50!
     s_localCharEntry.pWorldFirst  = s_worldFileName;
     s_localCharEntry.pWorldLast   = s_worldFileName + strlen(s_worldFileName);
     s_localCharEntry.pWorldEnd    = s_localCharEntry.pWorldLast;
     s_localCharEntry.pHandleFirst = s_charHandleStr;
     s_localCharEntry.pHandleLast  = s_charHandleStr + strlen(s_charHandleStr);
     s_localCharEntry.pHandleEnd   = s_localCharEntry.pHandleLast;
-    s_localCharEntry.charId       = g_ActiveCharId ? g_ActiveCharId : 360;
+    s_localCharEntry.charId       = g_ActiveCharId;
     s_localCharEntry.worldId      = 1;
 
     // 5. Ensure fallback world pointer at 0x00896E4C points to slums metr
@@ -349,13 +376,8 @@ static bool TryAutoJackIn(uintptr_t clientBase) {
     return true;
 }
 
-// UI Visibility Hook to detect Screen 0x5D (Character Creation: CLARSICharCreateView)
-typedef void (__thiscall *SetControlVisible_t)(void* pUI, DWORD ctrlId, BOOL bVisible);
-static SetControlVisible_t OriginalSetControlVisible = nullptr;
-
 static void __fastcall DetourSetControlVisible(void* pUI, void* /*edx*/, DWORD ctrlId, BOOL bVisible) {
     if (ctrlId == 0x5D) {
-        bool wasActive = s_screen5DActive;
         s_screen5DActive = (bVisible != FALSE);
         if (bVisible) {
             s_screen5DFrames = 0;
@@ -363,15 +385,102 @@ static void __fastcall DetourSetControlVisible(void* pUI, void* /*edx*/, DWORD c
             Log("[mxohax] Screen 0x5D (Character Creation: CLARSICharCreateView) is active!\n");
         } else {
             Log("[mxohax] Screen 0x5D (Character Creation: CLARSICharCreateView) hidden!\n");
-            if (wasActive) {
-                // Character creation screen was just dismissed / finished!
-                s_charCreationJustFinished = true;
-                s_charCreationFinishedTicks = 0;
-                Log("[mxohax] Character creation finished/closed! World load pending.\n");
+        }
+    } else if (ctrlId == 0x4B) {
+        Log("[mxohax] Screen 0x4B (Character Selection: ViewPlayerSelection) visible=%d\n", bVisible);
+    }
+    if (OriginalSetControlVisible) OriginalSetControlVisible(pUI, ctrlId, bVisible);
+}
+
+// Hook ViewPlayerSelection::SelectCharacterInList (client.dll + 0x000C2120)
+typedef void (__thiscall *SelectCharacterInList_t)(void* pThis);
+static SelectCharacterInList_t OriginalSelectCharacterInList = nullptr;
+
+static void __fastcall DetourSelectCharacterInList(void* pThis, void* /*edx*/) {
+    Log("[mxohax] ViewPlayerSelection::SelectCharacterInList (0x100C2120) triggered!\n");
+    if (OriginalSelectCharacterInList) {
+        OriginalSelectCharacterInList(pThis);
+    }
+
+    uint32_t selectedIndex = 0;
+    if (pThis) {
+        void* pPlayerList = *reinterpret_cast<void**>(reinterpret_cast<uintptr_t>(pThis) + 0x64);
+        if (pPlayerList) {
+            uintptr_t* listVtable = *reinterpret_cast<uintptr_t**>(pPlayerList);
+            if (listVtable && listVtable[0x170 / 4]) {
+                typedef int (__thiscall *GetSelected_t)(void* pList);
+                GetSelected_t pfnGetSelected = reinterpret_cast<GetSelected_t>(listVtable[0x170 / 4]);
+                int idx = pfnGetSelected(pPlayerList);
+                if (idx >= 0 && idx < 5) {
+                    selectedIndex = static_cast<uint32_t>(idx);
+                }
             }
         }
     }
-    if (OriginalSetControlVisible) OriginalSetControlVisible(pUI, ctrlId, bVisible);
+
+    void* pMarginMgr = *reinterpret_cast<void**>(0x004B3A44);
+    if (pMarginMgr) {
+        uintptr_t pCharEntry = *reinterpret_cast<uintptr_t*>(reinterpret_cast<uintptr_t>(pMarginMgr) + 0x644 + selectedIndex * 4);
+        if (pCharEntry) {
+            uintptr_t pCharData = *reinterpret_cast<uintptr_t*>(pCharEntry + 0x10);
+            if (pCharData) {
+                const char* handle = reinterpret_cast<const char*>(pCharData + 3);
+                if (handle && handle[0] != '\0' && strlen(handle) < 32) {
+                    strncpy(g_ActiveCharName, handle, sizeof(g_ActiveCharName) - 1);
+                    g_ActiveCharName[sizeof(g_ActiveCharName) - 1] = '\0';
+                    Log("[mxohax] SelectCharacterInList: Selected char handle '%s' (index %u)\n", g_ActiveCharName, selectedIndex);
+                }
+            }
+        }
+
+        int curMarginState = GetMarginStateId();
+        if (curMarginState == 4) {
+            typedef void (__thiscall *MarginSelectChar_t)(void* pMgr, uint32_t charIndex);
+            MarginSelectChar_t pfnSelect = reinterpret_cast<MarginSelectChar_t>(0x00429F20);
+            pfnSelect(pMarginMgr, selectedIndex);
+            Log("[mxohax] SelectCharacterInList: Invoked matrix.exe SelectCharacter(0x00429F20) for index %u!\n", selectedIndex);
+        }
+    }
+
+    s_interactiveSelectTriggered = true;
+    s_interactiveSelectTicks = 0;
+}
+
+// Hook matrix.exe MarginMgr::SelectCharacter (0x00429F20)
+typedef void (__thiscall *MarginSelectChar_t)(void* pMgr, uint32_t charIndex);
+static MarginSelectChar_t OriginalMarginSelectChar = nullptr;
+
+static void __fastcall DetourMarginSelectChar(void* pMgr, void* /*edx*/, uint32_t charIndex) {
+    Log("[mxohax] matrix.exe SelectCharacter(0x00429F20) entered with charIndex=%u!\n", charIndex);
+    if (OriginalMarginSelectChar) {
+        OriginalMarginSelectChar(pMgr, charIndex);
+    }
+    s_interactiveSelectTriggered = true;
+    s_interactiveSelectTicks = 0;
+}
+
+// Hook CLARSICharCreateView::HandleMessage (client.dll + 0x0004AE30)
+typedef int (__thiscall *CharCreateHandleMessage_t)(void* pThis, void* pMsg);
+static CharCreateHandleMessage_t OriginalCharCreateHandleMessage = nullptr;
+
+static int __fastcall DetourCharCreateHandleMessage(void* pThis, void* /*edx*/, void* pMsg) {
+    if (pMsg) {
+        DWORD eventCode = *reinterpret_cast<DWORD*>(reinterpret_cast<uintptr_t>(pMsg) + 8);
+        if (eventCode == 0x45534F4C || eventCode == 0x6E444C4D) { // 'LOSE' or 'MLDn'
+            void* pMarginMgr = *reinterpret_cast<void**>(0x004B3A44);
+            if (pMarginMgr) {
+                const char* pMarginHandle = reinterpret_cast<const char*>(reinterpret_cast<uintptr_t>(pMarginMgr) + 0xFC);
+                if (pMarginHandle && pMarginHandle[0] != '\0' && strlen(pMarginHandle) < 32) {
+                    strncpy(g_ActiveCharName, pMarginHandle, sizeof(g_ActiveCharName) - 1);
+                    g_ActiveCharName[sizeof(g_ActiveCharName) - 1] = '\0';
+                    Log("[mxohax] CharCreate Finish event detected! Handle: '%s'\n", g_ActiveCharName);
+                }
+            }
+            s_screen5DEverOpened = true;
+            s_charCreationSubmitted = true;
+        }
+    }
+    return OriginalCharCreateHandleMessage ? OriginalCharCreateHandleMessage(pThis, pMsg) : 0;
 }
 
 // FrameTick hook on main thread (client.dll + 0x001F9140)
@@ -392,7 +501,7 @@ static void __fastcall DetourFrameTick(void* pThis, void* /*edx*/) {
     int curWorldState = *pState;
     int curMarginState = GetMarginStateId();
 
-    // Trigger 1: Interactive Character Selection clicked
+    // TRIGGER 1: Interactive Character Selection in UI clicked
     if (s_interactiveSelectTriggered && !s_worldTransitionDone) {
         if (curWorldState != 3 && curWorldState != 4) {
             s_interactiveSelectTicks++;
@@ -410,44 +519,62 @@ static void __fastcall DetourFrameTick(void* pThis, void* /*edx*/) {
         }
     }
 
-    // Trigger 2: Character Creation just completed / Screen 0x5D closed
-    if (s_charCreationJustFinished && !s_worldTransitionDone) {
+    // TRIGGER 2: Character Creation completed / Margin acknowledged
+    if (s_screen5DEverOpened && !s_worldTransitionDone) {
         if (curWorldState != 3 && curWorldState != 4) {
-            if (curMarginState == 4) {
-                // User cancelled / backed out of character creation to selection screen
-                s_charCreationJustFinished = false;
-                Log("[mxohax] Character creation was cancelled (marginState=4). Aborting auto-load.\n");
-            } else {
-                s_charCreationFinishedTicks++;
-                // When Margin enters State 9, 10, or 13 (or after 15 ticks)
-                if (s_charCreationFinishedTicks >= 15 || curMarginState == 9 || curMarginState == 10 || curMarginState == 13) {
-                    Log("[mxohax] Char Creation: Dispatching world entry for '%s' (marginState=%d, ticks=%d)...\n",
-                        g_ActiveCharName, curMarginState, s_charCreationFinishedTicks);
+            if (curMarginState == 10 || curMarginState == 13 || curMarginState == 9) {
+                s_charCreationTicks++;
+                if (s_charCreationTicks >= 3) {
+                    Log("[mxohax] Char Creation: Margin in state %d! Dispatching world entry for '%s'...\n",
+                        curMarginState, g_ActiveCharName);
                     if (TryAutoJackIn(g_clientBase)) {
                         s_worldTransitionDone = true;
-                        s_charCreationJustFinished = false;
+                        s_screen5DEverOpened = false;
+                        s_screen5DActive = false;
                     }
                 }
+            } else if (curMarginState == 4 && !s_screen5DActive) {
+                // User backed out of Character Creation to selection screen
+                s_screen5DEverOpened = false;
+                s_charCreationSubmitted = false;
             }
-        } else {
-            s_charCreationJustFinished = false;
         }
     }
 
-    // Trigger 3: Existing Character Auto-JackIn (for Launcher launches or -autojackin)
-    // NEVER if Screen 0x5D is currently active or was opened!
-    bool canAutoJackIn = (g_AutoJackInRequested || g_CommandLineCharSpecified);
-    if (canAutoJackIn && !s_worldTransitionDone && !s_screen5DActive && !s_screen5DEverOpened) {
+    // TRIGGER 3: Existing Character Auto-JackIn
+    if (!s_worldTransitionDone && !s_screen5DActive && !s_screen5DEverOpened) {
         if (curWorldState != 3 && curWorldState != 4) {
-            // Margin must be at State 4 (Character Select screen loaded) or higher
-            if (curMarginState >= 4) {
-                s_autoJackInFrames++;
-                // Wait 25 frames (about 0.8s) to give Screen 0x5D a chance to open if account has no characters
-                if (s_autoJackInFrames >= 25) {
-                    Log("[mxohax] Existing Char AutoJackIn: Dispatching world entry for '%s' (marginState=%d)...\n",
-                        g_ActiveCharName, curMarginState);
-                    if (TryAutoJackIn(g_clientBase)) {
-                        s_worldTransitionDone = true;
+            if (curMarginState == 4) {
+                s_state4Ticks++;
+                // Wait 30 ticks (~1 second) after Character Selection screen loads
+                if (s_state4Ticks >= 30) {
+                    void* pMarginMgr = *reinterpret_cast<void**>(0x004B3A44);
+                    bool hasExistingChar = false;
+                    if (pMarginMgr) {
+                        uintptr_t pCharEntry0 = *reinterpret_cast<uintptr_t*>(reinterpret_cast<uintptr_t>(pMarginMgr) + 0x644);
+                        if (pCharEntry0 != 0) {
+                            hasExistingChar = true;
+                            uintptr_t pCharData = *reinterpret_cast<uintptr_t*>(pCharEntry0 + 0x10);
+                            if (pCharData) {
+                                const char* handle = reinterpret_cast<const char*>(pCharData + 3);
+                                if (handle && handle[0] != '\0' && strlen(handle) < 32) {
+                                    strncpy(g_ActiveCharName, handle, sizeof(g_ActiveCharName) - 1);
+                                    g_ActiveCharName[sizeof(g_ActiveCharName) - 1] = '\0';
+                                }
+                            }
+                        }
+                    }
+
+                    if (hasExistingChar || g_AutoJackInRequested || g_CommandLineCharSpecified) {
+                        Log("[mxohax] Existing Char AutoJackIn: Triggering Margin SelectCharacter(0) for '%s' (marginState=%d)...\n",
+                            g_ActiveCharName, curMarginState);
+                        if (pMarginMgr) {
+                            typedef void (__thiscall *MarginSelectChar_t)(void* pMgr, uint32_t charIndex);
+                            MarginSelectChar_t pfnSelect = reinterpret_cast<MarginSelectChar_t>(0x00429F20);
+                            pfnSelect(pMarginMgr, 0);
+                        }
+                        s_interactiveSelectTriggered = true;
+                        s_interactiveSelectTicks = 0;
                     }
                 }
             }
@@ -456,10 +583,10 @@ static void __fastcall DetourFrameTick(void* pThis, void* /*edx*/) {
 
     // State 4 (Streaming) -> State 3 (In-World) promotion
     if (*pState == 4) {
-        s_state4Ticks++;
+        s_streamingTicks++;
 
         void** ppPlayerGlobal = reinterpret_cast<void**>(g_clientBase + 0x008A4378);
-        if (ppPlayerGlobal && !*ppPlayerGlobal && s_state4Ticks >= 10) {
+        if (ppPlayerGlobal && !*ppPlayerGlobal && s_streamingTicks >= 10) {
             typedef void* (__thiscall *CreateObject_t)(void* pMgr, DWORD objType);
             CreateObject_t pCreateObject = reinterpret_cast<CreateObject_t>(g_clientBase + 0x00120150);
             *ppPlayerGlobal = pCreateObject(pWorldMgr, 0x0C);
@@ -467,7 +594,7 @@ static void __fastcall DetourFrameTick(void* pThis, void* /*edx*/) {
         }
 
         // When player object is created and streaming settles, promote to State 3
-        if (ppPlayerGlobal && *ppPlayerGlobal && s_state4Ticks >= 25) {
+        if (ppPlayerGlobal && *ppPlayerGlobal && s_streamingTicks >= 25) {
             *reinterpret_cast<BYTE*>(reinterpret_cast<DWORD>(pWorldMgr) + 0x20) = 1;
             *reinterpret_cast<BYTE*>(reinterpret_cast<DWORD>(pWorldMgr) + 0x22) = 1;
             *reinterpret_cast<BYTE*>(reinterpret_cast<DWORD>(pWorldMgr) + 0x27) = 1;
@@ -476,43 +603,6 @@ static void __fastcall DetourFrameTick(void* pThis, void* /*edx*/) {
             Log("[mxohax] State 4 streaming complete -> Promoted to State 3 (In-World 3D gameplay)!\n");
         }
     }
-}
-
-// matrix.exe 0x00429D80: SelectCharacter in vtable
-typedef void (__thiscall *SelectCharacter_t)(void* pThis, void* pArg);
-static SelectCharacter_t OriginalSelectCharacter = nullptr;
-
-static void __fastcall DetourSelectCharacter(void* pThis, void* /*edx*/, void* pArg) {
-    Log("[mxohax] matrix.exe SelectCharacter called with pArg=0x%p\n", pArg);
-    if (!pArg) {
-        if (OriginalSelectCharacter) OriginalSelectCharacter(pThis, pArg);
-        return;
-    }
-
-    uint32_t charIndex = *reinterpret_cast<uint32_t*>(pArg);
-    Log("[mxohax] SelectCharacter: charIndex=%u\n", charIndex);
-
-    // Extract character handle from pMarginMgr if available
-    if (pThis && charIndex < 5) {
-        uintptr_t pCharEntry = *reinterpret_cast<uintptr_t*>(reinterpret_cast<uintptr_t>(pThis) + 0x644 + charIndex * 4);
-        if (pCharEntry) {
-            uintptr_t pCharData = *reinterpret_cast<uintptr_t*>(pCharEntry + 0x10);
-            if (pCharData) {
-                const char* handle = reinterpret_cast<const char*>(pCharData + 3);
-                if (handle && handle[0] != '\0' && strlen(handle) < 32) {
-                    strncpy(g_ActiveCharName, handle, sizeof(g_ActiveCharName) - 1);
-                    g_ActiveCharName[sizeof(g_ActiveCharName) - 1] = '\0';
-                    Log("[mxohax] SelectCharacter: Extracted active char handle '%s'\n", g_ActiveCharName);
-                }
-            }
-        }
-    }
-
-    if (OriginalSelectCharacter) OriginalSelectCharacter(pThis, pArg);
-
-    // Signal interactive selection world load
-    s_interactiveSelectTriggered = true;
-    s_interactiveSelectTicks = 0;
 }
 
 static void LoadTargetServerIp() {
@@ -537,6 +627,7 @@ static void LoadTargetServerIp() {
 }
 
 DWORD WINAPI InitThread(LPVOID) {
+    AddVectoredExceptionHandler(1, CrashHandler);
     LoadTargetServerIp();
     ParseClientCommandLine();
     Log("[mxohax] Clean DLL Injected. Target Server IP: %s, Operative: %s (charId=%u)\n",
@@ -575,7 +666,7 @@ DWORD WINAPI InitThread(LPVOID) {
     Log("[mxohax] RSA verification bypassed.\n");
 
     // Patch J: 0x0012B388: 2 bytes (EB 09 instead of 74 09)
-    // Bypasses destructive LeaveWorld(0x1012A3D0) when CLevelSystem::IsFinished returns 1 in State 4
+    // Bypasses premature LeaveWorld(0x1012A3D0) when CLevelSystem::IsFinished returns 1 in State 4
     DWORD oldProt = 0;
     LPVOID pLeaveWorldBypass = reinterpret_cast<LPVOID>(g_clientBase + 0x0012B388);
     if (VirtualProtect(pLeaveWorldBypass, 2, PAGE_EXECUTE_READWRITE, &oldProt)) {
@@ -640,15 +731,28 @@ DWORD WINAPI InitThread(LPVOID) {
         Log("[mxohax] SUCCESS: Hooked FrameTick at client.dll + 0x001F9140!\n");
     }
 
-    // Hook matrix.exe SelectCharacter (0x00429D80)
-    LPVOID pSelectChar = reinterpret_cast<LPVOID>(0x00429D80);
-    if (MH_CreateHook(pSelectChar, &DetourSelectCharacter, reinterpret_cast<LPVOID*>(&OriginalSelectCharacter)) == MH_OK) {
-        MH_EnableHook(pSelectChar);
-        Log("[mxohax] SUCCESS: Hooked matrix.exe SelectCharacter at 0x00429D80!\n");
+    // Hook ViewPlayerSelection::SelectCharacterInList (client.dll + 0x000C2120)
+    LPVOID pSelectCharList = reinterpret_cast<LPVOID>(g_clientBase + 0x000C2120);
+    if (MH_CreateHook(pSelectCharList, &DetourSelectCharacterInList, reinterpret_cast<LPVOID*>(&OriginalSelectCharacterInList)) == MH_OK) {
+        MH_EnableHook(pSelectCharList);
+        Log("[mxohax] SUCCESS: Hooked ViewPlayerSelection::SelectCharacterInList at client.dll + 0x000C2120!\n");
     }
 
-    AddVectoredExceptionHandler(1, CrashHandler);
-    Log("[mxohax] Vectored Exception Handler installed.\n");
+    // Hook CLARSICharCreateView::HandleMessage (client.dll + 0x0004AE30)
+    LPVOID pCharCreateMsg = reinterpret_cast<LPVOID>(g_clientBase + 0x0004AE30);
+    if (MH_CreateHook(pCharCreateMsg, &DetourCharCreateHandleMessage, reinterpret_cast<LPVOID*>(&OriginalCharCreateHandleMessage)) == MH_OK) {
+        MH_EnableHook(pCharCreateMsg);
+        Log("[mxohax] SUCCESS: Hooked CLARSICharCreateView::HandleMessage at client.dll + 0x0004AE30!\n");
+    }
+
+    // Hook matrix.exe SelectCharacter (0x00429F20)
+    LPVOID pMarginSelect = reinterpret_cast<LPVOID>(0x00429F20);
+    if (MH_CreateHook(pMarginSelect, &DetourMarginSelectChar, reinterpret_cast<LPVOID*>(&OriginalMarginSelectChar)) == MH_OK) {
+        MH_EnableHook(pMarginSelect);
+        Log("[mxohax] SUCCESS: Hooked matrix.exe SelectCharacter at 0x00429F20!\n");
+    }
+
+    Log("[mxohax] All hooks initialized successfully.\n");
 
     return 0;
 }
