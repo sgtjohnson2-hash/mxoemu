@@ -13,9 +13,10 @@ static char g_TargetServerIp[64] = "15.204.82.250";
 static uintptr_t g_clientBase = 0;
 static uintptr_t g_matrixBase = 0;
 
-static char g_ActiveCharName[64] = "S1acker";
-static uint32_t g_ActiveCharId = 360;
+static char g_ActiveCharName[64] = "Slacker";
+static uint32_t g_ActiveCharId = 0;
 static bool g_CommandLineParsed = false;
+static bool g_AutoJackInRequested = false;
 
 static volatile bool s_screen5DActive = false;
 static volatile int  s_screen5DFrames = 0;
@@ -37,6 +38,11 @@ static void ParseClientCommandLine() {
     g_CommandLineParsed = true;
     const char* cmd = GetCommandLineA();
     if (!cmd) return;
+
+    if (strstr(cmd, "-autojackin")) {
+        g_AutoJackInRequested = true;
+        Log("[mxohax] Command-line -autojackin requested.\n");
+    }
 
     const char* pChar = strstr(cmd, "-char");
     if (pChar) {
@@ -164,6 +170,12 @@ static LONG WINAPI CrashHandler(PEXCEPTION_POINTERS pExc) {
                     ctx->Eip = static_cast<DWORD>(g_clientBase + 0x000A2213);
                     return EXCEPTION_CONTINUE_EXECUTION;
                 }
+                // 6. UI cleanup destructor dereference at client.dll + 0x0037BF20..0x0037BF78
+                if (g_clientBase && (uintptr_t)addr >= g_clientBase + 0x0037BF20 && (uintptr_t)addr <= g_clientBase + 0x0037BF78) {
+                    Log("[mxohax] Recovered from UI cleanup destructor crash at 0x%p (client.dll + 0x%08X)\n", addr, (uintptr_t)addr - g_clientBase);
+                    ctx->Eip = static_cast<DWORD>(g_clientBase + 0x0037BF7B);
+                    return EXCEPTION_CONTINUE_EXECUTION;
+                }
             }
             Log("[mxohax] !!! UNHANDLED CRASH: 0x%08X at 0x%p !!!\n", code, addr);
         }
@@ -255,7 +267,7 @@ struct MxoLocalCharEntry {
 #pragma pack(pop)
 
 static char s_worldFileName[] = "resource/worlds/final_world/slums_barrens_full.metr";
-static char s_charHandleStr[64] = "S1acker";
+static char s_charHandleStr[64] = "Slacker";
 static MxoLocalCharEntry s_localCharEntry;
 
 static bool TryAutoJackIn(uintptr_t clientBase) {
@@ -288,21 +300,41 @@ static bool TryAutoJackIn(uintptr_t clientBase) {
         Log("[mxohax] [AutoJackIn] Margin State 9 transition invoked!\n");
     }
 
-    // 4. Populate character vector at client.dll + 0x00899B4C
-    s_localCharEntry.pWorldFirst  = s_worldFileName;
-    s_localCharEntry.pWorldLast   = s_worldFileName + strlen(s_worldFileName);
-    s_localCharEntry.pWorldEnd    = s_localCharEntry.pWorldLast;
-    s_localCharEntry.pHandleFirst = s_charHandleStr;
-    s_localCharEntry.pHandleLast  = s_charHandleStr + strlen(s_charHandleStr);
-    s_localCharEntry.pHandleEnd   = s_localCharEntry.pHandleLast;
-    s_localCharEntry.charId       = g_ActiveCharId ? g_ActiveCharId : 360;
-    s_localCharEntry.worldId      = 1;
-
+    // 4. Ensure character vector has an entry if currently empty
     DWORD* ppCharBegin = reinterpret_cast<DWORD*>(clientBase + 0x00899B4C);
     DWORD* ppCharEnd   = reinterpret_cast<DWORD*>(clientBase + 0x00899B50);
-    if (ppCharBegin && ppCharEnd) {
-        *ppCharBegin = reinterpret_cast<DWORD>(&s_localCharEntry);
-        *ppCharEnd   = reinterpret_cast<DWORD>(&s_localCharEntry) + sizeof(s_localCharEntry);
+    void* pCharToPass = nullptr;
+
+    if (ppCharBegin && ppCharEnd && *ppCharBegin && *ppCharEnd > *ppCharBegin) {
+        MxoLocalCharEntry* pEntries = reinterpret_cast<MxoLocalCharEntry*>(*ppCharBegin);
+        size_t count = (*ppCharEnd - *ppCharBegin) / sizeof(MxoLocalCharEntry);
+        for (size_t i = 0; i < count; ++i) {
+            if (pEntries[i].charId == g_ActiveCharId) {
+                pCharToPass = &pEntries[i];
+                break;
+            }
+        }
+        if (!pCharToPass && count > 0) {
+            pCharToPass = &pEntries[0];
+            g_ActiveCharId = pEntries[0].charId;
+        }
+    }
+
+    if (!pCharToPass) {
+        s_localCharEntry.pWorldFirst  = s_worldFileName;
+        s_localCharEntry.pWorldLast   = s_worldFileName + strlen(s_worldFileName);
+        s_localCharEntry.pWorldEnd    = s_localCharEntry.pWorldLast;
+        s_localCharEntry.pHandleFirst = s_charHandleStr;
+        s_localCharEntry.pHandleLast  = s_charHandleStr + strlen(s_charHandleStr);
+        s_localCharEntry.pHandleEnd   = s_localCharEntry.pHandleLast;
+        s_localCharEntry.charId       = g_ActiveCharId ? g_ActiveCharId : 360;
+        s_localCharEntry.worldId      = 1;
+        pCharToPass = &s_localCharEntry;
+
+        if (ppCharBegin && ppCharEnd && (!*ppCharBegin || *ppCharBegin == *ppCharEnd)) {
+            *ppCharBegin = reinterpret_cast<DWORD>(&s_localCharEntry);
+            *ppCharEnd   = reinterpret_cast<DWORD>(&s_localCharEntry) + sizeof(s_localCharEntry);
+        }
     }
 
     // 5. Ensure fallback world pointer at 0x00896E4C points to slums metr
@@ -311,7 +343,7 @@ static bool TryAutoJackIn(uintptr_t clientBase) {
     // 6. Invoke native CWorldMgr::EnterWorldWithCharacter (0x00124070)
     typedef void (__thiscall *EnterWorld_t)(void* pMgr, void* pChar);
     EnterWorld_t pEnterWorld = reinterpret_cast<EnterWorld_t>(clientBase + 0x00124070);
-    pEnterWorld(pWorldMgr, &s_localCharEntry);
+    pEnterWorld(pWorldMgr, pCharToPass);
 
     DWORD* pCurState = reinterpret_cast<DWORD*>(reinterpret_cast<DWORD>(pWorldMgr) + 0x1C);
     Log("[mxohax] [AutoJackIn] EnterWorld dispatched! WorldMgr State is now %u\n", pCurState ? *pCurState : 0);
@@ -325,12 +357,50 @@ static LoadButton_t OriginalLoadButton = nullptr;
 
 static void __fastcall DetourLoadButton(void* pThis, void* /*edx*/) {
     Log("[mxohax] User clicked 'Load' on Character Selection dialog!\n");
-    if (!s_autoJackInDone) {
-        if (TryAutoJackIn(g_clientBase)) {
-            s_autoJackInDone = true;
+    if (g_clientBase) {
+        DWORD pNetClient = *reinterpret_cast<DWORD*>(g_clientBase + 0x0089BBA0);
+        if (pNetClient) {
+            *reinterpret_cast<DWORD*>(pNetClient + 0x08) = 2; // CONNECTED (2)
+        }
+        void* pMarginMgr = *reinterpret_cast<void**>(0x004B3A44);
+        if (pMarginMgr) {
+            typedef void (__thiscall *TransitionToState_t)(void* pMgr, DWORD newStateId);
+            TransitionToState_t Transition = reinterpret_cast<TransitionToState_t>(0x00428FF0);
+            Transition(pMarginMgr, 9);
+            Log("[mxohax] [LoadButton] Margin State 9 transition invoked!\n");
+        }
+        *reinterpret_cast<const char**>(g_clientBase + 0x00896E4C) = s_worldFileName;
+    }
+    s_autoJackInDone = true;
+    if (OriginalLoadButton) OriginalLoadButton(pThis);
+}
+
+// 0x0002AC50: UI handler when user selects a character index on Character Selection screen
+typedef void (__thiscall *SelectCharIndex_t)(void* pThis, int index);
+static SelectCharIndex_t OriginalSelectCharIndex = nullptr;
+
+static void __fastcall DetourSelectCharIndex(void* pThis, void* /*edx*/, int index) {
+    Log("[mxohax] DetourSelectCharIndex called with index=%d\n", index);
+    if (g_clientBase) {
+        uintptr_t pBegin = *reinterpret_cast<uintptr_t*>(g_clientBase + 0x00899B4C);
+        uintptr_t pEnd   = *reinterpret_cast<uintptr_t*>(g_clientBase + 0x00899B50);
+        if (pBegin && pEnd && pEnd > pBegin) {
+            size_t count = (pEnd - pBegin) / sizeof(MxoLocalCharEntry);
+            if (index >= 0 && (size_t)index < count) {
+                MxoLocalCharEntry* pEntries = reinterpret_cast<MxoLocalCharEntry*>(pBegin);
+                MxoLocalCharEntry* selected = &pEntries[index];
+                g_ActiveCharId = selected->charId;
+                if (selected->pHandleFirst && selected->pHandleLast && selected->pHandleLast > selected->pHandleFirst) {
+                    size_t len = selected->pHandleLast - selected->pHandleFirst;
+                    if (len >= sizeof(g_ActiveCharName)) len = sizeof(g_ActiveCharName) - 1;
+                    memcpy(g_ActiveCharName, selected->pHandleFirst, len);
+                    g_ActiveCharName[len] = '\0';
+                }
+                Log("[mxohax] Selected character updated: '%s' (charId=%u)\n", g_ActiveCharName, g_ActiveCharId);
+            }
         }
     }
-    if (OriginalLoadButton) OriginalLoadButton(pThis);
+    if (OriginalSelectCharIndex) OriginalSelectCharIndex(pThis, index);
 }
 
 // UI Visibility Hook to detect Screen 0x5D (Character Selection)
@@ -338,10 +408,14 @@ typedef void (__thiscall *SetControlVisible_t)(void* pUI, DWORD ctrlId, BOOL bVi
 static SetControlVisible_t OriginalSetControlVisible = nullptr;
 
 static void __fastcall DetourSetControlVisible(void* pUI, void* /*edx*/, DWORD ctrlId, BOOL bVisible) {
-    if (ctrlId == 0x5D && bVisible) {
-        s_screen5DActive = true;
-        s_screen5DFrames = 0;
-        Log("[mxohax] Screen 0x5D (Character Selection) is active!\n");
+    if (ctrlId == 0x5D) {
+        s_screen5DActive = (bVisible != FALSE);
+        if (bVisible) {
+            s_screen5DFrames = 0;
+            Log("[mxohax] Screen 0x5D (Character Selection) is active!\n");
+        } else {
+            Log("[mxohax] Screen 0x5D (Character Selection) hidden (entering Character Creation or loading)!\n");
+        }
     }
     if (OriginalSetControlVisible) OriginalSetControlVisible(pUI, ctrlId, bVisible);
 }
@@ -361,11 +435,11 @@ static void __fastcall DetourFrameTick(void* pThis, void* /*edx*/) {
     DWORD* pState = reinterpret_cast<DWORD*>(reinterpret_cast<DWORD>(pWorldMgr) + 0x1C);
     if (!pState) return;
 
-    // 1. Auto-transition when Screen 0x5D is displayed
-    if (!s_autoJackInDone && s_screen5DActive) {
+    // 1. Auto-transition when Screen 0x5D is displayed ONLY if explicitly requested via command-line
+    if (!s_autoJackInDone && s_screen5DActive && g_AutoJackInRequested) {
         s_screen5DFrames++;
         if (s_screen5DFrames >= 10) {
-            Log("[mxohax] AutoJackIn triggered after %d frames on Screen 0x5D...\n", s_screen5DFrames);
+            Log("[mxohax] AutoJackIn triggered after %d frames on Screen 0x5D (-autojackin requested)...\n", s_screen5DFrames);
             if (TryAutoJackIn(g_clientBase)) {
                 s_autoJackInDone = true;
             }
@@ -531,6 +605,13 @@ DWORD WINAPI InitThread(LPVOID) {
     if (MH_CreateHook(pLoadBtn, &DetourLoadButton, reinterpret_cast<LPVOID*>(&OriginalLoadButton)) == MH_OK) {
         MH_EnableHook(pLoadBtn);
         Log("[mxohax] SUCCESS: Hooked Load button at client.dll + 0x0002AC10!\n");
+    }
+
+    // Hook SelectCharIndex on Character Selection dialog (0x0002AC50)
+    LPVOID pSelectCharIndex = reinterpret_cast<LPVOID>(g_clientBase + 0x0002AC50);
+    if (MH_CreateHook(pSelectCharIndex, &DetourSelectCharIndex, reinterpret_cast<LPVOID*>(&OriginalSelectCharIndex)) == MH_OK) {
+        MH_EnableHook(pSelectCharIndex);
+        Log("[mxohax] SUCCESS: Hooked SelectCharIndex at client.dll + 0x0002AC50!\n");
     }
 
     // Hook SetControlVisible to detect Character Selection screen (0x0001DB80)
