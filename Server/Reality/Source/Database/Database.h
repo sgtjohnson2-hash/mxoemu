@@ -114,6 +114,7 @@ public:
 	bool Execute( string QueryString);
 	bool Execute(format &fmt) { return Execute(fmt.str()); }
 	bool ExecutePrepared(class PreparedStatement* stmt);
+	bool WaitExecutePrepared(class PreparedStatement* stmt);
 	void ExecuteAsync( string QueryString);
 	void ExecuteAsync(format &fmt) { ExecuteAsync(fmt.str()); }
 

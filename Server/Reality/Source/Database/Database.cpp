@@ -216,6 +216,14 @@ bool Database::ExecutePrepared(PreparedStatement* stmt)
 	return Execute(stmt->GetQueryString(this));
 }
 
+bool Database::WaitExecutePrepared(PreparedStatement* stmt)
+{
+	if (!stmt)
+		return false;
+
+	return WaitExecute(stmt->GetQueryString(this));
+}
+
 QueryResult* Database::QueryPrepared(PreparedStatement* stmt)
 {
 	if (!stmt)

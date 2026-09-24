@@ -1191,7 +1191,7 @@ void MarginSocket::HandleClaimCharacterNameRequest(ByteBuffer &packetData)
 			"VALUES (?0, 1, 0, ?1, ?1, 'Operative', 16802.3, 665.0, 3237.01, 0.0245437, 250, 250, 100, 100, 1, 1, 0, 0, 0, 250, 1, 0)");
 		insStmt.SetUInt32(0, m_userId);
 		insStmt.SetString(1, handleStr);
-		sDatabase.ExecutePrepared(&insStmt);
+		sDatabase.WaitExecutePrepared(&insStmt);
 
 		uint64 newCharId = 0;
 		{
@@ -1206,6 +1206,18 @@ void MarginSocket::HandleClaimCharacterNameRequest(ByteBuffer &packetData)
 			}
 		}
 
+		if (newCharId == 0)
+		{
+			PreparedStatement selFallback("SELECT `charId` FROM `characters` WHERE LOWER(`handle`) = LOWER(?0) ORDER BY `charId` DESC LIMIT 1");
+			selFallback.SetString(0, handleStr);
+			scoped_ptr<QueryResult> fbRes(sDatabase.QueryPrepared(&selFallback));
+			if (fbRes)
+			{
+				Field* f = fbRes->Fetch();
+				newCharId = f[0].GetUInt64();
+			}
+		}
+
 		charId = newCharId;
 		m_charName = handleStr;
 
@@ -1213,7 +1225,7 @@ void MarginSocket::HandleClaimCharacterNameRequest(ByteBuffer &packetData)
 		PreparedStatement rsiDef("INSERT IGNORE INTO `rsivalues` (`charId`, `sex`, `body`, `hat`, `face`, `shirt`, `coat`, `pants`, `shoes`, `gloves`, `glasses`, `hair`, `facialdetail`, `shirtcolor`, `pantscolor`, `coatcolor`, `shoecolor`, `glassescolor`, `haircolor`, `skintone`, `tattoo`, `facialdetailcolor`, `leggings`) "
 			"VALUES (?0, 0, 0, 0, 0, 2, 10, 1, 6, 6, 4, 1, 0, 41, 16, 0, 0, 15, 1, 1, 0, 0, 0)");
 		rsiDef.SetUInt64(0, charId);
-		sDatabase.ExecutePrepared(&rsiDef);
+		sDatabase.WaitExecutePrepared(&rsiDef);
 
 		DEBUG_LOG(format("MS_ClaimCharacterNameRequest: Handle '%1%' reserved! CharID=%2%") % handleStr % charId);
 
@@ -1390,7 +1402,7 @@ void MarginSocket::HandleCreateCharacterRequest(ByteBuffer &packetData)
 		insStmt.SetString(3, lastName);
 		insStmt.SetString(4, description);
 		insStmt.SetUInt32(5, profId);
-		sDatabase.ExecutePrepared(&insStmt);
+		sDatabase.WaitExecutePrepared(&insStmt);
 
 		PreparedStatement getStmt("SELECT `charId` FROM `characters` WHERE `userId` = ?0 AND `handle` = ?1 ORDER BY `charId` DESC LIMIT 1");
 		getStmt.SetUInt32(0, m_userId);
@@ -1419,7 +1431,7 @@ void MarginSocket::HandleCreateCharacterRequest(ByteBuffer &packetData)
 	updStmt.SetUInt32(3, profId);
 	updStmt.SetUInt64(4, charId);
 	updStmt.SetUInt32(5, m_userId);
-	sDatabase.ExecutePrepared(&updStmt);
+	sDatabase.WaitExecutePrepared(&updStmt);
 
 	PreparedStatement rsiStmt("REPLACE INTO `rsivalues` (`charId`, `sex`, `body`, `hat`, `face`, `shirt`, `coat`, `pants`, `shoes`, `gloves`, `glasses`, `hair`, `facialdetail`, `shirtcolor`, `pantscolor`, `coatcolor`, `shoecolor`, `glassescolor`, `haircolor`, `skintone`, `tattoo`, `facialdetailcolor`, `leggings`) "
 		"VALUES (?0, ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, 41, 16, 0, 0, 15, ?13, ?14, ?15, 0, 0)");
@@ -1439,7 +1451,7 @@ void MarginSocket::HandleCreateCharacterRequest(ByteBuffer &packetData)
 	rsiStmt.SetUInt16(13, haircolor);
 	rsiStmt.SetUInt16(14, skintone);
 	rsiStmt.SetUInt16(15, tattoo);
-	sDatabase.ExecutePrepared(&rsiStmt);
+	sDatabase.WaitExecutePrepared(&rsiStmt);
 
 	INFO_LOG(format("MS_CreateCharacterRequest: Character %1% successfully created and configured!") % m_charName);
 
