@@ -170,23 +170,50 @@ namespace ZionLauncher
 
         const uint CREATE_SUSPENDED = 0x00000004;
 
-        private void AnyButton_Click(object sender, RoutedEventArgs e)
+        private static System.Media.SoundPlayer? s_matrixClickPlayer = null;
+        private static readonly object s_soundLock = new object();
+
+        private static void PlayMatrixClickSound()
         {
             try
             {
-                string wavPath = System.IO.Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "click.wav");
-                if (System.IO.File.Exists(wavPath))
+                lock (s_soundLock)
                 {
-                    var player = new System.Media.SoundPlayer(wavPath);
-                    player.Play();
+                    if (s_matrixClickPlayer == null)
+                    {
+                        string[] candidatePaths = new[]
+                        {
+                            System.IO.Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "click.wav"),
+                            System.IO.Path.Combine(AppContext.BaseDirectory, "click.wav"),
+                            System.IO.Path.Combine(Directory.GetCurrentDirectory(), "click.wav"),
+                            @"E:\Games\The Matrix Online\click.wav"
+                        };
+
+                        foreach (var path in candidatePaths)
+                        {
+                            if (System.IO.File.Exists(path))
+                            {
+                                s_matrixClickPlayer = new System.Media.SoundPlayer(path);
+                                s_matrixClickPlayer.Load();
+                                break;
+                            }
+                        }
+                    }
                 }
+                s_matrixClickPlayer?.Play();
             }
             catch { }
+        }
+
+        private void AnyButton_Click(object sender, RoutedEventArgs e)
+        {
+            PlayMatrixClickSound();
         }
 
         public MainWindow()
         {
             InitializeComponent();
+            EventManager.RegisterClassHandler(typeof(Button), Button.ClickEvent, new RoutedEventHandler((s, e) => PlayMatrixClickSound()));
         }
 
         private void Window_Loaded(object sender, RoutedEventArgs e)
