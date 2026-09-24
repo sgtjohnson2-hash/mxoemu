@@ -811,12 +811,16 @@ void __fastcall DetourSelectCharacterVtbl(void* pThis, void* /*edx*/, void* pArg
     int curStateId = GetMarginStateId();
     Log("[mxohax] [matrix.exe] Current Margin State is %d\n", curStateId);
 
-    if (curStateId >= 4 && OriginalSelectCharacterVtbl) {
-        Log("[mxohax] [matrix.exe] Margin state >= 4, executing OriginalSelectCharacterVtbl...\n");
+    if (curStateId < 4) {
+        typedef void (__thiscall *TransitionToState_t)(void* pMgr, DWORD newStateId);
+        TransitionToState_t Transition = reinterpret_cast<TransitionToState_t>(0x00428FF0);
+        Log("[mxohax] [matrix.exe] Advancing Margin state from %d to 4 for character selection...\n", curStateId);
+        Transition(pThis, 4);
+    }
+    if (OriginalSelectCharacterVtbl) {
+        Log("[mxohax] [matrix.exe] Executing OriginalSelectCharacterVtbl...\n");
         OriginalSelectCharacterVtbl(pThis, pArg);
         Log("[mxohax] [matrix.exe] OriginalSelectCharacterVtbl finished successfully!\n");
-    } else {
-        Log("[mxohax] [matrix.exe] Margin state < 4 (%d), skipping premature state transition.\n", curStateId);
     }
 }
 
@@ -1236,6 +1240,13 @@ static int __fastcall DetourCharCreateHandleMessage(void* pThis, void* /*edx*/, 
             Log("[mxohax] CharCreate Finish button ('CHE1') clicked!\n");
             void* pMarginMgr = *reinterpret_cast<void**>(0x004B3A44);
             if (pMarginMgr) {
+                int curMarginState = GetMarginStateId();
+                if (curMarginState != 4) {
+                    typedef void (__thiscall *TransitionToState_t)(void* pMgr, DWORD newStateId);
+                    TransitionToState_t Transition = reinterpret_cast<TransitionToState_t>(0x00428FF0);
+                    Log("[mxohax] CharCreate Finish: Advancing Margin from State %d to State 4 for CreateCharacter...\n", curMarginState);
+                    Transition(pMarginMgr, 4);
+                }
                 *reinterpret_cast<BYTE*>(reinterpret_cast<uintptr_t>(pMarginMgr) + 0x778) = 1;
                 *reinterpret_cast<DWORD*>(reinterpret_cast<uintptr_t>(pMarginMgr) + 0x77c) = 1;
                 const char* pMarginHandle = reinterpret_cast<const char*>(reinterpret_cast<uintptr_t>(pMarginMgr) + 0xFC);
@@ -1243,6 +1254,9 @@ static int __fastcall DetourCharCreateHandleMessage(void* pThis, void* /*edx*/, 
                     strncpy_s(g_ActiveCharName, sizeof(g_ActiveCharName), pMarginHandle, _TRUNCATE);
                     Log("[mxohax] CharCreate Finish: Captured character handle '%s' from MarginMgr!\n", g_ActiveCharName);
                 }
+            }
+            if (g_clientBase) {
+                *reinterpret_cast<BYTE*>(g_clientBase + 0x00899EE0) = 1;
             }
             s_screen5DEverOpened = true;
             s_charCreationSubmitted = true;
@@ -1472,13 +1486,22 @@ static bool TryAutoJackIn(DWORD clientBase) {
     Log("[mxohax] [AutoJackIn] Set WorldMgr character select flags (0x0089DD5D and pWorldMgr+0x25)\n");
 
     if (curWorldState < 2) {
-        *reinterpret_cast<DWORD*>(reinterpret_cast<DWORD>(pWorldMgr) + 0x1C) = 0;
-        Log("[mxohax] [AutoJackIn] Reset pWorldMgr State from %u -> 0, calling AdvanceState (0x10120060)...\n", curWorldState);
-        typedef char (__thiscall *AdvanceState_t)(void* pMgr);
-        AdvanceState_t pAdvance = reinterpret_cast<AdvanceState_t>(clientBase + 0x00120060);
-        char advRes = pAdvance(pWorldMgr);
-        curWorldState = *reinterpret_cast<DWORD*>(reinterpret_cast<DWORD>(pWorldMgr) + 0x1C);
-        Log("[mxohax] [AutoJackIn] AdvanceState(0x10120060) returned %d! pWorldMgr State is now %u\n", advRes, curWorldState);
+        if (curWorldState == 0) {
+            *reinterpret_cast<DWORD*>(reinterpret_cast<DWORD>(pWorldMgr) + 0x1C) = 0;
+            Log("[mxohax] [AutoJackIn] Reset pWorldMgr State from 0 -> 0, calling AdvanceState (0x10120060)...\n");
+            typedef char (__thiscall *AdvanceState_t)(void* pMgr);
+            AdvanceState_t pAdvance = reinterpret_cast<AdvanceState_t>(clientBase + 0x00120060);
+            char advRes = pAdvance(pWorldMgr);
+            curWorldState = *reinterpret_cast<DWORD*>(reinterpret_cast<DWORD>(pWorldMgr) + 0x1C);
+            Log("[mxohax] [AutoJackIn] AdvanceState(0x10120060) returned %d! pWorldMgr State is now %u\n", advRes, curWorldState);
+        } else if (curWorldState == 1) {
+            Log("[mxohax] [AutoJackIn] pWorldMgr is in State 1 (CharCreateView), advancing to State 2...\n");
+            typedef char (__thiscall *AdvanceState_t)(void* pMgr);
+            AdvanceState_t pAdvance = reinterpret_cast<AdvanceState_t>(clientBase + 0x00120060);
+            char advRes = pAdvance(pWorldMgr);
+            curWorldState = *reinterpret_cast<DWORD*>(reinterpret_cast<DWORD>(pWorldMgr) + 0x1C);
+            Log("[mxohax] [AutoJackIn] AdvanceState(0x10120060) returned %d! pWorldMgr State is now %u\n", advRes, curWorldState);
+        }
     }
 
     *reinterpret_cast<BYTE*>(clientBase + 0x0089DD5D) = 1;
@@ -1529,20 +1552,26 @@ static bool TryAutoJackIn(DWORD clientBase) {
     #pragma pack(pop)
 
     static MxoLocalCharEntry s_localCharEntry;
-    static bool s_charMounted = false;
-    if (!s_charMounted) {
+    static uint32_t s_mountedCharId = 0;
+    static char s_mountedCharName[64] = {0};
+
+    uint32_t targetCharId = g_ActiveCharId ? g_ActiveCharId : 360;
+    const char* charName = (g_ActiveCharName[0] != '\0') ? g_ActiveCharName : "Slacker";
+
+    if (s_mountedCharId != targetCharId || strcmp(s_mountedCharName, charName) != 0) {
         memset(&s_localCharEntry, 0, sizeof(s_localCharEntry));
         typedef void* (__thiscall *StringCtor_t)(void* pString, const char* str, char dummy);
         StringCtor_t pStringCtor = reinterpret_cast<StringCtor_t>(clientBase + 0x00001EF0);
 
         const char* worldMetrPath = "resource/worlds/final_world/slums_barrens_full.metr";
-        const char* charName = (g_ActiveCharName[0] != '\0') ? g_ActiveCharName : "Slacker";
 
         pStringCtor(&s_localCharEntry.pWorldFirst, worldMetrPath, 0);
         pStringCtor(&s_localCharEntry.pHandleFirst, charName, 0);
-        s_localCharEntry.charId  = g_ActiveCharId ? g_ActiveCharId : 360;
+        s_localCharEntry.charId  = targetCharId;
         s_localCharEntry.worldId = 1;
-        s_charMounted = true;
+        s_mountedCharId = targetCharId;
+        strncpy_s(s_mountedCharName, sizeof(s_mountedCharName), charName, _TRUNCATE);
+        Log("[mxohax] [AutoJackIn] Dynamically mounted operative '%s' (charId=%u) into s_localCharEntry\n", charName, targetCharId);
     }
 
     // Ensure fallback world pointer at 0x00896E4C points to real slums METR
@@ -5541,34 +5570,18 @@ static void __fastcall DetourFrameTick(void* pThis, void* /*edx*/) {
                         }
                     }
 
-                    // 3. Auto-JackIn mode (explicitly requested via -autojackin or -char)
-                    if (g_AutoJackInRequested || g_CommandLineCharSpecified) {
-                        if (s_marginState4Ticks >= 15) {
-                            Log("[mxohax] AutoJackIn: Triggering selection for '%s' (charId=%u, idx=%d, marginState=%d)...\n",
-                                g_ActiveCharName, g_ActiveCharId, targetIdx, curMarginState);
-                            MarginSelectChar_t pfnSelect = reinterpret_cast<MarginSelectChar_t>(0x00429F20);
-                            pfnSelect(pMarginMgr, targetIdx);
-                            *reinterpret_cast<BYTE*>(reinterpret_cast<uintptr_t>(pMarginMgr) + 0x778) = 1;
-                            *reinterpret_cast<DWORD*>(reinterpret_cast<uintptr_t>(pMarginMgr) + 0x77c) = 1;
+                    // 3. Unconditional world entry for existing character accounts (retail 2005 parity):
+                    if (s_marginState4Ticks >= 15) {
+                        Log("[mxohax] Existing character detected: Entering world with '%s' (charId=%u, idx=%d, marginState=%d)...\n",
+                            g_ActiveCharName, g_ActiveCharId, targetIdx, curMarginState);
+                        MarginSelectChar_t pfnSelect = reinterpret_cast<MarginSelectChar_t>(0x00429F20);
+                        pfnSelect(pMarginMgr, targetIdx);
+                        *reinterpret_cast<BYTE*>(reinterpret_cast<uintptr_t>(pMarginMgr) + 0x778) = 1;
+                        *reinterpret_cast<DWORD*>(reinterpret_cast<uintptr_t>(pMarginMgr) + 0x77c) = 1;
 
-                            if (TryAutoJackIn(clientBase)) {
-                                s_worldTransitionDone = true;
-                                s_autoJackInDone = true;
-                            }
-                        }
-                    } else {
-                        // 4. Interactive mode (retail flow: user clicks "Play" on Screen 0x4B)
-                        if (!s_screen4BActive && !s_worldTransitionDone) {
-                            if (pUI) {
-                                typedef void* (__thiscall *CreateControl_t)(void* pUI, DWORD ctrlId);
-                                CreateControl_t pCreateControl = reinterpret_cast<CreateControl_t>(clientBase + 0x0001BC10);
-                                __try {
-                                    pCreateControl(pUI, 0x4B);
-                                } __except (EXCEPTION_EXECUTE_HANDLER) {}
-                                SafeSetControlVisible(clientBase, pUI, 0x4B, true);
-                                s_screen4BActive = true;
-                                Log("[mxohax] Interactive Mode: Displayed Screen 0x4B (Character Selection) for %u characters.\n", realCount);
-                            }
+                        if (TryAutoJackIn(clientBase)) {
+                            s_worldTransitionDone = true;
+                            s_autoJackInDone = true;
                         }
                     }
                 } else if (realCount == 0) {
