@@ -42,6 +42,69 @@ void TCPVarLenSocket::OnRead()
 	TcpSocket::OnRead();
 	// get number of bytes in input buffer
 	size_t n = ibuf.GetLength();
+	if (n == 0)
+		return;
+
+	// Edge crawler protection: drop HTTP, TLS, SSLv2, SSH probes immediately with zero logging
+	char peekBuf[8] = { 0 };
+	size_t peekLen = (n < sizeof(peekBuf)) ? n : sizeof(peekBuf);
+	if (peekLen >= 2 && ibuf.Peek(peekBuf, peekLen))
+	{
+		const unsigned char* u = reinterpret_cast<const unsigned char*>(peekBuf);
+		bool dropCrawler = false;
+
+		// HTTP methods (3 chars) & SSH probe
+		if (peekLen >= 3)
+		{
+			if (memcmp(peekBuf, "GET", 3) == 0 ||
+			    memcmp(peekBuf, "POS", 3) == 0 ||
+			    memcmp(peekBuf, "HEA", 3) == 0 ||
+			    memcmp(peekBuf, "PUT", 3) == 0 ||
+			    memcmp(peekBuf, "DEL", 3) == 0 ||
+			    memcmp(peekBuf, "OPT", 3) == 0 ||
+			    memcmp(peekBuf, "CON", 3) == 0 ||
+			    memcmp(peekBuf, "TRA", 3) == 0 ||
+			    memcmp(peekBuf, "PAT", 3) == 0 ||
+			    memcmp(peekBuf, "PRI", 3) == 0 ||
+			    memcmp(peekBuf, "SSH", 3) == 0)
+			{
+				dropCrawler = true;
+			}
+		}
+
+		// TLS record header: ContentType 0x14..0x17 followed by version 0x03 (SSLv3 / TLS 1.0 - 1.3)
+		if (!dropCrawler && peekLen >= 2)
+		{
+			if ((u[0] >= 0x14 && u[0] <= 0x17) && u[1] == 0x03)
+			{
+				dropCrawler = true;
+			}
+		}
+
+		// SSLv2 ClientHello probe:
+		// Starts with 2-byte header with MSB set ((u[0] & 0x80) != 0).
+		// Byte 2 is msg_type 0x01 (CLIENT_HELLO).
+		// Note: Matrix Online CERT_ConnectRequest packet has u[0]=0x81, u[2]=0x01, u[3]=0x03, u[4]=0x00, u[5]=0x36.
+		// To avoid dropping valid CERT_ConnectRequest:
+		// Check for SSLv2 version (u[3]==0x00 && u[4]==0x02) or TLS version (u[3]==0x03 && u[4]>=0x01 && u[4]<=0x03),
+		// or SSLv3 hello (u[3]==0x03 && u[4]==0x00 && peekLen >= 6 && u[5]==0x00).
+		if (!dropCrawler && (u[0] & 0x80) != 0 && peekLen >= 5 && u[2] == 0x01)
+		{
+			if ((u[3] == 0x00 && u[4] == 0x02) ||
+			    (u[3] == 0x03 && u[4] >= 0x01 && u[4] <= 0x03) ||
+			    (u[3] == 0x03 && u[4] == 0x00 && peekLen >= 6 && u[5] == 0x00))
+			{
+				dropCrawler = true;
+			}
+		}
+
+		if (dropCrawler)
+		{
+			SetCloseAndDelete(true);
+			return;
+		}
+	}
+
 	while (n >= 2)
 	{
 		byte firstTwoBytes[2];

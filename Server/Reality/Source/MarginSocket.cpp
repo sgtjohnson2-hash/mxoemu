@@ -1043,9 +1043,18 @@ void MarginSocket::SendLoadCharacterReplies()
 void MarginSocket::HandleClaimCharacterNameRequest(ByteBuffer &packetData)
 {
 	DEBUG_LOG("Margin Received MS_ClaimCharacterNameRequest");
+	if (m_connState != MARGIN_STATE_AUTHENTICATED || m_userId == 0)
+	{
+		WARNING_LOG(format("MS_ClaimCharacterNameRequest: Unauthenticated session (state=%1%, userId=%2%), dropping")
+			% (uint32)m_connState % m_userId);
+		SetCloseAndDelete(true);
+		return;
+	}
+
 	if (packetData.remaining() < 4)
 	{
 		WARNING_LOG(format("MS_ClaimCharacterNameRequest: Packet too short (%1% bytes)") % packetData.remaining());
+		SetCloseAndDelete(true);
 		return;
 	}
 
@@ -1101,35 +1110,39 @@ void MarginSocket::HandleClaimCharacterNameRequest(ByteBuffer &packetData)
 		}
 	}
 
-	if (handleStr.empty())
-		handleStr = m_username;
-
-	// Enforce strict handle length and character validation
-	if (handleStr.size() < 3 || handleStr.size() > 24)
+	// Enforce strict handle length and character validation: 3 <= len <= 24, ^[a-zA-Z0-9_-]+$
+	bool validFormat = (handleStr.size() >= 3 && handleStr.size() <= 24);
+	if (validFormat)
 	{
-		WARNING_LOG(format("MS_ClaimCharacterNameRequest: Invalid handle length (%1%), falling back to username '%2%'") % handleStr.size() % m_username);
-		handleStr = m_username;
-	}
-
-	bool validChars = true;
-	for (char c : handleStr)
-	{
-		if (!isalnum((unsigned char)c) && c != '_' && c != '-')
+		for (char c : handleStr)
 		{
-			validChars = false;
-			break;
+			if (!isalnum((unsigned char)c) && c != '_' && c != '-')
+			{
+				validFormat = false;
+				break;
+			}
 		}
 	}
-	if (!validChars || handleStr.empty())
-	{
-		WARNING_LOG(format("MS_ClaimCharacterNameRequest: Handle '%1%' contains invalid characters, falling back to username '%2%'") % handleStr % m_username);
-		handleStr = m_username;
-	}
 
-	if (handleStr.empty() || handleStr.size() > 24)
+	if (!validFormat)
 	{
-		WARNING_LOG("MS_ClaimCharacterNameRequest: Handle is empty or exceeds limit after validation, disconnecting.");
-		SetCloseAndDelete(true);
+		WARNING_LOG(format("MS_ClaimCharacterNameRequest: Invalid handle '%1%' (len %2%), rejecting prior to SQL query")
+			% handleStr % handleStr.size());
+
+		// Return failure reply immediately without executing SQL query
+		string safeReplyHandle = handleStr.substr(0, std::min<size_t>(handleStr.size(), 24));
+		vector<char> handleBuf(safeReplyHandle.begin(), safeReplyHandle.end());
+		handleBuf.push_back('\0');
+		uint16 replyHandleLen = (uint16)handleBuf.size();
+
+		TwofishEncryptedPacket rejectReply;
+		rejectReply << uint8(MS_ClaimCharacterNameReply); // 0x0B
+		rejectReply << uint16(0x000F);                    // String offset
+		rejectReply << uint32(1);                         // Status: 1 = Failed/Invalid
+		rejectReply << uint64(0);                         // charId: 0
+		rejectReply << uint16(replyHandleLen);
+		rejectReply.append((const byte*)handleBuf.data(), replyHandleLen);
+		SendCrypted(rejectReply);
 		return;
 	}
 
@@ -1191,7 +1204,7 @@ void MarginSocket::HandleClaimCharacterNameRequest(ByteBuffer &packetData)
 			"VALUES (?0, 1, 0, ?1, ?1, 'Operative', 16802.3, 665.0, 3237.01, 0.0245437, 250, 250, 100, 100, 1, 1, 0, 0, 0, 250, 1, 0)");
 		insStmt.SetUInt32(0, m_userId);
 		insStmt.SetString(1, handleStr);
-		sDatabase.WaitExecutePrepared(&insStmt);
+		sDatabase.ExecutePrepared(&insStmt);
 
 		uint64 newCharId = 0;
 		{
@@ -1206,18 +1219,6 @@ void MarginSocket::HandleClaimCharacterNameRequest(ByteBuffer &packetData)
 			}
 		}
 
-		if (newCharId == 0)
-		{
-			PreparedStatement selFallback("SELECT `charId` FROM `characters` WHERE LOWER(`handle`) = LOWER(?0) ORDER BY `charId` DESC LIMIT 1");
-			selFallback.SetString(0, handleStr);
-			scoped_ptr<QueryResult> fbRes(sDatabase.QueryPrepared(&selFallback));
-			if (fbRes)
-			{
-				Field* f = fbRes->Fetch();
-				newCharId = f[0].GetUInt64();
-			}
-		}
-
 		charId = newCharId;
 		m_charName = handleStr;
 
@@ -1225,7 +1226,7 @@ void MarginSocket::HandleClaimCharacterNameRequest(ByteBuffer &packetData)
 		PreparedStatement rsiDef("INSERT IGNORE INTO `rsivalues` (`charId`, `sex`, `body`, `hat`, `face`, `shirt`, `coat`, `pants`, `shoes`, `gloves`, `glasses`, `hair`, `facialdetail`, `shirtcolor`, `pantscolor`, `coatcolor`, `shoecolor`, `glassescolor`, `haircolor`, `skintone`, `tattoo`, `facialdetailcolor`, `leggings`) "
 			"VALUES (?0, 0, 0, 0, 0, 2, 10, 1, 6, 6, 4, 1, 0, 41, 16, 0, 0, 15, 1, 1, 0, 0, 0)");
 		rsiDef.SetUInt64(0, charId);
-		sDatabase.WaitExecutePrepared(&rsiDef);
+		sDatabase.ExecutePrepared(&rsiDef);
 
 		DEBUG_LOG(format("MS_ClaimCharacterNameRequest: Handle '%1%' reserved! CharID=%2%") % handleStr % charId);
 
@@ -1241,6 +1242,14 @@ void MarginSocket::HandleClaimCharacterNameRequest(ByteBuffer &packetData)
 void MarginSocket::HandleCreateCharacterRequest(ByteBuffer &packetData)
 {
 	DEBUG_LOG("Margin Received MS_CreateCharacterRequest");
+	if (m_connState != MARGIN_STATE_AUTHENTICATED || m_userId == 0)
+	{
+		WARNING_LOG(format("MS_CreateCharacterRequest: Unauthenticated session (state=%1%, userId=%2%), dropping")
+			% (uint32)m_connState % m_userId);
+		SetCloseAndDelete(true);
+		return;
+	}
+
 	if (packetData.remaining() < 70)
 	{
 		WARNING_LOG(format("MS_CreateCharacterRequest: Packet too short (%1% bytes)") % packetData.remaining());
@@ -1345,6 +1354,11 @@ void MarginSocket::HandleCreateCharacterRequest(ByteBuffer &packetData)
 		}
 	}
 
+	// Enforce column width limits: handle <= 24, firstName <= 24, lastName <= 24, description <= 1024
+	if (firstName.size() > 24) firstName = firstName.substr(0, 24);
+	if (lastName.size() > 24) lastName = lastName.substr(0, 24);
+	if (description.size() > 1024) description = description.substr(0, 1024);
+
 	DEBUG_LOG(format("MS_CreateCharacterRequest: RSI parsed - CharID %1%: Name='%2% %3%', Hair=%4%, Coat=%5%, Shirt=%6%, Pants=%7%, Shoes=%8%, Glasses=%9%")
 		% charId % firstName % lastName % hairId % outerwearId % shirtId % pantsId % footwearId % eyewearId);
 
@@ -1353,6 +1367,8 @@ void MarginSocket::HandleCreateCharacterRequest(ByteBuffer &packetData)
 		handleToUse = firstName;
 	if (handleToUse.empty())
 		handleToUse = m_username;
+	if (handleToUse.size() > 24)
+		handleToUse = handleToUse.substr(0, 24);
 	m_charName = handleToUse;
 
 	if (charId == 0)
@@ -1379,6 +1395,8 @@ void MarginSocket::HandleCreateCharacterRequest(ByteBuffer &packetData)
 			charId = f[0].GetUInt64();
 			m_charName = f[1].GetString();
 			handleToUse = m_charName;
+			if (handleToUse.size() > 24)
+				handleToUse = handleToUse.substr(0, 24);
 		}
 	}
 
@@ -1390,6 +1408,8 @@ void MarginSocket::HandleCreateCharacterRequest(ByteBuffer &packetData)
 		if (otherRes)
 		{
 			handleToUse = handleToUse + "_" + std::to_string(m_userId);
+			if (handleToUse.size() > 24)
+				handleToUse = handleToUse.substr(0, 24);
 			m_charName = handleToUse;
 		}
 
@@ -1402,7 +1422,7 @@ void MarginSocket::HandleCreateCharacterRequest(ByteBuffer &packetData)
 		insStmt.SetString(3, lastName);
 		insStmt.SetString(4, description);
 		insStmt.SetUInt32(5, profId);
-		sDatabase.WaitExecutePrepared(&insStmt);
+		sDatabase.ExecutePrepared(&insStmt);
 
 		PreparedStatement getStmt("SELECT `charId` FROM `characters` WHERE `userId` = ?0 AND `handle` = ?1 ORDER BY `charId` DESC LIMIT 1");
 		getStmt.SetUInt32(0, m_userId);
@@ -1431,7 +1451,7 @@ void MarginSocket::HandleCreateCharacterRequest(ByteBuffer &packetData)
 	updStmt.SetUInt32(3, profId);
 	updStmt.SetUInt64(4, charId);
 	updStmt.SetUInt32(5, m_userId);
-	sDatabase.WaitExecutePrepared(&updStmt);
+	sDatabase.ExecutePrepared(&updStmt);
 
 	PreparedStatement rsiStmt("REPLACE INTO `rsivalues` (`charId`, `sex`, `body`, `hat`, `face`, `shirt`, `coat`, `pants`, `shoes`, `gloves`, `glasses`, `hair`, `facialdetail`, `shirtcolor`, `pantscolor`, `coatcolor`, `shoecolor`, `glassescolor`, `haircolor`, `skintone`, `tattoo`, `facialdetailcolor`, `leggings`) "
 		"VALUES (?0, ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, 41, 16, 0, 0, 15, ?13, ?14, ?15, 0, 0)");
@@ -1451,7 +1471,7 @@ void MarginSocket::HandleCreateCharacterRequest(ByteBuffer &packetData)
 	rsiStmt.SetUInt16(13, haircolor);
 	rsiStmt.SetUInt16(14, skintone);
 	rsiStmt.SetUInt16(15, tattoo);
-	sDatabase.WaitExecutePrepared(&rsiStmt);
+	sDatabase.ExecutePrepared(&rsiStmt);
 
 	INFO_LOG(format("MS_CreateCharacterRequest: Character %1% successfully created and configured!") % m_charName);
 

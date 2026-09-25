@@ -157,6 +157,43 @@ bool Database::Initialize(const char* Hostname, unsigned int port, const char* U
 				"PRIMARY KEY (`territory_id`, `faction`)"
 				") ENGINE=InnoDB DEFAULT CHARSET=utf8;");
 		Execute("INSERT IGNORE INTO `territory_map` (`territory_id`, `faction`, `control_points`) VALUES (1, 1, 0), (1, 2, 0), (1, 3, 0);");
+		Execute("CREATE TABLE IF NOT EXISTS `static_world_objects` ("
+				"`id` INT UNSIGNED NOT NULL AUTO_INCREMENT, "
+				"`metrId` SMALLINT UNSIGNED NOT NULL, "
+				"`sectorId` SMALLINT UNSIGNED NOT NULL DEFAULT 0, "
+				"`mxoId` VARCHAR(16) NOT NULL, "
+				"`staticId` VARCHAR(16) NOT NULL, "
+				"`type` VARCHAR(16) NOT NULL, "
+				"`exterior` TINYINT(1) NOT NULL DEFAULT 1, "
+				"`x` DOUBLE NOT NULL, "
+				"`y` DOUBLE NOT NULL, "
+				"`z` DOUBLE NOT NULL, "
+				"`rot` DOUBLE NOT NULL DEFAULT 0, "
+				"`quat` VARCHAR(64) DEFAULT NULL, "
+				"PRIMARY KEY (`id`), "
+				"INDEX `idx_metr_exterior` (`metrId`, `exterior`), "
+				"INDEX `idx_spatial` (`x`, `z`)"
+				") ENGINE=InnoDB DEFAULT CHARSET=utf8;");
+		Execute("CREATE TABLE IF NOT EXISTS `npc_spawns` ("
+				"`spawnId` INT UNSIGNED NOT NULL AUTO_INCREMENT, "
+				"`district` VARCHAR(32) NOT NULL, "
+				"`name` VARCHAR(64) NOT NULL, "
+				"`level` TINYINT UNSIGNED NOT NULL DEFAULT 1, "
+				"`health` INT UNSIGNED NOT NULL DEFAULT 100, "
+				"`innerStrength` INT UNSIGNED NOT NULL DEFAULT 100, "
+				"`rsiHex` VARCHAR(32) NOT NULL DEFAULT '', "
+				"`weaponHex` VARCHAR(32) DEFAULT NULL, "
+				"`x` DOUBLE NOT NULL, "
+				"`y` DOUBLE NOT NULL, "
+				"`z` DOUBLE NOT NULL, "
+				"`rot` DOUBLE NOT NULL DEFAULT 0, "
+				"`faction` VARCHAR(32) NOT NULL DEFAULT 'Civilian', "
+				"`isHostile` TINYINT(1) NOT NULL DEFAULT 0, "
+				"PRIMARY KEY (`spawnId`), "
+				"INDEX `idx_district` (`district`), "
+				"INDEX `idx_faction` (`faction`), "
+				"INDEX `idx_spatial` (`x`, `z`)"
+				") ENGINE=InnoDB DEFAULT CHARSET=utf8;");
 		INFO_LOG("Database: Schema migrations and table checks completed successfully.");
 	}
 
@@ -214,14 +251,6 @@ bool Database::ExecutePrepared(PreparedStatement* stmt)
 		return false;
 
 	return Execute(stmt->GetQueryString(this));
-}
-
-bool Database::WaitExecutePrepared(PreparedStatement* stmt)
-{
-	if (!stmt)
-		return false;
-
-	return WaitExecute(stmt->GetQueryString(this));
 }
 
 QueryResult* Database::QueryPrepared(PreparedStatement* stmt)
@@ -538,11 +567,6 @@ bool Database::_SendQuery(DatabaseConnection &con, const char* Sql, bool Self)
 	mysql_thread_init();
 
 	if (con.conn) {
-		// Verify socket is alive; auto-reconnect if server dropped connection
-		if (mysql_ping(con.conn) != 0) {
-			_HandleError(con, 2006);
-		}
-
 		// Drain any lingering unread results to prevent Commands out of sync
 		while (mysql_more_results(con.conn)) {
 			if (mysql_next_result(con.conn) == 0) {
@@ -555,7 +579,7 @@ bool Database::_SendQuery(DatabaseConnection &con, const char* Sql, bool Self)
 	}
 
 	int result = mysql_query(con.conn, Sql);
-	if(result != 0)
+	if(result > 0)
 	{
 		if( Self == false && _HandleError(con, mysql_errno( con.conn ) ) )
 		{
@@ -644,9 +668,6 @@ bool Database::_Reconnect(DatabaseConnection &conn)
 	MYSQL * temp, *temp2;
 
 	temp = mysql_init( NULL );
-	my_bool my_true = true;
-	mysql_options(temp, MYSQL_SET_CHARSET_NAME, "utf8");
-	mysql_options(temp, MYSQL_OPT_RECONNECT, &my_true);
 	temp2 = mysql_real_connect( temp, mHostname.c_str(), mUsername.c_str(), mPassword.c_str(), mDatabaseName.c_str(), mPort, NULL , 0 );
 	if( temp2 == NULL )
 	{
@@ -658,7 +679,7 @@ bool Database::_Reconnect(DatabaseConnection &conn)
 	if( conn.conn != NULL )
 		mysql_close( conn.conn );
 
-	conn.conn = temp2;
+	conn.conn = temp;
 	return true;
 }
 

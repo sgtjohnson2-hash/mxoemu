@@ -710,6 +710,11 @@ void PlayerObject::HandleCommand( ByteBuffer &srcCmd )
 		m_RPCbyte[0x34] = &PlayerObject::RPC_HandleStartAnimtion;
 		m_RPCbyte[0x35] = &PlayerObject::RPC_HandleChangeMood;
 		m_RPCbyte[0x30] = &PlayerObject::RPC_HandlePerformEmote;
+		m_RPCbyte[0x40] = &PlayerObject::RPC_HandleCloseCombatRequest;
+		m_RPCbyte[0x41] = &PlayerObject::RPC_HandleRangeCombatRequest;
+		m_RPCbyte[0x42] = &PlayerObject::RPC_HandleChangeTactic;
+		m_RPCbyte[0x44] = &PlayerObject::RPC_HandleLeaveCombat;
+		m_RPCbyte[0x50] = &PlayerObject::RPC_HandleDuelRequest;
 	}
 	if (!m_RPCshort.size())
 	{
@@ -731,6 +736,8 @@ void PlayerObject::HandleCommand( ByteBuffer &srcCmd )
 		m_RPCshort[0x80fe] = &PlayerObject::RPC_HandleJackoutFinished;
 		m_RPCshort[0x8090] = &PlayerObject::RPC_HandleCallContact;
 		m_RPCshort[0x9080] = &PlayerObject::RPC_HandleCallContact;
+		m_RPCshort[0x80ae] = &PlayerObject::RPC_HandleAbilityLoad;
+		m_RPCshort[0x80b9] = &PlayerObject::RPC_HandleAbilityUse;
 	}
 
 	uint8 firstByte = srcCmd.read<uint8>();

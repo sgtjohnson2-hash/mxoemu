@@ -151,11 +151,23 @@ void AuthSocket::ProcessData( const byte *buf,size_t len )
 			}
 		case AS_CreateCharacterRequest:
 			{
+				if (m_userId == 0)
+				{
+					WARNING_LOG("AuthSocket: AS_CreateCharacterRequest received before authentication, disconnecting");
+					SetCloseAndDelete(true);
+					break;
+				}
 				HandleCreateCharacterRequest(packetContents);
 				break;
 			}
 		case AS_DeleteCharacterRequest:
 			{
+				if (m_userId == 0)
+				{
+					WARNING_LOG("AuthSocket: AS_DeleteCharacterRequest received before authentication, disconnecting");
+					SetCloseAndDelete(true);
+					break;
+				}
 				HandleDeleteCharacterRequest(packetContents);
 				break;
 			}
@@ -287,7 +299,7 @@ void AuthSocket::HandleAuthRequest( ByteBuffer &packet )
 		// both are fully valid headers before the 16-byte Twofish key.
 		if (rsaBlobMethod != 4 && (rsaBlobMethod & 0xFFFF) != 0x0015)
 		{
-			DEBUG_LOG(format("rsaMethod/offsets in rsaBlob: 0x%1$08X") % rsaBlobMethod);
+			DEBUG_LOG(format("rsaMethod/offsets in rsaBlob: 0x%08X") % rsaBlobMethod);
 		}
 	}
 
@@ -373,14 +385,14 @@ void AuthSocket::HandleAuthRequest( ByteBuffer &packet )
 			m_publicExponent = field[4].GetUInt16();
 
 			const char *pubModulusStr = field[5].GetString();
-			if (pubModulusStr != NULL && strlen(pubModulusStr) >= 96)
+			if (pubModulusStr != NULL)
 				m_publicModulus = string(pubModulusStr, 96);
 			else
 				m_publicModulus.clear();
 
 			const char *privExponentStr = field[6].GetString();
-			if (privExponentStr != NULL && strlen(privExponentStr) >= 96)
-				m_privateExponent = string(privExponentStr, 96);
+			if (privExponentStr != NULL)
+				m_privateExponent = string(field[6].GetString(), 96);
 			else
 				m_privateExponent.clear();
 
@@ -497,10 +509,6 @@ void AuthSocket::HandleAuthRequest( ByteBuffer &packet )
 
 	PreparedStatement stmt2("SELECT `worldId`, `name`, `type`, `status`, `numPlayers` FROM `worlds`");
 	scoped_ptr<QueryResult> result(sDatabase.QueryPrepared(&stmt2));
-	if (result == NULL || result->GetRowCount() < 1)
-	{
-		result.reset(sDatabase.Query("SELECT `worldId`, `name`, `type`, `status`, `numPlayers` FROM `worlds`"));
-	}
 	if (result == NULL || result->GetRowCount() < 1)
 	{
 		ERROR_LOG("No worlds in db, disconnecting.");
@@ -636,6 +644,13 @@ void AuthSocket::HandleAuthChallengeResponse( ByteBuffer &packet )
 
 void AuthSocket::HandleCreateCharacterRequest( ByteBuffer &packet )
 {
+	if (m_userId == 0)
+	{
+		WARNING_LOG("Auth: Unauthenticated CreateCharacterRequest (m_userId == 0), dropping");
+		SetCloseAndDelete(true);
+		return;
+	}
+
 	try
 	{
 		if (packet.remaining() < 2)
@@ -676,14 +691,47 @@ void AuthSocket::HandleCreateCharacterRequest( ByteBuffer &packet )
 			}
 		}
 
-		if (handle.empty())
-			handle = m_username;
+		// Enforce strict handle length and character validation: 3 <= len <= 24, ^[a-zA-Z0-9_-]+$
+		bool validFormat = (handle.size() >= 3 && handle.size() <= 24);
+		if (validFormat)
+		{
+			for (char c : handle)
+			{
+				if (!isalnum((unsigned char)c) && c != '_' && c != '-')
+				{
+					validFormat = false;
+					break;
+				}
+			}
+		}
+
+		if (!validFormat)
+		{
+			WARNING_LOG(format("Auth: Invalid handle '%1%' (len %2%), rejecting prior to SQL query") % handle % handle.size());
+			string safeReplyHandle = handle.substr(0, std::min<size_t>(handle.size(), 24));
+			vector<char> hBuf(safeReplyHandle.begin(), safeReplyHandle.end());
+			hBuf.push_back('\0');
+			uint16 hLen = (uint16)hBuf.size();
+
+			TCPVariableLengthPacket replyPacket;
+			replyPacket << uint8(AS_CreateCharacterReply); // 0x0B
+			replyPacket << uint16(0x000F);                 // String offset table (0x0F)
+			replyPacket << uint32(1);                      // status 1 = Failed
+			replyPacket << uint64(0);
+			replyPacket << uint16(hLen);
+			replyPacket.append((const byte*)hBuf.data(), hLen);
+			SendPacket(replyPacket);
+			return;
+		}
 
 		DEBUG_LOG(format("HandleCreateCharacterRequest: Account='%1%', Handle='%2%'") % m_username % handle);
 
 		string worldName = "Reality";
 		string firstName = handle;
 		string lastName = "Operative";
+		if (handle.size() > 24) handle = handle.substr(0, 24);
+		if (firstName.size() > 24) firstName = firstName.substr(0, 24);
+		if (lastName.size() > 24) lastName = lastName.substr(0, 24);
 
 		uint64 newCharId = 0;
 		uint64 existingCharId = sAuth.getCharIdForHandle(handle);
@@ -773,8 +821,18 @@ void AuthSocket::HandleCreateCharacterRequest( ByteBuffer &packet )
 
 void AuthSocket::HandleDeleteCharacterRequest( ByteBuffer &packet )
 {
-	if (packet.remaining() < sizeof(uint64))
+	if (m_userId == 0)
+	{
+		WARNING_LOG("Auth: Unauthenticated DeleteCharacterRequest (m_userId == 0), dropping");
+		SetCloseAndDelete(true);
 		return;
+	}
+
+	if (packet.remaining() < sizeof(uint64))
+	{
+		SetCloseAndDelete(true);
+		return;
+	}
 
 	uint64 delCharId;
 	packet >> delCharId;
