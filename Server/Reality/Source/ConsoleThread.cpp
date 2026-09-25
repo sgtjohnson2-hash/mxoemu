@@ -34,6 +34,8 @@
 #include "BotManager.h"
 #include "ObjectMgr.h"
 #include "PlayerObject.h"
+#include "GameClient.h"
+#include "MessageTypes.h"
 
 #include <boost/algorithm/string.hpp>
 #include <fstream>
@@ -177,6 +179,68 @@ void ConsoleThread::ProcessLine(const string& fullLine)
 		}
 		if (!found)
 			ERROR_LOG(format("hurtBot: target %1% not found") % targetStr);
+	}
+	else if (iequals(command, "teleportPlayer"))
+	{
+		string targetHandle;
+		double x = 0, y = 0, z = 0;
+		lineParser >> targetHandle >> x >> y >> z;
+		if (!targetHandle.empty())
+		{
+			PlayerObject* theTargetPlayer = NULL;
+			std::vector<uint32> allObjects = sObjMgr.getAllGOIds();
+			for (size_t i = 0; i < allObjects.size(); i++)
+			{
+				PlayerObject* playerObj = sObjMgr.getGOPtr(allObjects[i]);
+				if (playerObj && iequals(targetHandle, playerObj->getHandle()))
+				{
+					theTargetPlayer = playerObj;
+					break;
+				}
+			}
+
+			if (theTargetPlayer)
+			{
+				LocationVector loc;
+				loc.ChangeCoords(x * 100.0, y * 100.0, z * 100.0);
+				theTargetPlayer->setPosition(loc);
+				sGame.AnnounceStateUpdate(NULL, make_shared<PositionStateMsg>(sObjMgr.getGOId(theTargetPlayer)));
+				INFO_LOG(format("Console: teleported player %1% to (%2%, %3%, %4%)") % targetHandle % (x * 100.0) % (y * 100.0) % (z * 100.0));
+			}
+			else
+			{
+				WARNING_LOG(format("Console: teleportPlayer target %1% not found online") % targetHandle);
+			}
+		}
+	}
+	else if (iequals(command, "kickPlayer"))
+	{
+		string targetHandle;
+		lineParser >> targetHandle;
+		if (!targetHandle.empty())
+		{
+			PlayerObject* theTargetPlayer = NULL;
+			std::vector<uint32> allObjects = sObjMgr.getAllGOIds();
+			for (size_t i = 0; i < allObjects.size(); i++)
+			{
+				PlayerObject* playerObj = sObjMgr.getGOPtr(allObjects[i]);
+				if (playerObj && iequals(targetHandle, playerObj->getHandle()))
+				{
+					theTargetPlayer = playerObj;
+					break;
+				}
+			}
+
+			if (theTargetPlayer)
+			{
+				theTargetPlayer->getClient().Invalidate();
+				INFO_LOG(format("Console: kicked player %1%") % targetHandle);
+			}
+			else
+			{
+				WARNING_LOG(format("Console: kickPlayer target %1% not found online") % targetHandle);
+			}
+		}
 	}
 	else if (iequals(command, "status"))
 	{
