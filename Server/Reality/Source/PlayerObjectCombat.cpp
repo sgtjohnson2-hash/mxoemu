@@ -39,6 +39,7 @@ std::map<uint32, std::vector<LocationVector>> PlayerObject::s_hardlineCache;
 void PlayerObject::LoadHardlines()
 {
     INFO_LOG("Loading Hardlines into cache...");
+    s_hardlineCache.clear();
     PreparedStatement stmt("SELECT `DistrictId`,`X`,`Y`,`Z`,`ROT` FROM `hardlines`");
     scoped_ptr<QueryResult> result(sDatabase.QueryPrepared(&stmt));
     if (result)
