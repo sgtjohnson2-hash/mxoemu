@@ -128,7 +128,10 @@ void MarginSocket::ProcessData( const byte *buf,size_t len )
 	if (len >= 3)
 	{
 		if (memcmp(buf, "GET", 3) == 0 || memcmp(buf, "POS", 3) == 0 || memcmp(buf, "HEA", 3) == 0 ||
-		    (buf[0] == 0x16 && buf[1] == 0x03) || (buf[0] == 0x03 && buf[1] == 0x01))
+		    memcmp(buf, "PRI", 3) == 0 || memcmp(buf, "OPT", 3) == 0 || memcmp(buf, "PUT", 3) == 0 ||
+		    memcmp(buf, "DEL", 3) == 0 || memcmp(buf, "CON", 3) == 0 ||
+		    (buf[0] == 0x16 && buf[1] >= 0x01 && buf[1] <= 0x04) ||
+		    (buf[0] == 0x03 && buf[1] == 0x01) || (buf[0] == 0x80 && len >= 2))
 		{
 			SetCloseAndDelete(true);
 			return;

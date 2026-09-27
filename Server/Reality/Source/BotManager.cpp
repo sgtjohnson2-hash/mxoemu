@@ -281,13 +281,17 @@ void BotManager::Update()
 
 
 
-    // Spawn ambient pedestrian traffic every 30 seconds
+    // Spawn ambient pedestrian traffic every 30 seconds (capped at 100 bots)
     if (now - m_lastTrafficTickMS > 30000)
     {
         m_lastTrafficTickMS = now;
         
         // Find active human players and spawn a neutral pedestrian near them if they are alone
         sObjMgr.ForEachHumanPlayer([this](PlayerObject* p) {
+            {
+                std::lock_guard<std::recursive_mutex> lock(m_botMutex);
+                if (m_bots.size() >= 100) return;
+            }
             // Spawn a random pedestrian nearby (radius 20)
             float rx = p->getPosition().x + ((rand() % 40) - 20);
             float ry = p->getPosition().y;
@@ -295,6 +299,36 @@ void BotManager::Update()
             
             SpawnBot(1, rx, ry, rz, 1); // 1 = FACTION_MACHINES/Neutral Pedestrian
         });
+    }
+
+    // Periodic ambient bot pruning (every 60 seconds)
+    static uint32 lastBotPruneMs = 0;
+    if (now - lastBotPruneMs > 60000)
+    {
+        lastBotPruneMs = now;
+        std::lock_guard<std::recursive_mutex> lock(m_botMutex);
+        if (m_activePlayerIds.empty() && m_bots.size() > 32)
+        {
+            size_t toRemove = m_bots.size() - 32;
+            size_t removed = 0;
+            for (auto it = m_bots.begin(); it != m_bots.end() && removed < toRemove;)
+            {
+                if (*it && !(*it)->IsInCombat() && (*it)->GetFaction() != FACTION_ZION)
+                {
+                    uint32 goId = (*it)->GetPlayerGoId();
+                    if (goId != 0) {
+                        sObjMgr.destroyObject(goId);
+                    }
+                    it = m_bots.erase(it);
+                    removed++;
+                }
+                else
+                {
+                    ++it;
+                }
+            }
+            if (removed > 0) m_botsDirty = true;
+        }
     }
 
     // Collect all active human players (cache updated every 2 seconds)

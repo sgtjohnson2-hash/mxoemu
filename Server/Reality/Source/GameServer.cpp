@@ -251,86 +251,105 @@ void GameServer::SimulationLoop()
 	uint32 m_lastSimMs = getMSTime();
 	while (m_runSimulation)
 	{
+		uint32 currentMs = getMSTime();
 		try {
-			// Tick Combat and AI at 30Hz (~33ms)
-			uint32 currentMs = getMSTime();
+			// Tier 1: High-Frequency (30Hz / 33ms) - Combat, Player State & Network Queue
 			uint32 aiDeltaMs = currentMs - m_lastSimMs;
 			m_lastSimMs = currentMs;
+			if (aiDeltaMs > 500) aiDeltaMs = 500; // Clamp spike deltas
 				
 			sCombatSys.Update(); 
-			sBotMgr.Update(); 
-
-			sFactionWarMgr.update(aiDeltaMs);
-			sAdaptiveMusicSystem.update(currentMs);
-			sWeatherSys.Update(currentMs);
-			sVehicleSys.Tick(currentMs);
-			sStatusEffectManager.Update(aiDeltaMs / 1000.0f);
 			sMissionSys.Update(aiDeltaMs);
+			sStatusEffectManager.Update(aiDeltaMs / 1000.0f);
 
-			// Megacity Tactical & Emergent Simulation Engines Tick in 4 Parallel Batches at 10Hz (~100ms)
-			static uint32 lastBatchSimMs = 0;
-			if (currentMs - lastBatchSimMs >= 100)
+			// High-frequency zero-latency network update and queue flush for connected human players
+			sObjMgr.ForEachHumanPlayer([](PlayerObject* po) {
+				po->Update();
+				po->getClient().FlushQueue();
+			});
+
+			// Tier 2: Medium-Frequency (5Hz / ~200ms) - Bot Navigation & Viewport AI
+			static uint32 lastBotSimMs = 0;
+			if (currentMs - lastBotSimMs >= 200)
 			{
-				uint32 batchDeltaMs = currentMs - lastBatchSimMs;
-				lastBatchSimMs = currentMs;
-				float dtSec = batchDeltaMs / 1000.0f;
-				if (dtSec > 0.5f) dtSec = 0.5f;
+				lastBotSimMs = currentMs;
+				sBotMgr.Update(); 
+			}
 
-				// Batch 1: Underworld, City Life & Syndicate Ecology
-				auto b1Future = sTaskScheduler.Enqueue([batchDeltaMs]() {
-					sCityLifeMgr.Update(batchDeltaMs);
-					sMafiaMgr.Update(batchDeltaMs);
-					sExileMgr.Update(batchDeltaMs);
-					sUnderworldMgr.Update(batchDeltaMs);
+			// Tier 3: Low-Frequency (1Hz / ~1000ms) - City Life, Law Enforcement, Weather & Faction War
+			static uint32 last1HzSimMs = 0;
+			if (currentMs - last1HzSimMs >= 1000)
+			{
+				uint32 delta1Hz = currentMs - last1HzSimMs;
+				last1HzSimMs = currentMs;
+				float dt1Hz = delta1Hz / 1000.0f;
+				if (dt1Hz > 2.0f) dt1Hz = 2.0f;
+
+				sFactionWarMgr.update(delta1Hz);
+				sAdaptiveMusicSystem.update(currentMs);
+				sWeatherSys.Update(currentMs);
+				sVehicleSys.Tick(currentMs);
+
+				// Underworld & Syndicate Ecology
+				sCityLifeMgr.Update(delta1Hz);
+				sMafiaMgr.Update(delta1Hz);
+				sExileMgr.Update(delta1Hz);
+				sUnderworldMgr.Update(delta1Hz);
+
+				// Law Enforcement & Tactical Response
+				sEmergentPoliceMgr.Update(delta1Hz);
+				sFrankCastleMgr.Update(delta1Hz);
+				sNeuralSwarmMgr.Update(dt1Hz);
+				sCastleAgentCombatEngine.Update(dt1Hz);
+				sCastlePvPKarmaEngine.Update(dt1Hz);
+				sCastleUnderworldAssaultEngine.Update(dt1Hz);
+
+				// Throttled background bot network queue flush
+				sObjMgr.ForEachGO([](PlayerObject* po) {
+					if (po->getClient().isBot()) {
+						po->Update();
+						po->getClient().FlushQueue();
+					}
 				});
+			}
 
-				// Batch 2: Law Enforcement, Tactical Response & Combat Units
-				auto b2Future = sTaskScheduler.Enqueue([batchDeltaMs, dtSec]() {
-					sEmergentPoliceMgr.Update(batchDeltaMs);
-					sFrankCastleMgr.Update(batchDeltaMs);
-					sNeuralSwarmMgr.Update(dtSec);
-					sCastleAgentCombatEngine.Update(dtSec);
-					sCastlePvPKarmaEngine.Update(dtSec);
-					sCastleUnderworldAssaultEngine.Update(dtSec);
-				});
+			// Tier 4: Macro Systems (0.1Hz / ~10,000ms) - Physics, Logistics, Splats & Quantum Engines
+			static uint32 last10sSimMs = 0;
+			if (currentMs - last10sSimMs >= 10000)
+			{
+				uint32 delta10s = currentMs - last10sSimMs;
+				last10sSimMs = currentMs;
+				float dt10s = delta10s / 1000.0f;
+				if (dt10s > 20.0f) dt10s = 20.0f;
 
-				// Batch 3: Airspace, Robotics & Physics Simulation
-				auto b3Future = sTaskScheduler.Enqueue([dtSec]() {
-					sAirspaceAndConvoyEngine.Update(dtSec);
-					sNeuroevolutionaryCombatEngine.Update(dtSec);
-					sMachineCitySystem.Update(dtSec);
-					sStructuralVoxelEngine.Update(dtSec);
-					sSharedMemoryShardFabric.Update(dtSec);
-					sNonEuclideanPortalEngine.Update(dtSec);
-					sSourceTelekinesisEngine.Update(dtSec);
-					sGlobalSovereignMesh.Update(dtSec);
-				});
+				// Airspace, Robotics & Physics Simulation
+				sAirspaceAndConvoyEngine.Update(dt10s);
+				sNeuroevolutionaryCombatEngine.Update(dt10s);
+				sMachineCitySystem.Update(dt10s);
+				sStructuralVoxelEngine.Update(dt10s);
+				sSharedMemoryShardFabric.Update(dt10s);
+				sNonEuclideanPortalEngine.Update(dt10s);
+				sSourceTelekinesisEngine.Update(dt10s);
+				sGlobalSovereignMesh.Update(dt10s);
 
-				// Batch 4: Quantum, Lattice & World Realization Engines
-				auto b4Future = sTaskScheduler.Enqueue([dtSec]() {
-					sGaussianSplatEngine.Update(dtSec);
-					sPhysarumLogisticsEngine.Update(dtSec);
-					sBiometricResonanceEngine.Update(dtSec);
-					sWebAssemblyGatewayEngine.Update(dtSec);
-					sWorldRealizationEngine.Update(dtSec);
-					sQuantumSuperpositionEngine.Update(dtSec);
-					sGenerationalLineageEngine.Update(dtSec);
-					sSubAtomicMatrixGrid.Update(dtSec);
-					sCosmicVerticalityEngine.Update(dtSec);
-					sCollectiveConsciousnessEngine.Update(dtSec);
-					sMegacityBourseEngine.Update(dtSec);
-					sTemporalAnomalyEngine.Update(dtSec);
-					sParallelMatrixEngine.Update(dtSec);
-					sQuantumEntangledMeshEngine.Update(dtSec);
-					sSourceVoxelSynthesisEngine.Update(dtSec);
-					sDeepCoreMeltdownEngine.Update(dtSec);
-					sArchitectSandboxEngine.Update(dtSec);
-				});
-
-				b1Future.wait();
-				b2Future.wait();
-				b3Future.wait();
-				b4Future.wait();
+				// Quantum, Lattice & World Realization Engines
+				sGaussianSplatEngine.Update(dt10s);
+				sPhysarumLogisticsEngine.Update(dt10s);
+				sBiometricResonanceEngine.Update(dt10s);
+				sWebAssemblyGatewayEngine.Update(dt10s);
+				sWorldRealizationEngine.Update(dt10s);
+				sQuantumSuperpositionEngine.Update(dt10s);
+				sGenerationalLineageEngine.Update(dt10s);
+				sSubAtomicMatrixGrid.Update(dt10s);
+				sCosmicVerticalityEngine.Update(dt10s);
+				sCollectiveConsciousnessEngine.Update(dt10s);
+				sMegacityBourseEngine.Update(dt10s);
+				sTemporalAnomalyEngine.Update(dt10s);
+				sParallelMatrixEngine.Update(dt10s);
+				sQuantumEntangledMeshEngine.Update(dt10s);
+				sSourceVoxelSynthesisEngine.Update(dt10s);
+				sDeepCoreMeltdownEngine.Update(dt10s);
+				sArchitectSandboxEngine.Update(dt10s);
 			}
 
 			// The Anomaly Event (Phase 50)
@@ -363,26 +382,6 @@ void GameServer::SimulationLoop()
 				}
 			}
 
-			// Zero-allocation thread-safe object update & network packet batching
-			// 1. High-frequency (30Hz) zero-latency network update and queue flush for connected human players
-			sObjMgr.ForEachHumanPlayer([](PlayerObject* po) {
-				po->Update();
-				po->getClient().FlushQueue();
-			});
-
-			// 2. Throttled background entity queue flushing (every 1000ms)
-			// Eliminates 15,000-object heap iteration every 33ms on the main simulation thread
-			static uint32 lastBackgroundFlushMs = 0;
-			if (currentMs - lastBackgroundFlushMs >= 1000) {
-				lastBackgroundFlushMs = currentMs;
-				sObjMgr.ForEachGO([](PlayerObject* po) {
-					if (po->getClient().isBot()) {
-						po->Update();
-						po->getClient().FlushQueue();
-					}
-				});
-			}
-
 			// Item 54: Flush pending lazy deletions from Garbage Collector
 			sObjMgr.FlushDeletions();
 
@@ -403,7 +402,7 @@ void GameServer::SimulationLoop()
 
 #if defined(__linux__)
 			static uint32 lastTrimMs = 0;
-			if (currentMs - lastTrimMs >= 300000) { // Every 5 minutes
+			if (currentMs - lastTrimMs >= 60000) { // Every 60 seconds
 				lastTrimMs = currentMs;
 				malloc_trim(0);
 			}
@@ -415,7 +414,13 @@ void GameServer::SimulationLoop()
 			ERROR_LOG("SimulationLoop caught unknown exception!");
 		}
 
-		std::this_thread::sleep_for(std::chrono::milliseconds(33));
+		// Adaptive frame rate regulator targeting 30 TPS (~33ms per tick)
+		uint32 frameWorkMs = getMSTime() - currentMs;
+		if (frameWorkMs < 33) {
+			std::this_thread::sleep_for(std::chrono::milliseconds(33 - frameWorkMs));
+		} else {
+			std::this_thread::yield();
+		}
 	}
 }
 
