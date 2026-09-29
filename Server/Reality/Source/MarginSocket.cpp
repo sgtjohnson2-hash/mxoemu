@@ -263,19 +263,25 @@ void MarginSocket::ProcessData( const byte *buf,size_t len )
 
 			signedDataStruct signedData;
 			memset(&signedData, 0, sizeof(signedData));
+			// 2005 client: "32 01" + 178-byte ticket. 7.6005 client: "36 01" + 182 bytes
+			// (same layout plus a trailing u32 account creation time). The signature covers all of it.
+			const size_t ticketSize = (authStart == swap16(0x3601)) ? 182 : 178;
 			size_t availableSignedData = packetData.remaining();
-			if (availableSignedData < 178)
+			if (availableSignedData < ticketSize)
 			{
-				ERROR_LOG(format("CERT_ConnectRequest remaining %1% < 178 bytes, disconnecting") % availableSignedData);
+				ERROR_LOG(format("CERT_ConnectRequest remaining %1% < %2% bytes, disconnecting") % availableSignedData % ticketSize);
 				SetCloseAndDelete(true);
 				return;
 			}
-			size_t toRead = std::min(availableSignedData, sizeof(signedData));
-			packetData.read((byte*)&signedData, toRead);
+			byte ticket[182];
+			memset(ticket, 0, sizeof(ticket));
+			packetData.read(ticket, ticketSize);
+			memcpy(&signedData, ticket, std::min(sizeof(signedData), ticketSize));
+			size_t toRead = ticketSize;
 
 			//verify signature, but first we need to md5
 			CryptoPP::Weak::MD5 md5Object;
-			md5Object.Update((const byte*)&signedData, toRead);
+			md5Object.Update(ticket, ticketSize);
 			byte verifyMePlease[16];
 			md5Object.Final(verifyMePlease);
 			bool signatureValid = sAuth.VerifyWith1024Bit(verifyMePlease,sizeof(verifyMePlease),signature,sizeof(signature));

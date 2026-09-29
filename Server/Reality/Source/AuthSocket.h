@@ -43,6 +43,12 @@ private:
 	void HandleCreateCharacterRequest(ByteBuffer &packet);
 	void HandleDeleteCharacterRequest(ByteBuffer &packet);
 
+	// 7.6005 client (retail protocol): AuthRequest -> AuthChallenge -> ChallengeResponse -> AuthReply
+	void HandleAuthRequest76005(ByteBuffer &packet);
+	void HandleAuthChallengeResponse76005(ByteBuffer &packet);
+	void SendAuthReply76005();
+	bool AcceptPassword(const string& plaintextPass);
+
 
 	void ProcessData(const byte *buf,size_t len);
 	bool VerifyPassword( const string& plaintextPass, const string& passwordSalt, const string& passwordHash );
@@ -65,6 +71,7 @@ private:
 	string m_privateExponent;
 	uint32 m_timeCreated;
 	bool m_isNewUser;
+	bool m_is76005;
 };
 
 

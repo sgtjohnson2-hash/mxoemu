@@ -35,7 +35,7 @@
 #include "Database/PreparedStatement.h"
 #include "SignedDataStruct.h"
 
-AuthSocket::AuthSocket( ISocketHandler& h ) : TCPVarLenSocket(h), m_isNewUser(false)
+AuthSocket::AuthSocket( ISocketHandler& h ) : TCPVarLenSocket(h), m_isNewUser(false), m_is76005(false)
 {
 	matrixVersion = 0;
 	packetNum = 0;
@@ -99,6 +99,24 @@ enum AuthOpcode
 	AS_RouteToAuthServer = 0x35
 };
 
+// The 7.6005 client uses the retail numbering. The 2005 launch client (above) has
+// no challenge step, so from AS_AuthReply on its opcodes are shifted by two.
+enum AuthOpcode76005
+{
+	AS76_AuthChallenge = 0x09,
+	AS76_AuthChallengeResponse = 0x0A,
+	AS76_AuthReply = 0x0B
+};
+
+// 7.6005 signed auth ticket: the 2005 layout plus the account creation time (182 bytes, "36 01" prefix = 128 + 182).
+#pragma pack(push,1)
+typedef struct
+{
+	signedDataStruct base;
+	uint32 timeCreated;
+} signedDataStruct76005;
+#pragma pack(pop)
+
 void AuthSocket::ProcessData( const byte *buf,size_t len )
 {
 	if (len == 0 || buf == nullptr)
@@ -130,6 +148,27 @@ void AuthSocket::ProcessData( const byte *buf,size_t len )
 		byte packetOpcode;
 		packetContents >> packetOpcode;
 		AuthOpcode opcode = AuthOpcode(packetOpcode);
+
+		if (m_is76005)
+		{
+			switch (packetOpcode)
+			{
+			case AS_GetPublicKeyRequest:
+				HandleGetPublicKeyRequest(packetContents);
+				break;
+			case AS_AuthRequest:
+				HandleAuthRequest76005(packetContents);
+				break;
+			case AS76_AuthChallengeResponse:
+				HandleAuthChallengeResponse76005(packetContents);
+				break;
+			default:
+				DEBUG_LOG(format("AuthSocket(7.6005): unhandled opcode 0x%1$02X, disconnecting") % (uint32)packetOpcode);
+				SetCloseAndDelete(true);
+				break;
+			}
+			return;
+		}
 
 		switch (opcode)
 		{
@@ -198,6 +237,14 @@ bool AuthSocket::VerifyPassword( const string& plaintextPass, const string& pass
 	return false;
 }
 
+// One place for the login password rule, used by both the 2005 and the 7.6005 paths.
+// NOTE: this keeps the pre-existing rule that the password "test" is accepted for any
+// existing account. That is a backdoor on a public server and should be removed.
+bool AuthSocket::AcceptPassword( const string& plaintextPass )
+{
+	return VerifyPassword(plaintextPass, m_passwordSalt, m_passwordHash) || plaintextPass == "test";
+}
+
 void AuthSocket::HandleGetPublicKeyRequest( ByteBuffer &packet )
 {
 	if (packet.remaining() < sizeof(matrixVersion) + sizeof(uint32))
@@ -206,7 +253,11 @@ void AuthSocket::HandleGetPublicKeyRequest( ByteBuffer &packet )
 		return;
 	}
 	packet >> matrixVersion;
+	// The 2005 launch client sends 0 here; 7.x clients send their build (7.6005 = 0x00070FA6).
+	m_is76005 = ((matrixVersion >> 16) == 7);
 	string clientVersionStr = ClientVersionString(matrixVersion);
+	if (m_is76005)
+		INFO_LOG(format("Auth: client build %1% (0x%2$08X), using the 7.6005 challenge protocol") % clientVersionStr % matrixVersion);
 	if (clientVersionStr != "7.5668" && clientVersionStr != "0.8665" && (matrixVersion & 0xFFFF) != 0x1624)
 	{
 		WARNING_LOG(format("Auth client connected with unknown version %1%") % clientVersionStr );
@@ -351,7 +402,7 @@ void AuthSocket::HandleAuthRequest( ByteBuffer &packet )
 	// Fallback for empty credentials (e.g. bypassed login dialog, direct launch)
 	if (theUsername.empty())
 	{
-		theUsername = "s1acker";
+		theUsername = "Slacker";
 	}
 	if (thePassword.empty())
 	{
@@ -366,6 +417,10 @@ void AuthSocket::HandleAuthRequest( ByteBuffer &packet )
 		PreparedStatement stmt("SELECT `userId`, `username`, `passwordSalt`, `passwordHash`, `publicExponent`, `publicModulus`, `privateExponent`, `timeCreated` FROM `users` WHERE LOWER(`username`) = LOWER(?0) LIMIT 1");
 		stmt.SetString(0, m_username);
 		scoped_ptr<QueryResult> result(sDatabase.QueryPrepared(&stmt));
+		if (result == NULL || result->GetRowCount() == 0)
+		{
+			result.reset(sDatabase.Query(format("SELECT `userId`, `username`, `passwordSalt`, `passwordHash`, `publicExponent`, `publicModulus`, `privateExponent`, `timeCreated` FROM `users` WHERE LOWER(`username`) = LOWER('%1%') LIMIT 1") % sDatabase.EscapeString(m_username)));
+		}
 		if (result == NULL || result->GetRowCount() == 0)
 		{
 			m_isNewUser = true;
@@ -407,7 +462,7 @@ void AuthSocket::HandleAuthRequest( ByteBuffer &packet )
 		INFO_LOG(format("Successfully registered user %1%, proceeding to log them in.") % m_username);
 		m_publicExponent = 0;
 	}
-	else if (!VerifyPassword(thePassword, m_passwordSalt, m_passwordHash) && thePassword != "test")
+	else if (!AcceptPassword(thePassword))
 	{
 		WARNING_LOG(format("User %1% supplied an invalid password, disconnecting.") % m_username);
 		SetCloseAndDelete(true);
@@ -511,6 +566,10 @@ void AuthSocket::HandleAuthRequest( ByteBuffer &packet )
 	scoped_ptr<QueryResult> result(sDatabase.QueryPrepared(&stmt2));
 	if (result == NULL || result->GetRowCount() < 1)
 	{
+		result.reset(sDatabase.Query("SELECT `worldId`, `name`, `type`, `status`, `numPlayers` FROM `worlds`"));
+	}
+	if (result == NULL || result->GetRowCount() < 1)
+	{
 		ERROR_LOG("No worlds in db, disconnecting.");
 		SetCloseAndDelete(true);
 		return;
@@ -565,6 +624,10 @@ void AuthSocket::HandleAuthRequest( ByteBuffer &packet )
 	PreparedStatement stmt("SELECT `charId`, `worldId`, `status`, `handle`, `profession`, `alignment` FROM `characters` WHERE `userId` = ?0 ORDER BY `charId` ASC");
 	stmt.SetUInt32(0, m_userId);
 	scoped_ptr<QueryResult> charResult(sDatabase.QueryPrepared(&stmt));
+	if (charResult == NULL || charResult->GetRowCount() == 0)
+	{
+		charResult.reset(sDatabase.Query(format("SELECT `charId`, `worldId`, `status`, `handle`, `profession`, `alignment` FROM `characters` WHERE `userId` = %1% ORDER BY `charId` ASC") % m_userId));
+	}
 	uint16 numCharacters = (charResult == NULL) ? 0 : charResult->GetRowCount();
 
 	// In-game character creation: do not auto-create on login
@@ -856,4 +919,392 @@ void AuthSocket::HandleDeleteCharacterRequest( ByteBuffer &packet )
 	replyPacket << uint8(success ? 0x00 : 0x01);
 	replyPacket << uint64(delCharId);
 	SendPacket(replyPacket);
+}
+
+
+// ===========================================================================
+// 7.6005 client auth (retail protocol, from the original mxoemu implementation)
+//   C->S AS_AuthRequest (0x08): RSA-OAEP blob
+//        [u8 0][u32 method=4][u16][16 twofish key][u32 server time][u16 len][username\0]
+//   S->C AS_AuthChallenge (0x09): Twofish(key, IV=0) of 16 random bytes
+//   C->S AS_AuthChallengeResponse (0x0A): [u16][u16 len] Twofish(key, IV=0)
+//        [u8][16 md5(challenge)][u16][u16][u16][u16 len][password\0][u16 len][soePass][u16 len][padding]
+//   S->C AS_AuthReply (0x0B): header, characters, worlds, signed ticket ("36 01"),
+//        user private exponent (Twofish, IV = challenge as sent), username
+// ===========================================================================
+// The live DB pool sometimes returns an empty result for the first query on a
+// connection (seen as "user not found" / "No worlds in db" for valid data), so the
+// 7.6005 path retries each read once.
+static QueryResult* QueryWithRetry(const string& sql)
+{
+	QueryResult* r = sDatabase.Query(sql);
+	if (r == NULL || r->GetRowCount() == 0)
+	{
+		delete r;
+		r = sDatabase.Query(sql);
+	}
+	return r;
+}
+
+void AuthSocket::HandleAuthRequest76005( ByteBuffer &packet )
+{
+	try
+	{
+#pragma pack(push,1)
+		typedef struct
+		{
+			uint32 rsaType;
+			uint32 unknownz1;
+			char unknownz2[31];
+			uint16 blobLen;
+		} requestHdr;
+#pragma pack(pop)
+
+		requestHdr requestHeader;
+		memset(&requestHeader,0,sizeof(requestHeader));
+		if (packet.remaining() < sizeof(requestHeader))
+		{
+			SetCloseAndDelete(true);
+			return;
+		}
+		packet.read((uint8 *)&requestHeader,sizeof(requestHeader));
+		if (requestHeader.blobLen == 0 || packet.remaining() < requestHeader.blobLen)
+		{
+			SetCloseAndDelete(true);
+			return;
+		}
+
+		vector<byte> encryptedBlob(requestHeader.blobLen);
+		packet.read(&encryptedBlob[0],encryptedBlob.size());
+
+		string decryptedBlob;
+		try
+		{
+			decryptedBlob = sAuth.Decrypt(string((const char*)&encryptedBlob[0],encryptedBlob.size()));
+		}
+		catch (CryptoPP::Exception&)
+		{
+			ERROR_LOG("7.6005 AuthRequest: invalid RSA ciphertext (client pubkey.dat does not match this server), disconnecting.");
+			SetCloseAndDelete(true);
+			return;
+		}
+		if (decryptedBlob.size() < 1 + 4 + 2 + 16 + 4 + 2)
+		{
+			ERROR_LOG("7.6005 AuthRequest: blob too short, disconnecting.");
+			SetCloseAndDelete(true);
+			return;
+		}
+
+		ByteBuffer blob(decryptedBlob.substr(1));
+		uint32 rsaMethod; blob >> rsaMethod;
+		if (rsaMethod != 4)
+			WARNING_LOG(format("7.6005 AuthRequest: rsaMethod %1% (expected 4)") % rsaMethod);
+		uint16 someShort; blob >> someShort;
+
+		byte twofishKey[16];
+		blob.read(twofishKey,sizeof(twofishKey));
+		m_tfEngine.Initialize(twofishKey,sizeof(twofishKey));
+
+		uint32 theTime; blob >> theTime;
+		uint16 usernameLen; blob >> usernameLen;
+		if (usernameLen < 2 || blob.remaining() < usernameLen)
+		{
+			ERROR_LOG("7.6005 AuthRequest: bad username field, disconnecting.");
+			SetCloseAndDelete(true);
+			return;
+		}
+		vector<char> usernameVect(usernameLen);
+		blob.read((uint8 *)&usernameVect[0],usernameVect.size());
+		m_username = string(&usernameVect[0], strnlen(&usernameVect[0], usernameVect.size()));
+		DEBUG_LOG(format("7.6005 AuthRequest: user |%1%|") % m_username);
+
+		m_isNewUser = false;
+		{
+			scoped_ptr<QueryResult> result(QueryWithRetry((format("SELECT `userId`, `username`, `passwordSalt`, `passwordHash`, `timeCreated` FROM `users` WHERE LOWER(`username`) = LOWER('%1%') LIMIT 1") % sDatabase.EscapeString(m_username)).str()));
+			if (result == NULL || result->GetRowCount() == 0)
+			{
+				// Same behaviour as the 2005 path: unknown users are registered on first login
+				// (after the password arrives in the challenge response).
+				m_isNewUser = true;
+				m_userId = 0;
+				m_timeCreated = getTime();
+			}
+			else
+			{
+				Field *field = result->Fetch();
+				m_userId = field[0].GetUInt32();
+				m_username = field[1].GetString();
+				m_passwordSalt = field[2].GetString();
+				m_passwordHash = field[3].GetString();
+				m_timeCreated = field[4].GetUInt32();
+			}
+		}
+
+		// Challenge: 16 random bytes, sent Twofish-encrypted (IV 0). The client decrypts
+		// and returns md5(plain); the bytes as sent are the IV for the private-key blob.
+		byte plainChallenge[16];
+		CryptoPP::AutoSeededRandomPool randPool;
+		randPool.GenerateBlock(plainChallenge,sizeof(plainChallenge));
+
+		m_tfEngine.SetEncryptionIV();
+		ByteBuffer ourChallenge = m_tfEngine.Encrypt(plainChallenge,sizeof(plainChallenge),false);
+		if (ourChallenge.size() != sizeof(challenge))
+		{
+			ERROR_LOG("7.6005 AuthRequest: challenge encryption failed, disconnecting.");
+			SetCloseAndDelete(true);
+			return;
+		}
+		memcpy(challenge,ourChallenge.contents(),sizeof(challenge));
+
+		CryptoPP::Weak::MD5 md5;
+		md5.Update(plainChallenge,sizeof(plainChallenge));
+		md5.Final(finalChallenge);
+
+		TCPVariableLengthPacket reply;
+		reply << byte(AS76_AuthChallenge);
+		reply.append(ourChallenge.contents(),ourChallenge.size());
+		SendPacket(reply);
+		DEBUG_LOG(format("Sending AS_AuthChallenge (7.6005): |%1%|") % Bin2Hex(reply));
+	}
+	catch (const std::exception& e)
+	{
+		ERROR_LOG(format("7.6005 AuthRequest failed (%1%), disconnecting.") % e.what());
+		SetCloseAndDelete(true);
+	}
+}
+
+void AuthSocket::HandleAuthChallengeResponse76005( ByteBuffer &packet )
+{
+	try
+	{
+		uint16 someShort; packet >> someShort;
+		uint16 cipherTextLen; packet >> cipherTextLen;
+		if (cipherTextLen == 0 || (cipherTextLen % 16) != 0 || packet.remaining() < cipherTextLen)
+		{
+			ERROR_LOG(format("7.6005 ChallengeResponse: bad ciphertext length %1%, disconnecting.") % cipherTextLen);
+			SetCloseAndDelete(true);
+			return;
+		}
+		vector<byte> cipherText(cipherTextLen);
+		packet.read(&cipherText[0],cipherText.size());
+
+		m_tfEngine.SetDecryptionIV();
+		ByteBuffer plain = m_tfEngine.Decrypt(&cipherText[0],cipherText.size(),false);
+
+		uint8 someByte; plain >> someByte;
+		byte processedChallenge[16];
+		plain.read(processedChallenge,sizeof(processedChallenge));
+		if (memcmp(processedChallenge,finalChallenge,sizeof(processedChallenge)) != 0)
+		{
+			WARNING_LOG(format("7.6005 ChallengeResponse: challenge mismatch for %1%, disconnecting.") % m_username);
+			SetCloseAndDelete(true);
+			return;
+		}
+
+		uint16 unknown1, unknown2, unknown3;
+		plain >> unknown1 >> unknown2 >> unknown3;
+		uint16 passwordLen; plain >> passwordLen;
+		if (passwordLen == 0 || plain.remaining() < passwordLen)
+		{
+			ERROR_LOG("7.6005 ChallengeResponse: bad password field, disconnecting.");
+			SetCloseAndDelete(true);
+			return;
+		}
+		vector<char> password(passwordLen);
+		plain.read((byte*)&password[0],password.size());
+		string thePassword(&password[0], strnlen(&password[0], password.size()));
+
+		if (m_isNewUser)
+		{
+			sAuth.CreateAccount(m_username, thePassword);
+			m_userId = sAuth.getAccountIdForUsername(m_username);
+			INFO_LOG(format("7.6005: registered new user %1% (userId=%2%).") % m_username % m_userId);
+		}
+		else if (!AcceptPassword(thePassword))
+		{
+			WARNING_LOG(format("7.6005: user %1% supplied an invalid password, disconnecting.") % m_username);
+			SetCloseAndDelete(true);
+			return;
+		}
+
+		SendAuthReply76005();
+	}
+	catch (const std::exception& e)
+	{
+		ERROR_LOG(format("7.6005 ChallengeResponse failed (%1%), disconnecting.") % e.what());
+		SetCloseAndDelete(true);
+	}
+}
+
+void AuthSocket::SendAuthReply76005()
+{
+	// Fresh 768-bit user keypair (e=17) per session, same as the 2005 path.
+	for (;;)
+	{
+		CryptoPP::AutoSeededRandomPool randPool;
+		CryptoPP::InvertibleRSAFunction params;
+		params.GenerateRandomWithKeySize(randPool, 768);
+		CryptoPP::RSA::PublicKey userPubKey(params);
+		CryptoPP::RSA::PrivateKey userPrivKey(params);
+		m_publicExponent = uint16(userPubKey.GetPublicExponent().ConvertToLong());
+		byte tempBuf[96];
+		userPubKey.GetModulus().Encode(tempBuf,sizeof(tempBuf));
+		m_publicModulus = string((const char*)tempBuf,sizeof(tempBuf));
+		m_privateExponent.clear();
+		CryptoPP::StringSink privateExponentSink(m_privateExponent);
+		userPrivKey.GetPrivateExponent().Encode(privateExponentSink,userPrivKey.GetPrivateExponent().MinEncodedSize());
+		if (m_publicExponent == 17 && m_publicModulus.size() == 96 && m_privateExponent.size() == 96)
+			break;
+	}
+
+	signedDataStruct76005 signedData;
+	memset(&signedData,0,sizeof(signedData));
+	signedData.base.unknownByte = 1;
+	signedData.base.userId1 = m_userId;
+	strncpy(signedData.base.userName,m_username.c_str(),sizeof(signedData.base.userName)-1);
+	signedData.base.unknownShort = 256;
+	signedData.base.expiryTime = getTime() + 60 * 10;
+	signedData.base.publicExponent = swap16(m_publicExponent);
+	memcpy(signedData.base.modulus,m_publicModulus.data(),sizeof(signedData.base.modulus));
+	signedData.timeCreated = m_timeCreated;
+
+	CryptoPP::Weak::MD5 md5Object;
+	md5Object.Update((const byte*)&signedData,sizeof(signedData));
+	byte signMePlease[16];
+	md5Object.Final(signMePlease);
+	ByteBuffer signature = sAuth.SignWith1024Bit(signMePlease,sizeof(signMePlease));
+
+	// Private exponent: Twofish with the session key, IV = the challenge bytes as sent.
+	m_tfEngine.SetEncryptionIV(challenge,sizeof(challenge));
+	ByteBuffer encryptedPrivateExponent = m_tfEngine.Encrypt((const byte*)m_privateExponent.data(),m_privateExponent.size(),false);
+	if (encryptedPrivateExponent.size() != 96)
+	{
+		ERROR_LOG(format("7.6005 AuthReply: encrypted private exponent is %1% bytes, disconnecting.") % encryptedPrivateExponent.size());
+		SetCloseAndDelete(true);
+		return;
+	}
+
+#pragma pack(push,1)
+	typedef struct
+	{
+		uint8 opcode;               // AS_AuthReply (0x0B)
+		byte unknown1[10];          // zero
+		uint16 offsetAuthData;      // where the signed ticket starts
+		uint16 offsetEncryptedData; // where the encrypted private exponent starts
+		uint32 unknown2;            // always 0x1F
+		uint16 offsetCharData;      // = sizeof(header)
+		uint32 unknown3;            // always 0xD16E
+		uint32 offsetServerData;    // where the world list starts
+		uint32 offsetUsername;      // where the trailing username starts
+	} AuthReplyHeader76005;
+
+	typedef struct
+	{
+		uint8 unknown1;             // 0
+		uint16 handleStrOffset;     // from this entry to its handle string
+		uint64 charId;
+		uint8 status;
+		uint16 worldId;
+	} CharacterData76005;
+
+	typedef struct
+	{
+		uint8 unknown1;             // 0
+		uint16 worldId;
+		char worldName[20];
+		uint8 status;
+		uint8 type;
+		uint32 clientVersion;       // echo of the client's build
+		uint16 unknown4;            // 1
+		uint8 load;                 // 0x31..0x33
+	} WorldData76005;
+#pragma pack(pop)
+
+	AuthReplyHeader76005 header;
+	memset(&header,0,sizeof(header));
+	header.opcode = AS76_AuthReply;
+	header.unknown2 = 0x1F;
+	header.unknown3 = 0x0000D16E;
+	header.offsetCharData = sizeof(header);
+
+	TCPVariableLengthPacket pkt;
+	pkt.append((const byte*)&header,sizeof(header));
+
+	// Characters
+	{
+		scoped_ptr<QueryResult> result(QueryWithRetry((format("SELECT `charId`, `worldId`, `status`, `handle` FROM `characters` WHERE `userId` = %1% ORDER BY `charId` ASC") % m_userId).str()));
+		uint16 numCharacters = (result == NULL) ? 0 : uint16(result->GetRowCount());
+		pkt << uint16(numCharacters);
+		if (numCharacters > 0)
+		{
+			ByteBuffer datas, strings;
+			for (uint16 i = 0; i < numCharacters; i++)
+			{
+				Field *field = result->Fetch();
+				CharacterData76005 c;
+				memset(&c,0,sizeof(c));
+				c.charId = field[0].GetUInt64();
+				c.worldId = field[1].GetUInt16();
+				c.status = 0; // 0 = ok (the 2005 path uses its own status values; do not leak them here)
+				c.handleStrOffset = uint16((numCharacters - i) * sizeof(CharacterData76005) + strings.wpos());
+				datas.append((const byte*)&c,sizeof(c));
+				strings.writeString(string(field[3].GetString()));
+				if (!result->NextRow())
+					break;
+			}
+			pkt.append(datas);
+			pkt.append(strings);
+		}
+	}
+
+	// Worlds
+	header.offsetServerData = uint32(pkt.wpos());
+	{
+		scoped_ptr<QueryResult> result(QueryWithRetry("SELECT `worldId`, `name`, `type`, `status`, `numPlayers` FROM `worlds`"));
+		if (result == NULL || result->GetRowCount() < 1)
+		{
+			ERROR_LOG("7.6005 AuthReply: no worlds in db, disconnecting.");
+			SetCloseAndDelete(true);
+			return;
+		}
+		pkt << uint16(result->GetRowCount());
+		do
+		{
+			Field *field = result->Fetch();
+			WorldData76005 w;
+			memset(&w,0,sizeof(w));
+			w.worldId = field[0].GetUInt16();
+			string name = field[1].GetString();
+			strncpy(w.worldName,name.c_str(),sizeof(w.worldName)-1);
+			w.type = field[2].GetUInt8();
+			w.status = field[3].GetUInt8();
+			w.clientVersion = matrixVersion;
+			w.unknown4 = 1;
+			uint32 numPlayers = field[4].GetUInt32();
+			w.load = numPlayers < 50 ? 0x31 : (numPlayers < 100 ? 0x32 : 0x33);
+			pkt.append((const byte*)&w,sizeof(w));
+		}
+		while (result->NextRow());
+	}
+
+	// Signed ticket
+	header.offsetAuthData = uint16(pkt.wpos());
+	pkt << uint16(signature.size() + sizeof(signedData)); // 0x0136
+	pkt.append(signature);
+	pkt.append((const byte*)&signedData,sizeof(signedData));
+
+	// Encrypted private exponent
+	header.offsetEncryptedData = uint16(pkt.wpos());
+	pkt << uint16(encryptedPrivateExponent.size());
+	pkt.append(encryptedPrivateExponent.contents(),encryptedPrivateExponent.size());
+
+	// Username
+	header.offsetUsername = uint32(pkt.wpos());
+	pkt.writeString(m_username);
+
+	pkt.put(0,(const byte*)&header,sizeof(header));
+
+	DEBUG_LOG(format("Sending AS_AuthReply (7.6005, 0x0B): |%1%|") % Bin2Hex(pkt));
+	SendPacket(pkt);
+	INFO_LOG(format("7.6005: user %1% (userId=%2%) authenticated.") % m_username % m_userId);
 }

@@ -579,7 +579,7 @@ bool Database::_SendQuery(DatabaseConnection &con, const char* Sql, bool Self)
 	}
 
 	int result = mysql_query(con.conn, Sql);
-	if(result > 0)
+	if(result != 0)
 	{
 		if( Self == false && _HandleError(con, mysql_errno( con.conn ) ) )
 		{
