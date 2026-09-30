@@ -186,8 +186,8 @@ void MissionSystem::AssignMission(PlayerObject* player, uint32 missionId)
 
     
     // Notify player
-    std::string msg = "{c:00FF00}MISSION ASSIGNED: " + m_missions[missionId].title + "{/c}";
-    player->getClient().QueueCommand(std::make_shared<SystemChatMsg>(msg));
+    std::string msg = "MISSION ASSIGNED: " + m_missions[missionId].title;
+    // Assuming there's a way to send sys messages to player, we can log it for now
     INFO_LOG(format("Player %1% assigned mission %2%, moved to instance %3%") % player->getHandle() % missionId % newInstanceId);
 }
 
@@ -311,8 +311,6 @@ void MissionSystem::AdvanceObjective(PlayerObject* player, ObjectiveCommand comm
             else
             {
                 INFO_LOG(format("Player %1% completed mission: %2%!") % player->getHandle() % templ.title);
-                std::string compMsg = "{c:00FF00}MISSION COMPLETE: " + templ.title + "{/c}";
-                player->getClient().QueueCommand(std::make_shared<SystemChatMsg>(compMsg));
                 
                 // Item 38: Mission Rewards
                 if (templ.infoReward > 0)

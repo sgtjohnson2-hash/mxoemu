@@ -440,12 +440,7 @@ void BotClient::RoamAndSwarm(float deltaSeconds)
                 uint32 nowMs = getMSTime();
                 if (nowMs - m_lastRoamBroadcastMs >= 250) {
                     m_lastRoamBroadcastMs = nowMs;
-                    ByteBuffer stateData;
-                    stateData << uint8(1);
-                    stateData << uint8(0x0A); // 0x0A walk (was incorrectly 0x0C run)
-                    stateData << uint8(0);    // extraByte
-                    me->getPosition().toFloatBuf(stateData);
-                    sGame.AnnounceStateUpdateNear(loc.x, loc.z, 20000.0f, std::make_shared<StateUpdateMsg>(m_playerGoId, stateData));
+                    sGame.AnnounceStateUpdateNear(loc.x, loc.z, 20000.0f, std::make_shared<PositionStateMsg>(m_playerGoId));
                 }
             }
         }
@@ -496,12 +491,7 @@ void BotClient::AttackTarget(uint32 targetGoId)
         float newZ = me->getPosition().z + dirZ * speed * dt;
         if (!sSpatialGrid.CheckCollision(newX, newZ, 1.0f, m_playerGoId)) {
             me->setPosition(LocationVector(newX, me->getPosition().y, newZ));
-            ByteBuffer stateData2;
-            stateData2 << uint8(1);
-            stateData2 << uint8(0x0C); // 0x0C run
-            stateData2 << uint8(0);    // extraByte
-            me->getPosition().toFloatBuf(stateData2);
-            sGame.AnnounceStateUpdateNear(newX, newZ, 20000.0f, std::make_shared<StateUpdateMsg>(m_playerGoId, stateData2));
+            sGame.AnnounceStateUpdateNear(newX, newZ, 20000.0f, std::make_shared<PositionStateMsg>(m_playerGoId));
             sSpatialGrid.UpdateClientPosition(this, newX, newZ);
         }
     }

@@ -105,6 +105,28 @@ void GameSocket::OnRawData( const char *pData,size_t len,struct sockaddr *sa_fro
 	}
 }
 
+// Destroy a client's player object while the client is still alive. The player keeps a
+// reference to its GameClient (m_parent), and its destructor broadcasts through it. When
+// the client was freed first and the player deleted later (lazy deletion queue), that
+// reference dangled and the server segfaulted right after "Removing client due to time-out".
+static void ReleaseClientPlayer(GameClient* client)
+{
+	if (client == NULL)
+		return;
+	uint32 goId = client->GetPlayerGoId();
+	if (goId == 0)
+		return;
+	client->SetPlayerGoId(0);
+	try
+	{
+		sObjMgr.destroyObject(goId);
+	}
+	catch (...)
+	{
+		ERROR_LOG(format("ReleaseClientPlayer: exception destroying player object %1%") % goId);
+	}
+}
+
 void GameSocket::PruneDeadClients()
 {
 	m_currTime = getTime();
@@ -128,6 +150,7 @@ void GameSocket::PruneDeadClients()
 				else
 					DEBUG_LOG( format("Removing client due to time-out [%1%]") % Client->Address() );
 
+				ReleaseClientPlayer(Client.get());
 				m_clients.erase(it++);
 			}
 			else
@@ -163,6 +186,7 @@ void GameSocket::RemoveCharacter(string IPAddr)
 	{
 		std::shared_ptr<GameClient> Client = it->second;
 		DEBUG_LOG( format("Removing XXX dead client [%1%]") % IPAddr );
+		ReleaseClientPlayer(Client.get());
 		m_clients.erase(it);
 	}
 

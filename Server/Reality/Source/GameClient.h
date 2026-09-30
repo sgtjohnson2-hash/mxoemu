@@ -85,6 +85,23 @@ public:
 		if (amIObjectUpdate != NULL)
 			amIObjectUpdate->setReceiver(this);
 
+		// A newer position for an object supersedes any older one still queued or awaiting
+		// an ack. Without this, roaming bots filled the queue with hundreds of stale position
+		// states that were resent every 500 ms; the flood of sequenced packets desynced the
+		// client ("view not found" with garbage view ids) until it crashed.
+		if (dynamic_pointer_cast<PositionStateMsg>(realPtr) != NULL)
+		{
+			const uint32 objId = amIObjectUpdate->getObjectId();
+			for (stateQueueType::iterator it=m_queuedStates.begin();it!=m_queuedStates.end();)
+			{
+				shared_ptr<PositionStateMsg> old = dynamic_pointer_cast<PositionStateMsg>(it->stateData);
+				if (old != NULL && !it->invalidated && it->callBack.empty() && old->getObjectId() == objId)
+					it = m_queuedStates.erase(it);
+				else
+					++it;
+			}
+		}
+
 		m_queuedStates.push_back(queuedState(realPtr,immediateOnly,callFunc));
 	}
 	void QueueCommand(msgBaseClassPtr theCmd,packetAckFunc callFunc=0)

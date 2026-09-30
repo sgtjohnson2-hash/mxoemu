@@ -264,14 +264,8 @@ void GameServer::SimulationLoop()
 
 			// High-frequency zero-latency network update and queue flush for connected human players
 			sObjMgr.ForEachHumanPlayer([](PlayerObject* po) {
-				try {
-					po->Update();
-					po->getClient().FlushQueue();
-				} catch (const std::exception& e) {
-					ERROR_LOG(format("Exception in simulation loop for player %1%: %2%") % po->getGoId() % e.what());
-				} catch (...) {
-					ERROR_LOG(format("Unknown exception in simulation loop for player %1%") % po->getGoId());
-				}
+				po->Update();
+				po->getClient().FlushQueue();
 			});
 
 			// Tier 2: Medium-Frequency (5Hz / ~200ms) - Bot Navigation & Viewport AI
@@ -312,15 +306,9 @@ void GameServer::SimulationLoop()
 
 				// Throttled background bot network queue flush
 				sObjMgr.ForEachGO([](PlayerObject* po) {
-					try {
-						if (po->getClient().isBot()) {
-							po->Update();
-							po->getClient().FlushQueue();
-						}
-					} catch (const std::exception& e) {
-						ERROR_LOG(format("Exception in simulation loop for bot %1%: %2%") % po->getGoId() % e.what());
-					} catch (...) {
-						ERROR_LOG(format("Unknown exception in simulation loop for bot %1%") % po->getGoId());
+					if (po->getClient().isBot()) {
+						po->Update();
+						po->getClient().FlushQueue();
 					}
 				});
 			}

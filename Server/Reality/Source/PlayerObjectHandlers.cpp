@@ -369,18 +369,10 @@ void PlayerObject::ParseAdminCommand( string theCmd )
 		Y = this->getPosition().y;
 		Z = this->getPosition().z;
 
-		PreparedStatement delStmt("DELETE FROM `locations` WHERE `District` = ?0 AND `Command` = ?1");
-		delStmt.SetString(0, s);
-		delStmt.SetString(1, area);
-		sDatabase.ExecutePrepared(&delStmt);
-
-		PreparedStatement insStmt("INSERT INTO `locations` SET `District` = ?0, `Command` = ?1, `X` = ?2, `Y` = ?3, `Z` = ?4");
-		insStmt.SetString(0, s);
-		insStmt.SetString(1, area);
-		insStmt.SetDouble(2, X);
-		insStmt.SetDouble(3, Y);
-		insStmt.SetDouble(4, Z);
-		sDatabase.ExecutePrepared(&insStmt);
+		string sql1 = (format("DELETE FROM `locations` Where `District` = '%1%' And `Command` = '%2%'") % s % area ).str();
+		string sql2 = (format("INSERT INTO `locations` SET `District` = '%1%', `Command` = '%2%', X = '%3%', Y = '%4%', Z = '%5%'") % s % area % X % Y % Z ).str();
+		sDatabase.Execute(sql1);
+		sDatabase.Execute(sql2);
 		m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FFFF00}New location set (async), test it out.{/c}"));
 		return;
 
@@ -424,20 +416,10 @@ void PlayerObject::ParseAdminCommand( string theCmd )
 		Z = this->getPosition().z;
 		O = this->getPosition().rot;
 
-		PreparedStatement delHl("DELETE FROM `hardlines` WHERE `DistrictId` = ?0 AND `HardlineId` = ?1");
-		delHl.SetString(0, s);
-		delHl.SetString(1, hardlineId);
-		sDatabase.ExecutePrepared(&delHl);
-
-		PreparedStatement insHl("INSERT INTO `hardlines` SET `DistrictId` = ?0, `HardlineId` = ?1, `X` = ?2, `Y` = ?3, `Z` = ?4, `HardlineName` = ?5, `ROT` = ?6");
-		insHl.SetString(0, s);
-		insHl.SetString(1, hardlineId);
-		insHl.SetDouble(2, X);
-		insHl.SetDouble(3, Y);
-		insHl.SetDouble(4, Z);
-		insHl.SetString(5, hardlineName);
-		insHl.SetDouble(6, O);
-		sDatabase.ExecutePrepared(&insHl);
+		string sql1 = (format("DELETE FROM `hardlines` WHERE `DistrictId` = '%1%' AND `HardlineId` = '%2%'") % s % hardlineId ).str();
+		string sql2 = (format("INSERT INTO `hardlines` SET `DistrictId` = '%1%', `HardlineId`='%2%',`X`='%3%',`Y`='%4%',`Z`= '%5%',`HardlineName`='%6%',`ROT`='%7%'") % s % hardlineId % X % Y % Z % hardlineName % O).str();
+		sDatabase.Execute(sql1);
+		sDatabase.Execute(sql2);
 		string msg1 = (format("{c:FFFF00}HardlineId:%1% Set to %2% at X:%3% Y:%4% Z:%5% O:%6% (async){/c}") % hardlineId % hardlineName % X % Y % Z % O ).str();
 		m_parent.QueueCommand(make_shared<SystemChatMsg>(msg1));
 		return;
@@ -1286,9 +1268,8 @@ void PlayerObject::ParsePlayerCommand( string theCmd )
         LocationVector loc = this->getPosition();
         uint8 district = this->getDistrict();
         
-        PreparedStatement hlStmt("SELECT `HardlineId`, `X`, `Y`, `Z` FROM `hardlines` WHERE `DistrictId` = ?0");
-        hlStmt.SetUInt32(0, (uint32)district);
-        scoped_ptr<QueryResult> result(sDatabase.QueryPrepared(&hlStmt));
+        format sql = format("SELECT `HardlineId`, `X`, `Y`, `Z` FROM `hardlines` WHERE `DistrictId`='%1%'") % (int)district;
+        scoped_ptr<QueryResult> result(sDatabase.Query(sql));
         if (result) {
             uint32 closestId = 0;
             float closestDist = 999999.0f;
@@ -1310,12 +1291,9 @@ void PlayerObject::ParsePlayerCommand( string theCmd )
             } while (result->NextRow());
             
             if (closestDist < 1000.0f) {
-                PreparedStatement updHl("UPDATE `hardlines` SET `FactionTag` = ?0, `HardlineName` = ?1 WHERE `DistrictId` = ?2 AND `HardlineId` = ?3");
-                updHl.SetUInt32(0, (uint32)getFaction());
-                updHl.SetString(1, (format("Tagged By %1%") % getHandle()).str());
-                updHl.SetUInt32(2, (uint32)district);
-                updHl.SetUInt32(3, closestId);
-                sDatabase.ExecutePrepared(&updHl);
+                format updateSql = format("UPDATE `hardlines` SET `FactionTag`='%1%', `HardlineName`='Tagged By %2%' WHERE `DistrictId`='%3%' AND `HardlineId`='%4%'")
+                    % (int)getFaction() % getHandle() % (int)district % closestId;
+                sDatabase.Execute(updateSql);
                 
                 sFactionWarMgr.captureNode(closestId, getFaction());
                 
@@ -3182,23 +3160,18 @@ void PlayerObject::RPC_HandleStaticObjInteraction( ByteBuffer &srcCmd )
 	{
 		LocationVector loc = this->getPosition();
 
-		PreparedStatement chkDoor("SELECT 1 FROM `doors` WHERE `DistrictId` = ?0 AND `DoorId` = ?1 LIMIT 1");
-		chkDoor.SetUInt32(0, (uint32)getDistrict());
-		chkDoor.SetUInt32(1, staticObjId);
-		scoped_ptr<QueryResult> resultDoorExists(sDatabase.QueryPrepared(&chkDoor));
+		scoped_ptr<QueryResult> resultDoorExists(sDatabase.Query(format("SELECT * FROM `doors` WHERE `DistrictId`='%1%' And `DoorId`='%2%' Limit 1") % (int)getDistrict() % staticObjId));
 		if (resultDoorExists == NULL)
 		{
 			m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FFFF00}You are using a door not in the database yet, lets add it{/c}"));	
-			PreparedStatement sqlDoorInsert("INSERT INTO `doors` SET `DistrictId` = ?0, `DoorId` = ?1, `X` = ?2, `Y` = ?3, `Z` = ?4, `ROT` = ?5, `FirstUser` = ?6");
-			sqlDoorInsert.SetUInt32(0, (uint32)m_district);
-			sqlDoorInsert.SetUInt32(1, staticObjId);
-			sqlDoorInsert.SetDouble(2, loc.x);
-			sqlDoorInsert.SetDouble(3, loc.y);
-			sqlDoorInsert.SetDouble(4, loc.z);
-			sqlDoorInsert.SetDouble(5, loc.rot);
-			sqlDoorInsert.SetString(6, this->getHandle());
+			format sqlDoorInsert = 
+				format("INSERT INTO `doors` SET  `DistrictId` = '%1%', `DoorId` = '%2%', X = '%3%', Y = '%4%', Z = '%5%', ROT = '%6%', FirstUser = '%7%'")
+				% (int)m_district
+				% staticObjId
+				% loc.x	% loc.y	% loc.z	% loc.rot
+				% this->getHandle();
 
-			if (sDatabase.ExecutePrepared(&sqlDoorInsert))
+			if (sDatabase.Execute(sqlDoorInsert))
 			{
 				format msg1 = 
 					format("{c:00FF00}Door:0x%08x in District %d Set to Location X:%f Y:%f Z:%f O:%f{/c}")
@@ -3456,24 +3429,23 @@ void PlayerObject::RPC_HandleHardlineTeleport( ByteBuffer &srcCmd )
 	//See if we need to add this HL to the DB
 	LocationVector loc = this->getPosition();
 
-	PreparedStatement chkHlExists("SELECT * FROM `hardlines` WHERE `DistrictId` = ?0 AND `HardlineId` = ?1 LIMIT 1");
-	chkHlExists.SetUInt32(0, (uint32)districtYouAreIn);
-	chkHlExists.SetUInt32(1, (uint32)hardlineYouAreUsing);
+	format sqlHLExists = 
+		format("SELECT * FROM `hardlines` WHERE `DistrictId`='%1%' AND `HardlineId`='%2%' LIMIT 1")
+		% (int)districtYouAreIn 
+		% (int)hardlineYouAreUsing;
 
-	scoped_ptr<QueryResult> resultHLExists(sDatabase.QueryPrepared(&chkHlExists));
+	scoped_ptr<QueryResult> resultHLExists(sDatabase.Query(sqlHLExists));
 	if (resultHLExists == NULL)
 	{
 		m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FFFF00}You are at a hardline not in the database yet, lets add it so all can use it :){/c}"));	
-		PreparedStatement sqlHLInsert("INSERT INTO `hardlines` SET `DistrictId` = ?0, `HardlineId` = ?1, `X` = ?2, `Y` = ?3, `Z` = ?4, `ROT` = ?5, `HardlineName` = ?6");
-		sqlHLInsert.SetUInt32(0, (uint32)districtYouAreIn);
-		sqlHLInsert.SetUInt32(1, (uint32)hardlineYouAreUsing);
-		sqlHLInsert.SetDouble(2, loc.x);
-		sqlHLInsert.SetDouble(3, loc.y);
-		sqlHLInsert.SetDouble(4, loc.z);
-		sqlHLInsert.SetDouble(5, loc.rot);
-		sqlHLInsert.SetString(6, (format("Tagged By %1%") % this->getHandle()).str());
+		format sqlHLInsert = 
+			format("INSERT INTO `hardlines` SET `DistrictId` = '%1%', `HardlineId` = '%2%', X = '%3%', Y = '%4%', Z = '%5%', ROT = '%6%', HardlineName = 'Tagged By %7%'")
+			% (int)districtYouAreIn 
+			% (int)hardlineYouAreUsing 
+			% loc.x % loc.y % loc.z % loc.rot
+			% this->getHandle();
 
-		if (sDatabase.ExecutePrepared(&sqlHLInsert))
+		if (sDatabase.Execute(sqlHLInsert))
 		{
 			format msg1 = 
 				format("{c:00FF00}HardlineId:%1% in District %7% Set to Tagged By %2% at X:%3% Y:%4% Z:%5% O:%6%{/c}")
@@ -3491,11 +3463,12 @@ void PlayerObject::RPC_HandleHardlineTeleport( ByteBuffer &srcCmd )
 
 	}
 
-	PreparedStatement hlTravelQuery("SELECT `X`,`Y`,`Z`, `ROT`, `HardlineName`, `FactionTag` FROM `hardlines` WHERE `DistrictId` = ?0 AND `HardlineId` = ?1 LIMIT 1");
-	hlTravelQuery.SetUInt32(0, (uint32)hardlineDistrict);
-	hlTravelQuery.SetUInt32(1, (uint32)hardlineLocation);
+	format sql = 
+		format("SELECT `X`,`Y`,`Z`, `ROT`, `HardlineName`, `FactionTag` FROM `hardlines` Where `DistrictId` = '%1%' And `HardlineId` = '%2%' LIMIT 1")
+		% (int)hardlineDistrict 
+		% (int)hardlineLocation;
 
-	scoped_ptr<QueryResult> result(sDatabase.QueryPrepared(&hlTravelQuery));
+	scoped_ptr<QueryResult> result(sDatabase.Query(sql));
 	if (result == NULL)
 	{
 		m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FF0000}The hardline you selected is not in the database yet, go tag it...{/c}"));	
@@ -3603,12 +3576,7 @@ void PlayerObject::RPC_HandleUpgradeAbility(ByteBuffer&) {}
 void PlayerObject::RPC_HandleMissionAbort(ByteBuffer&) {}
 void PlayerObject::RPC_HandleMissionAccept(ByteBuffer&) {}
 void PlayerObject::RPC_HandleMissionInfo(ByteBuffer&) {}
-void PlayerObject::RPC_HandleMissionRequest(ByteBuffer& srcCmd) {
-    uint32 newMissionId = sMissionSys.SynthesizeProceduralMission(this, ProceduralMissionArchetype::DATA_EXTRACTION);
-    if (newMissionId > 0) {
-        sMissionSys.AssignMission(this, newMissionId);
-    }
-}
+void PlayerObject::RPC_HandleMissionRequest(ByteBuffer&) {}
 void PlayerObject::RPC_HandleItemMoveSlot(ByteBuffer&) {}
 void PlayerObject::RPC_HandleItemUnmountRSI(ByteBuffer&) {}
 void PlayerObject::RPC_HandleItemMountRSI(ByteBuffer&) {}

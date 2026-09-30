@@ -51,6 +51,7 @@ public:
 	ObjectUpdateMsg(uint32 objectId);
 	~ObjectUpdateMsg();
 	virtual void setReceiver(class GameClient *toWho);
+	uint32 getObjectId() const { return m_objectId; }
 protected:
 	uint32 m_objectId;
 	class GameClient *m_toWho;
