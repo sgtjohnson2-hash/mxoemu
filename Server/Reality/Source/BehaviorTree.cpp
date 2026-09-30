@@ -156,6 +156,7 @@ NodeStatus ActionFindTarget::Tick(BotClient* bot)
                 // Turn observer to face the acquired target
                 myPos.rot = myPos.CalcAngTo(targetPos);
                 me->setPosition(myPos);
+                sGame.AnnounceStateUpdateNear(myPos.x, myPos.z, 20000.0f, make_shared<RotationStateMsg>(bot->GetPlayerGoId(), myPos.getMxoRot()));
                 
                 // Map BotPersonality to Local Chat Output
                 if ((rand() % 100) / 100.0f < bot->GetPersonality().talkativeness) {
@@ -524,19 +525,34 @@ NodeStatus ActionEngageTarget::Tick(BotClient* bot)
         
         float dt = (bot->GetDeltaSeconds() > 0.0001f) ? bot->GetDeltaSeconds() : 0.033f;
         float approachSpeed = 450.0f; // 4.5 m/s combat run
-        myPos.x += dx * approachSpeed * dt;
-        myPos.z += dz * approachSpeed * dt;
-        uint8 newRot = static_cast<uint8>(std::atan2(dz, dx) * 128.0f / 3.14159265f);
-        myPos.rot = newRot;
+        float nextX = myPos.x + dx * approachSpeed * dt;
+        float nextZ = myPos.z + dz * approachSpeed * dt;
         
-        me->setPosition(myPos);
-        sSpatialGrid.UpdateClientPosition(bot, myPos.x, myPos.z);
-        sGame.AnnounceStateUpdateNear(myPos.x, myPos.z, 20000.0f, make_shared<PositionStateMsg>(bot->GetPlayerGoId()));
-        sGame.AnnounceStateUpdateNear(myPos.x, myPos.z, 20000.0f, make_shared<RotationStateMsg>(bot->GetPlayerGoId(), newRot));
+        if (!sSpatialGrid.CheckCollision(nextX, nextZ, 1.0f, bot->GetPlayerGoId()))
+        {
+            myPos.x = nextX;
+            myPos.z = nextZ;
+            myPos.rot = std::atan2(dz, dx);
+            uint8 newRot = myPos.getMxoRot();
+            
+            me->setPosition(myPos);
+            sSpatialGrid.UpdateClientPosition(bot, myPos.x, myPos.z);
+            
+            uint32 nowMs = getMSTime();
+            if (nowMs - bot->m_lastRoamBroadcastMs >= 150)
+            {
+                bot->m_lastRoamBroadcastMs = nowMs;
+                sGame.AnnounceStateUpdateNear(myPos.x, myPos.z, 20000.0f, make_shared<PositionStateMsg>(bot->GetPlayerGoId()));
+                sGame.AnnounceStateUpdateNear(myPos.x, myPos.z, 20000.0f, make_shared<RotationStateMsg>(bot->GetPlayerGoId(), newRot));
+            }
+        }
         return NodeStatus::RUNNING; // Still moving
     }
     
-    // Within range
+    // Within range: squarely face target
+    myPos.rot = myPos.CalcAngTo(targetPos);
+    me->setPosition(myPos);
+    sGame.AnnounceStateUpdateNear(myPos.x, myPos.z, 20000.0f, make_shared<RotationStateMsg>(bot->GetPlayerGoId(), myPos.getMxoRot()));
     return NodeStatus::SUCCESS; 
 }
 

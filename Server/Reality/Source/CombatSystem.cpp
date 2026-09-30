@@ -308,13 +308,13 @@ bool CombatSystem::RequestInterlock(uint32 attackerGoId, uint32 targetGoId)
 	LocationVector posB = pB->getPosition();
 	posA.rot = posA.CalcAngTo(posB);
 	pA->setPosition(posA);
-	sGame.AnnounceStateUpdate(NULL, std::make_shared<PositionStateMsg>(pA->getGoId()));
-	sGame.AnnounceStateUpdate(NULL, std::make_shared<RotationStateMsg>(pA->getGoId(), posA.rot));
+	sGame.AnnounceStateUpdateNear(posA.x, posA.z, 20000.0f, std::make_shared<PositionStateMsg>(pA->getGoId()));
+	sGame.AnnounceStateUpdateNear(posA.x, posA.z, 20000.0f, std::make_shared<RotationStateMsg>(pA->getGoId(), posA.getMxoRot()));
 
 	posB.rot = posB.CalcAngTo(posA);
 	pB->setPosition(posB);
-	sGame.AnnounceStateUpdate(NULL, std::make_shared<PositionStateMsg>(pB->getGoId()));
-	sGame.AnnounceStateUpdate(NULL, std::make_shared<RotationStateMsg>(pB->getGoId(), posB.rot));
+	sGame.AnnounceStateUpdateNear(posB.x, posB.z, 20000.0f, std::make_shared<PositionStateMsg>(pB->getGoId()));
+	sGame.AnnounceStateUpdateNear(posB.x, posB.z, 20000.0f, std::make_shared<RotationStateMsg>(pB->getGoId(), posB.getMxoRot()));
 
 	pA->enterInterlock(targetGoId);
 	pB->enterInterlock(attackerGoId);

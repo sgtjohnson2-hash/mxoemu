@@ -2626,16 +2626,7 @@ void FrankCastleManager::BroadcastPirateTransmission(const std::string& message,
     }
 
     std::string formatted = (format("{c:FF2222}[PIRATE TRANSMISSION - FM 88.3 - FRANK CASTLE]{/c} {c:FFFFFF}%1%{/c}") % message).str();
-
-    if (GameServer::getSingletonPtr()) {
-        if (shardWide) {
-            sGame.Broadcast(std::make_shared<SystemChatMsg>(formatted)->toBuf(), false);
-            m_lastPublicBroadcastMs = now;
-        } else {
-            sGame.BroadcastNear(m_currentPos.x, m_currentPos.z, 20000.0f, std::make_shared<SystemChatMsg>(formatted)->toBuf(), false);
-        }
-    }
-
+    DEBUG_LOG(formatted);
     INFO_LOG(format("FrankCastleBroadcast: %1%") % message);
 }
 

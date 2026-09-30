@@ -242,7 +242,10 @@ PlayerObject::~PlayerObject()
 		INFO_LOG(format("Player object for %1%:%2% deconstructing") % m_handle % m_goId);
 		sSpatialGrid.RemoveClient(&m_parent);
 		sGame.AnnounceStateUpdate(&m_parent,make_shared<DeletePlayerMsg>(m_goId));
-		sGame.AnnounceCommand(&m_parent,make_shared<SystemChatMsg>((format("Player %1% with object id %2% disconnected")%m_handle%m_goId).str()));
+		if (!m_parent.isBot())
+		{
+			sGame.AnnounceCommand(&m_parent,make_shared<SystemChatMsg>((format("Player %1% with object id %2% disconnected")%m_handle%m_goId).str()));
+		}
 		
 		m_spawnedInWorld=false;
 	}
@@ -989,6 +992,11 @@ void PlayerObject::killPlayer(uint32 killerGoId, uint32 fxId)
 
 void PlayerObject::sayChat(const std::string& msg)
 {
+    if (m_parent.isBot())
+    {
+        DEBUG_LOG(format("Bot %1% sayChat: %2%") % m_handle % msg);
+        return;
+    }
     sGame.AnnounceCommand(&m_parent, std::make_shared<PlayerChatMsg>(m_handle, msg));
 }
 

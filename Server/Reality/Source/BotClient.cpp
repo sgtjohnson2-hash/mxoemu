@@ -441,11 +441,24 @@ void BotClient::InitializePatrolCircuit()
     m_hasHome = true;
 
     m_patrolCircuit.clear();
-    float r = 800.0f; // 8m patrol perimeter
-    m_patrolCircuit.push_back(BotVector2D(m_homeX + r, m_homeZ));
-    m_patrolCircuit.push_back(BotVector2D(m_homeX, m_homeZ + r));
-    m_patrolCircuit.push_back(BotVector2D(m_homeX - r, m_homeZ));
-    m_patrolCircuit.push_back(BotVector2D(m_homeX, m_homeZ - r));
+    const float angles[] = { 0.0f, 1.5707963f, 3.14159265f, -1.5707963f };
+    for (float ang : angles)
+    {
+        for (float r : { 800.0f, 500.0f, 300.0f })
+        {
+            float wx = m_homeX + cosf(ang) * r;
+            float wz = m_homeZ + sinf(ang) * r;
+            if (!sSpatialGrid.CheckCollision(wx, wz, 1.0f, m_playerGoId))
+            {
+                m_patrolCircuit.push_back(BotVector2D(wx, wz));
+                break;
+            }
+        }
+    }
+    if (m_patrolCircuit.empty())
+    {
+        m_patrolCircuit.push_back(BotVector2D(m_homeX, m_homeZ));
+    }
     m_currentPatrolIndex = 0;
     m_patrolInitialized = true;
 }
@@ -519,8 +532,8 @@ void BotClient::RoamAndSwarm(float deltaSeconds)
 
                 // Compute orientation/heading angle facing direction of movement
                 float heading = std::atan2(dz, dx);
-                uint8 newRot = static_cast<uint8>(heading * 128.0f / 3.14159265f);
-                loc.rot = newRot;
+                loc.rot = heading;
+                uint8 newRot = loc.getMxoRot();
 
                 me->setPosition(loc);
                 sSpatialGrid.UpdateClientPosition(this, newX, newZ);
@@ -581,9 +594,9 @@ void BotClient::AttackTarget(uint32 targetGoId)
         float newX = me->getPosition().x + dirX * speed * dt;
         float newZ = me->getPosition().z + dirZ * speed * dt;
         if (!sSpatialGrid.CheckCollision(newX, newZ, 1.0f, m_playerGoId)) {
-            uint8 newRot = static_cast<uint8>(std::atan2(dirZ, dirX) * 128.0f / 3.14159265f);
             LocationVector newPos(newX, me->getPosition().y, newZ);
-            newPos.rot = newRot;
+            newPos.rot = std::atan2(dirZ, dirX);
+            uint8 newRot = newPos.getMxoRot();
             me->setPosition(newPos);
             sGame.AnnounceStateUpdateNear(newX, newZ, 20000.0f, std::make_shared<PositionStateMsg>(m_playerGoId));
             sGame.AnnounceStateUpdateNear(newX, newZ, 20000.0f, std::make_shared<RotationStateMsg>(m_playerGoId, newRot));

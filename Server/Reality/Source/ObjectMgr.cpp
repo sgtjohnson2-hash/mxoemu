@@ -327,7 +327,7 @@ void ObjectMgr::OpenDoor( uint32 doorId, GameClient* requester)
 	m_openDoors[viewId]=doorId;	
 
 	format s = format("Door Opened With ViewId: %1%") % int(viewId);
-	sGame.AnnounceCommand(NULL,make_shared<SystemChatMsg>(s.str()));
+	DEBUG_LOG(s.str());
 
 	//sGame.AnnounceStateUpdate(NULL,make_shared<DeleteDoorMsg>(doorId));	
 	format sqlDoor = format("SELECT `X`, `Y`, `Z`, `ROT`, `DoorType` FROM `doors` WHERE `DoorId`='%1%' LIMIT 1") % doorId;

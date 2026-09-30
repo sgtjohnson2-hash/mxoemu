@@ -756,6 +756,9 @@ string GameClient::GetNetStats()
 			ByteBuffer msgBuf;
 			try
 			{
+				shared_ptr<ObjectUpdateMsg> objMsg = dynamic_pointer_cast<ObjectUpdateMsg>(sentState.stateData);
+				if (objMsg != NULL)
+					objMsg->setReceiver(this);
 				msgBuf = sentState.stateData->toBuf();
 			}
 			catch(MsgBaseClass::PacketNoLongerValid)
@@ -918,6 +921,9 @@ void GameClient::FlushQueue( bool alsoResend )
 			ByteBuffer packetStaticBuf;
 			try
 			{
+				shared_ptr<ObjectUpdateMsg> objMsg = dynamic_pointer_cast<ObjectUpdateMsg>(currMsg.data);
+				if (objMsg != NULL)
+					objMsg->setReceiver(this);
 				packetStaticBuf = currMsg.data->toBuf();
 			}
 			catch (MsgBaseClass::PacketNoLongerValid)
@@ -1046,6 +1052,9 @@ void GameClient::FlushQueue( bool alsoResend )
 			ByteBuffer serializedData;
 			try
 			{
+				shared_ptr<ObjectUpdateMsg> objMsg = dynamic_pointer_cast<ObjectUpdateMsg>(it->stateData);
+				if (objMsg != NULL)
+					objMsg->setReceiver(this);
 				serializedData=it->stateData->toBuf();
 			}
 			catch (MsgBaseClass::PacketNoLongerValid)

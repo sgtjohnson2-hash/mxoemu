@@ -240,10 +240,17 @@ void PlayerObject::die( uint32 killerGoId )
 
 	INFO_LOG(format("Player %1%:%2% was defeated by %3%") % m_handle % m_goId % killerName);
 
-	m_parent.QueueCommand(shared_ptr<SystemChatMsg>(new SystemChatMsg(
-		(format("{c:FF0000}You have been defeated by %1%. Emergency jack-out in progress...{/c}") % killerName).str() )));
-	sGame.AnnounceCommand(&m_parent,shared_ptr<SystemChatMsg>(new SystemChatMsg(
-		(format("{c:FF4444}%1% has been defeated by %2%.{/c}") % m_handle % killerName).str() )));
+	if (!m_parent.isBot())
+	{
+		m_parent.QueueCommand(shared_ptr<SystemChatMsg>(new SystemChatMsg(
+			(format("{c:FF0000}You have been defeated by %1%. Emergency jack-out in progress...{/c}") % killerName).str() )));
+		sGame.AnnounceCommand(&m_parent,shared_ptr<SystemChatMsg>(new SystemChatMsg(
+			(format("{c:FF4444}%1% has been defeated by %2%.{/c}") % m_handle % killerName).str() )));
+	}
+	else
+	{
+		DEBUG_LOG(format("Bot %1% defeated by %2%") % m_handle % killerName);
+	}
 
 	//IsDead attribute so clients render the death state on our views
 	sGame.AnnounceStateUpdate(&m_parent,shared_ptr<HealthUpdateMsg>(new HealthUpdateMsg(m_goId,false,true)), true);

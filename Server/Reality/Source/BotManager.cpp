@@ -644,14 +644,7 @@ void BotManager::SpawnHighValueTarget(int district)
 
     // Faction broadcast (Machine/Agent faction)
     std::string msg = (format("{c:0000FF}[Faction] System: High-Value Target spawned in District %1%. Eliminate all Exile interference.{/c}") % district).str();
-    
-    auto players = sObjMgr.getAllGOIds();
-    for (auto id : players) {
-        PlayerObject* p = sObjMgr.getGOPtrSafe(id);
-        if (p && p->getFactionName() == "Machines") {
-            p->getClient().QueueCommand(std::make_shared<SystemChatMsg>(msg));
-        }
-    }
+    DEBUG_LOG(msg);
 }
 
 void BotManager::SpawnFactionDefenders(uint8 district, uint32 hlId, uint8 faction, LocationVector loc)
@@ -667,7 +660,7 @@ void BotManager::SpawnFactionDefenders(uint8 district, uint32 hlId, uint8 factio
     else if (faction == 0) factionName = "Machines";
 
     std::string msg = (format("{c:00FF00}[Faction Warfare] %1% has deployed defenders to Hardline %2% in District %3%.{/c}") % factionName % hlId % (int)district).str();
-    sGame.Broadcast(std::make_shared<SystemChatMsg>(msg)->toBuf(), false);
+    DEBUG_LOG(msg);
 }
 
 std::shared_ptr<BotClient> BotManager::GetBotByGOID(uint32 goid)

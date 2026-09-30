@@ -127,10 +127,10 @@ public:
 	{
 		double dx = dest.x - x;
 		double dz = dest.z - z;
-		if(dz != 0.0f)
+		if (dx != 0.0 || dz != 0.0)
 			return atan2(dz, dx);
 		else 
-			return 0.0f;
+			return 0.0;
 	}
 	inline uint8 CalcAngToMxo(const LocationVector & dest) const
 	{
@@ -139,11 +139,11 @@ public:
 	double CalcAngFrom(const LocationVector & src) const
 	{
 		double dx = x - src.x;
-		double dz = z-  src.z;
-		if(dz != 0.0f)
+		double dz = z - src.z;
+		if (dx != 0.0 || dz != 0.0)
 			return atan2(dz, dx);
 		else
-			return 0.0f;
+			return 0.0;
 	}
 	inline uint8 CalcAngFromMxo(const LocationVector & dest) const
 	{
