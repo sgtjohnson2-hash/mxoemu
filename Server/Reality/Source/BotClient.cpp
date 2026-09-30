@@ -364,6 +364,8 @@ void BotClient::UpdateBotAI(float deltaSeconds)
             m_nextActionTime = currentTime + 1000;
         }
     } else if (optimal.name == "MISSION") {
+        // Bots "on a mission" still walk the streets so players can see them
+        RoamAndSwarm(deltaSeconds);
         if (currentTime >= m_nextActionTime) {
             uint32 randomMissionId = 1 + (rand() % 3);
             sMissionSys.AssignMission(me, randomMissionId);

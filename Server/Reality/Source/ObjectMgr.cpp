@@ -196,9 +196,9 @@ uint16 ObjectMgr::getViewForGO( GameClient* requester, uint32 goId )
 	if (requester==NULL)
 		throw ClientNotAvailable();
 
-	std::shared_lock<std::shared_mutex> lock(m_objMutex);
-	if (m_objects.find(goId)==m_objects.end())
-		throw ObjectNotAvailable();
+	// View ids are a 1:1 truncation of object ids. Do not throw for objects that
+	// were just destroyed: despawn broadcasts look the view up after removal, and
+	// an uncaught ObjectNotAvailable here terminated the whole server.
 
 /*	viewIdsMap &viewsOfClient = m_views[requester];
 	for (viewIdsMap::const_iterator it=viewsOfClient.begin();it!=viewsOfClient.end();++it)
