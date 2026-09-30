@@ -590,6 +590,14 @@ const ByteBuffer& EmoteMsg::toBuf()
 		m_buf.clear();
 		throw PacketNoLongerValid();
 	}
+	// Only real players emote on the wire. The simulation systems fire emote ids (41-51)
+	// at NPCs whose animation sets do not have them; the 7.6005 client crashed in
+	// playeranimation.cpp a few minutes after entering a busy area.
+	if (m_player->getClient().isBot())
+	{
+		m_buf.clear();
+		throw PacketNoLongerValid();
+	}
 	m_player->getPosition().toFloatBuf(&sampleEmoteMsg[0x0D],sizeof(float)*3);
 	uint16 viewId = 0;
 	try
