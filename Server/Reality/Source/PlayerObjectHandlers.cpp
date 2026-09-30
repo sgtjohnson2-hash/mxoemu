@@ -3603,7 +3603,12 @@ void PlayerObject::RPC_HandleUpgradeAbility(ByteBuffer&) {}
 void PlayerObject::RPC_HandleMissionAbort(ByteBuffer&) {}
 void PlayerObject::RPC_HandleMissionAccept(ByteBuffer&) {}
 void PlayerObject::RPC_HandleMissionInfo(ByteBuffer&) {}
-void PlayerObject::RPC_HandleMissionRequest(ByteBuffer&) {}
+void PlayerObject::RPC_HandleMissionRequest(ByteBuffer& srcCmd) {
+    uint32 newMissionId = sMissionSys.SynthesizeProceduralMission(this, ProceduralMissionArchetype::DATA_EXTRACTION);
+    if (newMissionId > 0) {
+        sMissionSys.AssignMission(this, newMissionId);
+    }
+}
 void PlayerObject::RPC_HandleItemMoveSlot(ByteBuffer&) {}
 void PlayerObject::RPC_HandleItemUnmountRSI(ByteBuffer&) {}
 void PlayerObject::RPC_HandleItemMountRSI(ByteBuffer&) {}
