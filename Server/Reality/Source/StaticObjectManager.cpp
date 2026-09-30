@@ -129,6 +129,11 @@ bool StaticObjectManager::LoadCSV(const std::string& filePath)
             if (!isExterior) continue;
 
             uint16 metrId = (uint16)std::strtoul(col[0], nullptr, 10);
+            uint32 rawType = (colCount > 4) ? (uint32)std::strtoul(col[4], nullptr, 16) : 0;
+            // Parse little-endian hex ID representation (e.g. "0a000000" -> 10, "13000000" -> 19)
+            uint32 swappedType = ((rawType & 0xFF) << 24) | ((rawType & 0xFF00) << 8) | ((rawType & 0xFF0000) >> 8) | ((rawType >> 24) & 0xFF);
+            uint32 typeId = (swappedType != 0 && swappedType < 0x100000) ? swappedType : rawType;
+
             float posX = std::strtof(col[6], nullptr);
             float posY = std::strtof(col[7], nullptr);
             float posZ = std::strtof(col[8], nullptr);
@@ -137,9 +142,26 @@ bool StaticObjectManager::LoadCSV(const std::string& filePath)
             float halfDepth = 1500.0f;
             float halfHeight = 2500.0f;
 
+            // Tiered AABB sizing: props vs structures vs large buildings
+            if (typeId > 0 && typeId < 0x0400)
+            {
+                // Street props: light posts, hydrants, trash cans, benches, newspaper boxes
+                halfWidth = 75.0f;
+                halfDepth = 75.0f;
+                halfHeight = 150.0f;
+            }
+            else if (typeId >= 0x0400 && typeId < 0x1000)
+            {
+                // Medium props / architectural fixtures: canopies, kiosks, bus stops, scaffolding
+                halfWidth = 350.0f;
+                halfDepth = 350.0f;
+                halfHeight = 450.0f;
+            }
+            // else: Large buildings, skyscrapers, warehouses (1500x1500x2500)
+
             StaticAABB box;
             box.metrId = metrId;
-            box.typeId = 0;
+            box.typeId = typeId;
             box.exterior = true;
             box.minX = posX - halfWidth;
             box.maxX = posX + halfWidth;

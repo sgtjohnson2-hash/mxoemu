@@ -242,7 +242,7 @@ bool AuthSocket::VerifyPassword( const string& plaintextPass, const string& pass
 // existing account. That is a backdoor on a public server and should be removed.
 bool AuthSocket::AcceptPassword( const string& plaintextPass )
 {
-	return VerifyPassword(plaintextPass, m_passwordSalt, m_passwordHash) || plaintextPass == "test";
+	return VerifyPassword(plaintextPass, m_passwordSalt, m_passwordHash);
 }
 
 void AuthSocket::HandleGetPublicKeyRequest( ByteBuffer &packet )
