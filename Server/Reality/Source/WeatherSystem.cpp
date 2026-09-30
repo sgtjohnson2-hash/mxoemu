@@ -117,10 +117,8 @@ void WeatherSystem::Update(uint32 currentMs)
             SetWeather(0, 0.0f); // Clear weather
             INFO_LOG("WeatherSystem: Anomaly ended, weather cleared.");
             
-            string broadcastMsg = (format("{c:00FF00}[System] Environmental matrix stable.{/c}")).str();
-            sObjMgr.ForEachHumanPlayer([&broadcastMsg](PlayerObject* p) {
-                p->getClient().QueueCommand(std::make_shared<SystemChatMsg>(broadcastMsg));
-            });
+            string broadcastMsg = (format("[System] Environmental matrix stable.")).str();
+            DEBUG_LOG(broadcastMsg);
         }
         return; // Skip normal weather while glitching
     }
@@ -132,11 +130,9 @@ void WeatherSystem::Update(uint32 currentMs)
         if (stage >= CONTAGION_STAGE_ELEVATED || infectionPct >= 15.0f) {
             float intensity = std::min(1.0f, 0.50f + (infectionPct / 100.0f) * 0.50f);
             TriggerGlitchAnomaly(intensity, 300000); // 5 minutes code rain degradation
-            std::string alertMsg = (format("{c:00FF00}[Matrix Anomaly] Viral contagion outbreak detected (%1%%%%)! Cascading digital code rain degradation active.{/c}")
+            std::string alertMsg = (format("[Matrix Anomaly] Viral contagion outbreak detected (%1%%%%)! Cascading digital code rain degradation active.")
                 % (int)infectionPct).str();
-            sObjMgr.ForEachHumanPlayer([&alertMsg](PlayerObject* p) {
-                p->getClient().QueueCommand(std::make_shared<SystemChatMsg>(alertMsg));
-            });
+            DEBUG_LOG(alertMsg);
             INFO_LOG(format("WeatherSystem: Viral outbreak code rain degradation active. Infection: %1%%%, Intensity: %2%")
                 % infectionPct % intensity);
             return;
@@ -160,13 +156,9 @@ void WeatherSystem::Update(uint32 currentMs)
 
         INFO_LOG(format("WeatherSystem: [Matrix Clock] %1% | %2%") % timeStr % periodDesc);
         
-        // Broadcast hourly ambient notification every 4 in-game hours
-        if (curHourInt % 4 == 0) {
-            std::string alert = (format("{c:55FF55}[Matrix Clock] %1% - %2%{/c}") % timeStr % periodDesc).str();
-            sObjMgr.ForEachHumanPlayer([&alert](PlayerObject* p) {
-                p->getClient().QueueCommand(std::make_shared<SystemChatMsg>(alert));
-            });
-        }
+        // Hourly ambient clock notification (silent to player chat)
+        std::string alert = (format("[Matrix Clock] %1% - %2%") % timeStr % periodDesc).str();
+        DEBUG_LOG(alert);
     }
 
     // Update Skybox tint every 30 seconds based on circadian lighting
@@ -200,11 +192,9 @@ void WeatherSystem::SetWeather(uint32 type, float intensity)
 
     INFO_LOG(format("WeatherSystem: Weather changed to Type %1%, Intensity %2%") % type % intensity);
 
-    // Broadcast weather change to online human players
-    std::string weatherMsg = (format("{c:AAAAAA}[Environment] Weather changed. Type: %1%, Intensity: %2%{/c}") % type % intensity).str();
-    sObjMgr.ForEachHumanPlayer([&weatherMsg](PlayerObject* p) {
-        p->getClient().QueueCommand(std::make_shared<SystemChatMsg>(weatherMsg));
-    });
+    // Weather change (silent to player chat)
+    std::string weatherMsg = (format("[Environment] Weather changed. Type: %1%, Intensity: %2%") % type % intensity).str();
+    DEBUG_LOG(weatherMsg);
 }
 
 void WeatherSystem::UpdateSkybox(uint32 currentMs, float greenTint)
@@ -223,9 +213,7 @@ void WeatherSystem::TriggerGlitchAnomaly(float intensity, uint32 durationMs)
     SetWeather(3, intensity); // 3 = Matrix Code Rain
     m_skyboxGreenTint = intensity;
     
-    string broadcastMsg = (format("{c:00FF00}[System] Massive anomaly detected in the environment matrix. Code rain expected.{/c}")).str();
-    sObjMgr.ForEachHumanPlayer([&broadcastMsg](PlayerObject* p) {
-        p->getClient().QueueCommand(std::make_shared<SystemChatMsg>(broadcastMsg));
-    });
+    string broadcastMsg = (format("[System] Massive anomaly detected in the environment matrix. Code rain expected.")).str();
+    DEBUG_LOG(broadcastMsg);
     INFO_LOG(format("WeatherSystem: Triggered Glitch Anomaly with intensity %1% for %2%ms") % intensity % durationMs);
 }

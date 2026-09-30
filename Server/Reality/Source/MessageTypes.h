@@ -119,6 +119,16 @@ public:
 	const ByteBuffer& toBuf();
 };
 
+class RotationStateMsg : public ObjectUpdateMsg
+{
+public:
+	RotationStateMsg(uint32 objectId, uint8 rot);
+	~RotationStateMsg();
+	const ByteBuffer& toBuf();
+private:
+	uint8 m_rot;
+};
+
 class JackoutEffectMsg : public ObjectUpdateMsg
 {
 public:

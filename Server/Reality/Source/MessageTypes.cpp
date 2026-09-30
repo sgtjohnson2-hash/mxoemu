@@ -703,6 +703,45 @@ const ByteBuffer& PositionStateMsg::toBuf()
 	return m_buf;
 }
 
+RotationStateMsg::RotationStateMsg( uint32 objectId, uint8 rot ):ObjectUpdateMsg(objectId),m_rot(rot)
+{
+
+}
+
+RotationStateMsg::~RotationStateMsg()
+{
+
+}
+
+const ByteBuffer& RotationStateMsg::toBuf()
+{
+	m_buf.clear();
+	m_buf << uint8(0x03);
+
+	PlayerObject *m_player = sObjMgr.getGOPtr(m_objectId);
+	if (m_player == NULL)
+	{
+		throw PacketNoLongerValid();
+	}
+	uint16 viewId = 0;
+	try
+	{
+		viewId = sObjMgr.getViewForGO(m_toWho,m_objectId);
+	}
+	catch (ObjectMgr::ClientNotAvailable)
+	{
+		throw PacketNoLongerValid();
+	}
+
+	m_buf << uint16(viewId);
+	m_buf << uint8(1);
+
+	m_buf << uint8(0x04); // change angle
+	m_buf << uint8(m_rot);
+
+	return m_buf;
+}
+
 JackoutEffectMsg::JackoutEffectMsg( uint32 objectId, bool jackout ):ObjectUpdateMsg(objectId),m_jackout(jackout)
 {
 }

@@ -2641,12 +2641,8 @@ void PlayerObject::RPC_HandleChat( ByteBuffer &srcCmd )
     }
 
     if (boost::iequals(theMessage, "/dispatch")) {
-        uint32 totalCalls = sRadioDispatchSystem.GetTotalDispatchCalls();
-        auto recent = sRadioDispatchSystem.GetRecentTransmissions(1);
-        std::string latest = recent.empty() ? "Scanner idle." : recent[0].chatterText;
         m_parent.QueueCommand(make_shared<SystemChatMsg>(
-            (format("{c:FF5555}[Police Radio Dispatch] Total Scanner Calls: %1% | Latest: %2%{/c}")
-             % totalCalls % latest).str()
+            "{c:AAAAAA}[Police Radio Dispatch] Scanner frequency offline.{/c}"
         ));
         return;
     }

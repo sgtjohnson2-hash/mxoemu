@@ -48,6 +48,10 @@ public:
     bool m_hasHome = false;
     float m_homeX = 0.0f, m_homeY = 0.0f, m_homeZ = 0.0f;
     uint32 m_idleUntilMs = 0;
+    std::vector<BotVector2D> m_patrolCircuit;
+    size_t m_currentPatrolIndex = 0;
+    bool m_patrolInitialized = false;
+    void InitializePatrolCircuit();
     float GetDeltaSeconds() const { return m_deltaSeconds; }
     void UpdateBotAI(float deltaSeconds);
     void RoamAndSwarm(float deltaSeconds = -1.0f);

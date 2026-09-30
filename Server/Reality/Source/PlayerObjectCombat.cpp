@@ -16,6 +16,7 @@
 #include "GameServer.h"
 #include "CombatSystem.h"
 #include "BotManager.h"
+#include "BotClient.h"
 #include "FactionWarManager.h"
 #include "AdaptiveMusicSystem.h"
 #include "Database/AsyncDatabase.h"
@@ -65,8 +66,19 @@ void PlayerObject::enterInterlock( uint32 partnerGoId )
 	m_ilPartner = partnerGoId;
 	m_inCombat = true;
 	setCombatStance(true);
-	m_parent.QueueCommand(shared_ptr<SystemChatMsg>(new SystemChatMsg(
-		"{c:FF8800}You are now in Interlock. Tactics: &tactic speed|power|grab|block - withdraw with &withdraw{/c}")));
+	if (m_parent.isBot())
+	{
+		BotClient* bot = dynamic_cast<BotClient*>(&m_parent);
+		if (bot)
+		{
+			bot->SetTargetGoId(partnerGoId);
+		}
+	}
+	else
+	{
+		m_parent.QueueCommand(shared_ptr<SystemChatMsg>(new SystemChatMsg(
+			"{c:FF8800}You are now in Interlock. Tactics: &tactic speed|power|grab|block - withdraw with &withdraw{/c}")));
+	}
 }
 
 void PlayerObject::leaveInterlock()
@@ -90,6 +102,15 @@ void PlayerObject::takeDamage( uint32 attackerGoId, uint16 damage, uint32 fxId )
 {
 	if (m_isDead)
 		return;
+
+	if (m_parent.isBot() && attackerGoId != 0 && attackerGoId != m_goId)
+	{
+		BotClient* bot = dynamic_cast<BotClient*>(&m_parent);
+		if (bot && bot->GetTargetGoId() == 0)
+		{
+			bot->SetTargetGoId(attackerGoId);
+		}
+	}
 
 	// Apply basic mitigation based on player level
 	uint16 mitigation = m_lvl / 2;

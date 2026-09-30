@@ -523,12 +523,16 @@ NodeStatus ActionEngageTarget::Tick(BotClient* bot)
         dx /= length; dz /= length;
         
         float dt = (bot->GetDeltaSeconds() > 0.0001f) ? bot->GetDeltaSeconds() : 0.033f;
-        float approachSpeed = 4500.0f; // world units per second (matches 150.0f / 0.0333s)
+        float approachSpeed = 450.0f; // 4.5 m/s combat run
         myPos.x += dx * approachSpeed * dt;
         myPos.z += dz * approachSpeed * dt;
+        uint8 newRot = static_cast<uint8>(std::atan2(dz, dx) * 128.0f / 3.14159265f);
+        myPos.rot = newRot;
         
         me->setPosition(myPos);
-        sGame.AnnounceStateUpdate(&me->getClient(), make_shared<PositionStateMsg>(bot->GetPlayerGoId()));
+        sSpatialGrid.UpdateClientPosition(bot, myPos.x, myPos.z);
+        sGame.AnnounceStateUpdateNear(myPos.x, myPos.z, 20000.0f, make_shared<PositionStateMsg>(bot->GetPlayerGoId()));
+        sGame.AnnounceStateUpdateNear(myPos.x, myPos.z, 20000.0f, make_shared<RotationStateMsg>(bot->GetPlayerGoId(), newRot));
         return NodeStatus::RUNNING; // Still moving
     }
     
@@ -594,6 +598,10 @@ NodeStatus ActionCombatCycle::Tick(BotClient* bot)
 
     me->setTactic(chosen);
     sCombatSys.SetTactic(bot->GetPlayerGoId(), chosen);
+    if (sCombatSys.IsInterlocked(bot->GetPlayerGoId()))
+    {
+        sCombatSys.QueueAbility(bot->GetPlayerGoId(), 1);
+    }
     
     // Evaluate reward for previous state (mock simulation)
     // Normally, the damage taken/dealt events from CombatSystem would trigger UpdateQValue.

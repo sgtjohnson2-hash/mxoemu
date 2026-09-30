@@ -283,16 +283,10 @@ void WorldDirector::StartHardlineCollapseCrisis()
 
     m_activeCrisis = crisis;
 
-    // The Oracle speaks
-    std::string broadcastMsg = (format("{c:00FF00}[The Oracle] The thread unweaves at coordinates (%1%, %2%). Stabilize the hardline before the doorway collapses!{/c}") 
+    // The Oracle speaks (silent to player chat)
+    std::string broadcastMsg = (format("[The Oracle] The thread unweaves at coordinates (%1%, %2%). Stabilize the hardline before the doorway collapses!") 
                                 % (int)hl.x % (int)hl.z).str();
-    auto players = sObjMgr.getAllGOIds();
-    for (auto goId : players) {
-        PlayerObject* p = sObjMgr.getGOPtrSafe(goId);
-        if (p && !p->getClient().isBot()) {
-            p->getClient().QueueCommand(std::make_shared<SystemChatMsg>(broadcastMsg));
-        }
-    }
+    DEBUG_LOG(broadcastMsg);
 
     INFO_LOG(format("WorldDirector: Started Crisis [Hardline Collapse] at (%1%, %2%)") % hl.x % hl.z);
 }
@@ -331,15 +325,9 @@ void WorldDirector::StartSubwayAmbushCrisis()
 
     m_activeCrisis = crisis;
 
-    std::string broadcastMsg = (format("{c:FF0000}[System Directive] Security protocol initiated: %1% is under federal lockdown. Subroutine scan in progress.{/c}") 
+    std::string broadcastMsg = (format("[System Directive] Security protocol initiated: %1% is under federal lockdown. Subroutine scan in progress.") 
                                 % subway.name).str();
-    auto players = sObjMgr.getAllGOIds();
-    for (auto goId : players) {
-        PlayerObject* p = sObjMgr.getGOPtrSafe(goId);
-        if (p && !p->getClient().isBot()) {
-            p->getClient().QueueCommand(std::make_shared<SystemChatMsg>(broadcastMsg));
-        }
-    }
+    DEBUG_LOG(broadcastMsg);
 
     INFO_LOG(format("WorldDirector: Started Crisis [Subway Ambush] at %1%") % subway.name);
 }
@@ -376,14 +364,8 @@ void WorldDirector::StartExileTurfWarCrisis()
 
     m_activeCrisis = crisis;
 
-    std::string broadcastMsg = "{c:FF8800}[The Merovingian] Ah, causality in motion. The streets belong to those with the courage to seize them.{/c}";
-    auto players = sObjMgr.getAllGOIds();
-    for (auto goId : players) {
-        PlayerObject* p = sObjMgr.getGOPtrSafe(goId);
-        if (p && !p->getClient().isBot()) {
-            p->getClient().QueueCommand(std::make_shared<SystemChatMsg>(broadcastMsg));
-        }
-    }
+    std::string broadcastMsg = "[The Merovingian] Ah, causality in motion. The streets belong to those with the courage to seize them.";
+    DEBUG_LOG(broadcastMsg);
 
     INFO_LOG("WorldDirector: Started Crisis [Exile Turf War]");
 }
@@ -407,14 +389,8 @@ void WorldDirector::StartAnomalyCascadeCrisis()
 
     m_activeCrisis = crisis;
 
-    std::string broadcastMsg = "{c:FFFF00}[Radio Free Zion] SENSORS DETECT AN UNBOUND CODE FRAGMENT! 3-way faction race underway in Downtown!{/c}";
-    auto players = sObjMgr.getAllGOIds();
-    for (auto goId : players) {
-        PlayerObject* p = sObjMgr.getGOPtrSafe(goId);
-        if (p && !p->getClient().isBot()) {
-            p->getClient().QueueCommand(std::make_shared<SystemChatMsg>(broadcastMsg));
-        }
-    }
+    std::string broadcastMsg = "[Radio Free Zion] SENSORS DETECT AN UNBOUND CODE FRAGMENT! 3-way faction race underway in Downtown!";
+    DEBUG_LOG(broadcastMsg);
 
     INFO_LOG("WorldDirector: Started Crisis [Source Code Anomaly]");
 }
@@ -435,13 +411,7 @@ void WorldDirector::ResolveCrisis()
         }
     }
 
-    auto players = sObjMgr.getAllGOIds();
-    for (auto goId : players) {
-        PlayerObject* p = sObjMgr.getGOPtrSafe(goId);
-        if (p && !p->getClient().isBot()) {
-            p->getClient().QueueCommand(std::make_shared<SystemChatMsg>(resolveMsg));
-        }
-    }
+    DEBUG_LOG(resolveMsg);
 
     INFO_LOG(format("WorldDirector: Crisis [%1%] resolved.") % title);
     m_activeCrisis.reset();
@@ -463,16 +433,10 @@ void WorldDirector::StartOracleProphecyConvergenceCrisis()
 
     m_activeCrisis = crisis;
 
-    // The Oracle speaks
-    std::string broadcastMsg = (format("{c:00FF00}[The Oracle] The thread has broken in Sector %1%. Operatives, converge before reality unravels!{/c}") 
+    // The Oracle speaks (silent to player chat)
+    std::string broadcastMsg = (format("[The Oracle] The thread has broken in Sector %1%. Operatives, converge before reality unravels!") 
                                 % crisis.targetDistrictId).str();
-    auto players = sObjMgr.getAllGOIds();
-    for (auto goId : players) {
-        PlayerObject* p = sObjMgr.getGOPtrSafe(goId);
-        if (p && !p->getClient().isBot()) {
-            p->getClient().QueueCommand(std::make_shared<SystemChatMsg>(broadcastMsg));
-        }
-    }
+    DEBUG_LOG(broadcastMsg);
 
     INFO_LOG(format("WorldDirector: Started Crisis [Oracle Prophecy Convergence] in Sector %1%") % crisis.targetDistrictId);
 }

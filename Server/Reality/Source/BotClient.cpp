@@ -200,6 +200,21 @@ void BotClient::UpdateBotAI(float deltaSeconds)
             }
             m_targetGoId = 0;
         }
+        else if (BotManager::getSingletonPtr()->IsAggroEnabled() && me->getFactionName() != "Civilian")
+        {
+            ActionFindTarget find;
+            if (find.Tick(this) == NodeStatus::SUCCESS)
+            {
+                m_pathWaypoints.clear();
+                ActionEngageTarget engage;
+                if (engage.Tick(this) == NodeStatus::SUCCESS)
+                {
+                    ActionCombatCycle cycle;
+                    cycle.Tick(this);
+                }
+                return;
+            }
+        }
         RoamAndSwarm(deltaSeconds);
         return;
     }
@@ -404,13 +419,35 @@ void BotClient::UpdateBotAI(float deltaSeconds)
     // Talkativeness trigger
     if (m_personality->talkativeness > 0.5f && (rand() % 1000) > 995) {
         if (optimal.name == "ATTACK") {
-            if (m_personality->aggressiveness > 0.7f) sGame.AnnounceCommand(this, std::make_shared<PlayerChatMsg>(me->getHandle(), "You're mine!"));
-            else if (m_personality->vibe == "Heroic") sGame.AnnounceCommand(this, std::make_shared<PlayerChatMsg>(me->getHandle(), "For Zion!"));
+            if (m_personality->aggressiveness > 0.7f) DEBUG_LOG((format("%1%: You're mine!") % me->getHandle()).str());
+            else if (m_personality->vibe == "Heroic") DEBUG_LOG((format("%1%: For Zion!") % me->getHandle()).str());
         } else if (optimal.name == "ROAM") {
-            if (m_personality->curiosity > 0.7f) sGame.AnnounceCommand(this, std::make_shared<PlayerChatMsg>(me->getHandle(), "What's over there...?"));
-            else if (m_personality->vibe == "Paranoid") sGame.AnnounceCommand(this, std::make_shared<PlayerChatMsg>(me->getHandle(), "Did you hear that?"));
+            if (m_personality->curiosity > 0.7f) DEBUG_LOG((format("%1%: What's over there...?") % me->getHandle()).str());
+            else if (m_personality->vibe == "Paranoid") DEBUG_LOG((format("%1%: Did you hear that?") % me->getHandle()).str());
         }
     }
+}
+
+void BotClient::InitializePatrolCircuit()
+{
+    if (m_patrolInitialized) return;
+    PlayerObject* me = BotGetPlayer(m_playerGoId);
+    if (!me) return;
+
+    LocationVector h = me->getPosition();
+    m_homeX = (float)h.x;
+    m_homeY = (float)h.y;
+    m_homeZ = (float)h.z;
+    m_hasHome = true;
+
+    m_patrolCircuit.clear();
+    float r = 800.0f; // 8m patrol perimeter
+    m_patrolCircuit.push_back(BotVector2D(m_homeX + r, m_homeZ));
+    m_patrolCircuit.push_back(BotVector2D(m_homeX, m_homeZ + r));
+    m_patrolCircuit.push_back(BotVector2D(m_homeX - r, m_homeZ));
+    m_patrolCircuit.push_back(BotVector2D(m_homeX, m_homeZ - r));
+    m_currentPatrolIndex = 0;
+    m_patrolInitialized = true;
 }
 
 void BotClient::RoamAndSwarm(float deltaSeconds)
@@ -420,68 +457,82 @@ void BotClient::RoamAndSwarm(float deltaSeconds)
     if (!me || me->isDead()) return;
 
     uint32 nowMs = getMSTime();
-    if (!m_hasHome)
+    if (!m_patrolInitialized)
     {
-        LocationVector h = me->getPosition();
-        m_homeX = (float)h.x; m_homeY = (float)h.y; m_homeZ = (float)h.z; m_hasHome = true;
+        InitializePatrolCircuit();
     }
-    if (m_pathWaypoints.empty() || m_currentWaypointIndex >= m_pathWaypoints.size())
+    if (m_pathWaypoints.empty() || m_currentWaypointIndex >= (int)m_pathWaypoints.size())
     {
-        // Arrived (or no path yet): stand for a while like a person would, then stroll to a
-        // new spot within 12 m of home. Keeps each NPC on its own street corner instead of
-        // drifting across the city or piling up at the hardline.
         if (m_idleUntilMs == 0)
         {
-            m_idleUntilMs = nowMs + 4000 + (rand() % 10000);
+            m_idleUntilMs = nowMs + 1500 + (rand() % 1500);
             return;
         }
         if (nowMs < m_idleUntilMs)
             return;
         m_idleUntilMs = 0;
-        float angle = static_cast<float>(rand() % 360) * 3.14159f / 180.0f;
-        float distance = 200.0f + static_cast<float>(rand() % 1000);
-        MoveTo(m_homeX + std::cos(angle) * distance, m_homeY, m_homeZ + std::sin(angle) * distance);
+
+        if (!m_patrolCircuit.empty())
+        {
+            m_currentPatrolIndex = (m_currentPatrolIndex + 1) % m_patrolCircuit.size();
+            BotVector2D nextWp = m_patrolCircuit[m_currentPatrolIndex];
+            MoveTo(nextWp.x, m_homeY, nextWp.z);
+        }
         if (m_pathWaypoints.empty())
             return;
     }
 
-    if (m_currentWaypointIndex < m_pathWaypoints.size())
+    if (m_currentWaypointIndex < (int)m_pathWaypoints.size())
     {
         auto wp = m_pathWaypoints[m_currentWaypointIndex];
         LocationVector loc = me->getPosition();
         
-        float dx = wp.first - loc.x;
-        float dz = wp.second - loc.z;
+        float dx = wp.first - (float)loc.x;
+        float dz = wp.second - (float)loc.z;
         float dist = std::sqrt(dx*dx + dz*dz);
         
-        if (dist < 30.0f) {
+        if (dist < 40.0f) {
             m_currentWaypointIndex++;
-            if (m_currentWaypointIndex >= (int)m_pathWaypoints.size())
+            if (m_currentWaypointIndex >= (int)m_pathWaypoints.size()) {
+                m_pathWaypoints.clear();
                 sGame.AnnounceStateUpdateNear(loc.x, loc.z, 20000.0f, std::make_shared<PositionStateMsg>(m_playerGoId));
+            }
         } else {
             dist = std::max(0.01f, dist); // Prevent division by zero
 
-            // Base Pathfinding velocity
-            float speed = 150.0f; // walking pace, 1.5 m/s (world units are centimetres; was 5 = 5 cm/s)
+            // Base Pathfinding velocity: 160.0f cm/s = 1.6 m/s walking stride
+            float speed = 160.0f;
             BotVector2D pathVel((dx / dist) * speed, (dz / dist) * speed);
 
             // Add Boids velocity
             BotVector2D swarmVel = CalculateBoidsVelocity(me);
             
-            // Blend them (weighting can be tuned)
             float dilation = me->GetTimeDilation();
-            float newX = loc.x + (pathVel.x + swarmVel.x) * dilation * deltaSeconds;
-            float newZ = loc.z + (pathVel.z + swarmVel.z) * dilation * deltaSeconds;
+            float moveX = (pathVel.x + swarmVel.x) * dilation * deltaSeconds;
+            float moveZ = (pathVel.z + swarmVel.z) * dilation * deltaSeconds;
+            float newX = (float)loc.x + moveX;
+            float newZ = (float)loc.z + moveZ;
             
             if (!sSpatialGrid.CheckCollision(newX, newZ, 1.0f, m_playerGoId)) {
                 loc.x = newX;
                 loc.z = newZ;
+
+                // Compute orientation/heading angle facing direction of movement
+                float heading = std::atan2(dz, dx);
+                uint8 newRot = static_cast<uint8>(heading * 128.0f / 3.14159265f);
+                loc.rot = newRot;
+
                 me->setPosition(loc);
+                sSpatialGrid.UpdateClientPosition(this, newX, newZ);
+
                 uint32 nowMs = getMSTime();
-                if (nowMs - m_lastRoamBroadcastMs >= 500) {
+                if (nowMs - m_lastRoamBroadcastMs >= 200) {
                     m_lastRoamBroadcastMs = nowMs;
                     sGame.AnnounceStateUpdateNear(loc.x, loc.z, 20000.0f, std::make_shared<PositionStateMsg>(m_playerGoId));
+                    sGame.AnnounceStateUpdateNear(loc.x, loc.z, 20000.0f, std::make_shared<RotationStateMsg>(m_playerGoId, newRot));
                 }
+            } else {
+                m_currentWaypointIndex++;
             }
         }
     }
@@ -530,8 +581,12 @@ void BotClient::AttackTarget(uint32 targetGoId)
         float newX = me->getPosition().x + dirX * speed * dt;
         float newZ = me->getPosition().z + dirZ * speed * dt;
         if (!sSpatialGrid.CheckCollision(newX, newZ, 1.0f, m_playerGoId)) {
-            me->setPosition(LocationVector(newX, me->getPosition().y, newZ));
+            uint8 newRot = static_cast<uint8>(std::atan2(dirZ, dirX) * 128.0f / 3.14159265f);
+            LocationVector newPos(newX, me->getPosition().y, newZ);
+            newPos.rot = newRot;
+            me->setPosition(newPos);
             sGame.AnnounceStateUpdateNear(newX, newZ, 20000.0f, std::make_shared<PositionStateMsg>(m_playerGoId));
+            sGame.AnnounceStateUpdateNear(newX, newZ, 20000.0f, std::make_shared<RotationStateMsg>(m_playerGoId, newRot));
             sSpatialGrid.UpdateClientPosition(this, newX, newZ);
         }
     }
@@ -584,12 +639,9 @@ void BotClient::MoveTo(float x, float y, float z)
             
             if (m_pathWaypoints.empty())
             {
-                // Fallback to direct teleport if no path found
-                loc.x = x;
-                loc.y = y;
-                loc.z = z;
-                me->setPosition(loc);
-                sGame.AnnounceStateUpdate(this, std::make_shared<PositionStateMsg>(m_playerGoId));
+                // Direct stride waypoint to prevent instantaneous teleport jumps
+                m_pathWaypoints.push_back({x, z});
+                m_currentWaypointIndex = 0;
             }
         }
     }
@@ -601,8 +653,7 @@ void BotClient::Say(const std::string& msg)
     PlayerObject* me = BotGetPlayer(m_playerGoId);
     if (!me) return;
 
-    INFO_LOG(format("%1% (Bot) says %2%") % me->getHandle() % msg);
-    sGame.AnnounceCommand(this, shared_ptr<PlayerChatMsg>(new PlayerChatMsg(me->getHandle(), msg)));
+    DEBUG_LOG(format("%1% (Bot) says %2%") % me->getHandle() % msg);
 }
 
 

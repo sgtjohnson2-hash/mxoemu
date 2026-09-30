@@ -102,7 +102,8 @@ public:
 			return true;
 		}
 		if (dynamic_pointer_cast<PositionStateMsg>(msg) != NULL || dynamic_pointer_cast<StateUpdateMsg>(msg) != NULL ||
-			dynamic_pointer_cast<EmoteMsg>(msg) != NULL || dynamic_pointer_cast<AnimationStateMsg>(msg) != NULL)
+			dynamic_pointer_cast<EmoteMsg>(msg) != NULL || dynamic_pointer_cast<AnimationStateMsg>(msg) != NULL ||
+			dynamic_pointer_cast<RotationStateMsg>(msg) != NULL)
 			return me->knowsEntity(objId);
 		return true;
 	}
@@ -127,6 +128,18 @@ public:
 			for (stateQueueType::iterator it=m_queuedStates.begin();it!=m_queuedStates.end();)
 			{
 				shared_ptr<PositionStateMsg> old = dynamic_pointer_cast<PositionStateMsg>(it->stateData);
+				if (old != NULL && !it->invalidated && it->callBack.empty() && old->getObjectId() == objId)
+					it = m_queuedStates.erase(it);
+				else
+					++it;
+			}
+		}
+		if (dynamic_pointer_cast<RotationStateMsg>(realPtr) != NULL)
+		{
+			const uint32 objId = amIObjectUpdate->getObjectId();
+			for (stateQueueType::iterator it=m_queuedStates.begin();it!=m_queuedStates.end();)
+			{
+				shared_ptr<RotationStateMsg> old = dynamic_pointer_cast<RotationStateMsg>(it->stateData);
 				if (old != NULL && !it->invalidated && it->callBack.empty() && old->getObjectId() == objId)
 					it = m_queuedStates.erase(it);
 				else

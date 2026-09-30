@@ -309,10 +309,12 @@ bool CombatSystem::RequestInterlock(uint32 attackerGoId, uint32 targetGoId)
 	posA.rot = posA.CalcAngTo(posB);
 	pA->setPosition(posA);
 	sGame.AnnounceStateUpdate(NULL, std::make_shared<PositionStateMsg>(pA->getGoId()));
+	sGame.AnnounceStateUpdate(NULL, std::make_shared<RotationStateMsg>(pA->getGoId(), posA.rot));
 
 	posB.rot = posB.CalcAngTo(posA);
 	pB->setPosition(posB);
 	sGame.AnnounceStateUpdate(NULL, std::make_shared<PositionStateMsg>(pB->getGoId()));
+	sGame.AnnounceStateUpdate(NULL, std::make_shared<RotationStateMsg>(pB->getGoId(), posB.rot));
 
 	pA->enterInterlock(targetGoId);
 	pB->enterInterlock(attackerGoId);
@@ -350,6 +352,12 @@ bool CombatSystem::RequestRangedCombat(uint32 attackerGoId, uint32 targetGoId, u
 
 	m_freefires.push_back(state);
 	pA->setCombatStance(true);
+	if (pB->getClient().isBot()) {
+		BotClient* botB = dynamic_cast<BotClient*>(&pB->getClient());
+		if (botB && botB->GetTargetGoId() == 0) {
+			botB->SetTargetGoId(attackerGoId);
+		}
+	}
 	return true;
 }
 
