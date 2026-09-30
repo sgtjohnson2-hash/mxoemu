@@ -12,6 +12,11 @@ try {
 
 const PORT = parseInt(process.env.PORT || '80', 10);
 const PATCH_DIR = path.join(__dirname, 'patch_data');
+const CRASHDUMPS_DIR = path.join(PATCH_DIR, 'crashdumps');
+
+if (!fs.existsSync(CRASHDUMPS_DIR)) {
+    fs.mkdirSync(CRASHDUMPS_DIR, { recursive: true });
+}
 
 if (!fs.existsSync(PATCH_DIR)) {
     fs.mkdirSync(PATCH_DIR, { recursive: true });
@@ -55,6 +60,82 @@ function generateSalt(length = 8) {
         salt += chars.charAt(Math.floor(Math.random() * chars.length));
     }
     return salt;
+}
+
+// Helper to read raw request body (up to maxBytes)
+function readRawBody(req, maxBytes = 50 * 1024 * 1024) {
+    return new Promise((resolve, reject) => {
+        const chunks = [];
+        let total = 0;
+        req.on('data', chunk => {
+            total += chunk.length;
+            if (total > maxBytes) {
+                req.destroy();
+                reject(new Error('Payload exceeds maximum allowed size'));
+                return;
+            }
+            chunks.push(chunk);
+        });
+        req.on('end', () => resolve(Buffer.concat(chunks)));
+        req.on('error', reject);
+    });
+}
+
+// Multipart/form-data parser for retail crashreporter.exe uploads
+function parseMultipartBuffer(buffer, boundary) {
+    const fields = {};
+    const files = [];
+    if (!boundary || !buffer || buffer.length === 0) return { fields, files };
+
+    boundary = boundary.replace(/^"|"$/g, '');
+    let boundaryMarker = '--' + boundary;
+    let bBuf = Buffer.from(boundaryMarker);
+    let startIdx = buffer.indexOf(bBuf);
+    if (startIdx === -1 && buffer.indexOf(Buffer.from(boundary)) !== -1) {
+        boundaryMarker = boundary;
+        bBuf = Buffer.from(boundaryMarker);
+        startIdx = buffer.indexOf(bBuf);
+    }
+
+    while (startIdx !== -1 && startIdx < buffer.length) {
+        startIdx += bBuf.length;
+        if (startIdx + 2 <= buffer.length && buffer[startIdx] === 0x2D && buffer[startIdx + 1] === 0x2D) {
+            break;
+        }
+        if (startIdx + 2 <= buffer.length && buffer[startIdx] === 0x0D && buffer[startIdx + 1] === 0x0A) {
+            startIdx += 2;
+        }
+
+        const headerEnd = buffer.indexOf(Buffer.from('\r\n\r\n'), startIdx);
+        if (headerEnd === -1) break;
+
+        const headerStr = buffer.slice(startIdx, headerEnd).toString('latin1');
+        const contentStart = headerEnd + 4;
+
+        const nextBIdx = buffer.indexOf(bBuf, contentStart);
+        const contentEnd = (nextBIdx !== -1) ? (nextBIdx >= 2 && buffer[nextBIdx - 2] === 0x0D && buffer[nextBIdx - 1] === 0x0A ? nextBIdx - 2 : nextBIdx) : buffer.length;
+
+        const bodySlice = buffer.slice(contentStart, contentEnd);
+        const nameMatch = headerStr.match(/name="([^"]+)"/i);
+        const fnMatch = headerStr.match(/filename="([^"]+)"/i);
+
+        if (nameMatch) {
+            const fieldName = nameMatch[1];
+            if (fnMatch) {
+                files.push({
+                    fieldName: fieldName,
+                    filename: fnMatch[1],
+                    data: bodySlice
+                });
+            } else {
+                fields[fieldName] = bodySlice.toString('utf8').trim();
+            }
+        }
+
+        startIdx = nextBIdx;
+    }
+
+    return { fields, files };
 }
 
 // Helper to parse JSON body
@@ -165,6 +246,7 @@ const server = http.createServer(async (req, res) => {
         <p>Game World: <span class="stat">Port 10000 TCP/UDP [ONLINE]</span></p>
         <p>REST API: <span class="stat">Port 80 HTTP [SECURED]</span></p>
         <p>Database: <span class="stat">Isolated Internal Network [ENFORCED]</span></p>
+        <p>Crash Telemetry: <span class="stat">crashdumps.lith.thematrixonline.net/upload/ [ONLINE]</span></p>
     </div>
     <div class="card">
         <h3>GAME CLIENT DOWNLOAD</h3>
@@ -461,6 +543,97 @@ const server = http.createServer(async (req, res) => {
     if (pathname === '/patch/patch_manifest.json' || pathname === '/patch_manifest.json' || pathname === '/manifest.json') {
         res.writeHead(200, { 'Content-Type': 'application/json' });
         fs.createReadStream(manifestJsonPath).pipe(res);
+        return;
+    }
+
+    // Crash Reporter Ingestion Endpoint (Retail crashreporter.exe)
+    if (pathname === '/upload' || pathname === '/upload/' || pathname.startsWith('/upload')) {
+        res.setHeader('Custom-Form-Result', '0');
+        if (req.method === 'GET' || req.method === 'HEAD') {
+            res.writeHead(200, { 'Content-Type': 'text/plain', 'Custom-Form-Result': '0' });
+            res.end('Crash Reporter Gateway Online\n');
+            return;
+        }
+
+        if (req.method === 'POST') {
+            try {
+                const cType = req.headers['content-type'] || '';
+                let boundary = '';
+                const bMatch = cType.match(/boundary=([^;]+)/i);
+                if (bMatch) boundary = bMatch[1].trim();
+
+                const rawBody = await readRawBody(req);
+                const { fields, files } = parseMultipartBuffer(rawBody, boundary);
+
+                const username = (fields.username || fields.user || 'Unknown').trim();
+                const appname = (fields.appname || 'MatrixOnline').trim();
+                const appversion = (fields.appversion || '7.6005').trim();
+                const userComment = fields.comment || fields.user_comment || null;
+                const clientIp = (req.headers['x-forwarded-for'] || req.socket.remoteAddress || 'unknown').replace('::ffff:', '');
+
+                let archiveFilename = '';
+                let archiveSize = 0;
+
+                if (files.length > 0) {
+                    const f = files[0];
+                    const safeName = `${Date.now()}_${username.replace(/[^a-zA-Z0-9_-]/g, '_')}_${path.basename(f.filename || 'crashdump.zip')}`;
+                    const targetFile = path.join(CRASHDUMPS_DIR, safeName);
+                    fs.writeFileSync(targetFile, f.data);
+                    archiveFilename = safeName;
+                    archiveSize = f.data.length;
+                } else if (rawBody.length > 0) {
+                    const safeName = `${Date.now()}_${username.replace(/[^a-zA-Z0-9_-]/g, '_')}_raw_dump.bin`;
+                    const targetFile = path.join(CRASHDUMPS_DIR, safeName);
+                    fs.writeFileSync(targetFile, rawBody);
+                    archiveFilename = safeName;
+                    archiveSize = rawBody.length;
+                }
+
+                if (pool) {
+                    try {
+                        await pool.execute(
+                            'INSERT INTO crash_reports (username, appname, appversion, client_ip, archive_filename, archive_size, user_comment, error_summary, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+                            [username, appname, appversion, clientIp, archiveFilename, archiveSize, userComment, `Crash report uploaded by ${username} (${appversion})`, 'RECEIVED']
+                        );
+                        console.log(`[PatchServer] Crash report saved & recorded in DB: ${archiveFilename} (${archiveSize} bytes) for ${username}`);
+                    } catch (dbErr) {
+                        console.error('[PatchServer] Error saving crash report to DB:', dbErr.message);
+                    }
+                }
+
+                res.writeHead(200, {
+                    'Content-Type': 'text/plain',
+                    'Custom-Form-Result': '0'
+                });
+                res.end('Crash report successfully received and processed.\n');
+            } catch (err) {
+                console.error('[PatchServer] Crash upload error:', err.message);
+                res.writeHead(200, {
+                    'Content-Type': 'text/plain',
+                    'Custom-Form-Result': '0'
+                });
+                res.end('Crash report received with warnings.\n');
+            }
+            return;
+        }
+    }
+
+    // Telemetry API: View Crash Reports
+    if ((pathname === '/api/crash_reports' || pathname === '/api/crash-reports') && req.method === 'GET') {
+        res.setHeader('Content-Type', 'application/json');
+        try {
+            if (!pool) {
+                res.writeHead(503);
+                res.end(JSON.stringify({ success: false, message: 'Database service unavailable' }));
+                return;
+            }
+            const [rows] = await pool.query('SELECT * FROM crash_reports ORDER BY id DESC LIMIT 50');
+            res.writeHead(200);
+            res.end(JSON.stringify({ success: true, count: rows.length, crash_reports: rows }, null, 2));
+        } catch (e) {
+            res.writeHead(500);
+            res.end(JSON.stringify({ success: false, message: e.message }));
+        }
         return;
     }
 
