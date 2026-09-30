@@ -424,10 +424,10 @@ void PlayerObject::SpawnSelf()
 		if (m_spawnedInWorld == false)
 		{
 			shared_ptr<PlayerSpawnMsg> dMsg = make_shared<PlayerSpawnMsg>(m_goId);
-			m_parent.QueueState(dMsg,false,boost::bind(&PlayerObject::PopulateWorld,this));
 			sGame.AnnounceStateUpdate(&m_parent,dMsg);
 			m_spawnedInWorld=true;
 			sSpatialGrid.UpdateClientPosition(&m_parent, m_pos.x, m_pos.z);
+			PopulateWorld();
 		}
 	} catch (std::exception& e) {
 		std::cout << "DEBUG: SpawnSelf EXCEPTION: " << e.what() << std::endl;

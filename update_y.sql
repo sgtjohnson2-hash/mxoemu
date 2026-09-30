@@ -1,0 +1,1 @@
+CREATE TABLE hardlines_backup AS SELECT * FROM hardlines; UPDATE hardlines SET Y = Y + 50 WHERE HardlineName LIKE '%Mara%'; CREATE TABLE characters_backup AS SELECT * FROM characters; UPDATE characters SET Y = Y + 50 WHERE handle = 'Slacker';
