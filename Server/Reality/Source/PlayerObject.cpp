@@ -906,7 +906,7 @@ bool PlayerObject::giveItem(unsigned int templateId)
 {
     if (!m_inventorySystem) return false;
     if (m_inventorySystem->getFirstFreeSlot() == 0) return false;
-    uint32 newGoId = sObjMgr.getNewObjectId();
+    uint32 newGoId = sObjMgr.getNewItemId();
     shared_ptr<Item> newItem(new Item(newGoId, templateId));
     if (m_inventorySystem->addItemAuto(newItem)) {
         if (!getClient().isBot()) {

@@ -43,6 +43,7 @@ public:
     virtual void CheckAndResend();
 
     float m_deltaSeconds = 0.033f;
+    uint32 m_lastRoamBroadcastMs = 0;
     float GetDeltaSeconds() const { return m_deltaSeconds; }
     void UpdateBotAI(float deltaSeconds);
     void RoamAndSwarm(float deltaSeconds = -1.0f);

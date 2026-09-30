@@ -32,6 +32,7 @@
 #include <cstdint>
 #include <shared_mutex>
 #include <atomic>
+#include <mutex>
 
 const uint32 OBJECTMANAGER_STARTINGOBJECTID = 0x8000; //we have plenty of uint32s
 
@@ -140,10 +141,14 @@ public:
 
 	void RandomObject( uint32 randomObjectId, GameClient* requester, double X, double Y, double Z, double ROT);
 
-	uint32 getNewObjectId()
-	{
-		return m_currFreeObjectId.fetch_add(1);
-	}
+	// World objects (players and bots) double as client view ids, which are 16-bit on the
+	// wire (getViewForGO returns uint16(goId)). A plain counter passes 0xFFFF after a few hours
+	// of bot churn and then wraps into other objects' views, so the client rejects the updates
+	// ("HandleInput, view ID is out of range / view not found") and bots appear frozen.
+	// Recycle ids in [0x8000, 0xFFF0], skipping live objects and ids freed in the last 60 s.
+	uint32 getNewObjectId();
+	// Items never become client views; keep them out of the view id range.
+	uint32 getNewItemId() { return m_nextItemId.fetch_add(1); }
 
 private:
 	typedef shared_ptr<PlayerObject> objectPtr;
@@ -155,6 +160,9 @@ private:
 
 	uint16 allocateViewId(class GameClient* requester);
 	std::atomic<uint32> m_currFreeObjectId;
+	std::atomic<uint32> m_nextItemId{0x01000000};
+	std::mutex m_idAllocMutex;
+	map<uint32,uint32> m_recentlyFreedIds; // goId -> getMSTime() when freed
 
 	map<uint16,uint32> m_openDoors;
 	

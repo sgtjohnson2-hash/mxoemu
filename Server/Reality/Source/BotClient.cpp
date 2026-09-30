@@ -397,10 +397,10 @@ void BotClient::RoamAndSwarm(float deltaSeconds)
 
     if (m_pathWaypoints.empty() || m_currentWaypointIndex >= m_pathWaypoints.size())
     {
-        // Pick a random location within 100m
+        // Pick a random location 3-15 m away (world units are centimetres)
         LocationVector loc = me->getPosition();
         float angle = static_cast<float>(rand() % 360) * 3.14159f / 180.0f;
-        float distance = 10.0f + static_cast<float>(rand() % 90);
+        float distance = 300.0f + static_cast<float>(rand() % 1200);
         
         MoveTo(loc.x + std::cos(angle) * distance, loc.y, loc.z + std::sin(angle) * distance);
     }
@@ -414,13 +414,13 @@ void BotClient::RoamAndSwarm(float deltaSeconds)
         float dz = wp.second - loc.z;
         float dist = std::sqrt(dx*dx + dz*dz);
         
-        if (dist < 1.0f) {
+        if (dist < 30.0f) {
             m_currentWaypointIndex++;
         } else {
             dist = std::max(0.01f, dist); // Prevent division by zero
 
             // Base Pathfinding velocity
-            float speed = 5.0f; // 5m/s base speed
+            float speed = 150.0f; // walking pace, 1.5 m/s (world units are centimetres; was 5 = 5 cm/s)
             BotVector2D pathVel((dx / dist) * speed, (dz / dist) * speed);
 
             // Add Boids velocity
@@ -435,7 +435,11 @@ void BotClient::RoamAndSwarm(float deltaSeconds)
                 loc.x = newX;
                 loc.z = newZ;
                 me->setPosition(loc);
-                sGame.AnnounceStateUpdateNear(loc.x, loc.z, 20000.0f, std::make_shared<PositionStateMsg>(m_playerGoId));
+                uint32 nowMs = getMSTime();
+                if (nowMs - m_lastRoamBroadcastMs >= 250) {
+                    m_lastRoamBroadcastMs = nowMs;
+                    sGame.AnnounceStateUpdateNear(loc.x, loc.z, 20000.0f, std::make_shared<PositionStateMsg>(m_playerGoId));
+                }
             }
         }
     }

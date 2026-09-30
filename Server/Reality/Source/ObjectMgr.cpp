@@ -73,8 +73,48 @@ uint32 ObjectMgr::constructPlayer( GameClient* requester, uint64 charUID, bool i
 	return theNewObjectId;
 }
 
+uint32 ObjectMgr::getNewObjectId()
+{
+	const uint32 kLast = 0xFFF0;
+	std::lock_guard<std::mutex> idLock(m_idAllocMutex);
+	uint32 now = getMSTime();
+	for (uint32 tries = 0; tries < (kLast - OBJECTMANAGER_STARTINGOBJECTID); ++tries)
+	{
+		uint32 id = m_currFreeObjectId.fetch_add(1);
+		if (id < OBJECTMANAGER_STARTINGOBJECTID || id > kLast)
+		{
+			m_currFreeObjectId = OBJECTMANAGER_STARTINGOBJECTID + 1;
+			id = OBJECTMANAGER_STARTINGOBJECTID;
+		}
+		{
+			std::shared_lock<std::shared_mutex> lock(m_objMutex);
+			if (m_objects.find(id) != m_objects.end())
+				continue;
+		}
+		map<uint32,uint32>::iterator freed = m_recentlyFreedIds.find(id);
+		if (freed != m_recentlyFreedIds.end())
+		{
+			if (now - freed->second < 60000)
+				continue;
+			m_recentlyFreedIds.erase(freed);
+		}
+		return id;
+	}
+	ERROR_LOG("ObjectMgr: no free object id in the 16-bit view range; reusing the oldest freed id");
+	uint32 oldest = OBJECTMANAGER_STARTINGOBJECTID;
+	uint32 oldestTime = 0xFFFFFFFF;
+	for (map<uint32,uint32>::iterator it = m_recentlyFreedIds.begin(); it != m_recentlyFreedIds.end(); ++it)
+		if (it->second < oldestTime) { oldestTime = it->second; oldest = it->first; }
+	m_recentlyFreedIds.erase(oldest);
+	return oldest;
+}
+
 void ObjectMgr::destroyObject( uint32 goId )
 {
+	{
+		std::lock_guard<std::mutex> idLock(m_idAllocMutex);
+		m_recentlyFreedIds[goId] = getMSTime();
+	}
 	std::unique_lock<std::shared_mutex> lock(m_objMutex);
 	//erase from valid objects
 	objectsMap::iterator it=m_objects.find(goId);
