@@ -1,5 +1,5 @@
 #!/bin/bash
-tset -e
+set -e
 
 echo "Tagging rollback image..."
 docker tag mxoemu-reality-server:latest mxoemu-reality-server:pre-rollback || true
