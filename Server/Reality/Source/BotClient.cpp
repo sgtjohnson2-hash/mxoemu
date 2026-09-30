@@ -478,7 +478,7 @@ void BotClient::RoamAndSwarm(float deltaSeconds)
                 loc.z = newZ;
                 me->setPosition(loc);
                 uint32 nowMs = getMSTime();
-                if (nowMs - m_lastRoamBroadcastMs >= 250) {
+                if (nowMs - m_lastRoamBroadcastMs >= 500) {
                     m_lastRoamBroadcastMs = nowMs;
                     sGame.AnnounceStateUpdateNear(loc.x, loc.z, 20000.0f, std::make_shared<PositionStateMsg>(m_playerGoId));
                 }

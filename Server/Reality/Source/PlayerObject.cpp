@@ -448,7 +448,7 @@ void PlayerObject::PopulateWorld()
 	size_t spawnedCount = 0;
 	for (GameClient* client : nearbyClients)
 	{
-		if (spawnedCount >= 5) break;
+		if (spawnedCount >= 15) break;
 		if (!client || client == &m_parent) continue;
 		uint32 otherGoId = client->GetPlayerGoId();
 		if (otherGoId == 0 || otherGoId == m_goId) continue;
@@ -501,6 +501,10 @@ void PlayerObject::UpdateAoIStreaming()
 
 		if (!knowsEntity(otherGoId))
 		{
+			{
+				std::lock_guard<std::mutex> l(m_knownMutex);
+				if (m_knownEntities.size() >= 30) break;
+			}
 			PlayerObject* otherObj = sObjMgr.getGOPtrSafe(otherGoId);
 			if (otherObj && !otherObj->isDead())
 			{

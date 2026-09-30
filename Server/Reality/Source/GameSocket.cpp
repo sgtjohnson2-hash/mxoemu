@@ -246,34 +246,67 @@ void GameSocket::BroadcastNear(float x, float z, float radius, const ByteBuffer 
 
 void GameSocket::AnnounceStateUpdate( GameClient* clFrom, msgBaseClassPtr theMsg, bool immediateOnly, GameClient::packetAckFunc callFunc )
 {
+    auto objMsg = std::dynamic_pointer_cast<ObjectUpdateMsg>(theMsg);
+    uint32 targetGoId = objMsg ? objMsg->getObjectId() : 0;
+
     if (clFrom)
     {
         auto localClients = sSpatialGrid.GetClientsNearClient(clFrom);
         for (GameClient* client : localClients)
         {
-            if (client != clFrom)
+            if (client && client != clFrom)
             {
+                PlayerObject* p = client->getPlayer();
+                if (objMsg && targetGoId != 0 && p)
+                {
+                    if (p->getGoId() != targetGoId && !p->knowsEntity(targetGoId))
+                        continue;
+                }
                 client->QueueState(theMsg, immediateOnly, callFunc);
             }
         }
     }
     else
     {
-        // Global Broadcast (e.g. system messages)
+        // Global Broadcast (e.g. system messages, or targeted updates)
         std::lock_guard<std::recursive_mutex> lock(m_clientsMutex);
         for (GClientList::iterator it=m_clients.begin();it!=m_clients.end();++it)
         {
-            it->second->QueueState(theMsg,immediateOnly,callFunc);
+            if (it->second)
+            {
+                PlayerObject* p = it->second->getPlayer();
+                if (objMsg && targetGoId != 0 && p)
+                {
+                    if (p->getGoId() != targetGoId && !p->knowsEntity(targetGoId))
+                        continue;
+                }
+                it->second->QueueState(theMsg,immediateOnly,callFunc);
+            }
         }
     }
 }
 
 void GameSocket::AnnounceStateUpdateNear(float x, float z, float radius, msgBaseClassPtr theMsg, bool immediateOnly, GameClient::packetAckFunc callFunc)
 {
-    auto localClients = sSpatialGrid.GetClientsInRadius(x, z, radius);
+    // Clamp radius to 25000.0f (250m AoI max)
+    float clampedRadius = (radius > 25000.0f) ? 25000.0f : radius;
+    auto localClients = sSpatialGrid.GetClientsInRadius(x, z, clampedRadius);
+
+    auto objMsg = std::dynamic_pointer_cast<ObjectUpdateMsg>(theMsg);
+    uint32 targetGoId = objMsg ? objMsg->getObjectId() : 0;
+
     for (GameClient* client : localClients)
     {
-        client->QueueState(theMsg, immediateOnly, callFunc);
+        if (client)
+        {
+            PlayerObject* p = client->getPlayer();
+            if (objMsg && targetGoId != 0 && p)
+            {
+                if (p->getGoId() != targetGoId && !p->knowsEntity(targetGoId))
+                    continue;
+            }
+            client->QueueState(theMsg, immediateOnly, callFunc);
+        }
     }
 }
 

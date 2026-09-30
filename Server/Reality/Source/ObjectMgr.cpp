@@ -341,9 +341,7 @@ void ObjectMgr::OpenDoor( uint32 doorId, GameClient* requester)
 		double Z = field[2].GetDouble();
 		double O = field[3].GetDouble();
 		int doorType = field[4].GetUInt16();
-		//int doorType = 1;
-
-		sGame.AnnounceStateUpdate(NULL,make_shared<DoorAnimationMsg>(doorId, viewId, X, Y, Z, O, doorType));
+		requester->QueueState(make_shared<DoorAnimationMsg>(doorId, viewId, X, Y, Z, O, doorType));
 	}
 
 }
