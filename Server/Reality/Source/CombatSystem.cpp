@@ -127,58 +127,74 @@ void CombatSystem::Update()
 	uint32 currTime = getMSTime();
 
 	for (auto it = m_interlocks.begin(); it != m_interlocks.end(); ) {
-		PlayerObject* pA = getPlayerSafe(it->goIdA);
-		PlayerObject* pB = getPlayerSafe(it->goIdB);
+		try {
+			PlayerObject* pA = getPlayerSafe(it->goIdA);
+			PlayerObject* pB = getPlayerSafe(it->goIdB);
 
-		//reap sessions whose participants vanished or died
-		bool keepAlive = (pA && pB && !pA->isDead() && !pB->isDead());
+			//reap sessions whose participants vanished or died
+			bool keepAlive = (pA && pB && !pA->isDead() && !pB->isDead());
 
-		if (keepAlive && currTime >= it->nextRoundTime) {
-			keepAlive = RunInterlockRound(*it);
+			if (keepAlive && currTime >= it->nextRoundTime) {
+				keepAlive = RunInterlockRound(*it);
 
-			// [Item 13] Bullet Time / Dilation Zones
-			float avgDilation = (pA->GetTimeDilation() + pB->GetTimeDilation()) / 2.0f;
-			if (avgDilation <= 0.1f) avgDilation = 0.1f; // Prevent infinite division
+				// [Item 13] Bullet Time / Dilation Zones
+				float avgDilation = (pA->GetTimeDilation() + pB->GetTimeDilation()) / 2.0f;
+				if (avgDilation <= 0.1f) avgDilation = 0.1f; // Prevent infinite division
 
-			it->nextRoundTime = currTime + uint32((INTERLOCK_ROUND_SECONDS * 1000.0f) / avgDilation);
-			it->roundNumber++;
-		}
-
-		if (!keepAlive) {
-			//tear the interlock UI down on both clients
-			if (pA && it->ilViewIdA) {
-				pA->getClient().QueueState(std::make_shared<DeleteViewMsg>(it->ilViewIdA));
-				sObjMgr.releaseDynamicView(&pA->getClient(), it->ilViewIdA);
+				it->nextRoundTime = currTime + uint32((INTERLOCK_ROUND_SECONDS * 1000.0f) / avgDilation);
+				it->roundNumber++;
 			}
-			if (pB && it->ilViewIdB) {
-				pB->getClient().QueueState(std::make_shared<DeleteViewMsg>(it->ilViewIdB));
-				sObjMgr.releaseDynamicView(&pB->getClient(), it->ilViewIdB);
+
+			if (!keepAlive) {
+				//tear the interlock UI down on both clients
+				if (pA && it->ilViewIdA) {
+					pA->getClient().QueueState(std::make_shared<DeleteViewMsg>(it->ilViewIdA));
+					sObjMgr.releaseDynamicView(&pA->getClient(), it->ilViewIdA);
+				}
+				if (pB && it->ilViewIdB) {
+					pB->getClient().QueueState(std::make_shared<DeleteViewMsg>(it->ilViewIdB));
+					sObjMgr.releaseDynamicView(&pB->getClient(), it->ilViewIdB);
+				}
+				if (pA) pA->leaveInterlock();
+				if (pB) pB->leaveInterlock();
+				it = m_interlocks.erase(it);
+				continue;
 			}
-			if (pA) pA->leaveInterlock();
-			if (pB) pB->leaveInterlock();
+			++it;
+		} catch (const std::exception& e) {
+			ERROR_LOG(format("Exception in interlock update for pair %1%/%2%: %3%") % it->goIdA % it->goIdB % e.what());
 			it = m_interlocks.erase(it);
-			continue;
+		} catch (...) {
+			ERROR_LOG(format("Unknown Exception in interlock update for pair %1%/%2%") % it->goIdA % it->goIdB);
+			it = m_interlocks.erase(it);
 		}
-		++it;
 	}
 
 	for (auto it = m_freefires.begin(); it != m_freefires.end(); ) {
-		bool keepAlive = true;
-		if (currTime >= it->nextShotTime) {
-			keepAlive = RunFreeFireShot(*it);
-            
-            PlayerObject* pA = getPlayerSafe(it->attackerGoId);
-            float dilation = pA ? pA->GetTimeDilation() : 1.0f;
-            if (dilation <= 0.1f) dilation = 0.1f;
-			it->nextShotTime = currTime + uint32((FREEFIRE_SHOT_SECONDS * 1000.0f) / dilation);
-		}
-		if (!keepAlive) {
-			PlayerObject* pA = getPlayerSafe(it->attackerGoId);
-			if (pA) pA->setCombatStance(false);
+		try {
+			bool keepAlive = true;
+			if (currTime >= it->nextShotTime) {
+				keepAlive = RunFreeFireShot(*it);
+				
+				PlayerObject* pA = getPlayerSafe(it->attackerGoId);
+				float dilation = pA ? pA->GetTimeDilation() : 1.0f;
+				if (dilation <= 0.1f) dilation = 0.1f;
+				it->nextShotTime = currTime + uint32((FREEFIRE_SHOT_SECONDS * 1000.0f) / dilation);
+			}
+			if (!keepAlive) {
+				PlayerObject* pA = getPlayerSafe(it->attackerGoId);
+				if (pA) pA->setCombatStance(false);
+				it = m_freefires.erase(it);
+				continue;
+			}
+			++it;
+		} catch (const std::exception& e) {
+			ERROR_LOG(format("Exception in freefire update for attacker %1%: %2%") % it->attackerGoId % e.what());
 			it = m_freefires.erase(it);
-			continue;
+		} catch (...) {
+			ERROR_LOG(format("Unknown Exception in freefire update for attacker %1%") % it->attackerGoId);
+			it = m_freefires.erase(it);
 		}
-		++it;
 	}
 
 	// Phase 3: Matrix Threat Heatmap Diffusion & Escalation Tick

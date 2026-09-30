@@ -484,7 +484,11 @@ void BotManager::Update()
                     bot->SetLastLodTick(now);
                     try {
                         bot->UpdateBotAI(botDeltaSeconds);
-                    } catch (...) {}
+                    } catch (const std::exception& e) {
+                        ERROR_LOG(format("Exception in BotClient update for bot %1%: %2%") % bot->GetPlayerGoId() % e.what());
+                    } catch (...) {
+                        ERROR_LOG(format("Unknown Exception in BotClient update for bot %1%") % bot->GetPlayerGoId());
+                    }
                 }
             }
         }
@@ -510,7 +514,11 @@ void BotManager::Update()
                     bot->SetLastLodTick(now);
                     try {
                         bot->UpdateBotAI(botDeltaSeconds);
-                    } catch (...) {}
+                    } catch (const std::exception& e) {
+                        ERROR_LOG(format("Exception in BotClient update for bot %1%: %2%") % bot->GetPlayerGoId() % e.what());
+                    } catch (...) {
+                        ERROR_LOG(format("Unknown Exception in BotClient update for bot %1%") % bot->GetPlayerGoId());
+                    }
                 }
             }
         }, 16);
