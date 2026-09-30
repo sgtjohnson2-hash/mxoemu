@@ -44,6 +44,10 @@ public:
 
     float m_deltaSeconds = 0.033f;
     uint32 m_lastRoamBroadcastMs = 0;
+    // Street-life wandering: a fixed home point (the NPC's authentic spawn) and an idle timer.
+    bool m_hasHome = false;
+    float m_homeX = 0.0f, m_homeY = 0.0f, m_homeZ = 0.0f;
+    uint32 m_idleUntilMs = 0;
     float GetDeltaSeconds() const { return m_deltaSeconds; }
     void UpdateBotAI(float deltaSeconds);
     void RoamAndSwarm(float deltaSeconds = -1.0f);

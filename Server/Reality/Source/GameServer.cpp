@@ -249,6 +249,11 @@ void GameServer::SimulationLoop()
 {
     INFO_LOG("DEBUG_TRACER: SimulationLoop started");
 	uint32 m_lastSimMs = getMSTime();
+	// The "living world" simulation engines (underworld, police, faction war squads, Frank
+	// Castle, the 10-second macro engines...) only produce chat text and short-lived NPC
+	// spawns with nothing behind them. Off by default; World.LegacySimulation = 1 restores them.
+	const bool legacySim = sConfig.GetBoolDefault("World.LegacySimulation", false);
+	INFO_LOG(format("SimulationLoop: legacy simulation engines %1%") % (legacySim ? "ON" : "OFF"));
 	while (m_runSimulation)
 	{
 		uint32 currentMs = getMSTime();
@@ -285,11 +290,13 @@ void GameServer::SimulationLoop()
 				float dt1Hz = delta1Hz / 1000.0f;
 				if (dt1Hz > 2.0f) dt1Hz = 2.0f;
 
-				sFactionWarMgr.update(delta1Hz);
+				if (legacySim) sFactionWarMgr.update(delta1Hz);
 				sAdaptiveMusicSystem.update(currentMs);
 				sWeatherSys.Update(currentMs);
-				sVehicleSys.Tick(currentMs);
+				if (legacySim) sVehicleSys.Tick(currentMs);
 
+				if (legacySim)
+				{
 				// Underworld & Syndicate Ecology
 				sCityLifeMgr.Update(delta1Hz);
 				sMafiaMgr.Update(delta1Hz);
@@ -303,6 +310,7 @@ void GameServer::SimulationLoop()
 				sCastleAgentCombatEngine.Update(dt1Hz);
 				sCastlePvPKarmaEngine.Update(dt1Hz);
 				sCastleUnderworldAssaultEngine.Update(dt1Hz);
+				}
 
 				// Throttled background bot network queue flush
 				sObjMgr.ForEachGO([](PlayerObject* po) {
@@ -315,7 +323,7 @@ void GameServer::SimulationLoop()
 
 			// Tier 4: Macro Systems (0.1Hz / ~10,000ms) - Physics, Logistics, Splats & Quantum Engines
 			static uint32 last10sSimMs = 0;
-			if (currentMs - last10sSimMs >= 10000)
+			if (legacySim && currentMs - last10sSimMs >= 10000)
 			{
 				uint32 delta10s = currentMs - last10sSimMs;
 				last10sSimMs = currentMs;
@@ -354,7 +362,7 @@ void GameServer::SimulationLoop()
 
 			// The Anomaly Event (Phase 50)
 			static uint32 lastAnomalyCheckMs = 0;
-			if (currentMs - lastAnomalyCheckMs > 3600000) { // Every 1 hour
+			if (legacySim && currentMs - lastAnomalyCheckMs > 3600000) { // Every 1 hour
 				lastAnomalyCheckMs = currentMs;
 				if (rand() % 100 < 5) { // 5% chance
 					std::vector<uint32> validPlayers;
@@ -374,7 +382,7 @@ void GameServer::SimulationLoop()
 
 			// Epoch XII: Periodic Reality Reset Saturation Checks & Multi-Epoch Shard State Synchronization
 			static uint32 lastResetCheckMs = 0;
-			if (currentMs - lastResetCheckMs >= 5000) { // Every 5 seconds
+			if (legacySim && currentMs - lastResetCheckMs >= 5000) { // Every 5 seconds
 				lastResetCheckMs = currentMs;
 				if (sTemporalAnomalyEngine.CheckRealityResetThreshold()) {
 					sTemporalAnomalyEngine.TriggerRealityResetCycle("Architectural Convergence: Critical Saturation Exceeded");

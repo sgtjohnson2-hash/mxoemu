@@ -28,6 +28,7 @@
 #include <cmath>
 #include <fstream>
 #include <typeinfo>
+#include "Config.h"
 
 QTable BotClient::s_qTable;
 
@@ -176,6 +177,32 @@ void BotClient::UpdateBotAI(float deltaSeconds)
         return; // Skip AI evaluation while stunned
     }
     
+
+    // Street-life mode (default): fight back when engaged, otherwise stroll around home.
+    // The legacy ecology/viral/sentient/active-inference pipeline below mostly generated
+    // chat text and short-lived spawns; it only runs with World.LegacySimulation = 1.
+    static const bool s_legacySim = sConfig.GetBoolDefault("World.LegacySimulation", false);
+    if (!s_legacySim)
+    {
+        if (m_targetGoId != 0)
+        {
+            PlayerObject* target = BotGetPlayer(m_targetGoId);
+            if (target && !target->isDead() && float(me->getPosition().Distance(target->getPosition())) < 4000.0f)
+            {
+                m_pathWaypoints.clear();
+                ActionEngageTarget engage;
+                if (engage.Tick(this) == NodeStatus::SUCCESS)
+                {
+                    ActionCombatCycle cycle;
+                    cycle.Tick(this);
+                }
+                return;
+            }
+            m_targetGoId = 0;
+        }
+        RoamAndSwarm(deltaSeconds);
+        return;
+    }
 
     // 1. Civilian Behavior Branch - Pedestrian Ecology & Circadian Routines
     if (me->getFactionName() == "Civilian") {
@@ -365,13 +392,8 @@ void BotClient::UpdateBotAI(float deltaSeconds)
         }
     } else if (optimal.name == "MISSION") {
         // Bots "on a mission" still walk the streets so players can see them
+        // NPCs do not run player missions; they go about their street life.
         RoamAndSwarm(deltaSeconds);
-        if (currentTime >= m_nextActionTime) {
-            uint32 randomMissionId = 1 + (rand() % 3);
-            sMissionSys.AssignMission(me, randomMissionId);
-            sMissionSys.AdvanceObjective(me, ObjectiveCommand::TALK, 0);
-            m_nextActionTime = currentTime + 10000;
-        }
     }
 
     // Periodic Theory of Mind cache eviction for inactive/stale targets
@@ -397,14 +419,30 @@ void BotClient::RoamAndSwarm(float deltaSeconds)
     PlayerObject* me = BotGetPlayer(m_playerGoId);
     if (!me || me->isDead()) return;
 
+    uint32 nowMs = getMSTime();
+    if (!m_hasHome)
+    {
+        LocationVector h = me->getPosition();
+        m_homeX = (float)h.x; m_homeY = (float)h.y; m_homeZ = (float)h.z; m_hasHome = true;
+    }
     if (m_pathWaypoints.empty() || m_currentWaypointIndex >= m_pathWaypoints.size())
     {
-        // Pick a random location 3-15 m away (world units are centimetres)
-        LocationVector loc = me->getPosition();
+        // Arrived (or no path yet): stand for a while like a person would, then stroll to a
+        // new spot within 12 m of home. Keeps each NPC on its own street corner instead of
+        // drifting across the city or piling up at the hardline.
+        if (m_idleUntilMs == 0)
+        {
+            m_idleUntilMs = nowMs + 4000 + (rand() % 10000);
+            return;
+        }
+        if (nowMs < m_idleUntilMs)
+            return;
+        m_idleUntilMs = 0;
         float angle = static_cast<float>(rand() % 360) * 3.14159f / 180.0f;
-        float distance = 300.0f + static_cast<float>(rand() % 1200);
-        
-        MoveTo(loc.x + std::cos(angle) * distance, loc.y, loc.z + std::sin(angle) * distance);
+        float distance = 200.0f + static_cast<float>(rand() % 1000);
+        MoveTo(m_homeX + std::cos(angle) * distance, m_homeY, m_homeZ + std::sin(angle) * distance);
+        if (m_pathWaypoints.empty())
+            return;
     }
 
     if (m_currentWaypointIndex < m_pathWaypoints.size())
@@ -418,6 +456,8 @@ void BotClient::RoamAndSwarm(float deltaSeconds)
         
         if (dist < 30.0f) {
             m_currentWaypointIndex++;
+            if (m_currentWaypointIndex >= (int)m_pathWaypoints.size())
+                sGame.AnnounceStateUpdateNear(loc.x, loc.z, 20000.0f, std::make_shared<PositionStateMsg>(m_playerGoId));
         } else {
             dist = std::max(0.01f, dist); // Prevent division by zero
 

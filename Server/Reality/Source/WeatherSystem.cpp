@@ -212,9 +212,8 @@ void WeatherSystem::UpdateSkybox(uint32 currentMs, float greenTint)
     m_skyboxGreenTint = std::clamp(greenTint, 0.0f, 1.0f);
 
     std::string skyboxMsg = (format("{c:00FF00}[Environment] Skybox tint adjusted to %1%{/c}") % m_skyboxGreenTint).str();
-    sObjMgr.ForEachHumanPlayer([&skyboxMsg](PlayerObject* p) {
-        p->getClient().QueueCommand(std::make_shared<SystemChatMsg>(skyboxMsg));
-    });
+    // The client sky is not driven by this value; the chat line was noise.
+    DEBUG_LOG(skyboxMsg);
 }
 
 void WeatherSystem::TriggerGlitchAnomaly(float intensity, uint32 durationMs)
