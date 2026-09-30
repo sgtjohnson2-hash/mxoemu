@@ -76,9 +76,41 @@ public:
 
 	typedef boost::function<void ()> packetAckFunc;
 
+	// Only send per-object updates (position, state, emote, animation) for objects this
+	// client has been told to spawn. Bots anywhere within 200 m broadcast updates, but the
+	// area-of-interest streamer spawns only a subset; the 7.6005 client logged thousands of
+	// "view not found" errors per session and ran out of memory in playeranimation.cpp.
+	bool PassesInterestGate(const msgBaseClassPtr& msg)
+	{
+		PlayerObject* me = m_playerObject;
+		if (me == NULL)
+			return true;
+		shared_ptr<ObjectUpdateMsg> upd = dynamic_pointer_cast<ObjectUpdateMsg>(msg);
+		if (upd == NULL)
+			return true;
+		const uint32 objId = upd->getObjectId();
+		if (objId == m_playerGoId)
+			return true;
+		if (dynamic_pointer_cast<PlayerSpawnMsg>(msg) != NULL)
+		{
+			me->noteEntitySpawned(objId);
+			return true;
+		}
+		if (dynamic_pointer_cast<DeletePlayerMsg>(msg) != NULL)
+		{
+			me->noteEntityDeleted(objId);
+			return true;
+		}
+		if (dynamic_pointer_cast<PositionStateMsg>(msg) != NULL || dynamic_pointer_cast<StateUpdateMsg>(msg) != NULL ||
+			dynamic_pointer_cast<EmoteMsg>(msg) != NULL || dynamic_pointer_cast<AnimationStateMsg>(msg) != NULL)
+			return me->knowsEntity(objId);
+		return true;
+	}
+
 	void QueueState(msgBaseClassPtr theData,bool immediateOnly=false,packetAckFunc callFunc=0)
 	{
 		if (isBot() && !g_sniffPackets) return;
+		if (!PassesInterestGate(theData)) return;
 		std::lock_guard<std::recursive_mutex> lock(m_queueMutex);
 		msgBaseClassPtr &realPtr = theData;
 		shared_ptr<ObjectUpdateMsg> amIObjectUpdate = dynamic_pointer_cast<ObjectUpdateMsg>(realPtr);

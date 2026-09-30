@@ -364,6 +364,13 @@ private:
     uint64 m_timeDilationExpires = 0;
 
     std::unordered_set<uint32> m_knownEntities;
+    mutable std::mutex m_knownMutex;
+public:
+    // Area-of-interest bookkeeping shared with GameClient::QueueState: object updates are
+    // only sent for objects this client has been told to spawn.
+    void noteEntitySpawned(uint32 goId) { std::lock_guard<std::mutex> l(m_knownMutex); m_knownEntities.insert(goId); }
+    void noteEntityDeleted(uint32 goId) { std::lock_guard<std::mutex> l(m_knownMutex); m_knownEntities.erase(goId); }
+    bool knowsEntity(uint32 goId) const { std::lock_guard<std::mutex> l(m_knownMutex); return m_knownEntities.count(goId) > 0; }
     uint32 m_lastAoIUpdateMs = 0;
 };
 

@@ -456,7 +456,7 @@ void PlayerObject::PopulateWorld()
 		PlayerObject* theOtherObject = sObjMgr.getGOPtrSafe(otherGoId);
 		if (theOtherObject != NULL && theOtherObject != this && !theOtherObject->isDead())
 		{
-			m_knownEntities.insert(otherGoId);
+			noteEntitySpawned(otherGoId);
 			vector<msgBaseClassPtr> objectsPackets = theOtherObject->getCurrentStatePackets();
 			for (vector<msgBaseClassPtr>::iterator it2=objectsPackets.begin();it2!=objectsPackets.end();++it2)
 			{
@@ -499,12 +499,12 @@ void PlayerObject::UpdateAoIStreaming()
 		uint32 otherGoId = client->GetPlayerGoId();
 		if (otherGoId == 0 || otherGoId == m_goId) continue;
 
-		if (m_knownEntities.find(otherGoId) == m_knownEntities.end())
+		if (!knowsEntity(otherGoId))
 		{
 			PlayerObject* otherObj = sObjMgr.getGOPtrSafe(otherGoId);
 			if (otherObj && !otherObj->isDead())
 			{
-				m_knownEntities.insert(otherGoId);
+				noteEntitySpawned(otherGoId);
 				vector<msgBaseClassPtr> statePackets = otherObj->getCurrentStatePackets();
 				for (const auto& pkt : statePackets)
 				{
@@ -515,33 +515,19 @@ void PlayerObject::UpdateAoIStreaming()
 	}
 
 	// 2. Stream out (cull) entities leaving 300m or dead
-	for (auto it = m_knownEntities.begin(); it != m_knownEntities.end(); )
+	std::vector<uint32> known;
 	{
-		uint32 knownGoId = *it;
+		std::lock_guard<std::mutex> l(m_knownMutex);
+		known.assign(m_knownEntities.begin(), m_knownEntities.end());
+	}
+	for (uint32 knownGoId : known)
+	{
 		PlayerObject* otherObj = sObjMgr.getGOPtrSafe(knownGoId);
-		bool cull = false;
-
-		if (!otherObj || otherObj->isDead())
-		{
-			cull = true;
-		}
-		else if (m_pos.Distance2DSq(otherObj->getPosition()) > STREAM_OUT_RADIUS_SQ)
-		{
-			cull = true;
-		}
-
+		bool cull = (!otherObj || otherObj->isDead() || m_pos.Distance2DSq(otherObj->getPosition()) > STREAM_OUT_RADIUS_SQ);
 		if (cull)
 		{
-			try
-			{
-				m_parent.QueueState(make_shared<DeletePlayerMsg>(knownGoId));
-			}
-			catch (...) {}
-			it = m_knownEntities.erase(it);
-		}
-		else
-		{
-			++it;
+			noteEntityDeleted(knownGoId);
+			try { m_parent.QueueState(make_shared<DeletePlayerMsg>(knownGoId)); } catch (...) {}
 		}
 	}
 }
