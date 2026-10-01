@@ -398,13 +398,14 @@ void PlayerObject::RPC_HandleRangeCombatRequest( ByteBuffer &srcCmd )
 //0x42 - combat tactic change
 void PlayerObject::RPC_HandleChangeTactic( ByteBuffer &srcCmd )
 {
-	uint8 newTactic = srcCmd.read<uint8>();
+	uint8 rawClientTactic = srcCmd.read<uint8>();
+	uint8 serverTactic = TacticAdapter::ClientToServerTactic(rawClientTactic);
 
-	DEBUG_LOG(format("(%1%) %2%:%3% changing combat tactic to %4%")
-		% m_parent.Address() % m_handle % m_goId % uint32(newTactic));
+	DEBUG_LOG(format("(%1%) %2%:%3% changing combat tactic raw=%4% -> server=%5%")
+		% m_parent.Address() % m_handle % m_goId % uint32(rawClientTactic) % uint32(serverTactic));
 
-	m_tactic = newTactic;
-	sCombatSys.SetTactic(m_goId,newTactic);
+	m_tactic = serverTactic;
+	sCombatSys.SetTactic(m_goId, serverTactic);
 }
 
 //0x44 - leave combat / withdraw from interlock

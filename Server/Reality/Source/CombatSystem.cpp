@@ -290,10 +290,17 @@ bool CombatSystem::RequestInterlock(uint32 attackerGoId, uint32 targetGoId)
 
 				//the pairing references the opponent's view as this client sees it
 				uint16 otherViewId = sObjMgr.getViewForGO(&sides[i].self->getClient(), sides[i].other->getGoId());
-				uint32 otherViewWithSpawnId = uint32(otherViewId) | (uint32(2) << 16);
-
-				sides[i].self->getClient().QueueState(std::make_shared<InterlockInitMsg>(
-					ilViewId, ilPos, otherViewWithSpawnId, uint16(2)));
+				if (otherViewId != 0)
+				{
+					uint32 otherViewWithSpawnId = uint32(otherViewId) | (uint32(2) << 16);
+					sides[i].self->getClient().QueueState(std::make_shared<InterlockInitMsg>(
+						ilViewId, ilPos, otherViewWithSpawnId, uint16(2)));
+				}
+				else
+				{
+					WARNING_LOG(format("Opponent GO %1% has no view on client %2%, skipping interlock pairing packet")
+						% sides[i].other->getGoId() % sides[i].self->getGoId());
+				}
 			}
 			catch (ObjectMgr::NoMoreFreeViews) { WARNING_LOG("No free views for interlock handler spawn"); }
 			catch (ObjectMgr::ObjectNotAvailable) {}
@@ -567,11 +574,23 @@ CombatSystem::AttackResult CombatSystem::ResolveAttack(PlayerObject* attacker, P
         return res; // Agent Dodge
     }
     
-    // [Item 5] Adaptive Combat Learning
+    // Tiered Bot Combat AI: Adaptive learning for Elite Agents / Bosses, uniform random for street thugs
     if (target->getClient().isBot()) {
-        uint8 newTactic = TACTIC_NORMAL;
-        if (attackerTactic == TACTIC_NORMAL) newTactic = TACTIC_RETALIATE;
-        else if (attackerTactic == TACTIC_RETALIATE) newTactic = TACTIC_DEFENSE;
+        uint8 newTactic = TACTIC_POWER;
+        bool isElite = (target->getHandle().find("Agent") != std::string::npos || target->getLevel() >= 30);
+        if (isElite) {
+            switch (attackerTactic) {
+                case TACTIC_POWER:     newTactic = TACTIC_RETALIATE; break; // Grab counters Power windup
+                case TACTIC_SPEED:     newTactic = TACTIC_POWER;     break; // Power crushes Speed
+                case TACTIC_RETALIATE: newTactic = TACTIC_SPEED;     break; // Speed interrupts Grab
+                case TACTIC_DEFENSE:   newTactic = TACTIC_RETALIATE; break; // Grab breaks Guard
+                default:               newTactic = (rand() % 2 == 0) ? TACTIC_POWER : TACTIC_SPEED; break;
+            }
+        } else {
+            // Street thugs choose randomly among the 4 core martial arts tactics
+            const uint8 thugTactics[] = { TACTIC_POWER, TACTIC_SPEED, TACTIC_RETALIATE, TACTIC_DEFENSE };
+            newTactic = thugTactics[rand() % 4];
+        }
         SetTactic(target->getGoId(), newTactic);
     }
 
