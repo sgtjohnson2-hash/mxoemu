@@ -2,6 +2,7 @@
 **/build/
 **/bin/
 **/obj/
+Server/Reality/Archive/
 **/Debug/
 **/Release/
 **/x64/

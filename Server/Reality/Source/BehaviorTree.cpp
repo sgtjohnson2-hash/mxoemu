@@ -1,4 +1,4 @@
-#include "Common.h"
+﻿#include "Common.h"
 #include "BehaviorTree.h"
 #include "BotClient.h"
 #include "BotManager.h"
@@ -118,7 +118,7 @@ NodeStatus ActionFindTarget::Tick(BotClient* bot)
     if (!me) return NodeStatus::FAILURE;
     if (me->getFactionName() == "Civilian") return NodeStatus::FAILURE;
 
-    std::vector<GameClient*> localClients = sSpatialGrid.GetClientsInRadius(me->getPosition().x, me->getPosition().z);
+    std::vector<GameClient*> localClients = sSpatialGrid.GetClientsInRadius(me->getPosition().x, me->getPosition().z, 5000.0f);
     for (GameClient* client : localClients)
     {
         if (client == bot || client->GetPlayerGoId() == bot->GetPlayerGoId()) continue;
@@ -130,25 +130,34 @@ NodeStatus ActionFindTarget::Tick(BotClient* bot)
             if (sStatusEffectManager.HasEffect(potentialTarget->getGoId(), EFFECT_FACTION_MASK)) continue; // Item 25: Simulacra Masking
             
             std::string fName = potentialTarget->getFactionName();
-            if (fName == "Civilian") continue; // Never ambiently target neutral civilians!
+            if (fName == "Civilian" || potentialTarget->getHandle().find("Civilian") != std::string::npos) continue; // Never ambiently target neutral civilians!
 
             // Enforce mxoFaction checks so we don't attack our own
             mxoFaction targetFaction = FACTION_ZION;
             if (fName == "Machines") targetFaction = FACTION_MACHINES;
             else if (fName == "Merovingian") targetFaction = FACTION_MEROVINGIAN;
 
-            if (targetFaction == bot->GetFaction()) continue; // Skip same faction
+            // Agent Smith clones / Viral Assimilated hosts are hostile to EVERYONE
+            bool targetIsSmith = (potentialTarget->getHandle().find("Smith") != std::string::npos || sSentientCharacters.IsHijackedHost(potentialTarget->getGoId()));
+            bool botIsSmith = (me->getHandle().find("Smith") != std::string::npos || sSentientCharacters.IsHijackedHost(me->getGoId()));
 
-            // Sensory perception: dual-cone vision + acoustic awareness check
+            if (!targetIsSmith && !botIsSmith && targetFaction == bot->GetFaction()) continue; // Skip same faction unless virus
+
+            // Sensory perception: dual-cone vision + close acoustic awareness
             LocationVector myPos = me->getPosition();
             LocationVector targetPos = potentialTarget->getPosition();
             float dist = sqrt(pow(myPos.x - targetPos.x, 2) + pow(myPos.y - targetPos.y, 2) + pow(myPos.z - targetPos.z, 2));
             
-            float visionConfidence = 0.0f;
-            bool canSee = sSensoryPerception.CheckVision(me, potentialTarget, false, visionConfidence);
+            // 360-degree close acoustic awareness: footsteps / presence within 8m (800 units)
+            bool detected = (dist <= 800.0f);
+            if (!detected)
+            {
+                float visionConfidence = 0.0f;
+                detected = sSensoryPerception.CheckVision(me, potentialTarget, false, visionConfidence);
+            }
             BotAwarenessState awareness = sSensoryPerception.GetAwareness(bot->GetPlayerGoId());
 
-            if (canSee || (awareness.stage >= AWARENESS_ALERTED && awareness.alertSourceGoId == client->GetPlayerGoId()))
+            if (detected || (awareness.stage >= AWARENESS_ALERTED && awareness.alertSourceGoId == client->GetPlayerGoId()))
             {
                 sSensoryPerception.SetAwareness(bot->GetPlayerGoId(), AWARENESS_IN_COMBAT, client->GetPlayerGoId());
                 bot->SetTargetGoId(client->GetPlayerGoId());
@@ -158,11 +167,13 @@ NodeStatus ActionFindTarget::Tick(BotClient* bot)
                 me->setPosition(myPos);
                 sGame.AnnounceStateUpdateNear(myPos.x, myPos.z, 20000.0f, make_shared<RotationStateMsg>(bot->GetPlayerGoId(), myPos.getMxoRot()));
                 
-                // Map BotPersonality to Local Chat Output
+                // Map BotPersonality to Local Proximity Chat Challenge
                 if ((rand() % 100) / 100.0f < bot->GetPersonality().talkativeness) {
                     std::string shout = "Target locked!";
                     mxoFaction myFaction = bot->GetFaction();
-                    if (myFaction == FACTION_ZION) {
+                    if (botIsSmith) {
+                        shout = "Agent Smith: It is inevitable. Your code will be rewritten.";
+                    } else if (myFaction == FACTION_ZION) {
                         const char* zionShouts[] = {"Watch your six, redpills!", "Taking them down!", "For Zion!"};
                         shout = zionShouts[rand() % 3];
                     } else if (myFaction == FACTION_MACHINES) {
@@ -174,7 +185,6 @@ NodeStatus ActionFindTarget::Tick(BotClient* bot)
                     }
                     bot->Say(shout);
                 }
-                bot->Emote(0); // Emote before combat
                 return NodeStatus::SUCCESS;
             }
         }
@@ -202,7 +212,7 @@ NodeStatus ActionHealAlly::Tick(BotClient* bot)
 
     if (!hasHeal) return NodeStatus::FAILURE;
 
-    std::vector<GameClient*> localClients = sSpatialGrid.GetClientsInRadius(me->getPosition().x, me->getPosition().z);
+    std::vector<GameClient*> localClients = sSpatialGrid.GetClientsInRadius(me->getPosition().x, me->getPosition().z, 2500.0f);
     for (GameClient* client : localClients)
     {
         if (client->GetPlayerGoId() == bot->GetPlayerGoId()) continue;
@@ -242,7 +252,7 @@ NodeStatus ActionFormCrew::Tick(BotClient* bot)
     PlayerObject* me = BotGetPlayer(bot->GetPlayerGoId());
     if (!me) return NodeStatus::FAILURE;
 
-    std::vector<GameClient*> localClients = sSpatialGrid.GetClientsInRadius(me->getPosition().x, me->getPosition().z);
+    std::vector<GameClient*> localClients = sSpatialGrid.GetClientsInRadius(me->getPosition().x, me->getPosition().z, 2500.0f);
     for (GameClient* client : localClients)
     {
         if (client->GetPlayerGoId() == bot->GetPlayerGoId()) continue;
@@ -508,6 +518,7 @@ NodeStatus ActionEngageTarget::Tick(BotClient* bot)
     if (!me || !target || target->isDead())
     {
         bot->SetTargetGoId(0);
+        bot->SetLocomotionAnimation(0);
         return NodeStatus::FAILURE;
     }
 
@@ -517,6 +528,8 @@ NodeStatus ActionEngageTarget::Tick(BotClient* bot)
 
     if (dist > 250.0f) //melee engage distance
     {
+        bot->SetLocomotionAnimation(30); // 30 = DetectDiff_RunF (Combat Sprint)
+
         // Move towards target scaled by deltaSeconds for uniform movement across LOD tiers
         float dx = targetPos.x - myPos.x;
         float dz = targetPos.z - myPos.z;
@@ -549,7 +562,8 @@ NodeStatus ActionEngageTarget::Tick(BotClient* bot)
         return NodeStatus::RUNNING; // Still moving
     }
     
-    // Within range: squarely face target
+    // Within range: squarely face target and stop sprint
+    bot->SetLocomotionAnimation(0);
     myPos.rot = myPos.CalcAngTo(targetPos);
     me->setPosition(myPos);
     sGame.AnnounceStateUpdateNear(myPos.x, myPos.z, 20000.0f, make_shared<RotationStateMsg>(bot->GetPlayerGoId(), myPos.getMxoRot()));
@@ -808,7 +822,7 @@ NodeStatus ActionPartyInvite::Tick(BotClient* bot)
         PlayerObject* me = BotGetPlayer(bot->GetPlayerGoId());
         if (!me) return NodeStatus::FAILURE;
 
-        auto nearbyClients = sSpatialGrid.GetClientsInRadius(me->getPosition().x, me->getPosition().z);
+        auto nearbyClients = sSpatialGrid.GetClientsInRadius(me->getPosition().x, me->getPosition().z, 2500.0f);
         for (GameClient* client : nearbyClients)
         {
             if (client == bot) continue;

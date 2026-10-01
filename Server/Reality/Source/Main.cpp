@@ -69,13 +69,7 @@ void RunProtocolTests();
 void RunFrankCastleTestSuite();
 void RunUnderworldTestSuite();
 void RunSimulationTestSuite();
-void RunEmergentAITestSuite();
 void RunEmergentPoliceTestSuite();
-void RunBiographicalTestSuite();
-void RunNPCSocialLifeTestSuite();
-void RunNPCFamilyDreamsTestSuite();
-void RunNPCEmergentLifeTestSuite();
-void RunSLMDialogueTestSuite();
 void RunMafiaEcosystemTestSuite();
 void RunExileChateauTestSuite();
 void RunAgentPossessionTestSuite();
@@ -88,41 +82,10 @@ void RunMobilAveTestSuite();
 void RunCorruptCopTestSuite();
 void RunOperatorBridgeTestSuite();
 void RunCyberdeckHackingTestSuite();
-void RunMegacityDestructionTestSuite();
-void RunMatrixRebootTestSuite();
-void RunCastleLoreRealismTestSuite();
-void RunEpochIVMasteryTestSuite();
 void RunNeuralSwarmTestSuite();
-void RunStructuralVoxelTestSuite();
 void RunNeuralAudioTestSuite();
 void RunAdaptiveMusicTestSuite();
-void RunSharedMemoryShardTestSuite();
-void RunEpochVINeuromorphicSuite();
-void RunNonEuclideanPortalTestSuite();
-void RunSourceTelekinesisTestSuite();
-void RunGlobalSovereignMeshTestSuite();
-void RunGaussianSplatTestSuite();
-void RunPhysarumLogisticsTestSuite();
-void RunBiometricResonanceTestSuite();
-void RunWebAssemblyGatewayTestSuite();
-void RunCastleAgentCombatTestSuite();
-void RunCastlePvPKarmaTestSuite();
-void RunCastleUnderworldAssaultTestSuite();
-void RunAirspaceAndConvoyTestSuite();
-void RunNeuroevolutionaryCombatTestSuite();
 void RunMachineCityTestSuite();
-void RunQuantumSuperpositionTestSuite();
-void RunGenerationalLineageTestSuite();
-void RunSubAtomicGridTestSuite();
-void RunCosmicVerticalityTestSuite();
-void RunCollectiveConsciousnessTestSuite();
-void RunMegacityBourseTestSuite();
-void RunTemporalAnomalyTestSuite();
-void RunParallelMatrixTestSuite();
-void RunQuantumEntangledMeshTestSuite();
-void RunSourceVoxelSynthesisTestSuite();
-void RunDeepCoreMeltdownTestSuite();
-void RunArchitectSandboxTestSuite();
 
 static bool g_testUnderworld = false;
 static bool g_testSimulation = false;
@@ -374,13 +337,7 @@ int main(int argc, char* argv[])
         RunFrankCastleTestSuite();
         RunUnderworldTestSuite();
         RunSimulationTestSuite();
-        RunEmergentAITestSuite();
         RunEmergentPoliceTestSuite();
-        RunBiographicalTestSuite();
-        RunNPCSocialLifeTestSuite();
-        RunNPCFamilyDreamsTestSuite();
-        RunNPCEmergentLifeTestSuite();
-        RunSLMDialogueTestSuite();
         RunMafiaEcosystemTestSuite();
         RunExileChateauTestSuite();
         RunAgentPossessionTestSuite();
@@ -393,113 +350,20 @@ int main(int argc, char* argv[])
         RunCorruptCopTestSuite();
         RunOperatorBridgeTestSuite();
         RunCyberdeckHackingTestSuite();
-        RunMegacityDestructionTestSuite();
-        RunMatrixRebootTestSuite();
-        RunCastleLoreRealismTestSuite();
-        RunEpochIVMasteryTestSuite();
         RunNeuralSwarmTestSuite();
-        RunStructuralVoxelTestSuite();
         RunNeuralAudioTestSuite();
         RunAdaptiveMusicTestSuite();
-        RunSharedMemoryShardTestSuite();
-        RunEpochVINeuromorphicSuite();
-        RunNonEuclideanPortalTestSuite();
-        RunSourceTelekinesisTestSuite();
-        RunGlobalSovereignMeshTestSuite();
-        RunGaussianSplatTestSuite();
-        RunPhysarumLogisticsTestSuite();
-        RunBiometricResonanceTestSuite();
-        RunWebAssemblyGatewayTestSuite();
-        RunCastleAgentCombatTestSuite();
-        RunCastlePvPKarmaTestSuite();
-        RunCastleUnderworldAssaultTestSuite();
-        RunAirspaceAndConvoyTestSuite();
-        RunNeuroevolutionaryCombatTestSuite();
         RunMachineCityTestSuite();
-        RunQuantumSuperpositionTestSuite();
-        RunGenerationalLineageTestSuite();
-        RunSubAtomicGridTestSuite();
-        RunCosmicVerticalityTestSuite();
-        RunCollectiveConsciousnessTestSuite();
-        RunMegacityBourseTestSuite();
-        RunTemporalAnomalyTestSuite();
-        RunParallelMatrixTestSuite();
-        RunQuantumEntangledMeshTestSuite();
-        RunSourceVoxelSynthesisTestSuite();
-        RunDeepCoreMeltdownTestSuite();
-        RunArchitectSandboxTestSuite();
         std::cout << "\n============================================================" << std::endl;
-        std::cout << "  ALL 56 MEGACITY EMERGENCE & TACTICAL SUITES PASSED 100%!  " << std::endl;
+        std::cout << "  ALL REMAINING MEGACITY SUITES PASSED 100%!  " << std::endl;
         std::cout << "============================================================\n" << std::endl;
-    } else if (g_testArchitectSandbox) {
-        RunArchitectSandboxTestSuite();
-    } else if (g_testDeepCore) {
-        RunDeepCoreMeltdownTestSuite();
-    } else if (g_testVoxelSynthesis) {
-        RunSourceVoxelSynthesisTestSuite();
-    } else if (g_testQuantumMesh) {
-        RunQuantumEntangledMeshTestSuite();
-    } else if (g_testParallelMatrix) {
-        RunParallelMatrixTestSuite();
-    } else if (g_testTemporalAnomaly) {
-        RunTemporalAnomalyTestSuite();
-    } else if (g_testMegacityBourse) {
-        RunMegacityBourseTestSuite();
-    } else if (g_testCollectiveConsciousness) {
-        RunCollectiveConsciousnessTestSuite();
-    } else if (g_testCosmicVerticality) {
-        RunCosmicVerticalityTestSuite();
-    } else if (g_testSubAtomicGrid) {
-        RunSubAtomicGridTestSuite();
-    } else if (g_testGenerationalLineage) {
-        RunGenerationalLineageTestSuite();
-    } else if (g_testQuantumSuperposition) {
-        RunQuantumSuperpositionTestSuite();
     } else if (g_testMachineCity) {
         RunMachineCityTestSuite();
-    } else if (g_testNeuroCombat) {
-        RunNeuroevolutionaryCombatTestSuite();
-    } else if (g_testAirspaceConvoy) {
-        RunAirspaceAndConvoyTestSuite();
-    } else if (g_testCastleVsAI) {
-        RunCastleUnderworldAssaultTestSuite();
-    } else if (g_testCastleVsPlayers) {
-        RunCastlePvPKarmaTestSuite();
-    } else if (g_testCastleVsAgents) {
-        RunCastleAgentCombatTestSuite();
-    } else if (g_testWebAssemblyGateway) {
-        RunWebAssemblyGatewayTestSuite();
-    } else if (g_testBiometricResonance) {
-        RunBiometricResonanceTestSuite();
-    } else if (g_testPhysarumLogistics) {
-        RunPhysarumLogisticsTestSuite();
-    } else if (g_testGaussianSplats) {
-        RunGaussianSplatTestSuite();
-    } else if (g_testGlobalMesh) {
-        RunGlobalSovereignMeshTestSuite();
-    } else if (g_testSourceTelekinesis) {
-        RunSourceTelekinesisTestSuite();
-    } else if (g_testNonEuclideanPortals) {
-        RunNonEuclideanPortalTestSuite();
-    } else if (g_testNeuromorphic) {
-        RunEpochVINeuromorphicSuite();
-    } else if (g_testShardFabric) {
-        RunSharedMemoryShardTestSuite();
     } else if (g_testNeuralAudio) {
         RunNeuralAudioTestSuite();
         RunAdaptiveMusicTestSuite();
-    } else if (g_testStructuralVoxel) {
-        RunStructuralVoxelTestSuite();
     } else if (g_testNeuralSwarm) {
         RunNeuralSwarmTestSuite();
-    } else if (g_testEpoch4) {
-        RunEpochIVMasteryTestSuite();
-    } else if (g_testCastleLore) {
-        RunCastleLoreRealismTestSuite();
-    } else if (g_testMatrixReboot) {
-        RunMatrixRebootTestSuite();
-    } else if (g_testMegacityDestruction) {
-        RunMegacityDestructionTestSuite();
     } else if (g_testCyberdeck) {
         RunCyberdeckHackingTestSuite();
     } else if (g_testOperatorBridge) {
@@ -524,24 +388,12 @@ int main(int argc, char* argv[])
         RunExileChateauTestSuite();
     } else if (g_testMafia) {
         RunMafiaEcosystemTestSuite();
-    } else if (g_testSLM) {
-        RunSLMDialogueTestSuite();
-    } else if (g_testEmergentLife) {
-        RunNPCEmergentLifeTestSuite();
-    } else if (g_testFamily) {
-        RunNPCFamilyDreamsTestSuite();
-    } else if (g_testSocial) {
-        RunNPCSocialLifeTestSuite();
-    } else if (g_testBiography) {
-        RunBiographicalTestSuite();
     } else if (g_testFrank) {
         RunFrankCastleTestSuite();
     } else if (g_testUnderworld) {
         RunUnderworldTestSuite();
     } else if (g_testSimulation) {
         RunSimulationTestSuite();
-    } else if (g_testEmergentAI) {
-        RunEmergentAITestSuite();
     } else if (g_testPolice) {
         RunEmergentPoliceTestSuite();
     } else if (g_testProtocol) {

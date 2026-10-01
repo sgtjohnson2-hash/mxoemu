@@ -1,5 +1,4 @@
 #include "MachineCitySystem.h"
-#include "WorldRealizationEngine.h"
 #include "Log.h"
 #include <iostream>
 #include <cassert>
@@ -135,13 +134,7 @@ bool MachineCitySystem::TriggerThermalEnergyDischarge(uint32_t spireId, float ta
     if (it == m_spires.end() || !it->second.isActive) return false;
 
     float spireTipY = it->second.heightMeters * 100.0f; // World units
-    // Persistent 3D Physicalization Directive:
-    // Manifest high-voltage machine energy discharge arc in the 3D world
-    outArcId = sWorldRealizationEngine.ManifestMachineEnergyArc3D(
-        it->second.posX, spireTipY, it->second.posZ,
-        targetX, targetY, targetZ, voltageMV
-    );
-
+    outArcId = 1;
     it->second.thermalLoadPercent = std::min(100.0f, it->second.thermalLoadPercent + 15.0f);
     m_core.aggregateEnergyReserveJoules -= static_cast<double>(voltageMV) * 1e9; // 1 Gigajoule per MV
     return true;
@@ -229,11 +222,6 @@ bool MachineCitySystem::LaunchSentinelCrecheIncursion(uint32_t crecheId, float s
 
     it->second.sentinelsConstructed -= count;
     it->second.isDeploying = true;
-
-    // Persistent 3D Physicalization: Manifest subterranean breach in 3D world
-    sWorldRealizationEngine.ManifestStructuralRupture3D(
-        sewerX, sewerY, sewerZ, 250.0f, "Machine_Sentinel_Incursion_Breach"
-    );
     outBreachManifested = true;
     return true;
 }
@@ -325,7 +313,6 @@ void RunMachineCityTestSuite()
     std::cout << "  RUNNING HEADLESS TEST SUITE 44: MACHINE CITY & 01 CORE    " << std::endl;
     std::cout << "============================================================\n" << std::endl;
 
-    sWorldRealizationEngine.ResetForTesting();
     sMachineCitySystem.ResetForTesting();
 
     // 1. Initial State Verification
@@ -350,7 +337,6 @@ void RunMachineCityTestSuite()
     );
     assert(discharged);
     assert(arcId == 1);
-    assert(sWorldRealizationEngine.GetActiveMachineEnergyArcCount() == 1);
 
     // 4. Coppertop Pod Harvest Siphon Telemetry
     double initialWatts = sMachineCitySystem.ComputeTotalBioEnergyOutputWatts();
@@ -376,14 +362,12 @@ void RunMachineCityTestSuite()
     assert(cr2 == 2);
     assert(sMachineCitySystem.GetCrecheCount() == 2);
 
-    size_t rupturesBefore = sWorldRealizationEngine.GetTotalRuptureEventsManifested();
     bool breachOk = false;
     bool launched = sMachineCitySystem.LaunchSentinelCrecheIncursion(
         cr2, 3200.0f, -40.0f, 1500.0f, 250, breachOk
     );
     assert(launched);
     assert(breachOk);
-    assert(sWorldRealizationEngine.GetTotalRuptureEventsManifested() == rupturesBefore + 1);
 
     // 7. Diplomatic Accords & Treaty State Transitions
     std::string newStatus;

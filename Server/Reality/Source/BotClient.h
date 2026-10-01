@@ -1,4 +1,4 @@
-#ifndef MXOSIM_BOTCLIENT_H
+﻿#ifndef MXOSIM_BOTCLIENT_H
 #define MXOSIM_BOTCLIENT_H
 
 #include "GameClient.h"
@@ -44,6 +44,9 @@ public:
 
     float m_deltaSeconds = 0.033f;
     uint32 m_lastRoamBroadcastMs = 0;
+    uint8 m_currentAnimState = 0;
+    uint8 GetLocomotionAnimation() const { return m_currentAnimState; }
+    void SetLocomotionAnimation(uint8 animId);
     // Street-life wandering: a fixed home point (the NPC's authentic spawn) and an idle timer.
     bool m_hasHome = false;
     float m_homeX = 0.0f, m_homeY = 0.0f, m_homeZ = 0.0f;

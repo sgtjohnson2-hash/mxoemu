@@ -1,6 +1,5 @@
 #include "UnderworldManager.h"
 #include "FrankCastleManager.h"
-#include "EmergentAIEngine.h"
 #include "EmergentPoliceManager.h"
 #include "RadioDispatchSystem.h"
 #include "BotManager.h"
@@ -561,8 +560,6 @@ bool UnderworldManager::DecapitateRacket(uint32 racketId, bool byCastle)
             r->districtId,
             r->coordinates
         );
-
-        sEmergentAIMgr.OnFrankCastleAmbushExecuted(r->coordinates, r->name, byCastle);
     }
 
     // Surviving lieutenants of this faction escalate retaliation
@@ -946,8 +943,6 @@ uint32 UnderworldManager::SpawnEmergentCrime(EmergentCrimeType type, uint32 dist
     DEBUG_LOG(format("[Underworld] Emergent crime detected: %1% [%2%] in %3%. Perps: %4% (%5% enforcers).")
         % c.typeName % c.perpDescription % c.districtName % c.perpFactionName % c.perpCount);
 
-    sEmergentAIMgr.OnEmergentCrimeDetected(crimeId, districtId, loc, c.perpDescription);
-
     if (EmergentPoliceManager::getSingletonPtr()) {
         sEmergentPoliceMgr.OnEmergentCrimeReported(crimeId, districtId, loc, type, c.hostageCount);
     }
@@ -1168,8 +1163,6 @@ uint32 UnderworldManager::DispatchPoliceResponse(uint32 districtId, uint32 wante
         tx.timestampMs = getMSTime();
         sRadioDispatchSystem.BroadcastDispatch(tx, 30000.0f);
     }
-
-    sEmergentAIMgr.OnPolice10CodeDispatched(districtId, call.tenCode, sceneLoc);
 
     if (call.wantedLevelStars >= 3 && EmergentPoliceManager::getSingletonPtr()) {
         sEmergentPoliceMgr.DeploySWATSquad(districtId, call.callsign, sceneLoc);

@@ -1,11 +1,6 @@
 #include "CityLifeManager.h"
-#include "EmergentAIEngine.h"
 #include "WeatherSystem.h"
 #include "UnderworldManager.h"
-#include "BiographicalNarrativeEngine.h"
-#include "NPCSocialLifeEngine.h"
-#include "NPCFamilyDreamsEngine.h"
-#include "NPCEmergentLifeEngine.h"
 #include "BotManager.h"
 #include "ObjectMgr.h"
 #include "PlayerObject.h"
@@ -146,7 +141,6 @@ void CityLifeManager::Initialize()
     InitializeDefaultTrafficGrid();
     PopulateDefaultCitizens(120);
     InitializeDefaultRumors();
-    sEmergentAIMgr.Initialize();
 
     if (Has3DWorldSupport()) {
         SpawnPhysicalCitizens();
@@ -580,171 +574,6 @@ void CityLifeManager::PopulateDefaultCitizens(size_t count)
     }
 
     m_nextCitizenId = static_cast<uint32>(count + 1);
-
-    // ------------------------------------------------------------------------
-    // Seed NPC Social Life Engine Profiles & Emergent Social Network
-    // ------------------------------------------------------------------------
-    sSocialEngine.Initialize();
-    for (auto& pair : m_citizens) {
-        BluepillCitizen& c = pair.second;
-        auto& profile = sSocialEngine.GetOrCreateProfile(c.id, c.name, true);
-        if (c.preferredShopId != 0 && m_shops.find(c.preferredShopId) != m_shops.end()) {
-            profile.preferredHangouts.push_back(m_shops[c.preferredShopId].name);
-        }
-        if (!c.homeApartmentName.empty()) {
-            profile.preferredHangouts.push_back(c.homeApartmentName);
-        }
-        
-        // Initial Episodic Memories: Residence & Workplace
-        sSocialEngine.RecordEpisodicMemory(c.id, "Moving into " + c.homeApartmentName,
-            "Signed tenancy agreement and unboxed belongings under flickering fluorescents.",
-            MemoryCategory::DAILY_PLEASURE, 0.4f, 0.5f, 0, c.homeApartmentName, false);
-
-        if (!c.workplaceName.empty()) {
-            sSocialEngine.RecordEpisodicMemory(c.id, "First Day at " + c.workplaceName,
-                "Began employment shift and oriented to corporate workflow directives.",
-                MemoryCategory::WORKPLACE_ACHIEVEMENT, 0.5f, 0.6f, 0, c.workplaceName, false);
-        }
-    }
-
-    // Seed Coworker Edges for citizens assigned to the same workplace
-    for (const auto& wpPair : m_workplaces) {
-        const auto& workerIds = wpPair.second.assignedCitizenIds;
-        for (size_t i = 0; i < workerIds.size(); ++i) {
-            for (size_t j = i + 1; j < workerIds.size(); ++j) {
-                uint32 idA = workerIds[i];
-                uint32 idB = workerIds[j];
-                sSocialEngine.FormFriendship(idA, idB, FriendshipTier::Coworker);
-            }
-        }
-    }
-
-    // Seed Romance and Friendships across compatible citizens
-    for (size_t i = 1; i <= count; i += 4) {
-        uint32 idA = static_cast<uint32>(i);
-        uint32 idB = static_cast<uint32>(i + 1 <= count ? i + 1 : 1);
-        if (idA != idB && m_citizens.find(idA) != m_citizens.end() && m_citizens.find(idB) != m_citizens.end()) {
-            float compat = sSocialEngine.CalculateCompatibility(m_citizens[idA].traits, m_citizens[idB].traits);
-            if (compat >= 0.55f) {
-                sSocialEngine.InitiateFlirtation(idA, idB, compat);
-                std::string venue = (m_citizens[idA].preferredShopId != 0 && m_shops.find(m_citizens[idA].preferredShopId) != m_shops.end())
-                    ? m_shops[m_citizens[idA].preferredShopId].name : "Morrell Noodle Bar";
-                sSocialEngine.ScheduleAndExecuteDate(idA, idB, venue, "Romantic dinner date");
-                if (compat >= 0.70f) {
-                    sSocialEngine.DeepenCommitment(idA, idB);
-                }
-            } else {
-                sSocialEngine.FormFriendship(idA, idB, FriendshipTier::CasualFriend);
-            }
-        }
-    }
-
-    // ------------------------------------------------------------------------
-    // Seed NPC Families, Life Dreams & Career Ladders
-    // ------------------------------------------------------------------------
-    sFamilyDreamsEngine.Initialize();
-
-    // 1. Assign Career Tracks and Initial Positions based on Archetype
-    for (auto& pair : m_citizens) {
-        BluepillCitizen& c = pair.second;
-        CareerTrack track = CareerTrack::CorporateTech;
-        std::string jobTitle = "Office Associate";
-        JobPositionLevel level = JobPositionLevel::Level1_JuniorAssociate;
-        uint32 wage = 45;
-
-        switch (c.archetype) {
-            case CivilianArchetype::CorporateSuit:
-                track = CareerTrack::CorporateTech;
-                level = (c.id % 5 == 0) ? JobPositionLevel::Level3_SeniorLead : JobPositionLevel::Level1_JuniorAssociate;
-                jobTitle = (level == JobPositionLevel::Level3_SeniorLead) ? "Senior Systems Architect" : "Systems Analyst";
-                wage = 65;
-                break;
-            case CivilianArchetype::IndustrialBlueCollar:
-                track = CareerTrack::IndustrialManufacturing;
-                level = (c.id % 6 == 0) ? JobPositionLevel::Level3_SeniorLead : JobPositionLevel::Level1_JuniorAssociate;
-                jobTitle = (level == JobPositionLevel::Level3_SeniorLead) ? "Shop Floor Supervisor" : "Heavy Machine Operator";
-                wage = 40;
-                break;
-            case CivilianArchetype::ServiceRetailWorker:
-                track = CareerTrack::RetailCulinaryCommerce;
-                jobTitle = "Store Manager & Barista";
-                wage = 35;
-                break;
-            case CivilianArchetype::AcademicStudent:
-                track = CareerTrack::CorporateTech;
-                level = JobPositionLevel::Level0_EntryIntern;
-                jobTitle = "Graduate Research Intern";
-                wage = 25;
-                break;
-            case CivilianArchetype::NightlifeClubber:
-                track = CareerTrack::NightlifeEntertainment;
-                jobTitle = "Club Host & Promoter";
-                wage = 50;
-                break;
-            case CivilianArchetype::UrbanDrifter:
-                track = CareerTrack::RetailCulinaryCommerce;
-                level = JobPositionLevel::Level0_EntryIntern;
-                jobTitle = "Freelance Courier";
-                wage = 20;
-                break;
-            case CivilianArchetype::MunicipalCivilServant:
-                track = CareerTrack::MunicipalGovernment;
-                level = JobPositionLevel::Level2_MidLevelSpecialist;
-                jobTitle = "Municipal Records Administrator";
-                wage = 55;
-                break;
-            case CivilianArchetype::MedicalStaff:
-                track = CareerTrack::MedicalHealthcare;
-                level = (c.id % 3 == 0) ? JobPositionLevel::Level3_SeniorLead : JobPositionLevel::Level2_MidLevelSpecialist;
-                jobTitle = (level == JobPositionLevel::Level3_SeniorLead) ? "Attending Physician" : "Critical Care Specialist";
-                wage = 85;
-                break;
-        }
-
-        std::string wpName = c.workplaceName.empty() ? "Megacity Municipal Services" : c.workplaceName;
-        sFamilyDreamsEngine.AssignCareer(c.id, track, level, jobTitle, wpName, c.workplaceId, wage);
-
-        // 2. Assign Lifelong Dreams matching citizen persona
-        LifeDreamType dream = LifeDreamType::RaiseFlourishingFamily;
-        switch (c.archetype) {
-            case CivilianArchetype::CorporateSuit:
-                dream = (c.traits.conscientiousness > 0.7f) ? LifeDreamType::BecomeMetacortexVP : LifeDreamType::BuyRichlandHighRise;
-                break;
-            case CivilianArchetype::IndustrialBlueCollar:
-                dream = (c.traits.agreeableness > 0.6f) ? LifeDreamType::RaiseFlourishingFamily : LifeDreamType::ClearHouseholdDebt;
-                break;
-            case CivilianArchetype::ServiceRetailWorker:
-                dream = LifeDreamType::OpenArtisanBakery;
-                break;
-            case CivilianArchetype::MedicalStaff:
-                dream = LifeDreamType::RaiseFlourishingFamily;
-                break;
-            default:
-                dream = static_cast<LifeDreamType>(c.id % 5);
-                break;
-        }
-        sFamilyDreamsEngine.AssignDream(c.id, dream);
-    }
-
-    // 3. Form Family Households among married/dating couples and assign dependents
-    for (size_t i = 1; i <= count; i += 4) {
-        uint32 idA = static_cast<uint32>(i);
-        uint32 idB = static_cast<uint32>(i + 1 <= count ? i + 1 : 1);
-        if (idA != idB && m_citizens.find(idA) != m_citizens.end() && m_citizens.find(idB) != m_citizens.end()) {
-            const auto* profA = sSocialEngine.GetProfile(idA);
-            if (profA && (profA->romanceStatus == RomanceStage::Dating || profA->romanceStatus == RomanceStage::InLove || profA->romanceStatus == RomanceStage::CommittedPartner || profA->romanceStatus == RomanceStage::Married)) {
-                std::string addr = m_citizens[idA].homeApartmentName.empty() ? "Megacity Residential Apartments" : m_citizens[idA].homeApartmentName;
-                sFamilyDreamsEngine.FormHouseholdFromRomance(idA, idB, m_citizens[idA].name, m_citizens[idB].name, addr, m_citizens[idA].homeLocation);
-
-                // If household formed, add a child or younger sibling
-                auto* h = sFamilyDreamsEngine.GetHouseholdByMember(idA);
-                if (h && (i + 2 <= count) && m_citizens.find(static_cast<uint32>(i + 2)) != m_citizens.end()) {
-                    uint32 kidId = static_cast<uint32>(i + 2);
-                    sFamilyDreamsEngine.AddKinshipMember(h->householdId, kidId, m_citizens[kidId].name, KinshipRole::Child, 12 + (static_cast<uint32>(i) % 8));
-                }
-            }
-        }
-    }
 }
 
 void CityLifeManager::InitializeDefaultRumors()
@@ -791,14 +620,7 @@ void CityLifeManager::Update(uint32 deltaMs)
         UpdateRumorPool(deltaMs);
     }
 
-    if (NPCSocialLifeEngine::getSingletonPtr()) {
-        sSocialEngine.UpdateCircadianSocialCycle(static_cast<uint32>(m_simulatedHour * 60.0f));
-    }
 
-    // Call EmergentAI updates OUTSIDE CityLifeManager mutex to prevent cross-engine deadlock
-    if (EmergentAIEngine::getSingletonPtr()) {
-        sEmergentAIMgr.UpdateManagedCitizens(deltaMs);
-    }
 }
 
 void CityLifeManager::SetSimulatedHour(float hour)
@@ -1029,63 +851,10 @@ void CityLifeManager::UpdateCitizens(uint32 deltaMs)
             c.drives.fatigue = std::max(0.0f, c.drives.fatigue - 0.0001f * deltaMs);
         }
 
-        // Social Life Interaction during Lunch / Dining / Leisure
+        // Social / leisure drive relaxation
         if (c.currentRoutine == RoutineScheduleState::LunchBreak || c.currentRoutine == RoutineScheduleState::Dining || c.currentRoutine == RoutineScheduleState::Leisure) {
-            const auto* prof = sSocialEngine.GetProfile(c.id);
-            if (prof) {
-                // If partner exists, occasionally execute date meetup
-                if (prof->partnerEntityId != 0 && (c.id % 5 == 0)) {
-                    std::string venue = (c.preferredShopId != 0 && m_shops.find(c.preferredShopId) != m_shops.end()) ? m_shops[c.preferredShopId].name : "Downtown Bistro";
-                    sSocialEngine.ScheduleAndExecuteDate(c.id, prof->partnerEntityId, venue, "Shared evening meal");
-                    c.drives.socialNeed = std::max(0.0f, c.drives.socialNeed - 0.3f);
-                }
-                // Stress venting if stressed
-                if (c.drives.stress > 0.3f) {
-                    for (const auto& relPair : prof->relationships) {
-                        if (relPair.second.friendship >= FriendshipTier::Coworker || relPair.second.romance >= RomanceStage::Dating) {
-                            sSocialEngine.VentWorkplaceStress(c.id, relPair.first);
-                            c.drives.stress = std::max(0.05f, c.drives.stress - 0.25f);
-                            break;
-                        }
-                    }
-                }
-            }
-        }
-
-        // Family Domestic & Career Dynamics
-        if (c.currentRoutine == RoutineScheduleState::Breakfast) {
-            auto* h = sFamilyDreamsEngine.GetHouseholdByMember(c.id);
-            if (h && h->headEntityId == c.id && (c.id % 4 == 0)) {
-                sFamilyDreamsEngine.ProcessHouseholdMorningBreakfast(h->householdId);
-            }
-        } else if (c.currentRoutine == RoutineScheduleState::Working || c.currentRoutine == RoutineScheduleState::AfternoonWork) {
-            sFamilyDreamsEngine.AdvanceWorkShiftPerformance(c.id, 0.002f, false);
-            // Occasional promotion review for top performers
-            auto* car = sFamilyDreamsEngine.GetCareer(c.id);
-            if (car && car->performanceScore >= 0.92f && (c.id % 12 == 0)) {
-                sFamilyDreamsEngine.PromoteCitizenCareer(c.id);
-            }
-        } else if (c.currentRoutine == RoutineScheduleState::Dining) {
-            auto* h = sFamilyDreamsEngine.GetHouseholdByMember(c.id);
-            if (h) {
-                if (h->headEntityId == c.id && (c.id % 4 == 0)) {
-                    sFamilyDreamsEngine.ProcessHouseholdEveningDinner(h->householdId);
-                }
-                sFamilyDreamsEngine.DepositHouseholdSavings(h->householdId, c.id, 15);
-            }
-        } else if (c.currentRoutine == RoutineScheduleState::Leisure || c.currentRoutine == RoutineScheduleState::Nightclubbing) {
-            float relief = 0.0f, happy = 0.0f;
-            sEmergentLifeEngine.ExecuteCurrentActivity(c.id, relief, happy);
-            c.drives.stress = std::max(0.05f, c.drives.stress - (relief * 0.005f));
-
-            // Word-of-Mouth Gossip with known relationships or neighbors
-            const auto* prof = sSocialEngine.GetProfile(c.id);
-            if (prof && !prof->relationships.empty() && (c.id % 3 == 0)) {
-                for (const auto& rel : prof->relationships) {
-                    sEmergentLifeEngine.SpreadRumorBetweenEntities(c.id, rel.first);
-                    break;
-                }
-            }
+            c.drives.socialNeed = std::max(0.0f, c.drives.socialNeed - 0.0001f * deltaMs);
+            c.drives.stress = std::max(0.05f, c.drives.stress - 0.0001f * deltaMs);
         }
     }
 }
@@ -1534,9 +1303,7 @@ void CityLifeManager::BroadcastStreetRumor(RumorTopic topic, const std::string& 
         }
     }
 
-    if (EmergentAIEngine::getSingletonPtr()) {
-        sEmergentAIMgr.GetContagionEngine().SeedRumor(static_cast<uint32>(topic), headline, content, districtId, 0.35f);
-    }
+
 }
 
 void CityLifeManager::UpdateRumorPool(uint32 deltaMs)
@@ -1591,9 +1358,6 @@ void CityLifeManager::TriggerAreaPanic(float x, float z, float radius, const std
                 c.panicReason = cause;
                 c.drives.stress = std::min(1.0f, c.drives.stress + (0.5f * (1.0f + c.traits.neuroticism)));
 
-                // Emergent Life: Witnessing traumatic Matrix conflict induces cognitive dissonance & awakening
-                sEmergentLifeEngine.ProcessWitnessedAnomaly(c.id, cause, 0.45f);
-
                 // High Neuroticism flees frantically towards nearest subway station
                 if (c.traits.neuroticism > 0.45f) {
                     // Find nearest subway station
@@ -1629,10 +1393,6 @@ void CityLifeManager::TriggerAreaPanic(float x, float z, float radius, const std
         // Also close local shops in danger zone
         LockdownShopsInRadius(x, z, radius, cause);
     }
-
-    if (notifyEmergentAI && EmergentAIEngine::getSingletonPtr()) {
-        sEmergentAIMgr.GetContagionEngine().EmitPanicWave(LocationVector(x, 95.0, z), radius, 0.85f, cause, durationMs);
-    }
 }
 
 void CityLifeManager::ClearAllPanic()
@@ -1653,10 +1413,6 @@ void CityLifeManager::ClearAllPanic()
             }
         }
         LiftShopLockdowns();
-    }
-
-    if (EmergentAIEngine::getSingletonPtr()) {
-        sEmergentAIMgr.GetContagionEngine().ClearPanic();
     }
 }
 
@@ -1682,14 +1438,7 @@ std::string CityLifeManager::GetCitizenDFBiography(uint32 citizenId) const
     std::lock_guard<std::recursive_mutex> lock(m_mutex);
     auto it = m_citizens.find(citizenId);
     if (it == m_citizens.end()) return "Citizen not found.";
-    BiographicalProfile prof = sBioEngine.GenerateProfileForCitizen(citizenId, it->second.archetype);
-    std::string baseSheet = prof.ToDFCharacterSheet();
-    std::string familySummary = sFamilyDreamsEngine.GenerateFamilySummary(citizenId);
-    std::string careerSummary = sFamilyDreamsEngine.GenerateCareerSummary(citizenId);
-    std::string dreamsSummary = sFamilyDreamsEngine.GenerateDreamsSummary(citizenId);
-    std::string socialSummary = sSocialEngine.GenerateEntitySocialSummary(citizenId);
-    std::string memoriesReport = sSocialEngine.GenerateEntityMemoriesReport(citizenId);
-    return baseSheet + "\n" + familySummary + "\n" + careerSummary + "\n" + dreamsSummary + "\n" + socialSummary + "\n" + memoriesReport;
+    return "Citizen [" + it->second.name + "] - Archetype: " + GetArchetypeName(it->second.archetype);
 }
 
 std::vector<BluepillCitizen*> CityLifeManager::GetCitizensInDistrict(uint32 districtId)

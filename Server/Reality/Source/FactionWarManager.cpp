@@ -1,4 +1,4 @@
-#include "FactionWarManager.h"
+﻿#include "FactionWarManager.h"
 #include "Log.h"
 #include "Database/Database.h"
 #include "Database/PreparedStatement.h"
@@ -390,8 +390,19 @@ void FactionWarManager::BroadcastSquadCallout(const StrikeSquad& squad, const st
     if (!speaker) speaker = BotGetPlayer(squad.martialArtist.goId);
     if (!speaker) return;
 
+    // Only broadcast if there are actual human players within 20m (2000 units) proximity,
+    // preventing fake background chatter spam while operative is alone.
+    auto clients = sSpatialGrid.GetClientsInRadius(speaker->getPosition().x, speaker->getPosition().z, 2000.0f);
+    bool hasHumanNearby = false;
+    for (GameClient* gc : clients) {
+        if (!gc->isBot()) {
+            hasHumanNearby = true;
+            break;
+        }
+    }
+    if (!hasHumanNearby) return;
+
     std::string fullMsg = (format("[%1% - %2%] : %3%") % speaker->getHandle() % roleStr % msg).str();
-    auto clients = sSpatialGrid.GetClientsInRadius(speaker->getPosition().x, speaker->getPosition().z);
     for (GameClient* gc : clients) {
         if (!gc->isBot()) {
             gc->QueueCommand(std::make_shared<SystemChatMsg>(
@@ -713,7 +724,7 @@ void FactionWarManager::updateControlNodes(uint32 deltaMs)
         ControlNode& node = pair.second;
         
         int factionPresence[5] = {0, 0, 0, 0, 0}; // Indexed by mxoFaction: 1: Zion, 2: Machines, 3: Merovingian
-        auto nearbyClients = sSpatialGrid.GetClientsInRadius(node.x, node.z);
+        auto nearbyClients = sSpatialGrid.GetClientsInRadius(node.x, node.z, 1500.0f);
         
         for (GameClient* gc : nearbyClients) {
             uint32 goId = gc->GetPlayerGoId();

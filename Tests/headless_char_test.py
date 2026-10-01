@@ -377,6 +377,9 @@ def run_test(host: str, auth_port: int, margin_port: int, username: str, passwor
         margin_sock.connect((host, margin_port))
 
         # CERT_ConnectRequest (0x01)
+        # Authentic 7.6005 ticket header (0x0136) expects 182-byte ticket (128-byte sig + 182-byte ticket = 310 bytes)
+        if len(ticket_bytes) == 306:
+            ticket_bytes = ticket_bytes + b'\x00\x00\x00\x00'
         send_var_packet(margin_sock, struct.pack("<BHH", 0x01, 3, 0x0136) + ticket_bytes)
 
         # Recv CERT_Challenge (0x02)

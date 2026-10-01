@@ -53,7 +53,6 @@
 #include "FrankCastleManager.h"
 #include "LoadingConstruct.h"
 #include "BackdoorNetwork.h"
-#include "ArchitectDialogueTree.h"
 #include "OracleDialogueTree.h"
 #include "OracleSanctuarySystem.h"
 #include "OracleCookieSystem.h"
@@ -61,31 +60,19 @@
 #include "StatusEffectManager.h"
 #include "NeuralVoiceSystem.h"
 #include "RadioDispatchSystem.h"
-#include "OpenXRPipeline.h"
 #include "APUCombatSystem.h"
-#include "MegacityDestructionEngine.h"
 #include "RedpillAwakeningSystem.h"
-#include "WebGPUTerminalBridge.h"
-#include "NeuralNarrativeEngine.h"
 #include "MachineCitySystem.h"
 #include "FreewayCombatSystem.h"
 #include "MobilAveRailSystem.h"
 #include "CyberdeckHackingSystem.h"
-#include "ShardFederationEngine.h"
 #include "ClubHelRaidSystem.h"
 #include "PodHarvestSystem.h"
 #include "OrbitalSatelliteSystem.h"
 #include "SourceCodeCompilerSystem.h"
-#include "MatrixRebootEngine.h"
-#include "BiographicalNarrativeEngine.h"
 #include "UnderworldManager.h"
 #include "CityLifeManager.h"
-#include "EmergentAIEngine.h"
 #include "EmergentPoliceManager.h"
-#include "NPCSocialLifeEngine.h"
-#include "NPCFamilyDreamsEngine.h"
-#include "NPCEmergentLifeEngine.h"
-#include "SLMDialogueContextEngine.h"
 #include "MafiaEcosystemManager.h"
 #include "ExileChateauManager.h"
 
@@ -612,369 +599,20 @@ void PlayerObject::ParseAdminCommand( string theCmd )
         }
         return;
     }
-    else if (iequals(command, "inspect") || iequals(command, "bio"))
+    else if (iequals(command, "inspect") || iequals(command, "bio") ||
+             iequals(command, "social") || iequals(command, "love") || iequals(command, "friendships") ||
+             iequals(command, "memories") || iequals(command, "memory") || iequals(command, "socialstats") ||
+             iequals(command, "family") || iequals(command, "household") ||
+             iequals(command, "dreams") || iequals(command, "dream") || iequals(command, "aspiration") ||
+             iequals(command, "career") || iequals(command, "job") || iequals(command, "vocation") ||
+             iequals(command, "life") || iequals(command, "lifedossier") || iequals(command, "dossier") ||
+             iequals(command, "lifestats") || iequals(command, "familystats") ||
+             iequals(command, "emergentlife") || iequals(command, "emergentlifestyle") ||
+             iequals(command, "awakening") || iequals(command, "epiphany") ||
+             iequals(command, "gossip") || iequals(command, "rumors") ||
+             iequals(command, "socialcircles") || iequals(command, "circles"))
     {
-        string targetArg;
-        cmdStream >> targetArg;
-        if (iequals(targetArg, "stats") || iequals(targetArg, "telemetry")) {
-            m_parent.QueueCommand(make_shared<SystemChatMsg>(sBioEngine.GenerateEngineTelemetryReport()));
-            return;
-        }
-        else if (iequals(targetArg, "generate")) {
-            string factionArg;
-            cmdStream >> factionArg;
-            BioFaction faction = BioFaction::ZionRedpill;
-            if (iequals(factionArg, "machine") || iequals(factionArg, "agent")) faction = BioFaction::MachineAgent;
-            else if (iequals(factionArg, "exile") || iequals(factionArg, "merovingian")) faction = BioFaction::MerovingianExile;
-            else if (iequals(factionArg, "cypherite")) faction = BioFaction::CypheriteTurncoat;
-            else if (iequals(factionArg, "civilian") || iequals(factionArg, "bluepill")) faction = BioFaction::BluepillCivilian;
-            else if (iequals(factionArg, "police") || iequals(factionArg, "swat")) faction = BioFaction::MMPDPoliceSWAT;
-            else if (iequals(factionArg, "syndicate") || iequals(factionArg, "mob")) faction = BioFaction::SyndicateEnforcer;
-            
-            uint64_t seed = ((uint64_t)rand() << 32) | (uint64_t)rand();
-            BiographicalProfile prof = sBioEngine.GenerateProfile(seed, faction);
-            m_parent.QueueCommand(make_shared<SystemChatMsg>(prof.ToDFCharacterSheet()));
-            return;
-        }
-
-        PlayerObject* target = nullptr;
-        if (!targetArg.empty()) {
-            uint32 targetGoId = 0;
-            try {
-                targetGoId = (uint32)std::stoul(targetArg);
-            } catch (...) {
-                targetGoId = 0;
-            }
-
-            for (uint32 objId : sObjMgr.getAllGOIds()) {
-                PlayerObject* po = sObjMgr.getGOPtrSafe(objId);
-                if (po) {
-                    if (targetGoId != 0 && po->getGoId() == targetGoId) {
-                        target = po;
-                        break;
-                    } else if (iequals(po->getHandle(), targetArg)) {
-                        target = po;
-                        break;
-                    }
-                }
-            }
-        } else {
-            target = this;
-        }
-
-        if (target) {
-            BiographicalProfile prof = sBioEngine.GenerateProfileForBot(target->getGoId(), target->getCharacterUID(), (mxoFaction)target->getFaction());
-            m_parent.QueueCommand(make_shared<SystemChatMsg>(prof.ToDFCharacterSheet()));
-        } else {
-            m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FF0000}Target not found for inspection.{/c}"));
-        }
-        return;
-    }
-    else if (iequals(command, "social") || iequals(command, "love") || iequals(command, "friendships"))
-    {
-        string subCmd;
-        cmdStream >> subCmd;
-        if (subCmd.empty() || iequals(subCmd, "stats") || iequals(subCmd, "telemetry")) {
-            m_parent.QueueCommand(make_shared<SystemChatMsg>(sSocialEngine.GenerateSocialTelemetryReport()));
-            return;
-        }
-
-        if (iequals(subCmd, "date")) {
-            uint32 idA = 0, idB = 0;
-            cmdStream >> idA >> idB;
-            if (idA != 0 && idB != 0) {
-                bool res = sSocialEngine.ScheduleAndExecuteDate(idA, idB, "Le Bistro de Merovingian", "Scheduled Admin Romantic Date");
-                m_parent.QueueCommand(make_shared<SystemChatMsg>((format("{c:00FF00}Admin: Scheduled date between %1% and %2%: %3%{/c}") % idA % idB % (res ? "Success" : "Failed")).str()));
-            } else {
-                m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FF0000}Usage: !social date <idA> <idB>{/c}"));
-            }
-            return;
-        } else if (iequals(subCmd, "breakup")) {
-            uint32 idA = 0, idB = 0;
-            cmdStream >> idA >> idB;
-            if (idA != 0 && idB != 0) {
-                bool res = sSocialEngine.TriggerArgumentOrBreakup(idA, idB, "Irreconcilable ideological differences regarding the Matrix");
-                m_parent.QueueCommand(make_shared<SystemChatMsg>((format("{c:00FF00}Admin: Triggered breakup between %1% and %2%: %3%{/c}") % idA % idB % (res ? "Success" : "Failed")).str()));
-            } else {
-                m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FF0000}Usage: !social breakup <idA> <idB>{/c}"));
-            }
-            return;
-        }
-
-        uint32 targetGoId = 0;
-        try {
-            targetGoId = (uint32)std::stoul(subCmd);
-        } catch (...) {
-            targetGoId = 0;
-        }
-
-        if (targetGoId == 0) {
-            for (uint32 objId : sObjMgr.getAllGOIds()) {
-                PlayerObject* po = sObjMgr.getGOPtrSafe(objId);
-                if (po && iequals(po->getHandle(), subCmd)) {
-                    targetGoId = po->getGoId();
-                    break;
-                }
-            }
-        }
-
-        if (targetGoId != 0) {
-            m_parent.QueueCommand(make_shared<SystemChatMsg>(sSocialEngine.GenerateEntitySocialSummary(targetGoId)));
-        } else {
-            m_parent.QueueCommand(make_shared<SystemChatMsg>(sSocialEngine.GenerateEntitySocialSummary(this->getGoId())));
-        }
-        return;
-    }
-    else if (iequals(command, "memories") || iequals(command, "memory"))
-    {
-        string subCmd;
-        cmdStream >> subCmd;
-        uint32 targetGoId = 0;
-        if (!subCmd.empty()) {
-            try {
-                targetGoId = (uint32)std::stoul(subCmd);
-            } catch (...) {
-                targetGoId = 0;
-            }
-            if (targetGoId == 0) {
-                for (uint32 objId : sObjMgr.getAllGOIds()) {
-                    PlayerObject* po = sObjMgr.getGOPtrSafe(objId);
-                    if (po && iequals(po->getHandle(), subCmd)) {
-                        targetGoId = po->getGoId();
-                        break;
-                    }
-                }
-            }
-        } else {
-            targetGoId = this->getGoId();
-        }
-
-        if (targetGoId != 0) {
-            m_parent.QueueCommand(make_shared<SystemChatMsg>(sSocialEngine.GenerateEntityMemoriesReport(targetGoId)));
-        } else {
-            m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FF0000}Target not found for memories inspection.{/c}"));
-        }
-        return;
-    }
-    else if (iequals(command, "socialstats"))
-    {
-        m_parent.QueueCommand(make_shared<SystemChatMsg>(sSocialEngine.GenerateSocialTelemetryReport()));
-        return;
-    }
-    else if (iequals(command, "family") || iequals(command, "household"))
-    {
-        string subCmd;
-        cmdStream >> subCmd;
-        if (iequals(subCmd, "stats") || iequals(subCmd, "telemetry")) {
-            m_parent.QueueCommand(make_shared<SystemChatMsg>(sNPCFamilyDreamsEngine.GenerateEngineMasterTelemetryReport()));
-            return;
-        }
-
-        uint32 targetGoId = 0;
-        if (!subCmd.empty()) {
-            try {
-                targetGoId = (uint32)std::stoul(subCmd);
-            } catch (...) {
-                targetGoId = 0;
-            }
-            if (targetGoId == 0) {
-                for (uint32 objId : sObjMgr.getAllGOIds()) {
-                    PlayerObject* po = sObjMgr.getGOPtrSafe(objId);
-                    if (po && iequals(po->getHandle(), subCmd)) {
-                        targetGoId = po->getGoId();
-                        break;
-                    }
-                }
-            }
-        } else {
-            targetGoId = this->getGoId();
-        }
-
-        if (targetGoId != 0) {
-            m_parent.QueueCommand(make_shared<SystemChatMsg>(sNPCFamilyDreamsEngine.GenerateFamilySummary(targetGoId)));
-        } else {
-            m_parent.QueueCommand(make_shared<SystemChatMsg>(sNPCFamilyDreamsEngine.GenerateFamilySummary(this->getGoId())));
-        }
-        return;
-    }
-    else if (iequals(command, "dreams") || iequals(command, "dream") || iequals(command, "aspiration"))
-    {
-        string subCmd;
-        cmdStream >> subCmd;
-        uint32 targetGoId = 0;
-        if (!subCmd.empty()) {
-            try {
-                targetGoId = (uint32)std::stoul(subCmd);
-            } catch (...) {
-                targetGoId = 0;
-            }
-            if (targetGoId == 0) {
-                for (uint32 objId : sObjMgr.getAllGOIds()) {
-                    PlayerObject* po = sObjMgr.getGOPtrSafe(objId);
-                    if (po && iequals(po->getHandle(), subCmd)) {
-                        targetGoId = po->getGoId();
-                        break;
-                    }
-                }
-            }
-        } else {
-            targetGoId = this->getGoId();
-        }
-
-        if (targetGoId != 0) {
-            m_parent.QueueCommand(make_shared<SystemChatMsg>(sNPCFamilyDreamsEngine.GenerateDreamsSummary(targetGoId)));
-        } else {
-            m_parent.QueueCommand(make_shared<SystemChatMsg>(sNPCFamilyDreamsEngine.GenerateDreamsSummary(this->getGoId())));
-        }
-        return;
-    }
-    else if (iequals(command, "career") || iequals(command, "job") || iequals(command, "vocation"))
-    {
-        string subCmd;
-        cmdStream >> subCmd;
-        uint32 targetGoId = 0;
-        if (!subCmd.empty()) {
-            try {
-                targetGoId = (uint32)std::stoul(subCmd);
-            } catch (...) {
-                targetGoId = 0;
-            }
-            if (targetGoId == 0) {
-                for (uint32 objId : sObjMgr.getAllGOIds()) {
-                    PlayerObject* po = sObjMgr.getGOPtrSafe(objId);
-                    if (po && iequals(po->getHandle(), subCmd)) {
-                        targetGoId = po->getGoId();
-                        break;
-                    }
-                }
-            }
-        } else {
-            targetGoId = this->getGoId();
-        }
-
-        if (targetGoId != 0) {
-            m_parent.QueueCommand(make_shared<SystemChatMsg>(sNPCFamilyDreamsEngine.GenerateCareerSummary(targetGoId)));
-        } else {
-            m_parent.QueueCommand(make_shared<SystemChatMsg>(sNPCFamilyDreamsEngine.GenerateCareerSummary(this->getGoId())));
-        }
-        return;
-    }
-    else if (iequals(command, "life") || iequals(command, "lifedossier") || iequals(command, "dossier"))
-    {
-        string subCmd;
-        cmdStream >> subCmd;
-        if (iequals(subCmd, "stats") || iequals(subCmd, "telemetry")) {
-            m_parent.QueueCommand(make_shared<SystemChatMsg>(sNPCFamilyDreamsEngine.GenerateEngineMasterTelemetryReport()));
-            return;
-        }
-
-        uint32 targetGoId = 0;
-        if (!subCmd.empty()) {
-            try {
-                targetGoId = (uint32)std::stoul(subCmd);
-            } catch (...) {
-                targetGoId = 0;
-            }
-            if (targetGoId == 0) {
-                for (uint32 objId : sObjMgr.getAllGOIds()) {
-                    PlayerObject* po = sObjMgr.getGOPtrSafe(objId);
-                    if (po && iequals(po->getHandle(), subCmd)) {
-                        targetGoId = po->getGoId();
-                        break;
-                    }
-                }
-            }
-        } else {
-            targetGoId = this->getGoId();
-        }
-
-        if (targetGoId != 0) {
-            m_parent.QueueCommand(make_shared<SystemChatMsg>(sNPCFamilyDreamsEngine.GenerateCompleteLifeDossier(targetGoId)));
-        } else {
-            m_parent.QueueCommand(make_shared<SystemChatMsg>(sNPCFamilyDreamsEngine.GenerateCompleteLifeDossier(this->getGoId())));
-        }
-        return;
-    }
-    else if (iequals(command, "lifestats") || iequals(command, "familystats"))
-    {
-        m_parent.QueueCommand(make_shared<SystemChatMsg>(sNPCFamilyDreamsEngine.GenerateEngineMasterTelemetryReport()));
-        return;
-    }
-    else if (iequals(command, "emergentlife") || iequals(command, "emergentlifestyle"))
-    {
-        string subCmd;
-        cmdStream >> subCmd;
-        if (iequals(subCmd, "stats") || iequals(subCmd, "telemetry")) {
-            m_parent.QueueCommand(make_shared<SystemChatMsg>(sEmergentLifeEngine.GenerateMasterTelemetryReport()));
-            return;
-        }
-
-        uint32 targetGoId = 0;
-        if (!subCmd.empty()) {
-            try {
-                targetGoId = (uint32)std::stoul(subCmd);
-            } catch (...) {
-                targetGoId = 0;
-            }
-            if (targetGoId == 0) {
-                for (uint32 objId : sObjMgr.getAllGOIds()) {
-                    PlayerObject* po = sObjMgr.getGOPtrSafe(objId);
-                    if (po && iequals(po->getHandle(), subCmd)) {
-                        targetGoId = po->getGoId();
-                        break;
-                    }
-                }
-            }
-        } else {
-            targetGoId = this->getGoId();
-        }
-
-        if (targetGoId != 0) {
-            m_parent.QueueCommand(make_shared<SystemChatMsg>(sEmergentLifeEngine.GenerateEmergentLifeSummary(targetGoId)));
-        } else {
-            m_parent.QueueCommand(make_shared<SystemChatMsg>(sEmergentLifeEngine.GenerateEmergentLifeSummary(this->getGoId())));
-        }
-        return;
-    }
-    else if (iequals(command, "awakening") || iequals(command, "epiphany"))
-    {
-        string subCmd;
-        cmdStream >> subCmd;
-        uint32 targetGoId = 0;
-        if (!subCmd.empty()) {
-            try {
-                targetGoId = (uint32)std::stoul(subCmd);
-            } catch (...) {
-                targetGoId = 0;
-            }
-            if (targetGoId == 0) {
-                for (uint32 objId : sObjMgr.getAllGOIds()) {
-                    PlayerObject* po = sObjMgr.getGOPtrSafe(objId);
-                    if (po && iequals(po->getHandle(), subCmd)) {
-                        targetGoId = po->getGoId();
-                        break;
-                    }
-                }
-            }
-        } else {
-            targetGoId = this->getGoId();
-        }
-
-        if (targetGoId != 0) {
-            m_parent.QueueCommand(make_shared<SystemChatMsg>(sEmergentLifeEngine.GenerateAwakeningReport(targetGoId)));
-        } else {
-            m_parent.QueueCommand(make_shared<SystemChatMsg>(sEmergentLifeEngine.GenerateAwakeningReport(this->getGoId())));
-        }
-        return;
-    }
-    else if (iequals(command, "gossip") || iequals(command, "rumors"))
-    {
-        m_parent.QueueCommand(make_shared<SystemChatMsg>(sEmergentLifeEngine.GenerateGossipNetworkReport()));
-        return;
-    }
-    else if (iequals(command, "socialcircles") || iequals(command, "circles"))
-    {
-        m_parent.QueueCommand(make_shared<SystemChatMsg>(sEmergentLifeEngine.GenerateSocialCirclesReport()));
+        m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FF0000}[System] Subsystem offline.{/c}"));
         return;
     }
     else if (iequals(command, "underworld") || iequals(command, "syndicate"))
@@ -1028,7 +666,8 @@ void PlayerObject::ParseAdminCommand( string theCmd )
     }
     else if (iequals(command, "emergent") || iequals(command, "affordances"))
     {
-        m_parent.QueueCommand(make_shared<SystemChatMsg>(sEmergentAIMgr.GenerateEmergentTelemetryReport()));
+        m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FF0000}[System] Subsystem offline.{/c}"));
+        return;
     }
     else if (iequals(command, "mafia") || iequals(command, "commission") || iequals(command, "pizzo"))
     {
@@ -1626,239 +1265,20 @@ void PlayerObject::ParsePlayerCommand( string theCmd )
         }
         return;
     }
-    else if (iequals(command, "inspect") || iequals(command, "bio"))
+    else if (iequals(command, "inspect") || iequals(command, "bio") ||
+             iequals(command, "social") || iequals(command, "love") || iequals(command, "friendships") ||
+             iequals(command, "memories") || iequals(command, "memory") || iequals(command, "socialstats") ||
+             iequals(command, "family") || iequals(command, "household") ||
+             iequals(command, "dreams") || iequals(command, "dream") || iequals(command, "aspiration") ||
+             iequals(command, "career") || iequals(command, "job") || iequals(command, "vocation") ||
+             iequals(command, "life") || iequals(command, "lifedossier") || iequals(command, "dossier") ||
+             iequals(command, "lifestats") || iequals(command, "familystats") ||
+             iequals(command, "emergentlife") || iequals(command, "emergentlifestyle") ||
+             iequals(command, "awakening") || iequals(command, "epiphany") ||
+             iequals(command, "gossip") || iequals(command, "rumors") ||
+             iequals(command, "socialcircles") || iequals(command, "circles"))
     {
-        string targetArg;
-        cmdStream >> targetArg;
-        if (iequals(targetArg, "stats") || iequals(targetArg, "telemetry")) {
-            m_parent.QueueCommand(make_shared<SystemChatMsg>(sBioEngine.GenerateEngineTelemetryReport()));
-            return;
-        }
-        else if (iequals(targetArg, "generate")) {
-            string factionArg;
-            cmdStream >> factionArg;
-            BioFaction faction = BioFaction::ZionRedpill;
-            if (iequals(factionArg, "machine") || iequals(factionArg, "agent")) faction = BioFaction::MachineAgent;
-            else if (iequals(factionArg, "exile") || iequals(factionArg, "merovingian")) faction = BioFaction::MerovingianExile;
-            else if (iequals(factionArg, "cypherite")) faction = BioFaction::CypheriteTurncoat;
-            else if (iequals(factionArg, "civilian") || iequals(factionArg, "bluepill")) faction = BioFaction::BluepillCivilian;
-            else if (iequals(factionArg, "police") || iequals(factionArg, "swat")) faction = BioFaction::MMPDPoliceSWAT;
-            else if (iequals(factionArg, "syndicate") || iequals(factionArg, "mob")) faction = BioFaction::SyndicateEnforcer;
-            
-            uint64_t seed = ((uint64_t)rand() << 32) | (uint64_t)rand();
-            BiographicalProfile prof = sBioEngine.GenerateProfile(seed, faction);
-            m_parent.QueueCommand(make_shared<SystemChatMsg>(prof.ToDFCharacterSheet()));
-            return;
-        }
-
-        PlayerObject* target = nullptr;
-        if (!targetArg.empty()) {
-            uint32 targetGoId = 0;
-            try {
-                targetGoId = (uint32)std::stoul(targetArg);
-            } catch (...) {
-                targetGoId = 0;
-            }
-
-            for (uint32 objId : sObjMgr.getAllGOIds()) {
-                PlayerObject* po = sObjMgr.getGOPtrSafe(objId);
-                if (po) {
-                    if (targetGoId != 0 && po->getGoId() == targetGoId) {
-                        target = po;
-                        break;
-                    } else if (iequals(po->getHandle(), targetArg)) {
-                        target = po;
-                        break;
-                    }
-                }
-            }
-        } else {
-            target = this;
-        }
-
-        if (target) {
-            BiographicalProfile prof = sBioEngine.GenerateProfileForBot(target->getGoId(), target->getCharacterUID(), (mxoFaction)target->getFaction());
-            m_parent.QueueCommand(make_shared<SystemChatMsg>(prof.ToDFCharacterSheet()));
-        } else {
-            m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FF0000}Target not found for inspection.{/c}"));
-        }
-        return;
-    }
-    else if (iequals(command, "social") || iequals(command, "love") || iequals(command, "friendships"))
-    {
-        string subCmd;
-        cmdStream >> subCmd;
-        if (iequals(subCmd, "stats") || iequals(subCmd, "telemetry")) {
-            m_parent.QueueCommand(make_shared<SystemChatMsg>(sSocialEngine.GenerateSocialTelemetryReport()));
-            return;
-        }
-
-        uint32 targetGoId = 0;
-        if (!subCmd.empty()) {
-            try {
-                targetGoId = (uint32)std::stoul(subCmd);
-            } catch (...) {
-                targetGoId = 0;
-            }
-            if (targetGoId == 0) {
-                for (uint32 objId : sObjMgr.getAllGOIds()) {
-                    PlayerObject* po = sObjMgr.getGOPtrSafe(objId);
-                    if (po && iequals(po->getHandle(), subCmd)) {
-                        targetGoId = po->getGoId();
-                        break;
-                    }
-                }
-            }
-        } else {
-            targetGoId = this->getGoId();
-        }
-
-        if (targetGoId != 0) {
-            m_parent.QueueCommand(make_shared<SystemChatMsg>(sSocialEngine.GenerateEntitySocialSummary(targetGoId)));
-        } else {
-            m_parent.QueueCommand(make_shared<SystemChatMsg>(sSocialEngine.GenerateEntitySocialSummary(this->getGoId())));
-        }
-        return;
-    }
-    else if (iequals(command, "memories") || iequals(command, "memory"))
-    {
-        string subCmd;
-        cmdStream >> subCmd;
-        uint32 targetGoId = 0;
-        if (!subCmd.empty()) {
-            try {
-                targetGoId = (uint32)std::stoul(subCmd);
-            } catch (...) {
-                targetGoId = 0;
-            }
-            if (targetGoId == 0) {
-                for (uint32 objId : sObjMgr.getAllGOIds()) {
-                    PlayerObject* po = sObjMgr.getGOPtrSafe(objId);
-                    if (po && iequals(po->getHandle(), subCmd)) {
-                        targetGoId = po->getGoId();
-                        break;
-                    }
-                }
-            }
-        } else {
-            targetGoId = this->getGoId();
-        }
-
-        if (targetGoId != 0) {
-            m_parent.QueueCommand(make_shared<SystemChatMsg>(sSocialEngine.GenerateEntityMemoriesReport(targetGoId)));
-        } else {
-            m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FF0000}Target not found for memories inspection.{/c}"));
-        }
-        return;
-    }
-    else if (iequals(command, "socialstats"))
-    {
-        m_parent.QueueCommand(make_shared<SystemChatMsg>(sSocialEngine.GenerateSocialTelemetryReport()));
-        return;
-    }
-    else if (iequals(command, "family") || iequals(command, "household"))
-    {
-        string subCmd;
-        cmdStream >> subCmd;
-        uint32 targetGoId = this->getGoId();
-        if (!subCmd.empty()) {
-            try {
-                targetGoId = (uint32)std::stoul(subCmd);
-            } catch (...) {
-                targetGoId = this->getGoId();
-            }
-        }
-        m_parent.QueueCommand(make_shared<SystemChatMsg>(sNPCFamilyDreamsEngine.GenerateFamilySummary(targetGoId)));
-        return;
-    }
-    else if (iequals(command, "dreams") || iequals(command, "dream") || iequals(command, "aspiration"))
-    {
-        string subCmd;
-        cmdStream >> subCmd;
-        uint32 targetGoId = this->getGoId();
-        if (!subCmd.empty()) {
-            try {
-                targetGoId = (uint32)std::stoul(subCmd);
-            } catch (...) {
-                targetGoId = this->getGoId();
-            }
-        }
-        m_parent.QueueCommand(make_shared<SystemChatMsg>(sNPCFamilyDreamsEngine.GenerateDreamsSummary(targetGoId)));
-        return;
-    }
-    else if (iequals(command, "career") || iequals(command, "job") || iequals(command, "vocation"))
-    {
-        string subCmd;
-        cmdStream >> subCmd;
-        uint32 targetGoId = this->getGoId();
-        if (!subCmd.empty()) {
-            try {
-                targetGoId = (uint32)std::stoul(subCmd);
-            } catch (...) {
-                targetGoId = this->getGoId();
-            }
-        }
-        m_parent.QueueCommand(make_shared<SystemChatMsg>(sNPCFamilyDreamsEngine.GenerateCareerSummary(targetGoId)));
-        return;
-    }
-    else if (iequals(command, "life") || iequals(command, "lifedossier") || iequals(command, "dossier"))
-    {
-        string subCmd;
-        cmdStream >> subCmd;
-        uint32 targetGoId = this->getGoId();
-        if (!subCmd.empty()) {
-            try {
-                targetGoId = (uint32)std::stoul(subCmd);
-            } catch (...) {
-                targetGoId = this->getGoId();
-            }
-        }
-        m_parent.QueueCommand(make_shared<SystemChatMsg>(sNPCFamilyDreamsEngine.GenerateCompleteLifeDossier(targetGoId)));
-        return;
-    }
-    else if (iequals(command, "lifestats") || iequals(command, "familystats"))
-    {
-        m_parent.QueueCommand(make_shared<SystemChatMsg>(sNPCFamilyDreamsEngine.GenerateEngineMasterTelemetryReport()));
-        return;
-    }
-    else if (iequals(command, "emergentlife") || iequals(command, "emergentlifestyle"))
-    {
-        string subCmd;
-        cmdStream >> subCmd;
-        uint32 targetGoId = this->getGoId();
-        if (!subCmd.empty()) {
-            try {
-                targetGoId = (uint32)std::stoul(subCmd);
-            } catch (...) {
-                targetGoId = this->getGoId();
-            }
-        }
-        m_parent.QueueCommand(make_shared<SystemChatMsg>(sEmergentLifeEngine.GenerateEmergentLifeSummary(targetGoId)));
-        return;
-    }
-    else if (iequals(command, "awakening") || iequals(command, "epiphany"))
-    {
-        string subCmd;
-        cmdStream >> subCmd;
-        uint32 targetGoId = this->getGoId();
-        if (!subCmd.empty()) {
-            try {
-                targetGoId = (uint32)std::stoul(subCmd);
-            } catch (...) {
-                targetGoId = this->getGoId();
-            }
-        }
-        m_parent.QueueCommand(make_shared<SystemChatMsg>(sEmergentLifeEngine.GenerateAwakeningReport(targetGoId)));
-        return;
-    }
-    else if (iequals(command, "gossip") || iequals(command, "rumors"))
-    {
-        m_parent.QueueCommand(make_shared<SystemChatMsg>(sEmergentLifeEngine.GenerateGossipNetworkReport()));
-        return;
-    }
-    else if (iequals(command, "socialcircles") || iequals(command, "circles"))
-    {
-        m_parent.QueueCommand(make_shared<SystemChatMsg>(sEmergentLifeEngine.GenerateSocialCirclesReport()));
+        m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FF0000}[System] Subsystem offline.{/c}"));
         return;
     }
     else if (iequals(command, "underworld") || iequals(command, "syndicate"))
@@ -1878,7 +1298,7 @@ void PlayerObject::ParsePlayerCommand( string theCmd )
     }
     else if (iequals(command, "emergent"))
     {
-        m_parent.QueueCommand(make_shared<SystemChatMsg>(sEmergentAIMgr.GenerateEmergentTelemetryReport()));
+        m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FF0000}[System] Subsystem offline.{/c}"));
         return;
     }
 	else
@@ -2214,11 +1634,8 @@ void PlayerObject::RPC_HandleChat( ByteBuffer &srcCmd )
     }
 
     if (boost::iequals(theMessage, "/source")) {
-        auto monitor = sArchitectDialogue.GetMonitorState();
-        size_t nodes = sArchitectDialogue.GetTotalDialogueNodes();
         m_parent.QueueCommand(make_shared<SystemChatMsg>(
-            (format("{c:00FFFF}[The Architect's Chamber] Active CRT Monitors: %1% | Pulse: %2$.0f BPM | Dialogue Nodes: %3% | The Choice: Two Doors{/c}")
-             % monitor.activeMonitors % monitor.pulseRateBpm % nodes).str()
+            "{c:00FFFF}[The Architect's Chamber] Subsystem offline.{/c}"
         ));
         return;
     }
@@ -2648,12 +2065,8 @@ void PlayerObject::RPC_HandleChat( ByteBuffer &srcCmd )
     }
 
     if (boost::iequals(theMessage, "/vr")) {
-        auto stats = sOpenXRPipeline.GetEvasionStats();
-        auto head = sOpenXRPipeline.GetHeadPose();
-        float ipd = sOpenXRPipeline.GetIPD();
         m_parent.QueueCommand(make_shared<SystemChatMsg>(
-            (format("{c:00FFCC}[OpenXR VR Pipeline] 6-DOF Active | IPD: %1$.1fmm | HMD: (%2$.1f, %3$.1f, %4$.1f) | Bullet Dodges: %5% | Max Lean: %6$.1fcm{/c}")
-             % ipd % head.position.x % head.position.y % head.position.z % stats.successfulBulletDodges % stats.maxPhysicalLeanCm).str()
+            "{c:00FFCC}[OpenXR VR Pipeline] Subsystem offline.{/c}"
         ));
         return;
     }
@@ -2674,15 +2087,8 @@ void PlayerObject::RPC_HandleChat( ByteBuffer &srcCmd )
     }
 
     if (boost::iequals(theMessage, "/gunship")) {
-        auto chopper = sMegacityDestructionEngine.GetHelicopter(1);
-        size_t buildings = sMegacityDestructionEngine.GetBuildingCount();
-        size_t particles = sMegacityDestructionEngine.GetActiveGlassParticleCount();
         m_parent.QueueCommand(make_shared<SystemChatMsg>(
-            (format("{c:00FFCC}[Bell 212 Gunship] Callsign: %1% | Pos: (%2$.0f, %3$.0f, %4$.0f) | Minigun Ammo: %5% | Collective: %6$.2f | Buildings: %7% | Glass Particles: %8%{/c}")
-             % (chopper ? chopper->callsign : "Zion Air-1")
-             % (chopper ? chopper->position.x : 0.0f) % (chopper ? chopper->position.y : 0.0f) % (chopper ? chopper->position.z : 0.0f)
-             % (chopper ? chopper->minigunAmmo : 0) % (chopper ? chopper->collectivePitch : 0.0f)
-             % buildings % particles).str()
+            "{c:00FFCC}[Megacity Gunship] Subsystem offline.{/c}"
         ));
         return;
     }
@@ -2701,28 +2107,15 @@ void PlayerObject::RPC_HandleChat( ByteBuffer &srcCmd )
     }
 
     if (boost::iequals(theMessage, "/webrtc")) {
-        auto ch = sWebGPUTerminalBridge.GetAudioChannel(1);
-        size_t tiles = sWebGPUTerminalBridge.GetTileStreamCount();
-        GPSCoordinate refGps{37.7749, -122.4194, 15.0};
-        auto nearby = sWebGPUTerminalBridge.QueryNearbyHardlines(refGps, 5000.0f);
         m_parent.QueueCommand(make_shared<SystemChatMsg>(
-            (format("{c:00FF99}[WebGPU & AR Deck] Channel: %1% | Codec: 1999 AMR-NB (%2$.1fk, %3$.0fHz) | Peers: %4% | Latency: %5$.1fms | AR Hardlines: %6% | glTF Tiles: %7%{/c}")
-             % (ch ? ch->roomId : "Alpha") % (ch ? ch->bitrateKbps : 12.2f) % (ch ? ch->sampleRateHz : 8000.0f)
-             % (ch ? ch->connectedPeers : 0) % (ch ? ch->averageLatencyMs : 14.5f)
-             % nearby.size() % tiles).str()
+            "{c:00FF99}[WebGPU Bridge] Subsystem offline.{/c}"
         ));
         return;
     }
 
     if (boost::iequals(theMessage, "/prophecy")) {
-        auto paper = sNeuralNarrativeEngine.GetLatestNewspaper();
-        auto proph = sNeuralNarrativeEngine.GetActiveProphecies();
-        std::string latestProph = proph.empty() ? "None" : proph[0].propheticText;
-        float latency = sNeuralNarrativeEngine.GetAverageInferenceLatencyMs();
         m_parent.QueueCommand(make_shared<SystemChatMsg>(
-            (format("{c:FF55FF}[Neural Prophecy Engine] Paper: %1% | Headline: '%2%' | Latency: %3$.1fms | Oracle Prophecy: '%4%'{/c}")
-             % (paper ? paper->paperName : "Megacity Herald") % (paper ? paper->headline : "No headline")
-             % latency % latestProph).str()
+            "{c:FF55FF}[Neural Prophecy Engine] Subsystem offline.{/c}"
         ));
         return;
     }
@@ -2778,15 +2171,8 @@ void PlayerObject::RPC_HandleChat( ByteBuffer &srcCmd )
     }
 
     if (boost::iequals(theMessage, "/federation")) {
-        size_t shards = sShardFederationEngine.GetShardCount();
-        size_t online = sShardFederationEngine.GetOnlineShardCount();
-        auto peace = sShardFederationEngine.GetPeaceIndex();
-        size_t resCount = sShardFederationEngine.GetResolutionCount();
         m_parent.QueueCommand(make_shared<SystemChatMsg>(
-            (format("{c:CC99FF}[Shard Federation] Shards: %1% (%2% online) | Truce: %3% (Z-M: %4$.0f%%, M-E: %5$.0f%%, E-Z: %6$.0f%%) | Crimson Sky: %7% | Resolutions: %8%{/c}")
-             % shards % online % (peace.crimsonSkyActive ? "{c:FF0000}CRIMSON SKY{/c}" : "{c:00FF00}STABLE{/c}")
-             % peace.zionMachineTrucePercent % peace.machineExileTrucePercent % peace.exileZionTrucePercent
-             % (peace.crimsonSkyActive ? "ACTIVE" : "OFF") % resCount).str()
+            "{c:CC99FF}[Shard Federation] Subsystem offline.{/c}"
         ));
         return;
     }
@@ -2838,13 +2224,8 @@ void PlayerObject::RPC_HandleChat( ByteBuffer &srcCmd )
     }
 
     if (boost::iequals(theMessage, "/reboot")) {
-        auto ver = sMatrixRebootEngine.GetVersionState();
         m_parent.QueueCommand(make_shared<SystemChatMsg>(
-            (format("{c:FFD700}[Matrix 7.0 Singularity] Current Engine: v%1$.1f | State: %2% | Dissolution: %3$.1f%% | Zion Core Selection: %4%F / %5%M | Golden Dawn: %6% | Legacy Title: %7%{/c}")
-             % ver.matrixVersion % (int)ver.currentState % ver.dissolutionProgressPercent
-             % ver.selectedFemaleCount % ver.selectedMaleCount
-             % (ver.goldenDawnAestheticActive ? "ACTIVE" : "OFF")
-             % (ver.legacyTitleAwarded.empty() ? "Pending Choice" : ver.legacyTitleAwarded)).str()
+            "{c:FFD700}[Matrix Reboot Engine] Subsystem offline.{/c}"
         ));
         return;
     }
@@ -2926,47 +2307,17 @@ void PlayerObject::RPC_HandleChat( ByteBuffer &srcCmd )
     }
 
     if (boost::iequals(theMessage, "/slmstats")) {
-        std::string rep = sSLMDialogueEngine.GenerateSLMTelemetryReport();
-        m_parent.QueueCommand(make_shared<SystemChatMsg>((format("{c:00FFCC}%1%{/c}") % rep).str()));
+        m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:00FFCC}[SLM Dialogue Engine] Subsystem offline.{/c}"));
         return;
     }
 
     if (theMessage.length() >= 10 && (boost::iequals(theMessage.substr(0, 10), "/epistemic") || boost::iequals(theMessage.substr(0, 10), "!epistemic"))) {
-        std::stringstream ss(theMessage.substr(10));
-        uint32 targetId = 0;
-        ss >> targetId;
-        if (targetId == 0) targetId = 101;
-        EpistemicHorizon h = sSLMDialogueEngine.DetermineEpistemicHorizon(targetId);
-        std::string hName = sSLMDialogueEngine.GetEpistemicHorizonName(h);
-        m_parent.QueueCommand(make_shared<SystemChatMsg>(
-            (format("{c:00FFCC}[Epistemic Horizon] NPC %1%: %2%{/c}") % targetId % hName).str()
-        ));
+        m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:00FFCC}[Epistemic Horizon] Subsystem offline.{/c}"));
         return;
     }
 
     if (theMessage.length() >= 9 && (boost::iequals(theMessage.substr(0, 9), "/dialogue") || boost::iequals(theMessage.substr(0, 9), "!dialogue"))) {
-        std::stringstream ss(theMessage.substr(9));
-        uint32 targetId = 0;
-        ss >> targetId;
-        std::string prompt;
-        std::getline(ss, prompt);
-        boost::trim(prompt);
-        if (prompt.empty()) prompt = "Hello, what's your story?";
-        if (targetId == 0) targetId = 101;
-
-        DialogueResponseResult res;
-        sSLMDialogueEngine.GenerateSituatedDialogueResponse(targetId, m_goId, prompt, res);
-        m_parent.QueueCommand(make_shared<SystemChatMsg>(
-            (format("{c:FFFF55}[Dialogue] You ask %1%: \"%2%\"{/c}") % res.speakerName % prompt).str()
-        ));
-        if (res.wasEpistemicBreachDetected) {
-            m_parent.QueueCommand(make_shared<SystemChatMsg>(
-                (format("{c:FF5555}[EPISTEMIC BREACH BLOCKED] '%1%' violated horizon!{/c}") % res.breachedConcept).str()
-            ));
-        }
-        m_parent.QueueCommand(make_shared<SystemChatMsg>(
-            (format("{c:00FFCC}[%1%] \"%2%\"{/c}") % res.speakerName % res.responseText).str()
-        ));
+        m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:00FFCC}[SLM Dialogue Engine] Subsystem offline.{/c}"));
         return;
     }
 
@@ -3562,17 +2913,143 @@ void PlayerObject::RPC_HandleJackoutFinished( ByteBuffer &srcCmd )
 }
 void PlayerObject::RPC_HandleMarketListItems(ByteBuffer&) {}
 void PlayerObject::RPC_HandleMarketOpen(ByteBuffer&) {}
-void PlayerObject::RPC_HandleVendorBuy(ByteBuffer&) {}
+void PlayerObject::RPC_HandleVendorBuy(ByteBuffer& srcCmd)
+{
+	if (srcCmd.remaining() < 4) return;
+	uint32 itemTemplateId = srcCmd.read<uint32>();
+	uint32 vendorGoId = 0;
+	if (srcCmd.remaining() >= 4)
+		vendorGoId = srcCmd.read<uint32>();
+
+	const ItemTemplate* tpl = sDataLoader.GetItemTemplate(itemTemplateId);
+	if (!tpl)
+	{
+		m_parent.QueueCommand(std::make_shared<SystemChatMsg>("{c:FF4444}[VENDOR] Item not cataloged in current vendor database.{/c}"));
+		return;
+	}
+
+	uint32 cost = tpl->value;
+	if (m_cash < cost)
+	{
+		m_parent.QueueCommand(std::make_shared<SystemChatMsg>(
+			(format("{c:FF4444}[VENDOR] Insufficient Information Bits. Cost: %1% bits, Available: %2% bits.{/c}") % cost % m_cash).str()
+		));
+		return;
+	}
+
+	if (!m_inventorySystem) return;
+
+	if (m_inventorySystem->getFirstFreeSlot() == 0 || m_inventorySystem->getFirstFreeSlot() == 0xFF)
+	{
+		m_parent.QueueCommand(std::make_shared<SystemChatMsg>("{c:FF4444}[VENDOR] Inventory is full. Clear space before purchasing.{/c}"));
+		return;
+	}
+
+	if (!giveItem(itemTemplateId))
+	{
+		m_parent.QueueCommand(std::make_shared<SystemChatMsg>("{c:FF4444}[VENDOR] Failed to add item to inventory.{/c}"));
+		return;
+	}
+
+	removeInfo(cost);
+	saveCashToDB();
+	m_parent.QueueCommand(std::make_shared<SetInformationCmd>(m_cash));
+
+	m_parent.QueueCommand(std::make_shared<SystemChatMsg>(
+		(format("{c:00FF00}[VENDOR] Purchased %1% for %2% Information Bits.{/c}") % tpl->name % cost).str()
+	));
+}
 void PlayerObject::RPC_HandleCraftRequest(ByteBuffer&) {}
 void PlayerObject::RPC_HandleFactionInfo(ByteBuffer&) {}
 void PlayerObject::RPC_HandleMissionInvite(ByteBuffer&) {}
 void PlayerObject::RPC_HandlePartyLeave(ByteBuffer&) {}
 void PlayerObject::RPC_HandleMemoryChangeTactic(ByteBuffer&) {}
 void PlayerObject::RPC_HandleUpgradeAbility(ByteBuffer&) {}
-void PlayerObject::RPC_HandleMissionAbort(ByteBuffer&) {}
-void PlayerObject::RPC_HandleMissionAccept(ByteBuffer&) {}
-void PlayerObject::RPC_HandleMissionInfo(ByteBuffer&) {}
-void PlayerObject::RPC_HandleMissionRequest(ByteBuffer&) {}
+void PlayerObject::RPC_HandleMissionAbort(ByteBuffer& srcCmd)
+{
+	DEBUG_LOG(format("(%1%) %2%:%3% RPC_HandleMissionAbort") % m_parent.Address() % m_handle % m_goId);
+	if (sMissionSys.HasActiveMission(m_goId))
+	{
+		m_parent.QueueCommand(std::make_shared<SystemChatMsg>("{c:FF4444}[OPERATOR] Contract aborted. Uplink severed.{/c}"));
+	}
+	else
+	{
+		m_parent.QueueCommand(std::make_shared<SystemChatMsg>("{c:FFFF00}[OPERATOR] No active contract to abort.{/c}"));
+	}
+}
+void PlayerObject::RPC_HandleMissionAccept(ByteBuffer& srcCmd)
+{
+	DEBUG_LOG(format("(%1%) %2%:%3% RPC_HandleMissionAccept") % m_parent.Address() % m_handle % m_goId);
+	if (sMissionSys.HasActiveMission(m_goId))
+	{
+		m_parent.QueueCommand(std::make_shared<SystemChatMsg>("{c:00FF00}[OPERATOR] Contract confirmed. Uplink established. Execute mission parameters.{/c}"));
+		sMissionSys.SendMissionObjectiveDialog(this);
+	}
+	else
+	{
+		RPC_HandleMissionRequest(srcCmd);
+	}
+}
+void PlayerObject::RPC_HandleMissionInfo(ByteBuffer& srcCmd)
+{
+	DEBUG_LOG(format("(%1%) %2%:%3% RPC_HandleMissionInfo") % m_parent.Address() % m_handle % m_goId);
+	if (sMissionSys.HasActiveMission(m_goId))
+	{
+		sMissionSys.SendMissionObjectiveDialog(this);
+	}
+	else
+	{
+		m_parent.QueueCommand(std::make_shared<SystemChatMsg>("{c:FFFF00}[OPERATOR] No active contract data on file. Contact operator for assignment.{/c}"));
+	}
+}
+void PlayerObject::RPC_HandleMissionRequest(ByteBuffer& srcCmd)
+{
+	DEBUG_LOG(format("(%1%) %2%:%3% RPC_HandleMissionRequest") % m_parent.Address() % m_handle % m_goId);
+
+	if (sMissionSys.HasActiveMission(m_goId))
+	{
+		m_parent.QueueCommand(std::make_shared<SystemChatMsg>("{c:FFFF00}[OPERATOR] Active contract in progress. Complete or abort current parameters before requesting new orders.{/c}"));
+		sMissionSys.SendMissionObjectiveDialog(this);
+		return;
+	}
+
+	uint32 missionId = sMissionSys.GenerateFactionTensionMission(this);
+	if (missionId == 0)
+	{
+		missionId = sMissionSys.SynthesizeProceduralMission(this, ProceduralMissionArchetype::DATA_EXTRACTION);
+	}
+
+	if (missionId != 0)
+	{
+		const auto& templates = sMissionSys.GetMissionTemplates();
+		auto it = templates.find(missionId);
+		if (it != templates.end())
+		{
+			const MissionTemplate& templ = it->second;
+			m_parent.QueueCommand(std::make_shared<SystemChatMsg>(
+				(format("{c:00FF00}[OPERATOR DISPATCH] New Contract Assigned: %1%{/c}") % templ.title).str()
+			));
+			m_parent.QueueCommand(std::make_shared<SystemChatMsg>(
+				(format("{c:00FFCC}[BRIEFING] %1%{/c}") % templ.description).str()
+			));
+			m_parent.QueueCommand(std::make_shared<SystemChatMsg>(
+				(format("{c:FFD700}[REWARDS] %1% Info Bits | %2% XP{/c}") % templ.infoReward % templ.expReward).str()
+			));
+
+			if (!templ.objectives.empty())
+			{
+				const auto& firstObj = templ.objectives[0];
+				m_parent.QueueCommand(std::make_shared<SystemChatMsg>(
+					(format("{c:00FF00}[RADAR BREADCRUMB] Objective Target: %1%{/c}") % firstObj.description).str()
+				));
+			}
+		}
+	}
+	else
+	{
+		m_parent.QueueCommand(std::make_shared<SystemChatMsg>("{c:FF4444}[OPERATOR] No operational contacts currently requesting tactical assets in this sector.{/c}"));
+	}
+}
 void PlayerObject::RPC_HandleItemMoveSlot(ByteBuffer&) {}
 void PlayerObject::RPC_HandleItemUnmountRSI(ByteBuffer&) {}
 void PlayerObject::RPC_HandleItemMountRSI(ByteBuffer&) {}

@@ -1,4 +1,4 @@
-#include <memory>
+﻿#include <memory>
 #include "BotClient.h"
 #include "BotManager.h"
 #include "ObjectMgr.h"
@@ -163,6 +163,7 @@ void BotClient::UpdateBotAI(float deltaSeconds)
     if (me->isDead())
     {
         m_targetGoId = 0; //respawn fires through the normal EVENT_RESPAWN path
+        SetLocomotionAnimation(0);
         return;
     }
     
@@ -199,6 +200,7 @@ void BotClient::UpdateBotAI(float deltaSeconds)
                 return;
             }
             m_targetGoId = 0;
+            SetLocomotionAnimation(0);
         }
         else if (BotManager::getSingletonPtr()->IsAggroEnabled() && me->getFactionName() != "Civilian")
         {
@@ -428,6 +430,21 @@ void BotClient::UpdateBotAI(float deltaSeconds)
     }
 }
 
+void BotClient::SetLocomotionAnimation(uint8 animId)
+{
+    if (m_currentAnimState == animId)
+        return;
+
+    m_currentAnimState = animId;
+    PlayerObject* me = BotGetPlayer(m_playerGoId);
+    if (!me)
+        return;
+
+    me->setCurrentAnimation(animId);
+    LocationVector loc = me->getPosition();
+    sGame.AnnounceStateUpdateNear(loc.x, loc.z, 20000.0f, std::make_shared<AnimationStateMsg>(m_playerGoId));
+}
+
 void BotClient::InitializePatrolCircuit()
 {
     if (m_patrolInitialized) return;
@@ -441,10 +458,30 @@ void BotClient::InitializePatrolCircuit()
     m_hasHome = true;
 
     m_patrolCircuit.clear();
-    const float angles[] = { 0.0f, 1.5707963f, 3.14159265f, -1.5707963f };
+
+    // 1. Check nearby hardlines for authentic city transit patrols (within 15m - 120m)
+    const auto& hardlines = BotManager::getSingleton().GetHardlines();
+    for (const auto& hl : hardlines)
+    {
+        float dx = (float)hl.x - m_homeX;
+        float dz = (float)hl.z - m_homeZ;
+        float dSq = dx * dx + dz * dz;
+        if (dSq >= 2250000.0f && dSq <= 144000000.0f) // 15m to 120m
+        {
+            if (!sSpatialGrid.CheckCollision((float)hl.x, (float)hl.z, 1.0f, m_playerGoId))
+            {
+                m_patrolCircuit.push_back(BotVector2D((float)hl.x, (float)hl.z));
+                if (m_patrolCircuit.size() >= 3)
+                    break;
+            }
+        }
+    }
+
+    // 2. Generate street-scale waypoints across intersections and avenues (18m - 35m)
+    const float angles[] = { 0.0f, 0.785398f, 1.5707963f, 2.356194f, 3.14159265f, -2.356194f, -1.5707963f, -0.785398f };
     for (float ang : angles)
     {
-        for (float r : { 800.0f, 500.0f, 300.0f })
+        for (float r : { 3500.0f, 2500.0f, 1800.0f })
         {
             float wx = m_homeX + cosf(ang) * r;
             float wz = m_homeZ + sinf(ang) * r;
@@ -454,11 +491,12 @@ void BotClient::InitializePatrolCircuit()
                 break;
             }
         }
+        if (m_patrolCircuit.size() >= 6)
+            break;
     }
-    if (m_patrolCircuit.empty())
-    {
-        m_patrolCircuit.push_back(BotVector2D(m_homeX, m_homeZ));
-    }
+
+    // Always loop back through home origin
+    m_patrolCircuit.push_back(BotVector2D(m_homeX, m_homeZ));
     m_currentPatrolIndex = 0;
     m_patrolInitialized = true;
 }
@@ -476,9 +514,10 @@ void BotClient::RoamAndSwarm(float deltaSeconds)
     }
     if (m_pathWaypoints.empty() || m_currentWaypointIndex >= (int)m_pathWaypoints.size())
     {
+        SetLocomotionAnimation(0); // Idle when waiting between waypoints
         if (m_idleUntilMs == 0)
         {
-            m_idleUntilMs = nowMs + 1500 + (rand() % 1500);
+            m_idleUntilMs = nowMs + 2000 + (rand() % 3000);
             return;
         }
         if (nowMs < m_idleUntilMs)
@@ -504,17 +543,19 @@ void BotClient::RoamAndSwarm(float deltaSeconds)
         float dz = wp.second - (float)loc.z;
         float dist = std::sqrt(dx*dx + dz*dz);
         
-        if (dist < 40.0f) {
+        if (dist < 50.0f) {
             m_currentWaypointIndex++;
             if (m_currentWaypointIndex >= (int)m_pathWaypoints.size()) {
                 m_pathWaypoints.clear();
+                SetLocomotionAnimation(0);
                 sGame.AnnounceStateUpdateNear(loc.x, loc.z, 20000.0f, std::make_shared<PositionStateMsg>(m_playerGoId));
             }
         } else {
             dist = std::max(0.01f, dist); // Prevent division by zero
 
-            // Base Pathfinding velocity: 160.0f cm/s = 1.6 m/s walking stride
-            float speed = 160.0f;
+            // Base Pathfinding velocity: 180.0f cm/s = 1.8 m/s walking stride
+            SetLocomotionAnimation(10); // 10 = DetectDiff_WalkF
+            float speed = 180.0f;
             BotVector2D pathVel((dx / dist) * speed, (dz / dist) * speed);
 
             // Add Boids velocity
@@ -539,10 +580,10 @@ void BotClient::RoamAndSwarm(float deltaSeconds)
                 sSpatialGrid.UpdateClientPosition(this, newX, newZ);
 
                 uint32 nowMs = getMSTime();
-                if (nowMs - m_lastRoamBroadcastMs >= 200) {
+                if (nowMs - m_lastRoamBroadcastMs >= 150) {
                     m_lastRoamBroadcastMs = nowMs;
-                    sGame.AnnounceStateUpdateNear(loc.x, loc.z, 20000.0f, std::make_shared<PositionStateMsg>(m_playerGoId));
-                    sGame.AnnounceStateUpdateNear(loc.x, loc.z, 20000.0f, std::make_shared<RotationStateMsg>(m_playerGoId, newRot));
+                    sGame.AnnounceStateUpdateNear(loc.x, loc.z, 15000.0f, std::make_shared<PositionStateMsg>(m_playerGoId));
+                    sGame.AnnounceStateUpdateNear(loc.x, loc.z, 15000.0f, std::make_shared<RotationStateMsg>(m_playerGoId, newRot));
                 }
             } else {
                 m_currentWaypointIndex++;
@@ -560,7 +601,10 @@ void BotClient::AttackTarget(uint32 targetGoId)
     PlayerObject* me = BotGetPlayer(m_playerGoId);
     PlayerObject* target = BotGetPlayer(targetGoId);
     if (!me || !target || target->isDead())
+    {
+        SetLocomotionAnimation(0);
         return;
+    }
 
     //engage through the combat system so a real session exists:
     //interlock in melee range, otherwise open fire
@@ -569,6 +613,7 @@ void BotClient::AttackTarget(uint32 targetGoId)
     float meleeRange = defaultMelee ? defaultMelee->range : 250.0f;
     
     if (dist <= meleeRange) {
+        SetLocomotionAnimation(0);
         sCombatSys.RequestInterlock(m_playerGoId, targetGoId);
     }
     else
@@ -576,7 +621,8 @@ void BotClient::AttackTarget(uint32 targetGoId)
         // Try ranged combat. If it fails (e.g. out of ammo or LOS blocked), move closer
         sCombatSys.RequestRangedCombat(m_playerGoId, targetGoId, 0);
         
-        // Always try to move towards target during ranged combat anyway to prevent getting stuck
+        // Approach target with combat sprint animation
+        SetLocomotionAnimation(30); // 30 = DetectDiff_RunF
         float dirX = target->getPosition().x - me->getPosition().x;
         float dirZ = target->getPosition().z - me->getPosition().z;
         float lenSq = dirX*dirX + dirZ*dirZ;
@@ -598,9 +644,14 @@ void BotClient::AttackTarget(uint32 targetGoId)
             newPos.rot = std::atan2(dirZ, dirX);
             uint8 newRot = newPos.getMxoRot();
             me->setPosition(newPos);
-            sGame.AnnounceStateUpdateNear(newX, newZ, 20000.0f, std::make_shared<PositionStateMsg>(m_playerGoId));
-            sGame.AnnounceStateUpdateNear(newX, newZ, 20000.0f, std::make_shared<RotationStateMsg>(m_playerGoId, newRot));
             sSpatialGrid.UpdateClientPosition(this, newX, newZ);
+
+            uint32 nowMs = getMSTime();
+            if (nowMs - m_lastRoamBroadcastMs >= 150) {
+                m_lastRoamBroadcastMs = nowMs;
+                sGame.AnnounceStateUpdateNear(newX, newZ, 20000.0f, std::make_shared<PositionStateMsg>(m_playerGoId));
+                sGame.AnnounceStateUpdateNear(newX, newZ, 20000.0f, std::make_shared<RotationStateMsg>(m_playerGoId, newRot));
+            }
         }
     }
 }

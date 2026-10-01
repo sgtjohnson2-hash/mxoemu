@@ -6,8 +6,6 @@
 #include "LocationVector.h"
 #include "AI/QTable.h"
 #include "SmithVirusCascade.h"
-#include "CastleTraumaModel.h"
-#include "CastleSurgeryEngine.h"
 #include <string>
 #include <vector>
 #include <map>

@@ -1,4 +1,4 @@
-// ***************************************************************************
+﻿// ***************************************************************************
 //
 // Reality - The Matrix Online Server Emulator
 // Copyright (C) 2006-2010 Rajko Stojadinovic
@@ -76,7 +76,9 @@ public:
 	bool getPvpFlag() const {return m_pvpflag;}
 
 	uint8 getCurrentAnimation() const {return m_currAnimation;}
+	void setCurrentAnimation(uint8 anim) { m_currAnimation = anim; }
 	uint8 getCurrentMood() const {return m_currMood;}
+	void setCurrentMood(uint8 mood) { m_currMood = mood; }
 
 	class GameClient& getClient() { return m_parent; }
 	vector<msgBaseClassPtr> getCurrentStatePackets();

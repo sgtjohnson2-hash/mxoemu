@@ -1,4 +1,4 @@
-#include "SensoryPerceptionSystem.h"
+﻿#include "SensoryPerceptionSystem.h"
 #include "PlayerObject.h"
 #include "BotClient.h"
 #include "BotManager.h"
@@ -63,11 +63,17 @@ bool SensoryPerceptionSystem::CheckVision(PlayerObject* observer, PlayerObject* 
     // Stance / Cloak multiplier
     float stanceMult = CalculateDetectionMultiplier(target);
 
-    // Near-Field Peripheral: 120 deg (half-angle 60 deg = ~1.047 rad), up to 15m (1500 units)
-    // Far-Field Focused: 45 deg (half-angle 22.5 deg = ~0.393 rad), up to 65m (6500 units)
-    // Combat Compression: Focused FOV narrows from 45 deg to 30 deg (half-angle 15 deg = ~0.262 rad)
+    // 360-degree close acoustic awareness: footsteps and presence within 8m (800 units)
+    if (dist <= 800.0f * stanceMult) {
+        outConfidence = 1.0f;
+        return true;
+    }
+
+    // Near-Field Peripheral: 170 deg (half-angle 85 deg = ~1.483 rad), up to 25m (2500 units)
+    // Far-Field Focused: 90 deg (half-angle 45 deg = ~0.785 rad), up to 65m (6500 units)
+    // Combat Compression: Focused FOV narrows from 90 deg to 45 deg (half-angle 22.5 deg)
     float maxFocusedRange = 6500.0f * stanceMult;
-    float maxPeripheralRange = 1500.0f * stanceMult;
+    float maxPeripheralRange = 2500.0f * stanceMult;
 
     if (dist > maxFocusedRange) {
         return false;
@@ -79,8 +85,8 @@ bool SensoryPerceptionSystem::CheckVision(PlayerObject* observer, PlayerObject* 
     float angleDiffRad = std::abs(targetAngleRad - obsHeadingRad);
     while (angleDiffRad > 3.14159265f) angleDiffRad = std::abs(angleDiffRad - 2.0f * 3.14159265f);
 
-    float focusedHalfAngle = inCombat ? (15.0f * 3.14159265f / 180.0f) : (22.5f * 3.14159265f / 180.0f);
-    float peripheralHalfAngle = 60.0f * 3.14159265f / 180.0f;
+    float focusedHalfAngle = inCombat ? (22.5f * 3.14159265f / 180.0f) : (45.0f * 3.14159265f / 180.0f);
+    float peripheralHalfAngle = 85.0f * 3.14159265f / 180.0f;
 
     bool insideFocusedCone = (dist <= maxFocusedRange && angleDiffRad <= focusedHalfAngle);
     bool insidePeripheralCone = (dist <= maxPeripheralRange && angleDiffRad <= peripheralHalfAngle);

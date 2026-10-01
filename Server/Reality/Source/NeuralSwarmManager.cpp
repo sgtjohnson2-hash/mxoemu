@@ -399,13 +399,12 @@ std::string NeuralSwarmManager::GenerateTelemetryJson() const
     return ss.str();
 }
 
-#include "AgentSmithCascadeEngine.h"
 #include <iostream>
 
 void RunNeuralSwarmTestSuite()
 {
     std::cout << "\n============================================================" << std::endl;
-    std::cout << "  STARTING EPOCH V: NEURAL SWARM & SMITH CASCADE TEST SUITE (SUITE 27)" << std::endl;
+    std::cout << "  STARTING EPOCH V: NEURAL SWARM TEST SUITE (SUITE 27)" << std::endl;
     std::cout << "============================================================\n" << std::endl;
 
     int passed = 0;
@@ -421,11 +420,9 @@ void RunNeuralSwarmTestSuite()
     };
 
     sNeuralSwarmMgr.ResetForTesting();
-    sSmithCascadeEngine.ResetForTesting();
 
     // 1. Initial State
     assertTest("Initial swarm boid count is 0", sNeuralSwarmMgr.GetActiveSwarmCount() == 0);
-    assertTest("Initial global Smith clones is 0", sSmithCascadeEngine.GetTotalGlobalSmithClones() == 0);
 
     // 2. Swarm Registration
     bool reg1 = sNeuralSwarmMgr.RegisterSwarmEntity(7001, SWARM_ENTITY_SMITH_CLONE, 1000.0f, 0.0f, 2000.0f);
@@ -471,53 +468,8 @@ void RunNeuralSwarmTestSuite()
     assertTest("Unregistered Smith clone 2 successfully", unreg);
     assertTest("Swarm count decremented to 2", sNeuralSwarmMgr.GetActiveSwarmCount() == 2);
 
-    // 7. Agent Smith Viral Assimilation Pipeline
-    bool initAssim = sSmithCascadeEngine.InitiateAssimilation(8001, 8050, "NeoFollower", 1, 500.0f, 10.0f, 500.0f);
-    assertTest("Initiated viral assimilation on civilian NeoFollower", initAssim);
-    assertTest("Victim marked as undergoing assimilation", sSmithCascadeEngine.IsVictimUndergoingAssimilation(8050));
-
-    // Check Stage 1
-    const AssimilationEvent* ev = sSmithCascadeEngine.GetAssimilationEvent(8050);
-    assertTest("Begins in STAGE_VIRAL_CONTACT", ev && ev->stage == STAGE_VIRAL_CONTACT);
-
-    // Step 2.5s -> Stage 2: Cellular Overwrite (31%)
-    sSmithCascadeEngine.Update(2.5f);
-    ev = sSmithCascadeEngine.GetAssimilationEvent(8050);
-    assertTest("Advanced to STAGE_CELLULAR_OVERWRITE", ev && ev->stage == STAGE_CELLULAR_OVERWRITE);
-
-    // Step 2.0s -> Stage 3: Epistemic Dissolution (56%)
-    sSmithCascadeEngine.Update(2.0f);
-    ev = sSmithCascadeEngine.GetAssimilationEvent(8050);
-    assertTest("Advanced to STAGE_EPISTEMIC_DISSOLUTION", ev && ev->stage == STAGE_EPISTEMIC_DISSOLUTION);
-
-    // Step 2.0s -> Stage 4: Sunglasses Manifestation (81%)
-    sSmithCascadeEngine.Update(2.0f);
-    ev = sSmithCascadeEngine.GetAssimilationEvent(8050);
-    assertTest("Advanced to STAGE_SUNGLASSES_MANIFESTATION", ev && ev->stage == STAGE_SUNGLASSES_MANIFESTATION);
-
-    // Step 2.0s -> Stage 5: Assimilation Complete (100%)
-    sSmithCascadeEngine.Update(2.0f);
-    assertTest("Victim completed assimilation and exited pending queue", !sSmithCascadeEngine.IsVictimUndergoingAssimilation(8050));
-    assertTest("Global Smith clones incremented to 1", sSmithCascadeEngine.GetTotalGlobalSmithClones() == 1);
-    assertTest("Victim seamlessly registered into NeuralSwarmManager as Smith Boid", 
-               sNeuralSwarmMgr.GetBoidNode(8050) != nullptr);
-
-    // 8. Antiviral Vaccine Interruption
-    sSmithCascadeEngine.InitiateAssimilation(8001, 8051, "ZionOperative", 1, 600.0f, 10.0f, 600.0f);
-    sSmithCascadeEngine.Update(3.0f); // 37.5% progress
-    bool vacResult = sSmithCascadeEngine.ApplyAntiviralVaccine(8051);
-    assertTest("Antiviral vaccine successfully purged viral code before completion", vacResult);
-    assertTest("Victim cleared from assimilation queue", !sSmithCascadeEngine.IsVictimUndergoingAssimilation(8051));
-    assertTest("Global Smith clones remained at 1", sSmithCascadeEngine.GetTotalGlobalSmithClones() == 1);
-
-    // 9. Purge Smith Clone
-    bool purged = sSmithCascadeEngine.PurgeSmithClone(8050);
-    assertTest("Smith clone purged from system", purged);
-    assertTest("Global Smith clones decremented to 0", sSmithCascadeEngine.GetTotalGlobalSmithClones() == 0);
-    assertTest("Purged clone removed from NeuralSwarmManager", sNeuralSwarmMgr.GetBoidNode(8050) == nullptr);
-
     std::cout << "\n------------------------------------------------------------" << std::endl;
-    std::cout << "  EPOCH V NEURAL SWARM & SMITH CASCADE SUITE COMPLETE" << std::endl;
+    std::cout << "  EPOCH V NEURAL SWARM SUITE COMPLETE" << std::endl;
     std::cout << "  PASSED: " << passed << " | FAILED: " << failed << std::endl;
     std::cout << "------------------------------------------------------------\n" << std::endl;
 

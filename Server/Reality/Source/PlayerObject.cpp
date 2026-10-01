@@ -447,11 +447,11 @@ void PlayerObject::PopulateWorld()
 		return;
 
 	// Dynamic Area-of-Interest (AoI) Streaming: query SpatialGrid within 250m for initial world population
-	auto nearbyClients = sSpatialGrid.GetClientsInAoI(m_pos.x, m_pos.z, 25000.0f);
+	auto nearbyClients = sSpatialGrid.GetClientsInAoI(m_pos.x, m_pos.z, 12000.0f);
 	size_t spawnedCount = 0;
 	for (GameClient* client : nearbyClients)
 	{
-		if (spawnedCount >= 15) break;
+		if (spawnedCount >= 4) break;
 		if (!client || client == &m_parent) continue;
 		uint32 otherGoId = client->GetPlayerGoId();
 		if (otherGoId == 0 || otherGoId == m_goId) continue;
@@ -487,14 +487,14 @@ void PlayerObject::PopulateWorld()
 void PlayerObject::UpdateAoIStreaming()
 {
 	uint32 now = getMSTime();
-	if (now - m_lastAoIUpdateMs < 250) // Throttle to ~4Hz to minimize CPU overhead
+	if (now - m_lastAoIUpdateMs < 1000) // Throttle to 1Hz
 		return;
 	m_lastAoIUpdateMs = now;
 
-	const float STREAM_IN_RADIUS = 25000.0f;     // 250m: dynamically stream in
-	const float STREAM_OUT_RADIUS_SQ = 30000.0f * 30000.0f; // 300m: cull with hysteresis
+	const float STREAM_IN_RADIUS = 12000.0f;     // 120m: dynamically stream in
+	const float STREAM_OUT_RADIUS_SQ = 18000.0f * 18000.0f; // 180m: cull with hysteresis
 
-	// 1. Stream in entities entering 250m
+	// 1. Stream in entities entering 120m (rate limited to 1 new entity per second)
 	auto nearbyClients = sSpatialGrid.GetClientsInAoI(m_pos.x, m_pos.z, STREAM_IN_RADIUS);
 	for (GameClient* client : nearbyClients)
 	{
@@ -506,7 +506,7 @@ void PlayerObject::UpdateAoIStreaming()
 		{
 			{
 				std::lock_guard<std::mutex> l(m_knownMutex);
-				if (m_knownEntities.size() >= 30) break;
+				if (m_knownEntities.size() >= 10) break;
 			}
 			PlayerObject* otherObj = sObjMgr.getGOPtrSafe(otherGoId);
 			if (otherObj && !otherObj->isDead())
@@ -517,6 +517,7 @@ void PlayerObject::UpdateAoIStreaming()
 				{
 					m_parent.QueueState(pkt);
 				}
+				break; // Rate limit: 1 new entity per second
 			}
 		}
 	}
@@ -731,6 +732,19 @@ void PlayerObject::HandleCommand( ByteBuffer &srcCmd )
 		m_RPCshort[0x9080] = &PlayerObject::RPC_HandleCallContact;
 		m_RPCshort[0x80ae] = &PlayerObject::RPC_HandleAbilityLoad;
 		m_RPCshort[0x80b9] = &PlayerObject::RPC_HandleAbilityUse;
+		m_RPCshort[0x8094] = &PlayerObject::RPC_HandleMissionRequest;
+		m_RPCshort[0x8098] = &PlayerObject::RPC_HandleMissionInfo;
+		m_RPCshort[0x809b] = &PlayerObject::RPC_HandleMissionAccept;
+		m_RPCshort[0x80a6] = &PlayerObject::RPC_HandleMissionAbort;
+		m_RPCshort[0x808c] = &PlayerObject::RPC_HandleMissionInvite;
+		m_RPCshort[0x8071] = &PlayerObject::RPC_HandlePartyLeave;
+		m_RPCshort[0x80b7] = &PlayerObject::RPC_HandleUpgradeAbility;
+		m_RPCshort[0x810e] = &PlayerObject::RPC_HandleVendorBuy;
+		m_RPCshort[0x8121] = &PlayerObject::RPC_HandleMarketOpen;
+		m_RPCshort[0x8124] = &PlayerObject::RPC_HandleMarketListItems;
+		m_RPCshort[0x8063] = &PlayerObject::RPC_HandleItemMountRSI;
+		m_RPCshort[0x8064] = &PlayerObject::RPC_HandleItemUnmountRSI;
+		m_RPCshort[0x8065] = &PlayerObject::RPC_HandleItemMoveSlot;
 	}
 
 	uint8 firstByte = srcCmd.read<uint8>();

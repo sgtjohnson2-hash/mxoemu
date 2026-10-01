@@ -1,10 +1,8 @@
 #include "EmergentPoliceManager.h"
 #include "UnderworldManager.h"
 #include "CityLifeManager.h"
-#include "EmergentAIEngine.h"
 #include "FrankCastleManager.h"
 #include "RadioDispatchSystem.h"
-#include "WorldRealizationEngine.h"
 #include "BotManager.h"
 #include "ObjectMgr.h"
 #include "PlayerObject.h"
@@ -203,7 +201,6 @@ void EmergentPoliceManager::InitializeDefaultRoadblocks()
         r.lanesCovered = 3;
         r.interceptionRadius = 50.0f;
         m_roadblocks[r.roadblockId] = r;
-        sWorldRealizationEngine.DeployTacticalRoadblock3D(r.roadblockId, r.location.x, r.location.y, r.location.z, 0.0f, r.interceptionRadius);
     }
 
     // Downtown
@@ -221,7 +218,6 @@ void EmergentPoliceManager::InitializeDefaultRoadblocks()
         r.lanesCovered = 4;
         r.interceptionRadius = 45.0f;
         m_roadblocks[r.roadblockId] = r;
-        sWorldRealizationEngine.DeployTacticalRoadblock3D(r.roadblockId, r.location.x, r.location.y, r.location.z, 0.0f, r.interceptionRadius);
     }
 
     // International (Harbor / Docks)
@@ -239,7 +235,6 @@ void EmergentPoliceManager::InitializeDefaultRoadblocks()
         r.lanesCovered = 3;
         r.interceptionRadius = 55.0f;
         m_roadblocks[r.roadblockId] = r;
-        sWorldRealizationEngine.DeployTacticalRoadblock3D(r.roadblockId, r.location.x, r.location.y, r.location.z, 0.0f, r.interceptionRadius);
     }
 
     // Industrial
@@ -257,7 +252,6 @@ void EmergentPoliceManager::InitializeDefaultRoadblocks()
         r.lanesCovered = 4;
         r.interceptionRadius = 60.0f;
         m_roadblocks[r.roadblockId] = r;
-        sWorldRealizationEngine.DeployTacticalRoadblock3D(r.roadblockId, r.location.x, r.location.y, r.location.z, 0.0f, r.interceptionRadius);
     }
 
     // Park East
@@ -275,7 +269,6 @@ void EmergentPoliceManager::InitializeDefaultRoadblocks()
         r.lanesCovered = 2;
         r.interceptionRadius = 40.0f;
         m_roadblocks[r.roadblockId] = r;
-        sWorldRealizationEngine.DeployTacticalRoadblock3D(r.roadblockId, r.location.x, r.location.y, r.location.z, 0.0f, r.interceptionRadius);
     }
 }
 
@@ -407,29 +400,6 @@ bool EmergentPoliceManager::OrderStackAndBreach(uint32 squadId, const LocationVe
     Transmit10Code(MMPD10Code::CODE_10_99, s->callsign, s->districtId, stackPos,
                    "SWAT Stack Formed at Target Entryway - Awaiting Breach Execution", true);
 
-    // Register tactical cover smart object if emergent AI is running
-    if (EmergentAIEngine::getSingletonPtr()) {
-        SmartObject coverObj;
-        coverObj.objectId = 9000 + squadId;
-        coverObj.name = (format("SWAT Ballistic Cover [%1%]") % s->callsign).str();
-        coverObj.typeTag = "TacticalCover";
-        coverObj.districtId = s->districtId;
-        coverObj.districtName = s->districtName;
-        coverObj.position = stackPos;
-        coverObj.interactionRadius = 4.0f;
-        coverObj.maxCapacity = 4;
-
-        AffordanceDefinition aff;
-        aff.type = AffordanceType::TAKE_COVER;
-        aff.actionName = "Take Tactical SWAT Stack Cover";
-        aff.durationMs = 12000;
-        aff.baseUtility = 0.95f;
-        aff.allowsPanickedUsers = true;
-        coverObj.affordances.push_back(aff);
-
-        sEmergentAIMgr.GetAffordanceGrid().RegisterObject(coverObj);
-    }
-
     // Lockdown nearby commercial shops to protect civilians during tactical operation
     if (CityLifeManager::getSingletonPtr()) {
         sCityLifeMgr.LockdownShopsInRadius(static_cast<float>(stackPos.x), static_cast<float>(stackPos.z), 60.0f, "MMPD SWAT Tactical Breach Operation");
@@ -525,11 +495,6 @@ bool EmergentPoliceManager::DetonateBreachCharge(uint32 squadId)
     charge.acousticDecibels = 185.0f;
     m_activeOrdnance[charge.effectId] = charge;
 
-    // Trigger cross-system gunshot echo & panic
-    if (EmergentAIEngine::getSingletonPtr()) {
-        sEmergentAIMgr.OnGunfireEcho(s->breachTargetLocation, 85.0f, "SWAT Explosive Breach Detonation");
-    }
-
     // Damage racket defenses if target is an underworld racket
     if (s->targetRacketId != 0 && UnderworldManager::getSingletonPtr()) {
         sUnderworldMgr.DamageRacketDefenses(s->targetRacketId, 60.0f, false);
@@ -603,12 +568,6 @@ bool EmergentPoliceManager::DeployTearGas(uint32 squadId, const LocationVector& 
                                           "CS Chemical Gas Deployed by SWAT",
                                           "Tactical officers deployed riot control gas in " + s->districtName,
                                           s->districtId);
-    }
-    if (EmergentAIEngine::getSingletonPtr()) {
-        sEmergentAIMgr.GetContagionEngine().SeedRumor(s->districtId,
-                                                      "SWAT Chemical Gas Dispersion in " + s->districtName,
-                                                      "CS gas canisters deployed to flush out barricaded suspects.",
-                                                      s->districtId, 0.75f);
     }
 
     return true;
@@ -713,11 +672,6 @@ bool EmergentPoliceManager::DeclareCode4(uint32 squadId)
 
     // Reset shield formation to stack line
     SetShieldFormation(squadId, BallisticShieldFormation::STACK_LINE);
-
-    // Unregister tactical cover smart object
-    if (EmergentAIEngine::getSingletonPtr()) {
-        sEmergentAIMgr.GetAffordanceGrid().UnregisterObject(9000 + squadId);
-    }
 
     // Lift shop lockdowns in the vicinity
     if (CityLifeManager::getSingletonPtr()) {
@@ -906,11 +860,6 @@ bool EmergentPoliceManager::ExecuteSniperTakedown(uint32 perchId, float& outDama
     p->stateTimerMs = 0;
     m_totalSniperNeutralizations++;
 
-    // Emit gunshot echo acoustic wave across Megacity
-    if (EmergentAIEngine::getSingletonPtr()) {
-        sEmergentAIMgr.OnGunfireEcho(p->vantageCoordinates, 90.0f, "Sniper Precision Overwatch Rifle Shot");
-    }
-
     // If target was linked to an emergent crime, clear immediate lethal threat on hostages
     if (p->designatedTargetEntityId >= 5000) {
         uint32 crimeId = p->designatedTargetEntityId - 5000;
@@ -1061,29 +1010,6 @@ uint32 EmergentPoliceManager::DeployRoadblock(uint32 districtId, const std::stri
 
     m_roadblocks[r.roadblockId] = r;
 
-    // Register roadblock cover smart object in emergent AI affordance grid
-    if (EmergentAIEngine::getSingletonPtr()) {
-        SmartObject rbObj;
-        rbObj.objectId = 8000 + r.roadblockId;
-        rbObj.name = "MMPD Vehicular Roadblock [" + name + "]";
-        rbObj.typeTag = "VehicularRoadblock";
-        rbObj.districtId = districtId;
-        rbObj.districtName = r.districtName;
-        rbObj.position = pos;
-        rbObj.interactionRadius = 8.0f;
-        rbObj.maxCapacity = 6;
-
-        AffordanceDefinition aff;
-        aff.type = AffordanceType::TAKE_COVER;
-        aff.actionName = "Take Cover Behind Armored BearCat / Police Cruiser";
-        aff.durationMs = 15000;
-        aff.baseUtility = 0.90f;
-        aff.allowsPanickedUsers = true;
-        rbObj.affordances.push_back(aff);
-
-        sEmergentAIMgr.GetAffordanceGrid().RegisterObject(rbObj);
-    }
-
     // Halt civilian traffic before spike strip perimeter in CityLifeManager
     if (CityLifeManager::getSingletonPtr()) {
         for (auto& vPair : const_cast<std::map<uint32, CityVehicle>&>(sCityLifeMgr.GetAllVehicles())) {
@@ -1156,15 +1082,6 @@ bool EmergentPoliceManager::InterceptVehicularTarget(uint32 roadblockId, const L
                 r->districtId
             );
         }
-        if (EmergentAIEngine::getSingletonPtr()) {
-            sEmergentAIMgr.GetContagionEngine().SeedRumor(
-                r->districtId,
-                "MMPD Roadblock Intercepts Cartel Smugglers",
-                "Spike strips deployed across roadway impounded illicit cartel shipment.",
-                r->districtId,
-                0.80f
-            );
-        }
     }
 
     return true;
@@ -1176,9 +1093,6 @@ bool EmergentPoliceManager::RemoveRoadblock(uint32 roadblockId)
     auto it = m_roadblocks.find(roadblockId);
     if (it != m_roadblocks.end()) {
         it->second.isActive = false;
-        if (EmergentAIEngine::getSingletonPtr()) {
-            sEmergentAIMgr.GetAffordanceGrid().UnregisterObject(8000 + roadblockId);
-        }
         return true;
     }
     return false;
@@ -1228,11 +1142,6 @@ uint32 EmergentPoliceManager::Transmit10Code(MMPD10Code code, const std::string&
         tx.escalationTier = isSWAT ? 3 : 2;
         tx.timestampMs = log.timestampMs;
         sRadioDispatchSystem.BroadcastDispatch(tx, 30000.0f);
-    }
-
-    // Trigger emergent AI contagion & observer reaction
-    if (EmergentAIEngine::getSingletonPtr()) {
-        sEmergentAIMgr.OnPolice10CodeDispatched(districtId, log.codeString, loc);
     }
 
     return log.logId;
@@ -1386,15 +1295,6 @@ bool EmergentPoliceManager::AdvanceIASting(uint32 stingId)
                     "Internal Affairs Purges Corrupt Precinct",
                     "Massive IA sting operation brought down dirty captain. Clean leadership installed.",
                     p ? p->districtId : 1
-                );
-            }
-            if (EmergentAIEngine::getSingletonPtr()) {
-                sEmergentAIMgr.GetContagionEngine().SeedRumor(
-                    p ? p->districtId : 1,
-                    "Precinct HQ Raided by Internal Affairs",
-                    "Corrupt police captain arrested in handcuffs after undercover IA sting.",
-                    p ? p->districtId : 1,
-                    0.95f
                 );
             }
             break;

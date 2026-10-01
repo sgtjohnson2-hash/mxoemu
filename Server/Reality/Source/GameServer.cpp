@@ -69,35 +69,7 @@
 #include "MafiaEcosystemManager.h"
 #include "ExileChateauManager.h"
 #include "NeuralSwarmManager.h"
-#include "StructuralVoxelEngine.h"
-#include "SharedMemoryShardFabric.h"
-#include "NeuromorphicSpikeEngine.h"
-#include "NonEuclideanPortalEngine.h"
-#include "SourceCodeTelekinesisEngine.h"
-#include "GlobalSovereignMeshFabric.h"
-#include "GaussianSplatEngine.h"
-#include "PhysarumLogisticsEngine.h"
-#include "BiometricResonanceEngine.h"
-#include "WebAssemblyGatewayEngine.h"
-#include "WorldRealizationEngine.h"
-#include "CastleAgentCombatEngine.h"
-#include "CastlePvPKarmaEngine.h"
-#include "CastleUnderworldAssaultEngine.h"
-#include "AirspaceAndConvoyEngine.h"
-#include "NeuroevolutionaryCombatEngine.h"
 #include "MachineCitySystem.h"
-#include "QuantumSuperpositionEngine.h"
-#include "GenerationalLineageEngine.h"
-#include "SubAtomicMatrixGrid.h"
-#include "CosmicVerticalityEngine.h"
-#include "CollectiveConsciousnessEngine.h"
-#include "MegacityBourseEngine.h"
-#include "TemporalAnomalyEngine.h"
-#include "ParallelMatrixEngine.h"
-#include "QuantumEntangledMeshEngine.h"
-#include "SourceVoxelSynthesisEngine.h"
-#include "DeepCoreMeltdownEngine.h"
-#include "ArchitectSandboxEngine.h"
 #include <boost/bind.hpp>
 
 initialiseSingleton( GameServer );
@@ -148,35 +120,7 @@ bool GameServer::Start()
 	sMafiaMgr.Initialize();
 	sExileMgr.Initialize();
 	sNeuralSwarmMgr.Initialize();
-	sStructuralVoxelEngine.Initialize();
-	sSharedMemoryShardFabric.Initialize();
-	sNeuromorphicSpikeEngine.Initialize();
-	sNonEuclideanPortalEngine.Initialize();
-	sSourceTelekinesisEngine.Initialize();
-	sGlobalSovereignMesh.Initialize();
-	sGaussianSplatEngine.Initialize();
-	sPhysarumLogisticsEngine.Initialize();
-	sBiometricResonanceEngine.Initialize();
-	sWebAssemblyGatewayEngine.Initialize();
-	sWorldRealizationEngine.Initialize();
-	sCastleAgentCombatEngine.Initialize();
-	sCastlePvPKarmaEngine.Initialize();
-	sCastleUnderworldAssaultEngine.Initialize();
-	sAirspaceAndConvoyEngine.Initialize();
-	sNeuroevolutionaryCombatEngine.Initialize();
 	sMachineCitySystem.Initialize();
-	sQuantumSuperpositionEngine.Initialize();
-	sGenerationalLineageEngine.Initialize();
-	sSubAtomicMatrixGrid.Initialize();
-	sCosmicVerticalityEngine.Initialize();
-	sCollectiveConsciousnessEngine.Initialize();
-	sMegacityBourseEngine.Initialize();
-	sTemporalAnomalyEngine.Initialize();
-	sParallelMatrixEngine.Initialize();
-	sQuantumEntangledMeshEngine.Initialize();
-	sSourceVoxelSynthesisEngine.Initialize();
-	sDeepCoreMeltdownEngine.Initialize();
-	sArchitectSandboxEngine.Initialize();
 
 	string Interface = sConfig.GetStringDefault("GameServer.IP", "0.0.0.0");
 	int Port = sConfig.GetIntDefault("GameServer.Port", 10000);
@@ -307,9 +251,6 @@ void GameServer::SimulationLoop()
 				sEmergentPoliceMgr.Update(delta1Hz);
 				sFrankCastleMgr.Update(delta1Hz);
 				sNeuralSwarmMgr.Update(dt1Hz);
-				sCastleAgentCombatEngine.Update(dt1Hz);
-				sCastlePvPKarmaEngine.Update(dt1Hz);
-				sCastleUnderworldAssaultEngine.Update(dt1Hz);
 				}
 
 				// Throttled background bot network queue flush
@@ -319,45 +260,6 @@ void GameServer::SimulationLoop()
 						po->getClient().FlushQueue();
 					}
 				});
-			}
-
-			// Tier 4: Macro Systems (0.1Hz / ~10,000ms) - Physics, Logistics, Splats & Quantum Engines
-			static uint32 last10sSimMs = 0;
-			if (legacySim && currentMs - last10sSimMs >= 10000)
-			{
-				uint32 delta10s = currentMs - last10sSimMs;
-				last10sSimMs = currentMs;
-				float dt10s = delta10s / 1000.0f;
-				if (dt10s > 20.0f) dt10s = 20.0f;
-
-				// Airspace, Robotics & Physics Simulation
-				sAirspaceAndConvoyEngine.Update(dt10s);
-				sNeuroevolutionaryCombatEngine.Update(dt10s);
-				sMachineCitySystem.Update(dt10s);
-				sStructuralVoxelEngine.Update(dt10s);
-				sSharedMemoryShardFabric.Update(dt10s);
-				sNonEuclideanPortalEngine.Update(dt10s);
-				sSourceTelekinesisEngine.Update(dt10s);
-				sGlobalSovereignMesh.Update(dt10s);
-
-				// Quantum, Lattice & World Realization Engines
-				sGaussianSplatEngine.Update(dt10s);
-				sPhysarumLogisticsEngine.Update(dt10s);
-				sBiometricResonanceEngine.Update(dt10s);
-				sWebAssemblyGatewayEngine.Update(dt10s);
-				sWorldRealizationEngine.Update(dt10s);
-				sQuantumSuperpositionEngine.Update(dt10s);
-				sGenerationalLineageEngine.Update(dt10s);
-				sSubAtomicMatrixGrid.Update(dt10s);
-				sCosmicVerticalityEngine.Update(dt10s);
-				sCollectiveConsciousnessEngine.Update(dt10s);
-				sMegacityBourseEngine.Update(dt10s);
-				sTemporalAnomalyEngine.Update(dt10s);
-				sParallelMatrixEngine.Update(dt10s);
-				sQuantumEntangledMeshEngine.Update(dt10s);
-				sSourceVoxelSynthesisEngine.Update(dt10s);
-				sDeepCoreMeltdownEngine.Update(dt10s);
-				sArchitectSandboxEngine.Update(dt10s);
 			}
 
 			// The Anomaly Event (Phase 50)
@@ -377,16 +279,6 @@ void GameServer::SimulationLoop()
 						});
 						INFO_LOG(format("The Anomaly has been granted to player ID %1%.") % chosenId);
 					}
-				}
-			}
-
-			// Epoch XII: Periodic Reality Reset Saturation Checks & Multi-Epoch Shard State Synchronization
-			static uint32 lastResetCheckMs = 0;
-			if (legacySim && currentMs - lastResetCheckMs >= 5000) { // Every 5 seconds
-				lastResetCheckMs = currentMs;
-				if (sTemporalAnomalyEngine.CheckRealityResetThreshold()) {
-					sTemporalAnomalyEngine.TriggerRealityResetCycle("Architectural Convergence: Critical Saturation Exceeded");
-					sTemporalAnomalyEngine.SynchronizeShardStateMesh("Reality-Main-Shard-01", static_cast<float>(currentMs));
 				}
 			}
 

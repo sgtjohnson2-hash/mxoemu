@@ -13,19 +13,15 @@
 #include "LoadingConstruct.h"
 #include "RadioDispatchSystem.h"
 #include "APUCombatSystem.h"
-#include "MegacityDestructionEngine.h"
 #include "RedpillAwakeningSystem.h"
-#include "NeuralNarrativeEngine.h"
 #include "MachineCitySystem.h"
 #include "FreewayCombatSystem.h"
 #include "MobilAveRailSystem.h"
 #include "CyberdeckHackingSystem.h"
-#include "ShardFederationEngine.h"
 #include "ClubHelRaidSystem.h"
 #include "PodHarvestSystem.h"
 #include "OrbitalSatelliteSystem.h"
 #include "SourceCodeCompilerSystem.h"
-#include "MatrixRebootEngine.h"
 #include "AgentPossessionManager.h"
 #include <cmath>
 #include <algorithm>
@@ -182,19 +178,15 @@ void WorldDirector::Update(uint32 deltaMs)
     sHovercraftFlightSys.UpdateSimulation(deltaSec);
     sLoadingConstruct.UpdateTimeDilation(deltaSec);
     sAPUCombatSystem.UpdateSimulation(deltaSec);
-    sMegacityDestructionEngine.UpdateSimulation(deltaSec);
     sRedpillAwakeningSystem.UpdateSimulation(deltaSec);
-    sNeuralNarrativeEngine.UpdateSimulation(deltaSec);
     sMachineCitySystem.UpdateSimulation(deltaSec);
     sFreewayCombatSystem.UpdateSimulation(deltaSec);
     sMobilAveRailSystem.UpdateSimulation(deltaSec);
     sCyberdeckHackingSystem.UpdateSimulation(deltaSec);
-    sShardFederationEngine.UpdateSimulation(deltaSec);
     sClubHelRaidSystem.UpdateSimulation(deltaSec);
     sPodHarvestSystem.UpdateSimulation(deltaSec);
     sOrbitalSatelliteSystem.UpdateSimulation(deltaSec);
     sSourceCodeCompilerSystem.UpdateSimulation(deltaSec);
-    sMatrixRebootEngine.UpdateSimulation(deltaSec);
     sAgentPossessionMgr.Update(deltaMs);
 
     // 1. Check Active Crisis Expiration

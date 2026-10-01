@@ -348,6 +348,62 @@ void MissionSystem::AdvanceObjective(PlayerObject* player, ObjectiveCommand comm
     }
 }
 
+void MissionSystem::SendMissionObjectiveDialog(PlayerObject* player)
+{
+    if (!player) return;
+    std::lock_guard<std::recursive_mutex> lock(m_missionMutex);
+
+    uint32 goId = player->getGoId();
+    auto it = m_activeMissions.find(goId);
+    if (it == m_activeMissions.end()) return;
+
+    ActiveMissionState& state = it->second;
+    auto tIt = m_missions.find(state.missionId);
+    if (tIt == m_missions.end()) return;
+
+    const MissionTemplate& templ = tIt->second;
+    if (state.currentObjectiveIndex < templ.objectives.size())
+    {
+        const MissionObjective& obj = templ.objectives[state.currentObjectiveIndex];
+        player->getClient().QueueCommand(std::make_shared<SystemChatMsg>(
+            (format("{c:00FF00}[CONTRACT OBJECTIVE #%1%] %2%{/c}") % (state.currentObjectiveIndex + 1) % obj.description).str()
+        ));
+        if (obj.isTimed && obj.timeLimitSeconds > 0)
+        {
+            player->getClient().QueueCommand(std::make_shared<SystemChatMsg>(
+                (format("{c:FFFF00}[TIMER] Time limit: %1% seconds{/c}") % obj.timeLimitSeconds).str()
+            ));
+        }
+    }
+}
+
+void MissionSystem::CompleteMission(PlayerObject* player, MissionTemplate& templ)
+{
+    if (!player) return;
+    std::lock_guard<std::recursive_mutex> lock(m_missionMutex);
+
+    uint32 goId = player->getGoId();
+    INFO_LOG(format("Player %1% completed mission: %2%!") % player->getHandle() % templ.title);
+
+    if (templ.infoReward > 0)
+        sEconomySys.GiveInfo(player, templ.infoReward, "Mission Completion");
+
+    if (templ.expReward > 0)
+        player->awardCombatExperience(templ.expReward);
+
+    if (templ.rewardFactionRep > 0)
+        player->addFactionReputation(templ.rewardFactionRep);
+
+    if (templ.rewardItemTemplateId > 0 && player->getInventory())
+    {
+        auto item = std::make_shared<Item>(rand(), templ.rewardItemTemplateId);
+        player->getInventory()->addItemAuto(item);
+        INFO_LOG(format("Rewarded Item %1% to %2%") % templ.rewardItemTemplateId % player->getHandle());
+    }
+
+    m_activeMissions.erase(goId);
+}
+
 // Item 37: Bounty Hunter Contracts
 void MissionSystem::PlaceBounty(uint32 targetGoId, uint32 infoAmount, const std::string& placedBy)
 {
