@@ -742,6 +742,46 @@ const ByteBuffer& RotationStateMsg::toBuf()
 	return m_buf;
 }
 
+LocomotionStateMsg::LocomotionStateMsg( uint32 objectId, uint8 animation, uint8 rot ):ObjectUpdateMsg(objectId),m_animation(animation),m_rot(rot)
+{
+
+}
+
+LocomotionStateMsg::~LocomotionStateMsg()
+{
+
+}
+
+const ByteBuffer& LocomotionStateMsg::toBuf()
+{
+	m_buf.clear();
+	m_buf << uint8(0x03);
+
+	PlayerObject *m_player = sObjMgr.getGOPtr(m_objectId);
+	if (m_player == NULL)
+	{
+		throw PacketNoLongerValid();
+	}
+	uint16 viewId = 0;
+	try
+	{
+		viewId = sObjMgr.getViewForGO(m_toWho,m_objectId);
+	}
+	catch (ObjectMgr::ClientNotAvailable)
+	{
+		throw PacketNoLongerValid();
+	}
+
+	m_buf << uint16(viewId);
+	m_buf << uint8(1);
+
+	m_buf << uint8(0x06); // update type 0x06: locomotion animation + rotation
+	m_buf << uint8(m_animation);
+	m_buf << uint8(m_rot);
+
+	return m_buf;
+}
+
 JackoutEffectMsg::JackoutEffectMsg( uint32 objectId, bool jackout ):ObjectUpdateMsg(objectId),m_jackout(jackout)
 {
 }

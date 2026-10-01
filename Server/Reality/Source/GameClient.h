@@ -103,7 +103,7 @@ public:
 		}
 		if (dynamic_pointer_cast<PositionStateMsg>(msg) != NULL || dynamic_pointer_cast<StateUpdateMsg>(msg) != NULL ||
 			dynamic_pointer_cast<EmoteMsg>(msg) != NULL || dynamic_pointer_cast<AnimationStateMsg>(msg) != NULL ||
-			dynamic_pointer_cast<RotationStateMsg>(msg) != NULL)
+			dynamic_pointer_cast<RotationStateMsg>(msg) != NULL || dynamic_pointer_cast<LocomotionStateMsg>(msg) != NULL)
 			return me->knowsEntity(objId);
 		return true;
 	}

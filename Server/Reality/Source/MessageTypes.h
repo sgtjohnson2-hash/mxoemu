@@ -129,6 +129,17 @@ private:
 	uint8 m_rot;
 };
 
+class LocomotionStateMsg : public ObjectUpdateMsg
+{
+public:
+	LocomotionStateMsg(uint32 objectId, uint8 animation, uint8 rot);
+	~LocomotionStateMsg();
+	const ByteBuffer& toBuf();
+private:
+	uint8 m_animation;
+	uint8 m_rot;
+};
+
 class JackoutEffectMsg : public ObjectUpdateMsg
 {
 public:

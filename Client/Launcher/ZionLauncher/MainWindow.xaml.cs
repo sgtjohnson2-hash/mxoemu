@@ -85,9 +85,19 @@ namespace ZionLauncher
         }
 
         private static string GameRoot => ResolveGameRoot();
-        private static string RealityServer => Path.Combine(GameRoot, @"mxoemu_fork\Reality\Binaries\Reality.exe");
+        private static string RealityServer => Path.Combine(GameRoot, @"mxoemu_live\Server\Reality\Binaries\Reality.exe");
         private static string MySqlExe => Directory.Exists(@"E:\TESTDB\bin") ? @"E:\TESTDB\bin\mysqld.exe" : Path.Combine(GameRoot, @"mysql\bin\mysqld.exe");
-        private static string HookDll => Path.Combine(GameRoot, "mxohax_modern.dll");
+        private static string HookDll
+        {
+            get
+            {
+                string clientHook = Path.Combine(GameRoot, "Client", "mxohax.dll");
+                if (File.Exists(clientHook)) return clientHook;
+                string rootHook = Path.Combine(GameRoot, "mxohax.dll");
+                if (File.Exists(rootHook)) return rootHook;
+                return Path.Combine(GameRoot, "mxohax_modern.dll");
+            }
+        }
 
         [System.Runtime.InteropServices.DllImport("kernel32.dll", SetLastError = true)]
         static extern IntPtr OpenProcess(uint dwDesiredAccess, bool bInheritHandle, int dwProcessId);
@@ -1715,12 +1725,13 @@ namespace ZionLauncher
                 try { File.Copy(clientPubkey, rootPubkey, true); } catch { }
             }
 
-            // 5. Resolve authentic matrix.exe
+            // 5. Resolve authentic matrix.exe (prioritize Client directory)
             string[] candidateClientPaths = new[]
             {
-                Path.Combine(GameRoot, "matrix.exe"),
+                Path.Combine(GameRoot, "Client", "launcher.exe"),
                 Path.Combine(GameRoot, "Client", "matrix.exe"),
-                Path.Combine(GameRoot, "launcher.exe")
+                Path.Combine(GameRoot, "launcher.exe"),
+                Path.Combine(GameRoot, "matrix.exe")
             };
 
             string clientExe = "";
@@ -1766,8 +1777,9 @@ namespace ZionLauncher
                     if (CreateProcess(null, cmdLine, IntPtr.Zero, IntPtr.Zero, false, CREATE_SUSPENDED, IntPtr.Zero, workDir, ref si, out PROCESS_INFORMATION pi))
                     {
                         startedSuspended = true;
-                        bool injected = InjectDllIntoHandle(pi.hProcess, HookDll);
                         ResumeThread(pi.hThread);
+                        Thread.Sleep(100);
+                        bool injected = InjectDllIntoHandle(pi.hProcess, HookDll);
                         CloseHandle(pi.hThread);
                         CloseHandle(pi.hProcess);
 

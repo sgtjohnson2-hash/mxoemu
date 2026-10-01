@@ -442,6 +442,9 @@ void BotClient::SetLocomotionAnimation(uint8 animId)
 
     me->setCurrentAnimation(animId);
     LocationVector loc = me->getPosition();
+    uint8 rotByte = loc.getMxoRot();
+    // 0x06: Locomotion state update (animation ID + heading rotation) drives client skeleton walk/run blend trees
+    sGame.AnnounceStateUpdateNear(loc.x, loc.z, 20000.0f, std::make_shared<LocomotionStateMsg>(m_playerGoId, animId, rotByte));
     sGame.AnnounceStateUpdateNear(loc.x, loc.z, 20000.0f, std::make_shared<AnimationStateMsg>(m_playerGoId));
 }
 
@@ -549,6 +552,7 @@ void BotClient::RoamAndSwarm(float deltaSeconds)
                 m_pathWaypoints.clear();
                 SetLocomotionAnimation(0);
                 sGame.AnnounceStateUpdateNear(loc.x, loc.z, 20000.0f, std::make_shared<PositionStateMsg>(m_playerGoId));
+                sGame.AnnounceStateUpdateNear(loc.x, loc.z, 20000.0f, std::make_shared<LocomotionStateMsg>(m_playerGoId, 0, loc.getMxoRot()));
             }
         } else {
             dist = std::max(0.01f, dist); // Prevent division by zero
@@ -583,7 +587,8 @@ void BotClient::RoamAndSwarm(float deltaSeconds)
                 if (nowMs - m_lastRoamBroadcastMs >= 150) {
                     m_lastRoamBroadcastMs = nowMs;
                     sGame.AnnounceStateUpdateNear(loc.x, loc.z, 15000.0f, std::make_shared<PositionStateMsg>(m_playerGoId));
-                    sGame.AnnounceStateUpdateNear(loc.x, loc.z, 15000.0f, std::make_shared<RotationStateMsg>(m_playerGoId, newRot));
+                    // Broadcast 0x06 locomotion animation (10 = DetectDiff_WalkF) + heading rotation
+                    sGame.AnnounceStateUpdateNear(loc.x, loc.z, 15000.0f, std::make_shared<LocomotionStateMsg>(m_playerGoId, 10, newRot));
                 }
             } else {
                 m_currentWaypointIndex++;
@@ -650,7 +655,8 @@ void BotClient::AttackTarget(uint32 targetGoId)
             if (nowMs - m_lastRoamBroadcastMs >= 150) {
                 m_lastRoamBroadcastMs = nowMs;
                 sGame.AnnounceStateUpdateNear(newX, newZ, 20000.0f, std::make_shared<PositionStateMsg>(m_playerGoId));
-                sGame.AnnounceStateUpdateNear(newX, newZ, 20000.0f, std::make_shared<RotationStateMsg>(m_playerGoId, newRot));
+                // Broadcast 0x06 locomotion animation (30 = DetectDiff_RunF combat sprint) + heading rotation
+                sGame.AnnounceStateUpdateNear(newX, newZ, 20000.0f, std::make_shared<LocomotionStateMsg>(m_playerGoId, 30, newRot));
             }
         }
     }
