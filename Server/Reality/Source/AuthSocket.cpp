@@ -34,6 +34,8 @@
 #include "Database/DatabaseEnv.h"
 #include "Database/PreparedStatement.h"
 #include "SignedDataStruct.h"
+#include <chrono>
+#include <thread>
 
 AuthSocket::AuthSocket( ISocketHandler& h ) : TCPVarLenSocket(h), m_isNewUser(false), m_is76005(false)
 {
@@ -934,14 +936,21 @@ void AuthSocket::HandleDeleteCharacterRequest( ByteBuffer &packet )
 // ===========================================================================
 // The live DB pool sometimes returns an empty result for the first query on a
 // connection (seen as "user not found" / "No worlds in db" for valid data), so the
-// 7.6005 path retries each read once.
+// 7.6005 path retries each read up to 3 times.
 static QueryResult* QueryWithRetry(const string& sql)
 {
-	QueryResult* r = sDatabase.Query(sql);
-	if (r == NULL || r->GetRowCount() == 0)
+	QueryResult* r = nullptr;
+	for (int i = 0; i < 3; ++i)
 	{
-		delete r;
 		r = sDatabase.Query(sql);
+		if (r != nullptr && r->GetRowCount() > 0)
+			return r;
+		if (r != nullptr)
+		{
+			delete r;
+			r = nullptr;
+		}
+		std::this_thread::sleep_for(std::chrono::milliseconds(50));
 	}
 	return r;
 }
@@ -1116,9 +1125,33 @@ void AuthSocket::HandleAuthChallengeResponse76005( ByteBuffer &packet )
 
 		if (m_isNewUser)
 		{
-			sAuth.CreateAccount(m_username, thePassword);
-			m_userId = sAuth.getAccountIdForUsername(m_username);
-			INFO_LOG(format("7.6005: registered new user %1% (userId=%2%).") % m_username % m_userId);
+			uint32 existingId = sAuth.getAccountIdForUsername(m_username);
+			if (existingId != 0)
+			{
+				WARNING_LOG(format("7.6005: user %1% was flagged as new user but already exists (userId=%2%), loading existing record.") % m_username % existingId);
+				m_userId = existingId;
+				m_isNewUser = false;
+				scoped_ptr<QueryResult> uRes(QueryWithRetry((format("SELECT `passwordSalt`, `passwordHash`, `timeCreated` FROM `users` WHERE `userId` = %1% LIMIT 1") % m_userId).str()));
+				if (uRes && uRes->GetRowCount() > 0)
+				{
+					Field *f = uRes->Fetch();
+					m_passwordSalt = f[0].GetString();
+					m_passwordHash = f[1].GetString();
+					m_timeCreated = f[2].GetUInt32();
+				}
+				if (!AcceptPassword(thePassword))
+				{
+					WARNING_LOG(format("7.6005: user %1% supplied an invalid password, disconnecting.") % m_username);
+					SetCloseAndDelete(true);
+					return;
+				}
+			}
+			else
+			{
+				sAuth.CreateAccount(m_username, thePassword);
+				m_userId = sAuth.getAccountIdForUsername(m_username);
+				INFO_LOG(format("7.6005: registered new user %1% (userId=%2%).") % m_username % m_userId);
+			}
 		}
 		else if (!AcceptPassword(thePassword))
 		{

@@ -2964,7 +2964,55 @@ void PlayerObject::RPC_HandleFactionInfo(ByteBuffer&) {}
 void PlayerObject::RPC_HandleMissionInvite(ByteBuffer&) {}
 void PlayerObject::RPC_HandlePartyLeave(ByteBuffer&) {}
 void PlayerObject::RPC_HandleMemoryChangeTactic(ByteBuffer&) {}
-void PlayerObject::RPC_HandleUpgradeAbility(ByteBuffer&) {}
+void PlayerObject::RPC_HandleUpgradeAbility(ByteBuffer& srcCmd)
+{
+	uint16 abilityId = 0;
+	uint16 targetLevel = 1;
+	if (srcCmd.remaining() >= sizeof(uint16))
+		abilityId = srcCmd.read<uint16>();
+	if (srcCmd.remaining() >= sizeof(uint16))
+		targetLevel = srcCmd.read<uint16>();
+
+	DEBUG_LOG(format("(%1%) %2%:%3% RPC_HandleUpgradeAbility: abilityId=%4% targetLevel=%5%")
+		% m_parent.Address() % m_handle % m_goId % abilityId % targetLevel);
+
+	if (abilityId != 0 && m_abilitySystem)
+	{
+		auto ab = m_abilitySystem->getAbility(abilityId);
+		if (ab)
+		{
+			uint16 slot = ab->getMemorySlot();
+			m_abilitySystem->loadAbility(abilityId, targetLevel, slot);
+		}
+		else
+		{
+			uint16 freeSlot = 1;
+			for (uint16 s = 1; s <= 20; ++s)
+			{
+				bool used = false;
+				for (const auto& pair : m_abilitySystem->getLoadedAbilities())
+				{
+					if (pair.second && pair.second->getMemorySlot() == s)
+					{
+						used = true;
+						break;
+					}
+				}
+				if (!used)
+				{
+					freeSlot = s;
+					break;
+				}
+			}
+			m_abilitySystem->loadAbility(abilityId, targetLevel, freeSlot);
+		}
+		m_abilitySystem->saveToDB();
+		m_parent.QueueCommand(std::make_shared<SystemChatMsg>(
+			(format("{c:00FF00}[ABILITY COMPILER] Ability 0x%04X compiled to Level %1%. Memory state persisted to MariaDB.{/c}")
+			 % abilityId % targetLevel).str()
+		));
+	}
+}
 void PlayerObject::RPC_HandleMissionAbort(ByteBuffer& srcCmd)
 {
 	DEBUG_LOG(format("(%1%) %2%:%3% RPC_HandleMissionAbort") % m_parent.Address() % m_handle % m_goId);
@@ -3065,5 +3113,56 @@ void PlayerObject::RPC_HandleCallContact( ByteBuffer &srcCmd )
 		contactId = srcCmd.read<uint8>();
 
 	DEBUG_LOG(format("(%1%) RPC_HandleCallContact: contactId=%2%") % m_parent.Address() % contactId);
-	m_parent.QueueCommand(make_shared<SystemChatMsg>((format("{c:00FF00}[Operator] Operator online. I read you, %1%.{/c}") % m_handle).str()));
+
+	std::string contactName = "Operator";
+	std::string response = "Operator online. I read you, " + m_handle + ". What are your coordinates?";
+
+	uint32 faction = getFaction();
+	switch (contactId)
+	{
+		case 1: // Morpheus (Zion)
+			contactName = "Morpheus";
+			response = "I can only show you the door. You're the one that has to walk through it. What do you need, " + m_handle + "?";
+			break;
+		case 2: // Ghost (Zion)
+			contactName = "Ghost";
+			response = "Target verified. We have an operational sweep in this district. Stand by for tactical telemetry.";
+			break;
+		case 3: // Trinity (Zion)
+			contactName = "Trinity";
+			response = "The answer is out there, " + m_handle + ". It's looking for you, and it will find you if you want it to.";
+			break;
+		case 4: // Niobe (Zion)
+			contactName = "Niobe";
+			response = "Keep your eyes open and your engine hot. We're intercepting an enemy convoy in the Barrens.";
+			break;
+		case 5: // The Merovingian (Exile)
+			contactName = "The Merovingian";
+			response = "Nom de dieu... Cause and effect. You want something, you pay the price. Make it quick, " + m_handle + ".";
+			break;
+		case 6: // The Oracle
+			contactName = "The Oracle";
+			response = "You didn't come here to make the choice, darling. You've already made it. You're here to understand why.";
+			break;
+		case 7: // Agent Gray / Machine Handler
+			contactName = "Agent Gray";
+			response = "System anomaly detected. Return to your designated sector or face immediate deletion.";
+			break;
+		default:
+			if (faction == 1) {
+				contactName = "Zion Dispatch";
+				response = "Zion command online. Transmitting local district telemetry to your HUD radar.";
+			} else if (faction == 2) {
+				contactName = "Exile Handler";
+				response = "Club Hel network active. Keep your head down and your code clean.";
+			} else {
+				contactName = "System Administrator";
+				response = "Matrix Architecture Node active. Processing operative status.";
+			}
+			break;
+	}
+
+	m_parent.QueueCommand(make_shared<SystemChatMsg>(
+		(format("{c:00FF00}[%1%] %2%{/c}") % contactName % response).str()
+	));
 }

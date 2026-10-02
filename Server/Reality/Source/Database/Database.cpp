@@ -86,6 +86,7 @@ bool Database::Initialize(const char* Hostname, unsigned int port, const char* U
 			temp2 = mysql_real_connect( temp, Hostname, Username, Password, DatabaseName, port, NULL, 0 );
 			if( temp2 != NULL )
 			{
+				mysql_options(temp, MYSQL_OPT_RECONNECT, &my_true);
 				connected = true;
 				break;
 			}
@@ -586,7 +587,7 @@ bool Database::_SendQuery(DatabaseConnection &con, const char* Sql, bool Self)
 			// Re-send the query, the connection was successful.
 			// The true on the end will prevent an endless loop here, as it will
 			// stop after sending the query twice.
-			result = _SendQuery(con, Sql, true);
+			return _SendQuery(con, Sql, true);
 		}
 		else
 			ERROR_LOG(format("Sql query failed due to [%1%], Query: [%2%]\n") % mysql_error( con.conn ) % Sql);
@@ -675,6 +676,9 @@ bool Database::_Reconnect(DatabaseConnection &conn)
 		mysql_close( temp );
 		return false;
 	}
+
+	my_bool my_true = true;
+	mysql_options(temp, MYSQL_OPT_RECONNECT, &my_true);
 
 	if( conn.conn != NULL )
 		mysql_close( conn.conn );
