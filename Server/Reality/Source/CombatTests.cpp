@@ -304,6 +304,57 @@ int RunCombatTestSuite()
 			Actor far1 = makeBot(9200022, 20000.0, 10000.0);
 			Actor far2 = makeBot(9200023, 20000.0 + 1600.0, 10000.0);
 			check(!sCombatSys.RequestInterlock(far1.go, far2.go), "interlock beyond 15 m is refused");
+
+			// ---------------------------------------------------------------- melee step-in (~1.5m) and facing
+			Actor stepA = makeBot(9200024, 15000.0, 10000.0, 50, 5000);
+			Actor stepB = makeBot(9200025, 15500.0, 10000.0, 50, 5000); // 500 units apart (> 150)
+			bool stepStarted = sCombatSys.RequestInterlock(stepA.go, stepB.go);
+			double stepDist = dist2D(stepA.po->getPosition(), stepB.po->getPosition());
+			check(stepStarted && std::fabs(stepDist - 150.0) < 1.0, "interlock participants step into 1.5m melee range (got " + std::to_string(stepDist) + " units)");
+			LocationVector finalPosA = stepA.po->getPosition();
+			LocationVector finalPosB = stepB.po->getPosition();
+			double fxA = -std::sin(finalPosA.rot), fzA = -std::cos(finalPosA.rot);
+			double txA = (finalPosB.x - finalPosA.x) / stepDist, tzA = (finalPosB.z - finalPosA.z) / stepDist;
+			double dotA = fxA * txA + fzA * tzA;
+			double fxB = -std::sin(finalPosB.rot), fzB = -std::cos(finalPosB.rot);
+			double txB = (finalPosA.x - finalPosB.x) / stepDist, tzB = (finalPosA.z - finalPosB.z) / stepDist;
+			double dotB = fxB * txB + fzB * tzB;
+			check(dotA >= 0.999 && dotB >= 0.999, "interlock participants face each other squarely (dotA=" + std::to_string(dotA) + ", dotB=" + std::to_string(dotB) + ")");
+			sCombatSys.EndInterlock(stepA.go, false);
+
+			// ---------------------------------------------------------------- combat emotes for bots in interlock
+			Actor botEmoter = makeBot(9200026, 16000.0, 10000.0, 50, 5000);
+			Actor botPartner = makeBot(9200027, 16150.0, 10000.0, 50, 5000);
+			sCombatSys.RequestInterlock(botEmoter.go, botPartner.go);
+			bool combatEmoteOk = false;
+			try {
+				EmoteMsg combatMsg(botEmoter.go, 43, 1);
+				combatMsg.setReceiver(&humanClient);
+				const ByteBuffer& b = combatMsg.toBuf();
+				combatEmoteOk = (b.size() > 0 && b.contents()[9] == 43);
+			} catch (...) {}
+			check(combatEmoteOk, "combat emote 43 serializes for bot combatant engaged in interlock");
+
+			bool nonCombatSuppressed = false;
+			try {
+				EmoteMsg nonCombatMsg(botEmoter.go, 100, 1);
+				nonCombatMsg.setReceiver(&humanClient);
+				nonCombatMsg.toBuf();
+			} catch (const MsgBaseClass::PacketNoLongerValid&) {
+				nonCombatSuppressed = true;
+			}
+			check(nonCombatSuppressed, "non-combat emote 100 is suppressed for bot combatant in interlock");
+			sCombatSys.EndInterlock(botEmoter.go, false);
+
+			bool idleBotSuppressed = false;
+			try {
+				EmoteMsg idleMsg(botEmoter.go, 43, 1);
+				idleMsg.setReceiver(&humanClient);
+				idleMsg.toBuf();
+			} catch (const MsgBaseClass::PacketNoLongerValid&) {
+				idleBotSuppressed = true;
+			}
+			check(idleBotSuppressed, "combat emote is suppressed for bot NOT in interlock");
 		}
 
 		// ---------------------------------------------------------------- Update() soak with forced rounds

@@ -554,6 +554,8 @@ EmoteMsg::EmoteMsg(uint32 objectId, uint32 emoteId, uint8 emoteCount):ObjectUpda
 	}
 	if (m_emotesMap.find(emoteId) != m_emotesMap.end() )
 		m_emoteAnimation=m_emotesMap[emoteId];
+	else if (emoteId > 0 && emoteId <= 0xFF)
+		m_emoteAnimation=(uint8)emoteId;
 	else
 		m_emoteAnimation=0;
 }
@@ -590,13 +592,18 @@ const ByteBuffer& EmoteMsg::toBuf()
 		m_buf.clear();
 		throw PacketNoLongerValid();
 	}
-	// Only real players emote on the wire. The simulation systems fire emote ids (41-51)
+	// Only real players emote on the wire by default. The simulation systems fire emote ids (41-51)
 	// at NPCs whose animation sets do not have them; the 7.6005 client crashed in
 	// playeranimation.cpp a few minutes after entering a busy area.
+	// Allow combat animations (emotes 41, 42, 43, 50, 51) for bot combatants during interlock.
+	bool isCombatEmote = (m_emoteAnimation == 41 || m_emoteAnimation == 42 || m_emoteAnimation == 43 || m_emoteAnimation == 50 || m_emoteAnimation == 51);
 	if (m_player->getClient().isBot())
 	{
-		m_buf.clear();
-		throw PacketNoLongerValid();
+		if (!isCombatEmote || m_player->getInterlockPartner() == 0)
+		{
+			m_buf.clear();
+			throw PacketNoLongerValid();
+		}
 	}
 	m_player->getPosition().toFloatBuf(&sampleEmoteMsg[0x0D],sizeof(float)*3);
 	uint16 viewId = 0;

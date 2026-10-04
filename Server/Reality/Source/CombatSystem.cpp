@@ -322,11 +322,51 @@ bool CombatSystem::RequestInterlock(uint32 attackerGoId, uint32 targetGoId)
 	session.ilViewIdA = 0;
 	session.ilViewIdB = 0;
 
+	// Step interlock participants into melee range (~1.5m = 150.0 units) and face each other squarely
+	// before issuing InterlockInitMsg, ensuring accurate animation alignment and camera framing.
+	LocationVector posA = pA->getPosition();
+	LocationVector posB = pB->getPosition();
+	const double targetMeleeDist = 150.0; // 1.5m in world centi-units
+
+	double dx = posB.x - posA.x;
+	double dz = posB.z - posA.z;
+	double curDist = std::sqrt(dx * dx + dz * dz);
+	double midX = (posA.x + posB.x) * 0.5;
+	double midZ = (posA.z + posB.z) * 0.5;
+
+	if (curDist > 0.001)
+	{
+		double dirX = dx / curDist;
+		double dirZ = dz / curDist;
+		posA.x = midX - dirX * (targetMeleeDist * 0.5);
+		posA.z = midZ - dirZ * (targetMeleeDist * 0.5);
+		posB.x = midX + dirX * (targetMeleeDist * 0.5);
+		posB.z = midZ + dirZ * (targetMeleeDist * 0.5);
+	}
+	else
+	{
+		posA.x = midX - (targetMeleeDist * 0.5);
+		posB.x = midX + (targetMeleeDist * 0.5);
+	}
+
+	posA.rot = std::atan2(-(posB.x - posA.x), -(posB.z - posA.z));
+	posB.rot = std::atan2(-(posA.x - posB.x), -(posA.z - posB.z));
+	pA->setPosition(posA);
+	pB->setPosition(posB);
+
+	sSpatialGrid.UpdateClientPosition(&pA->getClient(), (float)posA.x, (float)posA.z);
+	sSpatialGrid.UpdateClientPosition(&pB->getClient(), (float)posB.x, (float)posB.z);
+
+	sGame.AnnounceStateUpdateNear(posA.x, posA.z, 20000.0f, std::make_shared<PositionStateMsg>(pA->getGoId()));
+	sGame.AnnounceStateUpdateNear(posA.x, posA.z, 20000.0f, std::make_shared<RotationStateMsg>(pA->getGoId(), posA.getMxoRot()));
+	sGame.AnnounceStateUpdateNear(posB.x, posB.z, 20000.0f, std::make_shared<PositionStateMsg>(pB->getGoId()));
+	sGame.AnnounceStateUpdateNear(posB.x, posB.z, 20000.0f, std::make_shared<RotationStateMsg>(pB->getGoId(), posB.getMxoRot()));
+
 	//spawn the ILCombatHandler view + pairing packet on both clients - this
 	//drives the client-side interlock camera and round UI
 	{
 		float simTime = sGame.GetSimTime();
-		LocationVector ilPos = pA->getPosition();
+		LocationVector ilPos(midX, (posA.y + posB.y) * 0.5, midZ);
 
 		struct SideSetup { PlayerObject* self; PlayerObject* other; uint16* viewSlot; };
 		SideSetup sides[2] =
@@ -366,19 +406,6 @@ bool CombatSystem::RequestInterlock(uint32 attackerGoId, uint32 targetGoId)
 	}
 
 	m_interlocks.push_back(session);
-
-	// Turn combatants to face each other squarely upon interlock initiation
-	LocationVector posA = pA->getPosition();
-	LocationVector posB = pB->getPosition();
-	posA.rot = posA.CalcAngTo(posB);
-	pA->setPosition(posA);
-	sGame.AnnounceStateUpdateNear(posA.x, posA.z, 20000.0f, std::make_shared<PositionStateMsg>(pA->getGoId()));
-	sGame.AnnounceStateUpdateNear(posA.x, posA.z, 20000.0f, std::make_shared<RotationStateMsg>(pA->getGoId(), posA.getMxoRot()));
-
-	posB.rot = posB.CalcAngTo(posA);
-	pB->setPosition(posB);
-	sGame.AnnounceStateUpdateNear(posB.x, posB.z, 20000.0f, std::make_shared<PositionStateMsg>(pB->getGoId()));
-	sGame.AnnounceStateUpdateNear(posB.x, posB.z, 20000.0f, std::make_shared<RotationStateMsg>(pB->getGoId(), posB.getMxoRot()));
 
 	pA->enterInterlock(targetGoId);
 	pB->enterInterlock(attackerGoId);
@@ -778,7 +805,7 @@ CombatSystem::AttackResult CombatSystem::ResolveAttack(PlayerObject* attacker, P
         float deflectedDmg = dmg * reflectRatio;
         dmg *= absorbRatio; // Absorbed
         if (deflectedDmg > 0.0f && !attacker->isDead()) {
-            attacker->takeDamage(target->getGoId(), static_cast<uint16>(deflectedDmg), 0x280001C1);
+            attacker->takeDamage(target->getGoId(), static_cast<uint16>(deflectedDmg), 0x280006DF);
             if (!target->getClient().isBot()) {
                 target->getClient().QueueCommand(std::make_shared<SystemChatMsg>(
                     (format("{c:FFB300}[Seraphic Deflection] You absorbed %1%%% damage and deflected %2% kinetic force back to %3%!{/c}")
@@ -858,8 +885,8 @@ CombatSystem::AttackResult CombatSystem::ResolveAttack(PlayerObject* attacker, P
 
 	if (res.hit)
 	{
-		// Synchronized combat animation subpacket trigger (0x280001C1)
-		uint32 hitFx = inInterlock ? 0x280001C1 : ((move.hitFxId != 0 && move.hitFxId != 1234) ? move.hitFxId : 0x280001C1);
+		// Synchronized combat animation subpacket trigger (0x280006DF)
+		uint32 hitFx = inInterlock ? 0x280006DF : ((move.hitFxId != 0 && move.hitFxId != 1234) ? move.hitFxId : 0x280006DF);
 		target->takeDamage(attacker->getGoId(), res.damageTaken, hitFx);
         target->recordIncomingAttack(move.id);
 
@@ -930,7 +957,7 @@ bool CombatSystem::RunInterlockRound(InterlockSession &session)
 
 	bool isClash = (tacA == tacB && tacA != TACTIC_NORMAL);
 
-	// Synchronized combat animation subpacket triggers (0x280001C1) and paired emotes
+	// Synchronized combat animation subpacket triggers (0x280006DF) and paired emotes
 	if (aCrushesB) {
 		sGame.AnnounceStateUpdateNear(pA->getPosition().x, pA->getPosition().z, 20000.0f, std::make_shared<EmoteMsg>(pA->getGoId(), 43, 1)); // Power strike
 		sGame.AnnounceStateUpdateNear(pB->getPosition().x, pB->getPosition().z, 20000.0f, std::make_shared<EmoteMsg>(pB->getGoId(), 50, 1)); // Heavy stagger

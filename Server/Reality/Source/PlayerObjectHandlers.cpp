@@ -739,6 +739,23 @@ void PlayerObject::ParsePlayerCommand( string theCmd )
 	{
 		if (m_targetGoId == 0)
 		{
+			float bestDistSq = 1500.0f * 1500.0f;
+			for (uint32 gid : sObjMgr.getAllGOIds())
+			{
+				PlayerObject* po = sObjMgr.getGOPtrSafe(gid);
+				if (po && po != this && !po->isDead() && (po->getFaction() == FACTION_MACHINES || po->getFactionName() == "Machines"))
+				{
+					float d = (float)m_pos.DistanceSq(po->getPosition());
+					if (d <= bestDistSq)
+					{
+						bestDistSq = d;
+						m_targetGoId = gid;
+					}
+				}
+			}
+		}
+		if (m_targetGoId == 0)
+		{
 			m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FF0000}No valid target selected.{/c}"));
 			return;
 		}
@@ -820,6 +837,7 @@ void PlayerObject::ParsePlayerCommand( string theCmd )
 			botPo->setDamageScale(dmgScale);
 
 			noteEntitySpawned(botGoId);
+			setTargetGoId(botGoId);
 			auto pkts = botPo->getCurrentStatePackets();
 			for (const auto& pkt : pkts) {
 				m_parent.QueueState(pkt);
@@ -866,6 +884,36 @@ void PlayerObject::ParsePlayerCommand( string theCmd )
 		else
 		{
 			m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FF0000}Usage: &dojo <1v1 | group | clear>{/c}"));
+		}
+		return;
+	}
+	else if (iequals(command, "target"))
+	{
+		uint32 bestGoId = 0;
+		float bestDistSq = 2000.0f * 2000.0f;
+		for (uint32 gid : sObjMgr.getAllGOIds())
+		{
+			PlayerObject* po = sObjMgr.getGOPtrSafe(gid);
+			if (po && po != this && !po->isDead() && (po->getFaction() == FACTION_MACHINES || po->getFactionName() == "Machines"))
+			{
+				float d = (float)m_pos.DistanceSq(po->getPosition());
+				if (d < bestDistSq)
+				{
+					bestDistSq = d;
+					bestGoId = gid;
+				}
+			}
+		}
+		if (bestGoId != 0)
+		{
+			setTargetGoId(bestGoId);
+			m_parent.QueueCommand(make_shared<SystemChatMsg>(
+				(format("{c:00FF00}[TARGET] Acquired target: %1% (GOID %2%){/c}") % sObjMgr.getGOPtrSafe(bestGoId)->getHandle() % bestGoId).str()
+			));
+		}
+		else
+		{
+			m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FF0000}[TARGET] No hostile or dojo bot found nearby.{/c}"));
 		}
 		return;
 	}
@@ -1397,6 +1445,7 @@ void PlayerObject::RPC_HandleChat( ByteBuffer &srcCmd )
 									  boost::istarts_with(theMessage, "/tactic") ||
 									  boost::istarts_with(theMessage, "/withdraw") ||
 									  boost::istarts_with(theMessage, "/escape") ||
+									  boost::istarts_with(theMessage, "/target") ||
 									  boost::istarts_with(theMessage, "/dojo"))))
 	{
 		ParsePlayerCommand(theMessage.substr(1));
