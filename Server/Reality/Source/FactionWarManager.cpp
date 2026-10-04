@@ -1,4 +1,4 @@
-﻿#include "FactionWarManager.h"
+#include "FactionWarManager.h"
 #include "Log.h"
 #include "Database/Database.h"
 #include "Database/PreparedStatement.h"
@@ -669,12 +669,29 @@ void FactionWarManager::captureNode(uint32 id, uint32 newFaction)
 
         m_controlNodes[id].controllingFaction = newFaction;
         m_controlNodes[id].captureProgress = 0.0f;
+
+        // Persist Hardline FactionTag into MariaDB hardlines table
+        PreparedStatement hlStmt("UPDATE `hardlines` SET `FactionTag` = ?0 WHERE `HardlineId` = ?1");
+        hlStmt.SetUInt32(0, newFaction);
+        hlStmt.SetUInt32(1, id);
+        sDatabase.ExecutePrepared(&hlStmt);
+
+        // Update district frontlines and score
+        m_factionScores[newFaction] += 25;
+        PreparedStatement scoreStmt("REPLACE INTO `territory_map` (`territory_id`, `faction`, `control_points`) VALUES (?0, ?1, ?2)");
+        scoreStmt.SetUInt32(0, m_controlNodes[id].districtId);
+        scoreStmt.SetUInt32(1, newFaction);
+        scoreStmt.SetUInt32(2, m_factionScores[newFaction]);
+        sDatabase.ExecutePrepared(&scoreStmt);
+
+        updateDistrictFrontlines(0);
         
         string factionStr = "Machines";
         if (newFaction == FACTION_ZION) factionStr = "Zion";
         else if (newFaction == FACTION_MEROVINGIAN) factionStr = "Merovingian";
 
-        string broadcastMsg = (format("{c:FFFF00}[Radio Free Zion] : Control Node %1% has been captured by %2%!{/c}") % id % factionStr).str();
+        string districtBuff = GetActiveDistrictBuffName(m_controlNodes[id].districtId);
+        string broadcastMsg = (format("{c:FFFF00}[Radio Free Zion] : Hardline Uplink %1% has been CAPTURED by %2%! Dynamic District Buff: %3%{/c}") % id % factionStr % districtBuff).str();
         auto players = sObjMgr.getAllGOIds();
         for (auto goId : players)
         {
@@ -683,7 +700,7 @@ void FactionWarManager::captureNode(uint32 id, uint32 newFaction)
                 p->getClient().QueueCommand(std::make_shared<SystemChatMsg>(broadcastMsg));
             }
         }
-        INFO_LOG(format("FactionWarManager: Node %1% captured by %2%") % id % factionStr);
+        INFO_LOG(format("FactionWarManager: Node %1% captured by %2% (District buff: %3%)") % id % factionStr % districtBuff);
     }
 }
 

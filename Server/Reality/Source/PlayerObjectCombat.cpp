@@ -103,6 +103,10 @@ void PlayerObject::takeDamage( uint32 attackerGoId, uint16 damage, uint32 fxId )
 	if (m_isDead)
 		return;
 
+	// Authentic retail combat hit FX (0x280001C1) triggers floating damage indicators
+	if (fxId == 0)
+		fxId = 0x280001C1;
+
 	if (m_parent.isBot() && attackerGoId != 0 && attackerGoId != m_goId)
 	{
 		BotClient* bot = dynamic_cast<BotClient*>(&m_parent);

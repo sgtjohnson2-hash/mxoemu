@@ -262,6 +262,11 @@ void PlayerObject::ParseAdminCommand( string theCmd )
         }
         return;
     }
+    else if (iequals(command, "dojo"))
+    {
+        ParsePlayerCommand(theCmd);
+        return;
+    }
     else if (iequals(command, "frank") || iequals(command, "frankStatus") || iequals(command, "punisher"))
     {
         m_parent.QueueCommand(make_shared<SystemChatMsg>(sFrankCastleMgr.GenerateStatusReport()));
@@ -775,7 +780,18 @@ void PlayerObject::ParsePlayerCommand( string theCmd )
 		LocationVector pos = this->getPosition();
 		if (iequals(subCommand, "1v1"))
 		{
-			sBotMgr.SpawnBot(1, pos.x + 20.0f, pos.y, pos.z + 20.0f, 2); // 2 = FACTION_MACHINES
+			auto bot = sBotMgr.SpawnSingleBot(pos.x + 20.0f, pos.y, pos.z + 20.0f, 2); // 2 = FACTION_MACHINES
+			if (bot) {
+				uint32 botGoId = bot->GetPlayerGoId();
+				PlayerObject* botPo = sObjMgr.getGOPtrSafe(botGoId);
+				if (botPo) {
+					noteEntitySpawned(botGoId);
+					auto pkts = botPo->getCurrentStatePackets();
+					for (const auto& pkt : pkts) {
+						m_parent.QueueState(pkt);
+					}
+				}
+			}
 			m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:00FF00}Dojo: 1v1 Enemy spawned!{/c}"));
 		}
 		else if (iequals(subCommand, "group"))
@@ -1332,9 +1348,15 @@ void PlayerObject::RPC_HandleChat( ByteBuffer &srcCmd )
 									  boost::istarts_with(theMessage, "/interlock") ||
 									  boost::istarts_with(theMessage, "/tactic") ||
 									  boost::istarts_with(theMessage, "/withdraw") ||
-									  boost::istarts_with(theMessage, "/escape"))))
+									  boost::istarts_with(theMessage, "/escape") ||
+									  boost::istarts_with(theMessage, "/dojo"))))
 	{
 		ParsePlayerCommand(theMessage.substr(1));
+		return;
+	}
+	else if (theMessage[0] == '/' && boost::istarts_with(theMessage, "/mission"))
+	{
+		ParseAdminCommand("mission");
 		return;
 	}
 
@@ -2855,13 +2877,20 @@ void PlayerObject::RPC_HandleObjectSelected( ByteBuffer &srcCmd )
 	uint16 objType = srcCmd.read<uint16>();
 	if (viewId || objType)
 	{
+		uint32 targetGoId = sObjMgr.getGOForView(&m_parent, viewId);
+		setTargetGoId(targetGoId);
+
 		format msg = 
-			format("(%s) %s:%d selected dynamic object view id %04x objType %04x")
+			format("(%s) %s:%d selected dynamic object view id %04x objType %04x (targetGoId=%d)")
 			% m_parent.Address() % m_handle	% m_goId
-			% viewId % objType;
+			% viewId % objType % targetGoId;
 
 		DEBUG_LOG(msg);
 		m_parent.QueueCommand(make_shared<SystemChatMsg>(msg.str()));
+	}
+	else
+	{
+		setTargetGoId(0);
 	}
 }
 

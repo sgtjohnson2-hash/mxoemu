@@ -428,6 +428,7 @@ void PlayerObject::SpawnSelf()
 		{
 			shared_ptr<PlayerSpawnMsg> dMsg = make_shared<PlayerSpawnMsg>(m_goId);
 			m_parent.QueueState(dMsg,false,boost::bind(&PlayerObject::PopulateWorld,this));
+			m_parent.QueueState(make_shared<SelfVitalsMsg>(this, true, false));
 			sGame.AnnounceStateUpdate(&m_parent,dMsg);
 			m_spawnedInWorld=true;
 			sSpatialGrid.UpdateClientPosition(&m_parent, m_pos.x, m_pos.z);
@@ -506,7 +507,7 @@ void PlayerObject::UpdateAoIStreaming()
 		{
 			{
 				std::lock_guard<std::mutex> l(m_knownMutex);
-				if (m_knownEntities.size() >= 10) break;
+				if (m_knownEntities.size() >= 50) break;
 			}
 			PlayerObject* otherObj = sObjMgr.getGOPtrSafe(otherGoId);
 			if (otherObj && !otherObj->isDead())

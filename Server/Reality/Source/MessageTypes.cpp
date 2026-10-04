@@ -1291,6 +1291,7 @@ SelfVitalsMsg::SelfVitalsMsg( PlayerObject *thePlayer, bool includeMax, bool inc
 	{
 		block.addUInt16(PlayerAttrSelf::MaxHealth,thePlayer->getMaximumHealth());
 		block.addUInt16(PlayerAttrSelf::InnerStrengthMax,thePlayer->getMaximumIS());
+		block.addByte(PlayerAttrSelf::Level,thePlayer->getLevel());
 	}
 	if (includeDead)
 		block.addByte(PlayerAttrSelf::IsDead,thePlayer->isDead() ? 1 : 0);

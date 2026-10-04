@@ -16,6 +16,7 @@
 #include "WorldDirector.h"
 #include "LogisticsManager.h"
 #include "StatusEffectManager.h"
+#include "StaticObjectManager.h"
 #include <boost/property_tree/ptree.hpp>
 #include <boost/property_tree/json_parser.hpp>
 
@@ -525,6 +526,29 @@ CombatSystem::AttackResult CombatSystem::ResolveAttack(PlayerObject* attacker, P
 	res.isCrit = false;
 	res.isBlocked = false;
 	res.isGlancing = false;
+
+    // Firearms & Ballistics line-of-sight validation (prevent shooting through buildings)
+    if (move.dmgType == DAMAGE_RANGED || move.dmgType == DAMAGE_BALLISTIC) {
+        LocationVector aPos = attacker->getPosition();
+        LocationVector tPos = target->getPosition();
+        // Check line of sight through static building geometry at chest height (+100.0f)
+        bool hasLOS = sStaticObjMgr.CheckLineOfSight(aPos.x, aPos.y + 100.0f, aPos.z, tPos.x, tPos.y + 100.0f, tPos.z);
+        if (!hasLOS) {
+            res.hit = false;
+            sMatrixThreatHeatmap.RecordDisruption(aPos.x, aPos.z, 5.0f, "Ballistic Impact on Building Cover");
+            if (!attacker->getClient().isBot()) {
+                attacker->getClient().QueueCommand(std::make_shared<SystemChatMsg>(
+                    "{c:FF5555}[BALLISTICS] Line of sight obstructed! Bullet intercepted by building geometry.{/c}"
+                ));
+            }
+            if (!target->getClient().isBot()) {
+                target->getClient().QueueCommand(std::make_shared<SystemChatMsg>(
+                    "{c:00FFFF}[BALLISTICS] Incoming gunfire intercepted by building cover!{/c}"
+                ));
+            }
+            return res;
+        }
+    }
 
     // Item 33: Hacker System Integration (Stun)
     if (attacker->isStunned()) {

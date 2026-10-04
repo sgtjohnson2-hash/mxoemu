@@ -79,6 +79,7 @@ void EconomySystem::GiveInfo(PlayerObject* player, uint32 amount, const std::str
     if (!player || amount == 0) return;
     std::lock_guard<std::recursive_mutex> lock(m_transactionMutex);
     player->addInfo(amount);
+    player->saveCashToDB();
     
     INFO_LOG(format("Player %1% received %2% Info (Reason: %3%)") % player->getHandle() % amount % reason);
     sBotMgr.LogCombat((format("You received %1% Info.") % amount).str());
@@ -92,6 +93,7 @@ bool EconomySystem::TakeInfo(PlayerObject* player, uint32 amount, const std::str
     if (player->getInfo() >= amount)
     {
         player->removeInfo(amount);
+        player->saveCashToDB();
         INFO_LOG(format("Player %1% spent %2% Info (Reason: %3%)") % player->getHandle() % amount % reason);
         sBotMgr.LogCombat((format("You spent %1% Info.") % amount).str());
         return true;
@@ -196,13 +198,18 @@ bool EconomySystem::PurchaseVendorItem(PlayerObject* buyer, uint64 listingId)
 
     // ACID-safe atomic settlement
     buyer->removeInfo(listing.infoPrice);
+    buyer->saveCashToDB();
     buyer->giveItem(listing.templateId);
+    if (buyer->getInventory() && !buyer->getClient().isBot()) {
+        buyer->getInventory()->saveToDB();
+    }
     listing.isActive = false;
 
     PlayerObject* sellerObj = sObjMgr.getGOPtrSafe(listing.sellerId);
     if (sellerObj)
     {
         sellerObj->addInfo(listing.infoPrice);
+        sellerObj->saveCashToDB();
     }
 
     try
@@ -241,6 +248,9 @@ bool EconomySystem::CancelListing(PlayerObject* seller, uint64 listingId)
 
     it->second.isActive = false;
     seller->giveItem(it->second.templateId);
+    if (seller->getInventory() && !seller->getClient().isBot()) {
+        seller->getInventory()->saveToDB();
+    }
 
     try
     {
@@ -303,7 +313,15 @@ bool EconomySystem::AtomicTradeTransfer(PlayerObject* buyer, PlayerObject* selle
 
     buyer->removeInfo(price);
     seller->addInfo(price);
+    buyer->saveCashToDB();
+    seller->saveCashToDB();
     buyer->giveItem(itemTemplateId);
+    if (buyer->getInventory() && !buyer->getClient().isBot()) {
+        buyer->getInventory()->saveToDB();
+    }
+    if (seller->getInventory() && !seller->getClient().isBot()) {
+        seller->getInventory()->saveToDB();
+    }
 
     INFO_LOG(format("ACID Trade Executed: Buyer %1% acquired item %2% from Seller %3% for %4% Info.")
              % buyer->getHandle() % itemTemplateId % seller->getHandle() % price);
@@ -329,6 +347,10 @@ bool EconomySystem::DepositToLocker(PlayerObject* player, uint32 hardlineId, uin
     {
         sBotMgr.LogCombat("Item not present in inventory to deposit.");
         return false;
+    }
+
+    if (player->getInventory() && !player->getClient().isBot()) {
+        player->getInventory()->saveToDB();
     }
 
     LockerItem item;
@@ -384,6 +406,9 @@ bool EconomySystem::WithdrawFromLocker(PlayerObject* player, uint32 hardlineId, 
             uint32 templateId = entryIt->templateId;
             locker.erase(entryIt);
             player->giveItem(templateId);
+            if (player->getInventory() && !player->getClient().isBot()) {
+                player->getInventory()->saveToDB();
+            }
 
             try
             {
@@ -511,6 +536,9 @@ bool EconomySystem::BuyGearFromVendor(PlayerObject* player, uint32 vendorId, uin
     }
 
     player->giveItem(templateId);
+    if (player->getInventory() && !player->getClient().isBot()) {
+        player->getInventory()->saveToDB();
+    }
     sBotMgr.LogCombat((format("Purchased gear (Item %1%) from %2% for %3% Info.") % templateId % vIt->second.name % price).str());
     return true;
 }
@@ -526,6 +554,10 @@ bool EconomySystem::SellGearToVendor(PlayerObject* player, uint32 vendorId, uint
     {
         sBotMgr.LogCombat("Item not in inventory to sell.");
         return false;
+    }
+
+    if (player->getInventory() && !player->getClient().isBot()) {
+        player->getInventory()->saveToDB();
     }
 
     uint32 sellValue = GetItemPrice(templateId) / 2;
