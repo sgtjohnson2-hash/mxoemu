@@ -764,6 +764,8 @@ void PlayerObject::ParsePlayerCommand( string theCmd )
 			m_tactic = TACTIC_POWER;
 			sCombatSys.SetTactic(m_goId, TACTIC_POWER);
 		}
+		INFO_LOG(format("(%1%) %2%:%3% close combat request view 0 spawn 0 -> target go %4%")
+			% m_parent.Address() % m_handle % m_goId % m_targetGoId);
 		if (!sCombatSys.RequestInterlock(m_goId, m_targetGoId))
 		{
 			m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FF0000}Interlock request failed (out of range or already in combat).{/c}"));
@@ -834,7 +836,7 @@ void PlayerObject::ParsePlayerCommand( string theCmd )
 			// reasonable number of 4 s interlock rounds); damage scales with the player's HP pool
 			// so the dummy stays a threat for characters that have levelled up (+50 HP/level).
 			const uint8 botLvl = std::max<uint8>(1, getLevel());
-			const float hpF = (iequals(subCommand, "1v1")) ? 150.0f : std::max(120.0f, std::min(600.0f, 100.0f + 20.0f * botLvl));
+			const float hpF = (iequals(subCommand, "1v1")) ? 80.0f : std::max(120.0f, std::min(600.0f, 100.0f + 20.0f * botLvl));
 			const float dmgScale = std::max(1.0f, std::min(20.0f, float(getMaximumHealth()) / 150.0f));
 			botPo->setLevel(botLvl);
 			botPo->setMaximumHealth((uint16)hpF);
