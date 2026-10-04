@@ -71,6 +71,16 @@ private:
     uint64 m_lastUsedTime;
 };
 
+// One entry of the default new-character loadout. IDs/names are the REAL ability
+// IDs from hd_reference/data/abilityIDs.csv (NOT the invented ids in Data/abilities.json).
+struct DefaultLoadoutEntry
+{
+    uint16 abilityId;
+    uint16 level;
+    uint16 slot;
+    const char* name;
+};
+
 class AbilitySystem
 {
 public:
@@ -90,11 +100,21 @@ public:
     bool canCastAbility(uint16 abilityId) const;
     void onAbilityCast(uint16 abilityId);
 
+    // Sends one AbilityLoadRspMsg (RPC 0x80b2) per loaded ability so the client
+    // populates its hotbar. Grants the default melee loadout first when nothing is loaded.
     void sendFullLoadout();
+
+    // Default melee starter loadout (real ability ids) - also used by CombatSystem to
+    // register server-side moves for these ids.
+    static const std::vector<DefaultLoadoutEntry>& GetDefaultLoadout();
+    // Retail wire constant seen in every captured 0x80b2 load message (bytes 08 02).
+    static constexpr uint16 LOAD_RSP_TRAILER = 0x0208;
     
     const map<uint16, shared_ptr<Ability>>& getLoadedAbilities() const { return m_loadedAbilities; }
 
 private:
+    void grantDefaultLoadout();
+
     PlayerObject* m_owner;
     uint16 m_maxMemory;
     

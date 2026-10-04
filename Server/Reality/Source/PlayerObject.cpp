@@ -41,6 +41,18 @@
 #include "AbilitySystem.h"
 #include <boost/algorithm/string.hpp>
 
+//Phase A observability: unknown RPC opcodes / 03 state types are logged at INFO so a live
+//session records the real 7.6005 opcodes. First occurrences always log, afterwards every
+//100th, so a chatty unknown opcode cannot flood the log.
+static bool shouldLogUnhandledOpcode(uint32 key)
+{
+	static std::mutex s_mutex;
+	static std::map<uint32,uint32> s_seen;
+	std::lock_guard<std::mutex> lock(s_mutex);
+	uint32 n = ++s_seen[key];
+	return (n <= 10) || (n % 100 == 0);
+}
+
 PlayerObject::PlayerObject( GameClient &parent,uint64 charUID, bool isBot ) :m_parent(parent),m_characterUID(charUID),m_spawnedInWorld(false),m_worldPopulated(false)
 {
 	m_inventorySystem = std::make_shared<InventorySystem>(this);
@@ -221,6 +233,15 @@ void PlayerObject::initGoId(uint32 theGoId)
 			(format("{c:00FF00}[Operator] Welcome to the real world, %1%. Your signal is locked in. Training begins now. Check your mission log for instructions.{/c}") % m_handle).str()
 		));
 
+		// m_abilitySystem used to be declared but never created, so the loadout was never sent
+		if (!m_abilitySystem) {
+			try {
+				m_abilitySystem = std::make_shared<AbilitySystem>(this);
+				m_abilitySystem->loadFromDB();
+			} catch (...) {
+				WARNING_LOG(format("AbilitySystem init failed for %1%; using in-memory default loadout") % m_handle);
+			}
+		}
 		if (m_abilitySystem) {
 			m_abilitySystem->sendFullLoadout();
 		}
@@ -535,6 +556,24 @@ void PlayerObject::UpdateAoIStreaming()
 		bool cull = (!otherObj || otherObj->isDead() || m_pos.Distance2DSq(otherObj->getPosition()) > STREAM_OUT_RADIUS_SQ);
 		if (cull)
 		{
+			//say WHY the entity is leaving this client's view (diagnoses vanished targets)
+			if (!otherObj)
+			{
+				INFO_LOG(format("AoI cull: %1%:%2% drops go %3% from view (reason: object no longer exists)")
+					% m_handle % m_goId % knownGoId);
+			}
+			else if (otherObj->isDead())
+			{
+				INFO_LOG(format("AoI cull: %1%:%2% drops go %3% (%4%) from view (reason: dead)")
+					% m_handle % m_goId % knownGoId % otherObj->getHandle());
+			}
+			else
+			{
+				INFO_LOG(format("AoI cull: %1%:%2% drops go %3% (%4%) from view (reason: distance %5% > %6% units; self at %7%,%8% other at %9%,%10%)")
+					% m_handle % m_goId % knownGoId % otherObj->getHandle()
+					% sqrt(m_pos.Distance2DSq(otherObj->getPosition())) % sqrt(STREAM_OUT_RADIUS_SQ)
+					% m_pos.x % m_pos.z % otherObj->getPosition().x % otherObj->getPosition().z);
+			}
 			noteEntityDeleted(knownGoId);
 			try { m_parent.QueueState(make_shared<DeletePlayerMsg>(knownGoId)); } catch (...) {}
 		}
@@ -686,7 +725,8 @@ void PlayerObject::HandleStateUpdate( ByteBuffer &srcData )
 	else
 	{
 		srcData.rpos(0);
-		DEBUG_LOG(format("(%1%) %2%:%3% 03 data: %4%") % m_parent.Address() % m_handle % m_goId % Bin2Hex(srcData) );
+		if (shouldLogUnhandledOpcode(0x030000u | uint32(updateType)))
+			INFO_LOG(format("(%1%) %2%:%3% unhandled 03 state type 0x%4$02X data: %5%") % m_parent.Address() % m_handle % m_goId % uint32(updateType) % Bin2Hex(srcData) );
 	}
 }
 
@@ -779,7 +819,15 @@ void PlayerObject::HandleCommand( ByteBuffer &srcCmd )
 	}
 
 	srcCmd.rpos(0);
-	DEBUG_LOG(format("(%1%) unhandled RPC data: %2%") % m_parent.Address() % Bin2Hex(srcCmd) );
+	{
+		uint32 opcodeKey = 0;
+		if (srcCmd.size() >= 2)
+			opcodeKey = (uint32(srcCmd.contents()[0]) << 8) | uint32(srcCmd.contents()[1]);
+		else if (srcCmd.size() == 1)
+			opcodeKey = uint32(srcCmd.contents()[0]);
+		if (shouldLogUnhandledOpcode(0x010000u | opcodeKey))
+			INFO_LOG(format("(%1%) %2%:%3% unhandled RPC opcode 0x%4$04X data: %5%") % m_parent.Address() % m_handle % m_goId % opcodeKey % Bin2Hex(srcCmd) );
+	}
 }
 
 bool PlayerObject::setBackground(string newBackground)
@@ -840,8 +888,16 @@ void PlayerObject::Update()
 		}
 
 		if (m_deathDelayMS > 0 && getMSTime() >= m_deathDelayMS) {
+				uint32 delayedKillerId = m_deathDelayKillerId;
 				m_deathDelayMS = 0;
-				die(m_deathDelayKillerId);
+				m_deathDelayKillerId = 0;
+				if (m_healthC == 0) {
+					die(delayedKillerId);
+				} else {
+					//healed / levelled up during the takedown animation - the kill no longer applies
+					INFO_LOG(format("Death timer for %1%:%2% expired with %3% HP left; death cancelled")
+						% m_handle % m_goId % m_healthC);
+				}
 		}
 
 		//flush any updates that queued up while we were spawning

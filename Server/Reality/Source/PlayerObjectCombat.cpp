@@ -120,11 +120,24 @@ void PlayerObject::takeDamage( uint32 attackerGoId, uint16 damage, uint32 fxId )
 	uint16 mitigation = m_lvl / 2;
 	uint16 actualDamage = (damage > mitigation) ? (damage - mitigation) : 1;
 
+	uint16 healthBefore = m_healthC;
 	if (actualDamage >= m_healthC)
 		m_healthC = 0;
 	else
 		m_healthC -= actualDamage;
 
+	// Phase A observability: log every hit that involves a human player (bot-vs-bot
+	// background fights would flood the log at server scale).
+	{
+		PlayerObject* attackerObj = sObjMgr.getGOPtrSafe(attackerGoId);
+		if (!m_parent.isBot() || (attackerObj && !attackerObj->getClient().isBot()))
+		{
+			INFO_LOG(format("Damage applied: %1%:%2% -> %3%:%4% raw %5% actual %6% fx 0x%7$X HP %8% -> %9%/%10%")
+				% (attackerObj ? attackerObj->getHandle() : std::string("<none>")) % attackerGoId
+				% m_handle % m_goId % damage % actualDamage % fxId
+				% healthBefore % m_healthC % m_healthM);
+		}
+	}
 
 	m_hitCounter++;
 
@@ -230,9 +243,9 @@ void PlayerObject::die( uint32 killerGoId )
 	sCombatSys.RemoveCombatant(m_goId);
 
 	string killerName = "the Matrix";
+	PlayerObject *killer = sObjMgr.getGOPtrSafe(killerGoId);
 	try
 	{
-		PlayerObject *killer = sObjMgr.getGOPtr(killerGoId);
 		if (killer) {
 			killerName = killer->getHandle();
 			uint32 killerFaction = killer->getFaction();
@@ -260,6 +273,11 @@ void PlayerObject::die( uint32 killerGoId )
 	sGame.AnnounceStateUpdate(&m_parent,shared_ptr<HealthUpdateMsg>(new HealthUpdateMsg(m_goId,false,true)), true);
 	sendVitals(false,true);
 	setCombatStance(false);
+
+	// H1: every death pays out here (it used to live in ResolveAttack and only ran for
+	// zero-delay deaths, which never happen because takedowns always delay death 3 s)
+	if (killer && killerGoId != m_goId)
+		sCombatSys.AwardKill(killer, this);
     
     // V17: The Loot Engine (Only bots drop loot)
     if (m_parent.isBot())
@@ -357,7 +375,7 @@ void PlayerObject::RPC_HandleCloseCombatRequest( ByteBuffer &srcCmd )
 	if (targetGoId == 0)
 		targetGoId = m_targetGoId;
 
-	DEBUG_LOG(format("(%1%) %2%:%3% close combat request view %4% spawn %5% -> target go %6%")
+	INFO_LOG(format("(%1%) %2%:%3% close combat request view %4% spawn %5% -> target go %6%")
 		% m_parent.Address() % m_handle % m_goId % targetViewId % spawnCounter % targetGoId);
 
 	if (targetGoId == 0)
@@ -451,6 +469,9 @@ void PlayerObject::RPC_HandleAbilityUse( ByteBuffer &srcCmd )
 	uint32 targetGoId = sObjMgr.getGOForView(&m_parent,targetViewId);
 	if (targetGoId == 0)
 		targetGoId = m_targetGoId;
+
+	INFO_LOG(format("(%1%) %2%:%3% UseAbility request ability %4% view %5% -> target go %6%")
+		% m_parent.Address() % m_handle % m_goId % abilityId % targetViewId % targetGoId);
 
 	//cooldown bookkeeping when the ability is part of the player's loadout
 	if (m_abilitySystem && m_abilitySystem->getAbility(abilityId))

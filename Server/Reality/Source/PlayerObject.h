@@ -181,6 +181,10 @@ public:
     
     void setCurrentHealth(uint16 hp) { m_healthC = hp; }
     void setMaximumHealth(uint16 hp) { m_healthM = hp; }
+    // Outgoing damage multiplier (1.0 = unscaled). Used to scale dojo/sparring bots up
+    // toward player stat levels without changing player stats.
+    float getDamageScale() const { return m_damageScale; }
+    void setDamageScale(float s) { m_damageScale = s; }
     void setInnerStrength(uint16 cur, uint16 max) { m_innerStrC = cur; m_innerStrM = max; }
     void setCurrentIS(uint16 cur) { m_innerStrC = cur; }
     void setLevel(uint8 lvl) { m_lvl = lvl; }
@@ -283,6 +287,7 @@ public:
     uint32 m_possessingBotId = 0;
     bool m_hasBounty = false;
     float m_ccResistance = 0.0f;
+    float m_damageScale = 1.0f;
     std::shared_ptr<class AbilitySystem> m_abilitySystem;
     static std::map<uint32, std::vector<LocationVector>> s_hardlineCache;
     void respawn();

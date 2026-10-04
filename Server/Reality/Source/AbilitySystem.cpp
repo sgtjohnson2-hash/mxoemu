@@ -18,6 +18,8 @@
 #include "Database/PreparedStatement.h"
 #include "Log.h"
 #include "Timer.h"
+#include "MessageTypes.h"
+#include <algorithm>
 
 AbilitySystem::AbilitySystem(PlayerObject* owner) : m_owner(owner), m_maxMemory(100)
 {
@@ -34,6 +36,14 @@ AbilitySystem::~AbilitySystem()
 void AbilitySystem::loadFromDB()
 {
     m_loadedAbilities.clear();
+
+    // virtual characters (bots / headless tests, uid >= 9000000) are memory-only, like
+    // PlayerObject::saveDataToDB(): they just get the baseline loadout
+    if (m_owner && m_owner->getCharacterUID() >= 9000000)
+    {
+        grantDefaultLoadout();
+        return;
+    }
     
     // In Reality, we need to create an `abilities` table if it doesn't exist
     // Expected table: `abilities` (`charId`, `abilityId`, `level`, `slot`)
@@ -60,12 +70,33 @@ void AbilitySystem::loadFromDB()
 
     if (m_loadedAbilities.empty() && m_owner && !m_owner->getClient().isBot())
     {
-        // Grant authentic Level 1 baseline operative abilities
-        m_loadedAbilities[1] = make_shared<Ability>(1, 1, 0); // Generic Strike
-        m_loadedAbilities[2] = make_shared<Ability>(2, 1, 1); // Heavy Kick
-        m_loadedAbilities[3] = make_shared<Ability>(3, 1, 2); // Viral Injection
+        // Grant authentic Level 1 baseline operative abilities (real ids from abilityIDs.csv)
+        grantDefaultLoadout();
         saveToDB();
-        INFO_LOG(format("Granted default Level 1 abilities (Strike, Kick, Virus) for %1%") % m_owner->getHandle());
+        INFO_LOG(format("Granted default Level 1 melee loadout (%1% abilities) for %2%")
+            % m_loadedAbilities.size() % m_owner->getHandle());
+    }
+}
+
+const std::vector<DefaultLoadoutEntry>& AbilitySystem::GetDefaultLoadout()
+{
+    // Real ability IDs/names from hd_reference/data/abilityIDs.csv.
+    // 17 SelfDefenseAbility was part of the captured retail first-login loadout (80b2 1100 0100 0802).
+    static const std::vector<DefaultLoadoutEntry> s_default =
+    {
+        { 600, 1, 0, "CloseCombatTrainingAbility" },
+        { 137, 1, 1, "MartialArtsInitiateAbility" },
+        {  17, 1, 2, "SelfDefenseAbility" },
+    };
+    return s_default;
+}
+
+void AbilitySystem::grantDefaultLoadout()
+{
+    for (const DefaultLoadoutEntry& e : GetDefaultLoadout())
+    {
+        if (m_loadedAbilities.find(e.abilityId) == m_loadedAbilities.end())
+            m_loadedAbilities[e.abilityId] = make_shared<Ability>(e.abilityId, e.level, e.slot);
     }
 }
 
@@ -171,5 +202,32 @@ void AbilitySystem::onAbilityCast(uint16 abilityId)
 
 void AbilitySystem::sendFullLoadout()
 {
-    // TODO: Send packet to client with all loaded abilities
+    if (!m_owner)
+        return;
+
+    if (m_loadedAbilities.empty())
+        grantDefaultLoadout();
+
+    // order by hotbar slot so the client fills slots deterministically
+    std::vector<shared_ptr<Ability>> ordered;
+    for (const auto& kv : m_loadedAbilities)
+    {
+        if (kv.second)
+            ordered.push_back(kv.second);
+    }
+    std::sort(ordered.begin(), ordered.end(),
+        [](const shared_ptr<Ability>& a, const shared_ptr<Ability>& b) { return a->getMemorySlot() < b->getMemorySlot(); });
+
+    std::string idList;
+    for (const auto& ab : ordered)
+    {
+        // wire layout from the captured retail 0x80b2 messages: [id:2][level:2][08 02]
+        m_owner->getClient().QueueCommand(make_shared<AbilityLoadRspMsg>(ab->getAbilityId(), ab->getLevel(), LOAD_RSP_TRAILER));
+        if (!idList.empty())
+            idList += ",";
+        idList += std::to_string(ab->getAbilityId());
+    }
+
+    INFO_LOG(format("Ability loadout sent to %1%:%2% (%3% abilities: %4%)")
+        % m_owner->getHandle() % m_owner->getGoId() % ordered.size() % idList);
 }

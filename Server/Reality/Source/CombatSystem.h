@@ -195,6 +195,9 @@ public:
 	static const CombatMove* DefaultMelee();
 	static const CombatMove* DefaultRanged();
 
+	//pays XP / $Info / loot-advance for a kill; invoked from PlayerObject::die()
+	void AwardKill(PlayerObject* killer, PlayerObject* victim);
+
 	static const float INTERLOCK_ROUND_SECONDS;
 	static const float FREEFIRE_SHOT_SECONDS;
 private:
@@ -212,12 +215,17 @@ private:
 	bool RunInterlockRound(InterlockSession &session); //false = session over, reap it
 	bool RunFreeFireShot(FreeFireState &state); //false = engagement over, reap it
 	float TacticModifier(uint8 attackerTactic, uint8 targetTactic);
-	void AwardKill(PlayerObject* killer, PlayerObject* victim);
 
 	std::unordered_map<uint16, CombatMove> m_moveTable;
 	mutable std::recursive_mutex m_combatMutex;
 	list<InterlockSession> m_interlocks;
 	list<FreeFireState> m_freefires;
+
+	//M3: die() -> RemoveCombatant -> EndInterlock can be reached from inside Update() while it
+	//iterates m_interlocks. Those requests are queued here and replayed after the loop.
+	bool m_updatingInterlocks;
+	std::vector< std::pair<uint32,bool> > m_deferredInterlockEnds;
+	std::vector<uint32> m_deferredFreefireStops;
 };
 
 #define sCombatSys CombatSystem::getSingleton()
