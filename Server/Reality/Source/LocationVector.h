@@ -198,7 +198,7 @@ public:
 		else
 			return false;
 	}
-	uint8 getMxoRot()
+	uint8 getMxoRot() const
 	{
 		return DoubleToMxoRot(rot);
 	}

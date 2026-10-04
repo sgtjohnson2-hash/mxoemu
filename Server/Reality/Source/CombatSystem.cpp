@@ -359,8 +359,12 @@ bool CombatSystem::RequestInterlock(uint32 attackerGoId, uint32 targetGoId)
 
 	sGame.AnnounceStateUpdateNear(posA.x, posA.z, 20000.0f, std::make_shared<PositionStateMsg>(pA->getGoId()));
 	sGame.AnnounceStateUpdateNear(posA.x, posA.z, 20000.0f, std::make_shared<RotationStateMsg>(pA->getGoId(), posA.getMxoRot()));
+	sGame.AnnounceStateUpdateNear(posA.x, posA.z, 20000.0f, std::make_shared<LocomotionStateMsg>(pA->getGoId(), 0, posA.getMxoRot()));
 	sGame.AnnounceStateUpdateNear(posB.x, posB.z, 20000.0f, std::make_shared<PositionStateMsg>(pB->getGoId()));
 	sGame.AnnounceStateUpdateNear(posB.x, posB.z, 20000.0f, std::make_shared<RotationStateMsg>(pB->getGoId(), posB.getMxoRot()));
+	sGame.AnnounceStateUpdateNear(posB.x, posB.z, 20000.0f, std::make_shared<LocomotionStateMsg>(pB->getGoId(), 0, posB.getMxoRot()));
+	pA->getClient().QueueState(std::make_shared<LocomotionStateMsg>(pB->getGoId(), 0, posB.getMxoRot()));
+	pB->getClient().QueueState(std::make_shared<LocomotionStateMsg>(pA->getGoId(), 0, posA.getMxoRot()));
 
 	//spawn the ILCombatHandler view + pairing packet on both clients - this
 	//drives the client-side interlock camera and round UI
@@ -741,6 +745,7 @@ CombatSystem::AttackResult CombatSystem::ResolveAttack(PlayerObject* attacker, P
 		if (attackRoll < defenseRoll)
 		{
 			res.hit = false;
+			sGame.AnnounceStateUpdateNear(target->getPosition().x, target->getPosition().z, 20000.0f, std::make_shared<EmoteMsg>(target->getGoId(), 41, 1));
 			if (!attacker->getClient().isBot()) {
 				attacker->getClient().QueueCommand(std::make_shared<SystemChatMsg>(
 					(format("{c:FFFF00}[COMBAT] You missed %1%!{/c}") % target->getHandle()).str()
@@ -889,6 +894,7 @@ CombatSystem::AttackResult CombatSystem::ResolveAttack(PlayerObject* attacker, P
 		uint32 hitFx = inInterlock ? 0x280006DF : ((move.hitFxId != 0 && move.hitFxId != 1234) ? move.hitFxId : 0x280006DF);
 		target->takeDamage(attacker->getGoId(), res.damageTaken, hitFx);
         target->recordIncomingAttack(move.id);
+		sGame.AnnounceStateUpdateNear(target->getPosition().x, target->getPosition().z, 20000.0f, std::make_shared<EmoteMsg>(target->getGoId(), 50, 1));
 
 		if (!attacker->getClient().isBot()) {
 			attacker->getClient().QueueCommand(std::make_shared<SystemChatMsg>(
@@ -1045,12 +1051,18 @@ bool CombatSystem::RunInterlockRound(InterlockSession &session)
 		// Standard exchange: defenders only strike if an active special is queued
 		bool specialFromA = (session.queuedMoveA != 0);
 		if (tacA != TACTIC_DEFENSE || specialFromA) {
-			if (moveA) ResolveAttack(pA, pB, *moveA, tacA, tacB, true, false);
+			if (moveA) {
+				sGame.AnnounceStateUpdateNear(pA->getPosition().x, pA->getPosition().z, 20000.0f, std::make_shared<EmoteMsg>(pA->getGoId(), 43, 1));
+				ResolveAttack(pA, pB, *moveA, tacA, tacB, true, false);
+			}
 		}
 		if (!specialFromA && !pB->isDead()) {
 			bool specialFromB = (session.queuedMoveB != 0);
 			if (tacB != TACTIC_DEFENSE || specialFromB) {
-				if (moveB) ResolveAttack(pB, pA, *moveB, tacB, tacA, true, false);
+				if (moveB) {
+					sGame.AnnounceStateUpdateNear(pB->getPosition().x, pB->getPosition().z, 20000.0f, std::make_shared<EmoteMsg>(pB->getGoId(), 43, 1));
+					ResolveAttack(pB, pA, *moveB, tacB, tacA, true, false);
+				}
 			}
 		}
 	}

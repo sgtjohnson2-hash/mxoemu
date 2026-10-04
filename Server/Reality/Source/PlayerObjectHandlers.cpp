@@ -759,6 +759,11 @@ void PlayerObject::ParsePlayerCommand( string theCmd )
 			m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FF0000}No valid target selected.{/c}"));
 			return;
 		}
+		if (m_tactic == TACTIC_NORMAL)
+		{
+			m_tactic = TACTIC_POWER;
+			sCombatSys.SetTactic(m_goId, TACTIC_POWER);
+		}
 		if (!sCombatSys.RequestInterlock(m_goId, m_targetGoId))
 		{
 			m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FF0000}Interlock request failed (out of range or already in combat).{/c}"));
@@ -842,6 +847,8 @@ void PlayerObject::ParsePlayerCommand( string theCmd )
 			for (const auto& pkt : pkts) {
 				m_parent.QueueState(pkt);
 			}
+			m_parent.QueueState(std::make_shared<LocomotionStateMsg>(botGoId, 0, botPos.getMxoRot()));
+			sGame.AnnounceStateUpdateNear((float)bx, (float)bz, 20000.0f, std::make_shared<LocomotionStateMsg>(botGoId, 0, botPos.getMxoRot()));
 			INFO_LOG(format("Dojo bot %1% spawned for %2%: dist %3% units, pos (%4%, %5%, %6%) player (%7%, %8%, %9%) bot rot %10% lvl %11% hp %12% dmgScale %13%")
 				% botGoId % m_handle % (sqrt((pos.x - bx) * (pos.x - bx) + (pos.z - bz) * (pos.z - bz)))
 				% bx % pos.y % bz % pos.x % pos.y % pos.z % botPos.rot % int(botLvl) % hpF % dmgScale);

@@ -30,6 +30,7 @@
 #include "ObjectMgr.h"
 #include "LocationVector.h"
 #include "Config.h"
+#include "CombatSystem.h"
 #include <algorithm>
 
 ObjectUpdateMsg::ObjectUpdateMsg( uint32 objectId ):m_objectId(objectId),m_toWho(NULL)
@@ -599,7 +600,7 @@ const ByteBuffer& EmoteMsg::toBuf()
 	bool isCombatEmote = (m_emoteAnimation == 41 || m_emoteAnimation == 42 || m_emoteAnimation == 43 || m_emoteAnimation == 50 || m_emoteAnimation == 51);
 	if (m_player->getClient().isBot())
 	{
-		if (!isCombatEmote || m_player->getInterlockPartner() == 0)
+		if (!isCombatEmote || !sCombatSys.IsInterlocked(m_player->getGoId()))
 		{
 			m_buf.clear();
 			throw PacketNoLongerValid();
