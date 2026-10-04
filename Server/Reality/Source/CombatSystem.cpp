@@ -18,6 +18,7 @@
 #include "StatusEffectManager.h"
 #include "StaticObjectManager.h"
 #include "AbilitySystem.h"
+#include "CombatAnimationMatrix.h"
 #include <boost/property_tree/ptree.hpp>
 #include <boost/property_tree/json_parser.hpp>
 
@@ -110,6 +111,48 @@ void CombatSystem::LoadAbilities()
 				alias.id = e.abilityId;
 				alias.name = e.name;
 				m_moveTable[alias.id] = alias;
+			}
+		}
+
+		// Ensure all authentic retail launch martial arts abilities are registered in move table
+		struct RetailMoveDef { uint16 id; const char* name; uint16 isCost; float minDmg; float maxDmg; };
+		static const RetailMoveDef s_retailMoves[] = {
+			{ 17,  "SelfDefenseAbility",            0, 10.0f, 15.0f },
+			{ 101, "AikidoAbility",                15, 12.0f, 18.0f },
+			{ 132, "KarateAbility",                15, 15.0f, 20.0f },
+			{ 133, "KungFuAbility",                15, 14.0f, 19.0f },
+			{ 135, "MartialArtsAbility",           15, 14.0f, 18.0f },
+			{ 137, "MartialArtsInitiateAbility",   10, 10.0f, 14.0f },
+			{ 197, "Head Butt",                    10, 15.0f, 22.0f },
+			{ 198, "Cheap Shot",                   10, 12.0f, 16.0f },
+			{ 296, "AikidoSpinClayPigeonAbility",  25, 25.0f, 35.0f },
+			{ 531, "KarateFocusAbility",           25, 20.0f, 30.0f },
+			{ 569, "KarateCombatTacticsAbility",   15, 15.0f, 22.0f },
+			{ 570, "KungFuCombatTacticsAbility",   15, 15.0f, 22.0f },
+			{ 571, "AikidoCombatTacticsAbility",   15, 15.0f, 22.0f },
+			{ 572, "AikidoDamageAbility",          20, 20.0f, 28.0f },
+			{ 573, "KarateDamageAbility",          20, 22.0f, 30.0f },
+			{ 574, "KungFuDamageAbility",          20, 20.0f, 28.0f },
+			{ 600, "CloseCombatTrainingAbility",    0, 10.0f, 14.0f },
+		};
+		for (const auto& rm : s_retailMoves) {
+			if (m_moveTable.find(rm.id) == m_moveTable.end()) {
+				CombatMove m;
+				m.id = rm.id;
+				m.name = rm.name;
+				m.dmgType = DAMAGE_MELEE;
+				m.minDmg = rm.minDmg;
+				m.maxDmg = rm.maxDmg;
+				m.minDmgPerLvl = 1.0f;
+				m.maxDmgPerLvl = 1.5f;
+				m.isCost = rm.isCost;
+				m.range = 300.0f;
+				m.hitFxId = 0x280006DF;
+				m.interlockOnly = true;
+				m.freefireOnly = false;
+				m.castTime = 0.0f;
+				m.specialFlags = 0;
+				m_moveTable[m.id] = m;
 			}
 		}
 	}
@@ -745,7 +788,9 @@ CombatSystem::AttackResult CombatSystem::ResolveAttack(PlayerObject* attacker, P
 		if (attackRoll < defenseRoll)
 		{
 			res.hit = false;
-			sGame.AnnounceStateUpdateNear(target->getPosition().x, target->getPosition().z, 20000.0f, std::make_shared<EmoteMsg>(target->getGoId(), 41, 1));
+			if (!inInterlock) {
+				sGame.AnnounceStateUpdateNear(target->getPosition().x, target->getPosition().z, 20000.0f, std::make_shared<EmoteMsg>(target->getGoId(), 41, 1));
+			}
 			if (!attacker->getClient().isBot()) {
 				attacker->getClient().QueueCommand(std::make_shared<SystemChatMsg>(
 					(format("{c:FFFF00}[COMBAT] You missed %1%!{/c}") % target->getHandle()).str()
@@ -780,7 +825,9 @@ CombatSystem::AttackResult CombatSystem::ResolveAttack(PlayerObject* attacker, P
         dmg = 0;
         sMatrixThreatHeatmap.RecordDisruption(target->getPosition().x, target->getPosition().z, 15.0f, "Bullet Deflection");
         
-        sGame.AnnounceStateUpdateNear(target->getPosition().x, target->getPosition().z, 20000.0f, std::make_shared<EmoteMsg>(target->getGoId(), 41, 1));
+        if (!inInterlock) {
+            sGame.AnnounceStateUpdateNear(target->getPosition().x, target->getPosition().z, 20000.0f, std::make_shared<EmoteMsg>(target->getGoId(), 41, 1));
+        }
         
         if (!target->getClient().isBot())
             target->getClient().QueueCommand(std::make_shared<SystemChatMsg>("{c:00FFFF}You deflect the incoming fire!{/c}"));
@@ -876,10 +923,21 @@ CombatSystem::AttackResult CombatSystem::ResolveAttack(PlayerObject* attacker, P
     
     // Item 32: Takedown Moves
     if (res.hit && target->getCurrentHealth() <= res.damageTaken) {
-        // Play cinematic takedown emote for attacker based on weapon type
-        uint32 emoteId = (move.dmgType == DAMAGE_MELEE) ? 43 : 42;
-        sGame.AnnounceStateUpdateNear(attacker->getPosition().x, attacker->getPosition().z, 20000.0f, std::make_shared<EmoteMsg>(attacker->getGoId(), emoteId, 1)); 
-        sGame.AnnounceStateUpdateNear(target->getPosition().x, target->getPosition().z, 20000.0f, std::make_shared<EmoteMsg>(target->getGoId(), emoteId, 1)); // Victim plays matched emote
+        if (inInterlock) {
+            InterlockAnimPair pair = CombatAnimationMatrix::GetAnimationPair(
+                attacker->getFightingStyle(), attackerTactic,
+                target->getFightingStyle(), targetTactic,
+                InterlockExchangeOutcome::GuardBreak
+            );
+            sGame.AnnounceStateUpdateNear(attacker->getPosition().x, attacker->getPosition().z, 20000.0f,
+                std::make_shared<ExtendedAnimationMsg>(attacker->getGoId(), pair.attackerAnimId, 1));
+            sGame.AnnounceStateUpdateNear(target->getPosition().x, target->getPosition().z, 20000.0f,
+                std::make_shared<ExtendedAnimationMsg>(target->getGoId(), pair.defenderAnimId, 1));
+        } else {
+            uint32 emoteId = (move.dmgType == DAMAGE_MELEE) ? 43 : 42;
+            sGame.AnnounceStateUpdateNear(attacker->getPosition().x, attacker->getPosition().z, 20000.0f, std::make_shared<EmoteMsg>(attacker->getGoId(), emoteId, 1)); 
+            sGame.AnnounceStateUpdateNear(target->getPosition().x, target->getPosition().z, 20000.0f, std::make_shared<EmoteMsg>(target->getGoId(), emoteId, 1)); // Victim plays matched emote
+        }
         // arm the 3 s takedown timer only once; a second lethal hit must not push death out
         if (target->m_deathDelayMS == 0)
         {
@@ -894,7 +952,9 @@ CombatSystem::AttackResult CombatSystem::ResolveAttack(PlayerObject* attacker, P
 		uint32 hitFx = inInterlock ? 0x280006DF : ((move.hitFxId != 0 && move.hitFxId != 1234) ? move.hitFxId : 0x280006DF);
 		target->takeDamage(attacker->getGoId(), res.damageTaken, hitFx);
         target->recordIncomingAttack(move.id);
-		sGame.AnnounceStateUpdateNear(target->getPosition().x, target->getPosition().z, 20000.0f, std::make_shared<EmoteMsg>(target->getGoId(), 50, 1));
+		if (!inInterlock) {
+			sGame.AnnounceStateUpdateNear(target->getPosition().x, target->getPosition().z, 20000.0f, std::make_shared<EmoteMsg>(target->getGoId(), 50, 1));
+		}
 
 		if (!attacker->getClient().isBot()) {
 			attacker->getClient().QueueCommand(std::make_shared<SystemChatMsg>(
@@ -963,54 +1023,64 @@ bool CombatSystem::RunInterlockRound(InterlockSession &session)
 
 	bool isClash = (tacA == tacB && tacA != TACTIC_NORMAL);
 
-	// Synchronized combat animation subpacket triggers (0x280006DF) and paired emotes
+	FightingStyle styleA = pA->getFightingStyle();
+	FightingStyle styleB = pB->getFightingStyle();
+
+	// Dispatch atomic 16-bit skeletal animation tracks (opcode 0x29) for attacker & defender
 	if (aCrushesB) {
-		sGame.AnnounceStateUpdateNear(pA->getPosition().x, pA->getPosition().z, 20000.0f, std::make_shared<EmoteMsg>(pA->getGoId(), 43, 1)); // Power strike
-		sGame.AnnounceStateUpdateNear(pB->getPosition().x, pB->getPosition().z, 20000.0f, std::make_shared<EmoteMsg>(pB->getGoId(), 50, 1)); // Heavy stagger
+		InterlockAnimPair pair = CombatAnimationMatrix::GetAnimationPair(styleA, tacA, styleB, tacB, InterlockExchangeOutcome::StanceCrush);
+		sGame.AnnounceStateUpdateNear(pA->getPosition().x, pA->getPosition().z, 20000.0f, std::make_shared<ExtendedAnimationMsg>(pA->getGoId(), pair.attackerAnimId, 1));
+		sGame.AnnounceStateUpdateNear(pB->getPosition().x, pB->getPosition().z, 20000.0f, std::make_shared<ExtendedAnimationMsg>(pB->getGoId(), pair.defenderAnimId, 1));
 		if (!pA->getClient().isBot())
 			pA->getClient().QueueCommand(std::make_shared<SystemChatMsg>((format("{c:00FF00}[MARTIAL ARTS] Power crushes Speed! Frame advantage secured against %1%! (+35%% Damage){/c}") % pB->getHandle()).str()));
 		if (!pB->getClient().isBot())
 			pB->getClient().QueueCommand(std::make_shared<SystemChatMsg>((format("{c:FF4444}[MARTIAL ARTS] %1%'s Power stance crushed your Speed attack!{/c}") % pA->getHandle()).str()));
 	} else if (bCrushesA) {
-		sGame.AnnounceStateUpdateNear(pB->getPosition().x, pB->getPosition().z, 20000.0f, std::make_shared<EmoteMsg>(pB->getGoId(), 43, 1));
-		sGame.AnnounceStateUpdateNear(pA->getPosition().x, pA->getPosition().z, 20000.0f, std::make_shared<EmoteMsg>(pA->getGoId(), 50, 1));
+		InterlockAnimPair pair = CombatAnimationMatrix::GetAnimationPair(styleB, tacB, styleA, tacA, InterlockExchangeOutcome::StanceCrush);
+		sGame.AnnounceStateUpdateNear(pB->getPosition().x, pB->getPosition().z, 20000.0f, std::make_shared<ExtendedAnimationMsg>(pB->getGoId(), pair.attackerAnimId, 1));
+		sGame.AnnounceStateUpdateNear(pA->getPosition().x, pA->getPosition().z, 20000.0f, std::make_shared<ExtendedAnimationMsg>(pA->getGoId(), pair.defenderAnimId, 1));
 		if (!pB->getClient().isBot())
 			pB->getClient().QueueCommand(std::make_shared<SystemChatMsg>((format("{c:00FF00}[MARTIAL ARTS] Power crushes Speed! Frame advantage secured against %1%! (+35%% Damage){/c}") % pA->getHandle()).str()));
 		if (!pA->getClient().isBot())
 			pA->getClient().QueueCommand(std::make_shared<SystemChatMsg>((format("{c:FF4444}[MARTIAL ARTS] %1%'s Power stance crushed your Speed attack!{/c}") % pB->getHandle()).str()));
 	} else if (aInterruptsB) {
-		sGame.AnnounceStateUpdateNear(pA->getPosition().x, pA->getPosition().z, 20000.0f, std::make_shared<EmoteMsg>(pA->getGoId(), 43, 1)); // Fast jab
-		sGame.AnnounceStateUpdateNear(pB->getPosition().x, pB->getPosition().z, 20000.0f, std::make_shared<EmoteMsg>(pB->getGoId(), 50, 1)); // Interrupted recoil
+		InterlockAnimPair pair = CombatAnimationMatrix::GetAnimationPair(styleA, tacA, styleB, tacB, InterlockExchangeOutcome::FastInterrupt);
+		sGame.AnnounceStateUpdateNear(pA->getPosition().x, pA->getPosition().z, 20000.0f, std::make_shared<ExtendedAnimationMsg>(pA->getGoId(), pair.attackerAnimId, 1));
+		sGame.AnnounceStateUpdateNear(pB->getPosition().x, pB->getPosition().z, 20000.0f, std::make_shared<ExtendedAnimationMsg>(pB->getGoId(), pair.defenderAnimId, 1));
 		if (!pA->getClient().isBot())
 			pA->getClient().QueueCommand(std::make_shared<SystemChatMsg>((format("{c:00FF00}[MARTIAL ARTS] Speed interrupts Grab! Fast jab interrupted %1%'s grab maneuver! (+35%% Damage){/c}") % pB->getHandle()).str()));
 		if (!pB->getClient().isBot())
 			pB->getClient().QueueCommand(std::make_shared<SystemChatMsg>((format("{c:FF4444}[MARTIAL ARTS] %1%'s Speed strike interrupted your Grab maneuver!{/c}") % pA->getHandle()).str()));
 	} else if (bInterruptsA) {
-		sGame.AnnounceStateUpdateNear(pB->getPosition().x, pB->getPosition().z, 20000.0f, std::make_shared<EmoteMsg>(pB->getGoId(), 43, 1));
-		sGame.AnnounceStateUpdateNear(pA->getPosition().x, pA->getPosition().z, 20000.0f, std::make_shared<EmoteMsg>(pA->getGoId(), 50, 1));
+		InterlockAnimPair pair = CombatAnimationMatrix::GetAnimationPair(styleB, tacB, styleA, tacA, InterlockExchangeOutcome::FastInterrupt);
+		sGame.AnnounceStateUpdateNear(pB->getPosition().x, pB->getPosition().z, 20000.0f, std::make_shared<ExtendedAnimationMsg>(pB->getGoId(), pair.attackerAnimId, 1));
+		sGame.AnnounceStateUpdateNear(pA->getPosition().x, pA->getPosition().z, 20000.0f, std::make_shared<ExtendedAnimationMsg>(pA->getGoId(), pair.defenderAnimId, 1));
 		if (!pB->getClient().isBot())
 			pB->getClient().QueueCommand(std::make_shared<SystemChatMsg>((format("{c:00FF00}[MARTIAL ARTS] Speed interrupts Grab! Fast jab interrupted %1%'s grab maneuver! (+35%% Damage){/c}") % pA->getHandle()).str()));
 		if (!pA->getClient().isBot())
 			pA->getClient().QueueCommand(std::make_shared<SystemChatMsg>((format("{c:FF4444}[MARTIAL ARTS] %1%'s Speed strike interrupted your Grab maneuver!{/c}") % pB->getHandle()).str()));
 	} else if (aBreaksGuardB || aBreaksPowerB) {
-		sGame.AnnounceStateUpdateNear(pA->getPosition().x, pA->getPosition().z, 20000.0f, std::make_shared<EmoteMsg>(pA->getGoId(), 43, 1)); // Throw slam
-		sGame.AnnounceStateUpdateNear(pB->getPosition().x, pB->getPosition().z, 20000.0f, std::make_shared<EmoteMsg>(pB->getGoId(), 51, 1)); // Knockdown slam
+		InterlockAnimPair pair = CombatAnimationMatrix::GetAnimationPair(styleA, tacA, styleB, tacB, InterlockExchangeOutcome::GuardBreak);
+		sGame.AnnounceStateUpdateNear(pA->getPosition().x, pA->getPosition().z, 20000.0f, std::make_shared<ExtendedAnimationMsg>(pA->getGoId(), pair.attackerAnimId, 1));
+		sGame.AnnounceStateUpdateNear(pB->getPosition().x, pB->getPosition().z, 20000.0f, std::make_shared<ExtendedAnimationMsg>(pB->getGoId(), pair.defenderAnimId, 1));
 		const char* targetStance = aBreaksGuardB ? "Guard" : "Power";
 		if (!pA->getClient().isBot())
 			pA->getClient().QueueCommand(std::make_shared<SystemChatMsg>((format("{c:00FF00}[MARTIAL ARTS] Grab breaks %1%! Unblockable throw executed on %2%! (+%3%%% Damage){/c}") % targetStance % pB->getHandle() % (aBreaksGuardB ? 40 : 35)).str()));
 		if (!pB->getClient().isBot())
 			pB->getClient().QueueCommand(std::make_shared<SystemChatMsg>((format("{c:FF0000}[MARTIAL ARTS] Your %1% was broken by %2%'s Grab! Unblockable throw!{/c}") % targetStance % pA->getHandle()).str()));
 	} else if (bBreaksGuardA || bBreaksPowerA) {
-		sGame.AnnounceStateUpdateNear(pB->getPosition().x, pB->getPosition().z, 20000.0f, std::make_shared<EmoteMsg>(pB->getGoId(), 43, 1));
-		sGame.AnnounceStateUpdateNear(pA->getPosition().x, pA->getPosition().z, 20000.0f, std::make_shared<EmoteMsg>(pA->getGoId(), 51, 1));
+		InterlockAnimPair pair = CombatAnimationMatrix::GetAnimationPair(styleB, tacB, styleA, tacA, InterlockExchangeOutcome::GuardBreak);
+		sGame.AnnounceStateUpdateNear(pB->getPosition().x, pB->getPosition().z, 20000.0f, std::make_shared<ExtendedAnimationMsg>(pB->getGoId(), pair.attackerAnimId, 1));
+		sGame.AnnounceStateUpdateNear(pA->getPosition().x, pA->getPosition().z, 20000.0f, std::make_shared<ExtendedAnimationMsg>(pA->getGoId(), pair.defenderAnimId, 1));
 		const char* targetStance = bBreaksGuardA ? "Guard" : "Power";
 		if (!pB->getClient().isBot())
 			pB->getClient().QueueCommand(std::make_shared<SystemChatMsg>((format("{c:00FF00}[MARTIAL ARTS] Grab breaks %1%! Unblockable throw executed on %2%! (+%3%%% Damage){/c}") % targetStance % pA->getHandle() % (bBreaksGuardA ? 40 : 35)).str()));
 		if (!pA->getClient().isBot())
 			pA->getClient().QueueCommand(std::make_shared<SystemChatMsg>((format("{c:FF0000}[MARTIAL ARTS] Your %1% was broken by %2%'s Grab! Unblockable throw!{/c}") % targetStance % pB->getHandle()).str()));
 	} else if (isClash) {
-		sGame.AnnounceStateUpdateNear(pA->getPosition().x, pA->getPosition().z, 20000.0f, std::make_shared<EmoteMsg>(pA->getGoId(), 41, 1));
-		sGame.AnnounceStateUpdateNear(pB->getPosition().x, pB->getPosition().z, 20000.0f, std::make_shared<EmoteMsg>(pB->getGoId(), 41, 1));
+		InterlockAnimPair pair = CombatAnimationMatrix::GetAnimationPair(styleA, tacA, styleB, tacB, InterlockExchangeOutcome::Clash);
+		sGame.AnnounceStateUpdateNear(pA->getPosition().x, pA->getPosition().z, 20000.0f, std::make_shared<ExtendedAnimationMsg>(pA->getGoId(), pair.attackerAnimId, 1));
+		sGame.AnnounceStateUpdateNear(pB->getPosition().x, pB->getPosition().z, 20000.0f, std::make_shared<ExtendedAnimationMsg>(pB->getGoId(), pair.defenderAnimId, 1));
 		std::string clashName = (tacA == TACTIC_POWER) ? "Power" : (tacA == TACTIC_SPEED ? "Speed" : (tacA == TACTIC_RETALIATE ? "Grab" : "Guard"));
 		if (!pA->getClient().isBot()) pA->getClient().QueueCommand(std::make_shared<SystemChatMsg>((format("{c:FFFF00}[MARTIAL ARTS] Stance Clash! Both combatants chose %1%. Glancing exchange.{/c}") % clashName).str()));
 		if (!pB->getClient().isBot()) pB->getClient().QueueCommand(std::make_shared<SystemChatMsg>((format("{c:FFFF00}[MARTIAL ARTS] Stance Clash! Both combatants chose %1%. Glancing exchange.{/c}") % clashName).str()));
@@ -1052,7 +1122,10 @@ bool CombatSystem::RunInterlockRound(InterlockSession &session)
 		bool specialFromA = (session.queuedMoveA != 0);
 		if (tacA != TACTIC_DEFENSE || specialFromA) {
 			if (moveA) {
-				sGame.AnnounceStateUpdateNear(pA->getPosition().x, pA->getPosition().z, 20000.0f, std::make_shared<EmoteMsg>(pA->getGoId(), 43, 1));
+				InterlockExchangeOutcome outcome = (tacB == TACTIC_DEFENSE) ? InterlockExchangeOutcome::Blocked : InterlockExchangeOutcome::NormalHit;
+				InterlockAnimPair pair = CombatAnimationMatrix::GetAnimationPair(styleA, tacA, styleB, tacB, outcome);
+				sGame.AnnounceStateUpdateNear(pA->getPosition().x, pA->getPosition().z, 20000.0f, std::make_shared<ExtendedAnimationMsg>(pA->getGoId(), pair.attackerAnimId, 1));
+				sGame.AnnounceStateUpdateNear(pB->getPosition().x, pB->getPosition().z, 20000.0f, std::make_shared<ExtendedAnimationMsg>(pB->getGoId(), pair.defenderAnimId, 1));
 				ResolveAttack(pA, pB, *moveA, tacA, tacB, true, false);
 			}
 		}
@@ -1060,7 +1133,10 @@ bool CombatSystem::RunInterlockRound(InterlockSession &session)
 			bool specialFromB = (session.queuedMoveB != 0);
 			if (tacB != TACTIC_DEFENSE || specialFromB) {
 				if (moveB) {
-					sGame.AnnounceStateUpdateNear(pB->getPosition().x, pB->getPosition().z, 20000.0f, std::make_shared<EmoteMsg>(pB->getGoId(), 43, 1));
+					InterlockExchangeOutcome outcome = (tacA == TACTIC_DEFENSE) ? InterlockExchangeOutcome::Blocked : InterlockExchangeOutcome::NormalHit;
+					InterlockAnimPair pair = CombatAnimationMatrix::GetAnimationPair(styleB, tacB, styleA, tacA, outcome);
+					sGame.AnnounceStateUpdateNear(pB->getPosition().x, pB->getPosition().z, 20000.0f, std::make_shared<ExtendedAnimationMsg>(pB->getGoId(), pair.attackerAnimId, 1));
+					sGame.AnnounceStateUpdateNear(pA->getPosition().x, pA->getPosition().z, 20000.0f, std::make_shared<ExtendedAnimationMsg>(pA->getGoId(), pair.defenderAnimId, 1));
 					ResolveAttack(pB, pA, *moveB, tacB, tacA, true, false);
 				}
 			}
@@ -1076,6 +1152,28 @@ bool CombatSystem::RunInterlockRound(InterlockSession &session)
 			% session.roundNumber
 			% pA->getHandle() % pA->getGoId() % pA->getCurrentHealth() % pA->getMaximumHealth() % (pA->isDead() ? " (dead)" : "")
 			% pB->getHandle() % pB->getGoId() % pB->getCurrentHealth() % pB->getMaximumHealth() % (pB->isDead() ? " (dead)" : ""));
+	}
+
+	// Re-align and clamp spacing to 150.0 +/- 5.0 units facing each other to eliminate root-motion drift
+	if (!pA->isDead() && !pB->isDead())
+	{
+		LocationVector posA = pA->getPosition();
+		LocationVector posB = pB->getPosition();
+		double dx = posB.x - posA.x;
+		double dz = posB.z - posA.z;
+		double dist = std::sqrt(dx * dx + dz * dz);
+		if (dist > 1.0)
+		{
+			double normX = dx / dist;
+			double normZ = dz / dist;
+			const double targetSpacing = 150.0; // 1.5m retail interlock engagement distance
+			LocationVector clampedBPos = posB;
+			clampedBPos.x = posA.x + normX * targetSpacing;
+			clampedBPos.y = posA.y; // maintain pavement elevation flush with pavement
+			clampedBPos.z = posA.z + normZ * targetSpacing;
+			pB->setPosition(clampedBPos);
+			sGame.AnnounceStateUpdate(NULL, std::make_shared<PositionStateMsg>(pB->getGoId()));
+		}
 	}
 
 	return !pA->isDead() && !pB->isDead();

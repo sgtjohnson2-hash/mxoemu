@@ -190,12 +190,23 @@ bool DataLoader::LoadAbilities(const std::string& filePath)
             }
 
             templ.maxLevel = 1;
-            // Identify Hacker Abilities based on name
+            // Identify Abilities based on name
             if (templ.name.find("Virus") != std::string::npos || 
                 templ.name.find("Logic") != std::string::npos ||
                 templ.name.find("Simulacra") != std::string::npos)
             {
                 templ.discipline = DisciplineType::HACKER;
+            }
+            else if (templ.name.find("KungFu") != std::string::npos ||
+                     templ.name.find("Karate") != std::string::npos ||
+                     templ.name.find("Aikido") != std::string::npos ||
+                     templ.name.find("MartialArts") != std::string::npos ||
+                     templ.name.find("CloseCombat") != std::string::npos ||
+                     templ.name.find("SelfDefense") != std::string::npos ||
+                     templ.name.find("Head Butt") != std::string::npos ||
+                     templ.name.find("Cheap Shot") != std::string::npos)
+            {
+                templ.discipline = DisciplineType::MARTIAL_ARTIST;
             }
             else
             {

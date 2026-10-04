@@ -624,6 +624,62 @@ const ByteBuffer& EmoteMsg::toBuf()
 	return m_buf;
 }
 
+ExtendedAnimationMsg::ExtendedAnimationMsg(uint32 objectId, uint16 animId, uint8 animCount)
+	: ObjectUpdateMsg(objectId), m_animId(animId), m_animCount(animCount)
+{
+}
+
+ExtendedAnimationMsg::~ExtendedAnimationMsg()
+{
+}
+
+const ByteBuffer& ExtendedAnimationMsg::toBuf()
+{
+	// Authentic LithTech Jupiter EXTENDED_ animation packet (opcode 0x29, 31 bytes)
+	byte sampleExtendedAnimMsg[] =
+	{
+		0x03, 0x02, 0x00, 0x01, 0x28, 0xAA, 0x40, 0x00, 0x29, 0x00, 0x00, 0x00, 0x01, 0xBB, 0xBB, 0xBB, 
+		0xBB, 0xCC, 0xCC, 0xCC, 0xCC, 0xDD, 0xDD, 0xDD, 0xDD, 0x20, 0x9F, 0x1E, 0x20, 0x00, 0x00, 
+	};
+
+	sampleExtendedAnimMsg[5] = m_animCount;
+	sampleExtendedAnimMsg[9] = (byte)(m_animId & 0xFF);
+	sampleExtendedAnimMsg[10] = (byte)((m_animId >> 8) & 0xFF);
+
+	PlayerObject *m_player = sObjMgr.getGOPtr(m_objectId);
+	if (m_player == NULL)
+	{
+		m_buf.clear();
+		throw PacketNoLongerValid();
+	}
+
+	if (m_player->getClient().isBot())
+	{
+		if (!sCombatSys.IsInterlocked(m_player->getGoId()))
+		{
+			m_buf.clear();
+			throw PacketNoLongerValid();
+		}
+	}
+
+	m_player->getPosition().toFloatBuf(&sampleExtendedAnimMsg[0x0D], sizeof(float)*3);
+	uint16 viewId = 0;
+	try
+	{
+		viewId = sObjMgr.getViewForGO(m_toWho, m_objectId);
+	}
+	catch (ObjectMgr::ClientNotAvailable)
+	{
+		m_buf.clear();
+		throw PacketNoLongerValid();
+	}
+	memcpy(&sampleExtendedAnimMsg[1], &viewId, sizeof(viewId));
+
+	m_buf.clear();
+	m_buf.append(sampleExtendedAnimMsg, sizeof(sampleExtendedAnimMsg));
+	return m_buf;
+}
+
 AnimationStateMsg::AnimationStateMsg( uint32 objectId ):ObjectUpdateMsg(objectId)
 {
 	

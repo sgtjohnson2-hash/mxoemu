@@ -28,6 +28,7 @@
 #include "BotClient.h"
 #include "SpatialGrid.h"
 #include "AbilitySystem.h"
+#include "CombatAnimationMatrix.h"
 #include "DojoSpawn.h"
 #include "MessageTypes.h"
 #include "Timer.h"
@@ -495,6 +496,72 @@ int RunCombatTestSuite()
 			else
 				skip("control: non-passive bot auto-target", "headless environment did not acquire a target, passive assertion above is weaker");
 			sCombatSys.EndInterlock(aggro.go, false);
+		}
+
+		// ---------------------------------------------------------------- Martial Arts & Animation Matrix Tests
+		{
+			// Test ExtendedAnimationMsg packet layout (opcode 0x29)
+			ExtendedAnimationMsg animMsg(human.go, 0x0D58, 1);
+			animMsg.setReceiver(&humanClient);
+			const ByteBuffer& buf = animMsg.toBuf();
+			check(buf.size() == 31, "ExtendedAnimationMsg size is exactly 31 bytes (got " + std::to_string(buf.size()) + ")");
+			if (buf.size() == 31)
+			{
+				const uint8* data = reinterpret_cast<const uint8*>(buf.contents());
+				check(data[0] == 0x03, "ExtendedAnimationMsg byte 0 is 0x03");
+				check(data[8] == 0x29, "ExtendedAnimationMsg opcode is 0x29 (EXTENDED_ANIMATION)");
+				uint16 wireAnimId = uint16(data[9]) | (uint16(data[10]) << 8);
+				check(wireAnimId == 0x0D58, "ExtendedAnimationMsg carries correct 16-bit uint16 animId 0x0D58");
+			}
+
+			// Test CombatAnimationMatrix across all 4 disciplines
+			// 1. Kung Fu
+			InterlockAnimPair kfPair = CombatAnimationMatrix::GetAnimationPair(
+				FightingStyle::KungFu, TACTIC_POWER,
+				FightingStyle::None, TACTIC_SPEED,
+				InterlockExchangeOutcome::StanceCrush
+			);
+			check(kfPair.attackerAnimId == 0x0D58 && kfPair.defenderAnimId == 0x0AFE,
+				"Kung Fu Tiger Punch paired animation is 0x0D58 vs 0x0AFE");
+
+			// 2. Karate
+			InterlockAnimPair karatePair = CombatAnimationMatrix::GetAnimationPair(
+				FightingStyle::Karate, TACTIC_POWER,
+				FightingStyle::None, TACTIC_SPEED,
+				InterlockExchangeOutcome::StanceCrush
+			);
+			check(karatePair.attackerAnimId == 0x04F0 && karatePair.defenderAnimId == 0x0F44,
+				"Karate Spin Kick paired animation is 0x04F0 vs 0x0F44");
+
+			// 3. Aikido
+			InterlockAnimPair aikidoPair = CombatAnimationMatrix::GetAnimationPair(
+				FightingStyle::Aikido, TACTIC_RETALIATE,
+				FightingStyle::None, TACTIC_DEFENSE,
+				InterlockExchangeOutcome::GuardBreak
+			);
+			check(aikidoPair.attackerAnimId == 0x0068 && aikidoPair.defenderAnimId == 0x0AF2,
+				"Aikido Tomoe Nage unblockable throw is 0x0068 vs 0x0AF2");
+
+			// 4. Self-Defense
+			InterlockAnimPair sdPair = CombatAnimationMatrix::GetAnimationPair(
+				FightingStyle::None, TACTIC_POWER,
+				FightingStyle::None, TACTIC_SPEED,
+				InterlockExchangeOutcome::NormalHit
+			);
+			check(sdPair.attackerAnimId == 0x1135 && sdPair.defenderAnimId == 0x1136,
+				"Self-Defense Headbutt paired animation is 0x1135 vs 0x1136");
+
+			// 5. Firearms Disarm
+			uint16 disarmPistol = CombatAnimationMatrix::GetDisarmAnimation(FightingStyle::KungFu, 0);
+			check(disarmPistol == 0x0E3E, "Kung Fu pistol disarm animation is 0x0E3E");
+
+			// 6. FightingStyle switching
+			human.po->setFightingStyle(FightingStyle::Karate);
+			check(human.po->getFightingStyle() == FightingStyle::Karate, "PlayerObject fighting style sets to Karate");
+			human.po->setFightingStyle(FightingStyle::KungFu);
+			check(human.po->getFightingStyle() == FightingStyle::KungFu, "PlayerObject fighting style sets to Kung Fu");
+			human.po->setFightingStyle(FightingStyle::None);
+			check(human.po->getFightingStyle() == FightingStyle::None, "PlayerObject fighting style resets to Self-Defense");
 		}
 	}
 	catch (const std::exception& e)

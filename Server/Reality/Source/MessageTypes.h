@@ -103,6 +103,17 @@ private:
 	uint8 m_emoteAnimation;
 };
 
+class ExtendedAnimationMsg : public ObjectUpdateMsg
+{
+public:
+	ExtendedAnimationMsg(uint32 objectId, uint16 animId, uint8 animCount = 1);
+	~ExtendedAnimationMsg();
+	const ByteBuffer& toBuf();
+private:
+	uint16 m_animId;
+	uint8 m_animCount;
+};
+
 class AnimationStateMsg : public ObjectUpdateMsg
 {
 public:

@@ -791,6 +791,36 @@ void PlayerObject::ParsePlayerCommand( string theCmd )
 		m_parent.QueueCommand(make_shared<SystemChatMsg>((format("{c:00FF00}Combat tactic set to %1%.{/c}") % tacStr).str()));
 		return;
 	}
+	else if (iequals(command, "style") || iequals(command, "discipline"))
+	{
+		string styleStr;
+		cmdStream >> styleStr;
+		if (iequals(styleStr, "kungfu") || iequals(styleStr, "wushu"))
+		{
+			setFightingStyle(FightingStyle::KungFu);
+			m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:00FF00}[MARTIAL ARTS] Fighting style set to Kung Fu (Wushu).{/c}"));
+		}
+		else if (iequals(styleStr, "karate"))
+		{
+			setFightingStyle(FightingStyle::Karate);
+			m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:00FF00}[MARTIAL ARTS] Fighting style set to Karate.{/c}"));
+		}
+		else if (iequals(styleStr, "aikido"))
+		{
+			setFightingStyle(FightingStyle::Aikido);
+			m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:00FF00}[MARTIAL ARTS] Fighting style set to Aikido.{/c}"));
+		}
+		else if (iequals(styleStr, "street") || iequals(styleStr, "selfdefense") || iequals(styleStr, "brawl"))
+		{
+			setFightingStyle(FightingStyle::None);
+			m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:00FF00}[MARTIAL ARTS] Fighting style set to Self-Defense / Close Combat.{/c}"));
+		}
+		else
+		{
+			m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FF0000}Usage: &style <kungfu|karate|aikido|street>{/c}"));
+		}
+		return;
+	}
 	else if (iequals(command, "withdraw") || iequals(command, "escape"))
 	{
 		sCombatSys.StopFreeFire(m_goId);

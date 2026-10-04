@@ -477,6 +477,50 @@ void PlayerObject::RPC_HandleAbilityUse( ByteBuffer &srcCmd )
 	if (m_abilitySystem && m_abilitySystem->getAbility(abilityId))
 		m_abilitySystem->onAbilityCast(abilityId);
 
+	// Update active martial arts discipline style when an ability of that style is executed
+	const AbilityTemplate* abilTempl = sDataLoader.GetAbilityTemplate(abilityId);
+	if (abilTempl)
+	{
+		if (abilTempl->name.find("KungFu") != std::string::npos)
+		{
+			if (m_fightingStyle != FightingStyle::KungFu)
+			{
+				m_fightingStyle = FightingStyle::KungFu;
+				if (!m_parent.isBot())
+					m_parent.QueueCommand(std::make_shared<SystemChatMsg>("{c:00FF00}[MARTIAL ARTS] Fighting style engaged: Kung Fu (Wushu){/c}"));
+			}
+		}
+		else if (abilTempl->name.find("Karate") != std::string::npos)
+		{
+			if (m_fightingStyle != FightingStyle::Karate)
+			{
+				m_fightingStyle = FightingStyle::Karate;
+				if (!m_parent.isBot())
+					m_parent.QueueCommand(std::make_shared<SystemChatMsg>("{c:00FF00}[MARTIAL ARTS] Fighting style engaged: Karate{/c}"));
+			}
+		}
+		else if (abilTempl->name.find("Aikido") != std::string::npos)
+		{
+			if (m_fightingStyle != FightingStyle::Aikido)
+			{
+				m_fightingStyle = FightingStyle::Aikido;
+				if (!m_parent.isBot())
+					m_parent.QueueCommand(std::make_shared<SystemChatMsg>("{c:00FF00}[MARTIAL ARTS] Fighting style engaged: Aikido{/c}"));
+			}
+		}
+		else if (abilTempl->name.find("SelfDefense") != std::string::npos ||
+		         abilTempl->name.find("CloseCombat") != std::string::npos ||
+		         abilTempl->name.find("MartialArts") != std::string::npos)
+		{
+			if (m_fightingStyle != FightingStyle::None)
+			{
+				m_fightingStyle = FightingStyle::None;
+				if (!m_parent.isBot())
+					m_parent.QueueCommand(std::make_shared<SystemChatMsg>("{c:00FF00}[MARTIAL ARTS] Fighting style engaged: Self-Defense / Close Combat{/c}"));
+			}
+		}
+	}
+
 	sCombatSys.UseAbility(this,abilityId,targetGoId);
 }
 

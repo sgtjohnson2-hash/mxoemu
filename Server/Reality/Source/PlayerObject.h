@@ -1,4 +1,4 @@
-﻿// ***************************************************************************
+// ***************************************************************************
 //
 // Reality - The Matrix Online Server Emulator
 // Copyright (C) 2006-2010 Rajko Stojadinovic
@@ -28,6 +28,7 @@
 
 #include "LocationVector.h"
 #include "MessageTypes.h"
+#include "CombatAnimationMatrix.h"
 #include "IGO.h"
 #include <mutex>
 #include <unordered_set>
@@ -176,6 +177,9 @@ public:
     void SetCCResistance(float v) { m_ccResistance = v; }
 
     void applyStun(uint32 durationMs); //in PlayerObjectCombat.cpp
+    
+    FightingStyle getFightingStyle() const { return m_fightingStyle; }
+    void setFightingStyle(FightingStyle style) { m_fightingStyle = style; }
     
     std::shared_ptr<class AbilitySystem> getAbilitySystem() { return m_abilitySystem; }
     
@@ -369,6 +373,8 @@ private:
     
     float m_timeDilation = 1.0f;
     uint64 m_timeDilationExpires = 0;
+
+    FightingStyle m_fightingStyle = FightingStyle::None;
 
     std::unordered_set<uint32> m_knownEntities;
     mutable std::mutex m_knownMutex;
