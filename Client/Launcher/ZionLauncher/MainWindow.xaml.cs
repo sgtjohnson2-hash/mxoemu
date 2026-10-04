@@ -99,6 +99,18 @@ namespace ZionLauncher
             }
         }
 
+        // The retail 7.6005 client needs the modern hook (login/network shim + launcher watch); the old 113k mxohax.dll
+        // only knows the 2005 client's offsets. Client\mxohax.dll is intentionally left untouched.
+        private static string RetailHookDll
+        {
+            get
+            {
+                string clientModern = Path.Combine(GameRoot, "Client", "mxohax_modern.dll");
+                if (File.Exists(clientModern)) return clientModern;
+                return Path.Combine(GameRoot, "mxohax_modern.dll");
+            }
+        }
+
         [System.Runtime.InteropServices.DllImport("kernel32.dll", SetLastError = true)]
         static extern IntPtr OpenProcess(uint dwDesiredAccess, bool bInheritHandle, int dwProcessId);
 
@@ -179,6 +191,54 @@ namespace ZionLauncher
         static extern uint ResumeThread(IntPtr hThread);
 
         const uint CREATE_SUSPENDED = 0x00000004;
+
+        [System.Runtime.InteropServices.DllImport("kernel32.dll", SetLastError = true)]
+        static extern bool VirtualProtectEx(IntPtr hProcess, IntPtr lpAddress, uint dwSize, uint flNewProtect, out uint lpflOldProtect);
+
+        [System.Runtime.InteropServices.DllImport("kernel32.dll", SetLastError = true)]
+        static extern bool FlushInstructionCache(IntPtr hProcess, IntPtr lpBaseAddress, UIntPtr dwSize);
+
+        const uint PAGE_EXECUTE_READWRITE = 0x40;
+
+        // PE TimeDateStamp of the retail 7.6005 launcher.exe / matrix.exe (the 2005 client is 0x421564AE).
+        const uint RETAIL_7_6005_TIMESTAMP = 0x48CB38B2;
+
+        private static bool IsRetailClient(string exePath)
+        {
+            try
+            {
+                using var fs = new FileStream(exePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+                using var br = new BinaryReader(fs);
+                fs.Seek(0x3C, SeekOrigin.Begin);
+                int peOff = br.ReadInt32();
+                fs.Seek(peOff + 8, SeekOrigin.Begin);
+                return br.ReadUInt32() == RETAIL_7_6005_TIMESTAMP;
+            }
+            catch { return false; }
+        }
+
+        private static bool PatchRemote(IntPtr hProcess, uint addr, byte[] bytes)
+        {
+            if (!VirtualProtectEx(hProcess, (IntPtr)addr, (uint)bytes.Length, PAGE_EXECUTE_READWRITE, out uint oldProt)) return false;
+            bool ok = WriteProcessMemory(hProcess, (IntPtr)addr, bytes, (uint)bytes.Length, out _);
+            VirtualProtectEx(hProcess, (IntPtr)addr, (uint)bytes.Length, oldProt, out _);
+            return ok;
+        }
+
+        /// <summary>
+        /// Applies the retail 7.6005 launcher bypasses to a SUSPENDED client process (same set as tools/harness32.cpp):
+        /// single-instance check, parent-launcher check, "run via launcher.exe / -clone deprecated" modal, EULA/patcher flags.
+        /// </summary>
+        private static bool ApplyRetailBypassPatches(IntPtr hProcess)
+        {
+            bool ok = true;
+            ok &= PatchRemote(hProcess, 0x0040A0C0, new byte[] { 0x31, 0xC0, 0xC3 });                   // single instance: xor eax,eax; ret
+            ok &= PatchRemote(hProcess, 0x0040A180, new byte[] { 0xB8, 0x01, 0x00, 0x00, 0x00, 0xC3 }); // parent check: mov eax,1; ret
+            ok &= PatchRemote(hProcess, 0x0040B4B1, new byte[] { 0xEB, 0x51 });                         // jump past deprecation modal
+            ok &= PatchRemote(hProcess, 0x004C8B1C, new byte[] { 0x00, 0x00 });                         // clear EULA/patcher flags
+            FlushInstructionCache(hProcess, IntPtr.Zero, UIntPtr.Zero);
+            return ok;
+        }
 
         private static System.Media.SoundPlayer? s_matrixClickPlayer = null;
         private static readonly object s_soundLock = new object();
@@ -1770,7 +1830,43 @@ namespace ZionLauncher
                 string workDir = Path.GetDirectoryName(clientExe)!;
 
                 bool startedSuspended = false;
-                if (File.Exists(HookDll))
+
+                // Retail 7.6005 client: apply the launcher bypasses while the process is still suspended, then resume,
+                // then inject mxohax_modern.dll and hook the mxowrap child. Mirrors the verified tools/harness32.cpp path.
+                string retailExe = Path.Combine(GameRoot, "Client", "matrix.exe");
+                if (!File.Exists(retailExe)) retailExe = clientExe;
+                string retailHook = RetailHookDll;
+                if (IsRetailClient(retailExe) && File.Exists(retailHook))
+                {
+                    string retailArgs = $"-clone -LocalTest -nopatch -noeula -autojackin -configsection HighDetail -user \"{username}\" -pwd \"{password}\" -char \"{charArg}\"";
+                    string retailCmd = $"\"{retailExe}\" {retailArgs}";
+                    string retailDir = Path.GetDirectoryName(retailExe)!;
+
+                    STARTUPINFO rsi = new STARTUPINFO();
+                    rsi.cb = (uint)System.Runtime.InteropServices.Marshal.SizeOf(rsi);
+                    if (CreateProcess(null, retailCmd, IntPtr.Zero, IntPtr.Zero, false, CREATE_SUSPENDED, IntPtr.Zero, retailDir, ref rsi, out PROCESS_INFORMATION rpi))
+                    {
+                        bool patched = ApplyRetailBypassPatches(rpi.hProcess);
+                        ResumeThread(rpi.hThread);
+                        Thread.Sleep(150);
+                        bool injected = InjectDllIntoHandle(rpi.hProcess, retailHook);
+                        uint retailPid = rpi.dwProcessId;
+                        CloseHandle(rpi.hThread);
+                        CloseHandle(rpi.hProcess);
+
+                        string clientDirForChild = Path.Combine(GameRoot, "Client");
+                        _ = Task.Run(() => WatchRetailChildAndHook((int)retailPid, retailHook, clientDirForChild));
+
+                        Dispatcher.Invoke(() =>
+                        {
+                            txtStatus.Foreground = (patched && injected) ? Brushes.Lime : Brushes.Orange;
+                            txtStatus.Text = $"[Jacked In] Retail 7.6005 client started (PID {retailPid}); launcher bypass {(patched ? "applied" : "FAILED")}, hook {(injected ? "injected" : "FAILED")}.";
+                        });
+                        startedSuspended = true;
+                    }
+                }
+
+                if (!startedSuspended && File.Exists(HookDll))
                 {
                     STARTUPINFO si = new STARTUPINFO();
                     si.cb = (uint)System.Runtime.InteropServices.Marshal.SizeOf(si);
@@ -1816,6 +1912,47 @@ namespace ZionLauncher
             {
                 txtStatus.Text = "Launch Error: " + ex.Message;
             }
+        }
+
+        /// <summary>
+        /// The retail launcher (mxowrap) re-runs the game as %TEMP%\MatrixOnline.N\matrix.exe. Find that child, give it the
+        /// game dir + hook + dbghelp, and inject the hook (mirrors tools/harness32.cpp CheckAndHookChildProcesses).
+        /// </summary>
+        private void WatchRetailChildAndHook(int parentPid, string hookDll, string clientDir)
+        {
+            var done = new System.Collections.Generic.HashSet<int>();
+            try
+            {
+                for (int i = 0; i < 240; i++) // ~60 s
+                {
+                    Thread.Sleep(250);
+                    var procs = Process.GetProcessesByName("matrix").Concat(Process.GetProcessesByName("launcher")).ToArray();
+                    foreach (var proc in procs)
+                    {
+                        if (proc.Id == parentPid || done.Contains(proc.Id)) continue;
+                        string exePath = "";
+                        try { exePath = proc.MainModule?.FileName ?? ""; } catch { continue; }
+                        bool isWrapChild = exePath.IndexOf("MatrixOnline.", StringComparison.OrdinalIgnoreCase) >= 0
+                                           || string.Equals(Path.GetFileName(exePath), "matrix.exe", StringComparison.OrdinalIgnoreCase);
+                        if (!isWrapChild) continue;
+
+                        string childDir = Path.GetDirectoryName(exePath) ?? "";
+                        try
+                        {
+                            File.WriteAllText(Path.Combine(childDir, "mxohax_gamedir.txt"), clientDir);
+                            File.Copy(hookDll, Path.Combine(childDir, "mxohax.dll"), true);
+                            File.Copy(hookDll, Path.Combine(childDir, "mxohax_modern.dll"), true);
+                            string dbg = Path.Combine(clientDir, "dbghelp.dll");
+                            if (File.Exists(dbg)) File.Copy(dbg, Path.Combine(childDir, "dbghelp.dll"), true);
+                        }
+                        catch { }
+
+                        if (InjectDll(proc, hookDll)) done.Add(proc.Id);
+                    }
+                    if (done.Count > 0) { Thread.Sleep(2000); if (done.Count > 0) return; }
+                }
+            }
+            catch { }
         }
 
         private void InjectImmediatelyAndWatch(Process? targetProc)
