@@ -202,7 +202,7 @@ void BotClient::UpdateBotAI(float deltaSeconds)
             m_targetGoId = 0;
             SetLocomotionAnimation(0);
         }
-        else if (BotManager::getSingletonPtr()->IsAggroEnabled() && me->getFactionName() != "Civilian")
+        else if (!m_passive && BotManager::getSingletonPtr()->IsAggroEnabled() && me->getFactionName() != "Civilian")
         {
             ActionFindTarget find;
             if (find.Tick(this) == NodeStatus::SUCCESS)
@@ -217,6 +217,8 @@ void BotClient::UpdateBotAI(float deltaSeconds)
                 return;
             }
         }
+        if (m_passive)
+            return; // dojo dummy: stand still until attacked
         RoamAndSwarm(deltaSeconds);
         return;
     }

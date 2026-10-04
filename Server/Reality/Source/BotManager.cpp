@@ -138,10 +138,17 @@ std::shared_ptr<BotClient> BotManager::SpawnSingleBot(float x, float y, float z,
     }
     std::shared_ptr<BotClient> bot = std::make_shared<BotClient>(uid);
     bot->SetFaction((mxoFaction)faction);
+
+    // A fresh BotClient's PlayerObject sits at world origin (0,0,0). MoveTo() only plans a
+    // path / updates the spatial grid, so without this the bot is really AT the origin and
+    // walks from there (and is AoI-culled for any player who is not near the origin).
+    PlayerObject* po = sObjMgr.getGOPtr(bot->GetPlayerGoId());
+    if (po) {
+        po->setPosition(LocationVector(x, y, z));
+    }
     bot->MoveTo(x, y, z);
     
     // Give bot a mock ranged weapon (e.g., Template ID 500 = SMG)
-    PlayerObject* po = sObjMgr.getGOPtr(bot->GetPlayerGoId());
     if (po) {
         po->giveItem(500); // 500 is just a mock template ID for now
         

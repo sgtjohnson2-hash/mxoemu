@@ -71,6 +71,11 @@ public:
     bool isAgent() const { return m_isAgent; }
     void setAgent(bool val) { m_isAgent = val; }
 
+    // Passive bots (training-dojo dummies) never go looking for targets and do not wander;
+    // they only fight back once something hurts them (takeDamage sets their target).
+    bool IsPassive() const { return m_passive; }
+    void SetPassive(bool passive) { m_passive = passive; }
+
     bool IsPanicking() const;
     void SetPanicking(bool panic);
     void triggerPanic(uint32 sourceGoId);
@@ -175,6 +180,7 @@ private:
     
     uint32 m_possessedBy;
     bool m_isAgent = false;
+    bool m_passive = false;
     uint32 m_infectingTargetGoId{0};
     uint32 m_infectChannelStartMs{0};
     uint32 m_infectChannelDurationMs{2500};

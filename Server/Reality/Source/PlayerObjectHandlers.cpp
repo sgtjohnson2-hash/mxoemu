@@ -38,6 +38,7 @@
 #include "ObjectMgr.h"
 #include "SpatialGrid.h"
 #include "CombatSystem.h"
+#include "DojoSpawn.h"
 #include <iomanip>
 #include "GameServer.h"
 #include "GameClient.h"
@@ -778,37 +779,84 @@ void PlayerObject::ParsePlayerCommand( string theCmd )
 		string subCommand;
 		cmdStream >> subCommand;
 		LocationVector pos = this->getPosition();
+
+		// Spawns one passive, scaled training bot distM metres from the player along
+		// (facing + angleOffsetRad), turned to face the player. World units are 100/m and
+		// "forward" is (-sin(rot), -cos(rot)) - the same convention GoAhead() walks with.
+		auto spawnDojoBot = [&](float distM, float angleOffsetRad) -> bool
+		{
+			const LocationVector botPos = DojoPlaceInFront(pos, distM, angleOffsetRad);
+			const double bx = botPos.x;
+			const double bz = botPos.z;
+
+			auto bot = sBotMgr.SpawnSingleBot((float)bx, (float)pos.y, (float)bz, FACTION_MACHINES);
+			if (!bot)
+				return false;
+			uint32 botGoId = bot->GetPlayerGoId();
+			PlayerObject* botPo = sObjMgr.getGOPtrSafe(botGoId);
+			if (!botPo)
+				return false;
+
+			// SpawnSingleBot swaps the requested faction for the controlling one at that
+			// location - the dojo dummy must always be hostile, so force Machines.
+			bot->SetFaction(FACTION_MACHINES);
+			botPo->setFactionName("Machines");
+			bot->SetPassive(true);
+
+			// place + face the player
+			botPo->setPosition(botPos);
+			sSpatialGrid.UpdateClientPosition(bot.get(), (float)bx, (float)bz);
+
+			// Scale the DUMMY (never the player): same level as the player. HP follows a bounded
+			// level curve (the player's own damage is not scaled, so it must stay killable in a
+			// reasonable number of 4 s interlock rounds); damage scales with the player's HP pool
+			// so the dummy stays a threat for characters that have levelled up (+50 HP/level).
+			const uint8 botLvl = std::max<uint8>(1, getLevel());
+			const float hpF = std::max(120.0f, std::min(600.0f, 100.0f + 20.0f * botLvl));
+			const float dmgScale = std::max(1.0f, std::min(20.0f, float(getMaximumHealth()) / 150.0f));
+			botPo->setLevel(botLvl);
+			botPo->setMaximumHealth((uint16)hpF);
+			botPo->setCurrentHealth((uint16)hpF);
+			botPo->setDamageScale(dmgScale);
+
+			noteEntitySpawned(botGoId);
+			auto pkts = botPo->getCurrentStatePackets();
+			for (const auto& pkt : pkts) {
+				m_parent.QueueState(pkt);
+			}
+			INFO_LOG(format("Dojo bot %1% spawned for %2%: dist %3% units, pos (%4%, %5%, %6%) player (%7%, %8%, %9%) bot rot %10% lvl %11% hp %12% dmgScale %13%")
+				% botGoId % m_handle % (sqrt((pos.x - bx) * (pos.x - bx) + (pos.z - bz) * (pos.z - bz)))
+				% bx % pos.y % bz % pos.x % pos.y % pos.z % botPos.rot % int(botLvl) % hpF % dmgScale);
+			return true;
+		};
+
 		if (iequals(subCommand, "1v1"))
 		{
-			auto bot = sBotMgr.SpawnSingleBot(pos.x + 20.0f, pos.y, pos.z + 20.0f, 2); // 2 = FACTION_MACHINES
-			if (bot) {
-				uint32 botGoId = bot->GetPlayerGoId();
-				PlayerObject* botPo = sObjMgr.getGOPtrSafe(botGoId);
-				if (botPo) {
-					noteEntitySpawned(botGoId);
-					auto pkts = botPo->getCurrentStatePackets();
-					for (const auto& pkt : pkts) {
-						m_parent.QueueState(pkt);
-					}
-				}
-			}
-			m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:00FF00}Dojo: 1v1 Enemy spawned!{/c}"));
+			bool ok = spawnDojoBot(4.0f, 0.0f);
+			m_parent.QueueCommand(make_shared<SystemChatMsg>(ok
+				? "{c:00FF00}Dojo: 1v1 Enemy spawned 4m ahead of you!{/c}"
+				: "{c:FF0000}Dojo: could not spawn an enemy.{/c}"));
 		}
 		else if (iequals(subCommand, "group"))
 		{
-			sBotMgr.SpawnBot(4, pos.x + 20.0f, pos.y, pos.z + 20.0f, 2); // 2 = FACTION_MACHINES
-			m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:00FF00}Dojo: Group of enemies spawned!{/c}"));
+			// four dummies in a 3-5 m arc in front of the player
+			static const float distM[4]   = { 4.5f, 3.5f, 3.5f, 4.5f };
+			static const float offRad[4]  = { -0.50f, -0.17f, 0.17f, 0.50f };
+			int spawned = 0;
+			for (int i = 0; i < 4; i++)
+				if (spawnDojoBot(distM[i], offRad[i]))
+					spawned++;
+			m_parent.QueueCommand(make_shared<SystemChatMsg>((format("{c:00FF00}Dojo: %1% enemies spawned ahead of you!{/c}") % spawned).str()));
 		}
 		else if (iequals(subCommand, "clear"))
 		{
 			int killed = 0;
 			auto goIds = sObjMgr.getAllGOIds();
 			for (uint32 id : goIds) {
-				PlayerObject* p = sObjMgr.getGOPtr(id);
-				if (p && p->getClient().isBot()) {
+				PlayerObject* p = sObjMgr.getGOPtrSafe(id);
+				if (p && p != this && p->getClient().isBot() && !p->isDead()) {
 					if (p->getPosition().DistanceSq(pos) < 5000.0f * 5000.0f) {
-						p->setCurrentHealth(0);
-						p->sendHealthUpdate();
+						p->die(0); // killerGoId 0 = no reward; announces death + cleans combat state
 						killed++;
 					}
 				}
@@ -2885,8 +2933,9 @@ void PlayerObject::RPC_HandleObjectSelected( ByteBuffer &srcCmd )
 			% m_parent.Address() % m_handle	% m_goId
 			% viewId % objType % targetGoId;
 
-		DEBUG_LOG(msg);
-		m_parent.QueueCommand(make_shared<SystemChatMsg>(msg.str()));
+		INFO_LOG(msg);
+		if (targetGoId == 0)
+			INFO_LOG(format("%1%:%2% selected view %3% which maps to no known object (targetGoId=0)") % m_handle % m_goId % viewId);
 	}
 	else
 	{
