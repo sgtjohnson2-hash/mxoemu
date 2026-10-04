@@ -149,8 +149,12 @@ public:
 
 		m_queuedStates.push_back(queuedState(realPtr,immediateOnly,callFunc));
 	}
+	// Test hook (CombatTests.cpp): when set, every command queued for a NON-bot client is also
+	// handed to this callback so a headless test can assert what the client would receive.
+	boost::function<void(const msgBaseClassPtr&)> m_commandTap;
 	void QueueCommand(msgBaseClassPtr theCmd,packetAckFunc callFunc=0)
 	{
+		if (m_commandTap && !isBot()) m_commandTap(theCmd);
 		if (isBot() && !g_sniffPackets) return;
 		std::lock_guard<std::recursive_mutex> lock(m_queueMutex);
 		msgBaseClassPtr &realPtr = theCmd;

@@ -86,6 +86,8 @@ void RunNeuralSwarmTestSuite();
 void RunNeuralAudioTestSuite();
 void RunAdaptiveMusicTestSuite();
 void RunMachineCityTestSuite();
+int RunCombatTestSuite(); // CombatTests.cpp - returns number of failed assertions
+static bool g_testCombat = false;
 
 static bool g_testUnderworld = false;
 static bool g_testSimulation = false;
@@ -155,6 +157,8 @@ int main(int argc, char* argv[])
         std::string arg = argv[i];
         if (arg == "--sniff") {
             g_sniffPackets = true;
+        } else if (arg == "--test-combat") {
+            g_testCombat = true;
         } else if (arg == "--test-protocol") {
             g_testProtocol = true;
         } else if (arg == "--test-frank") {
@@ -330,6 +334,12 @@ int main(int argc, char* argv[])
     }
 
 #ifndef UNITTEST
+    if (g_testCombat) {
+        int failures = RunCombatTestSuite();
+        std::cout << std::flush;
+        fflush(NULL);
+        _exit(failures); // skip static destructors: the global singletons assert in teardown
+    }
     if (g_testFrank && g_testUnderworld && g_testSimulation && g_testEmergentAI && g_testPolice && g_testBiography && g_testSocial && g_testFamily && g_testEmergentLife && g_testSLM && g_testMafia && g_testExiles && g_testPossession && g_testFreeway && g_testConstruct && g_testAPU && g_testHovercraft && g_testBackdoor && g_testMobilAve && g_testCorruptCops && g_testOperatorBridge && g_testCyberdeck && g_testMegacityDestruction && g_testMatrixReboot && g_testCastleLore && g_testEpoch4 && g_testNeuralSwarm && g_testStructuralVoxel && g_testNeuralAudio && g_testShardFabric && g_testNeuromorphic && g_testNonEuclideanPortals && g_testSourceTelekinesis && g_testGlobalMesh && g_testGaussianSplats && g_testPhysarumLogistics && g_testBiometricResonance && g_testWebAssemblyGateway && g_testCastleVsAgents && g_testCastleVsPlayers && g_testCastleVsAI && g_testAirspaceConvoy && g_testNeuroCombat && g_testMachineCity && g_testQuantumSuperposition && g_testGenerationalLineage && g_testSubAtomicGrid && g_testCosmicVerticality && g_testCollectiveConsciousness && g_testMegacityBourse && g_testTemporalAnomaly && g_testParallelMatrix && g_testQuantumMesh && g_testVoxelSynthesis && g_testDeepCore && g_testArchitectSandbox) {
         std::cout << "\n============================================================" << std::endl;
         std::cout << "  RUNNING COMPLETE MEGACITY & TACTICAL TEST SUITE (56 SUITES)" << std::endl;
