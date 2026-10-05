@@ -1030,8 +1030,11 @@ void PlayerObject::ParsePlayerCommand( string theCmd )
 		if (iequals(subCommand, "1v1"))
 		{
 			bool ok = spawnDojoBot(4.0f, 0.0f);
+			if (ok && m_lastDojoBotGoId) {
+				sCombatSys.RequestInterlock(m_goId, m_lastDojoBotGoId);
+			}
 			m_parent.QueueCommand(make_shared<SystemChatMsg>(ok
-				? "{c:00FF00}Dojo: 1v1 Enemy spawned 4m ahead of you!{/c}"
+				? "{c:00FF00}Dojo: 1v1 Enemy spawned and engaged in close combat interlock!{/c}"
 				: "{c:FF0000}Dojo: could not spawn an enemy.{/c}"));
 		}
 		else if (iequals(subCommand, "group"))
