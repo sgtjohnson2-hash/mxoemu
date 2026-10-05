@@ -835,6 +835,7 @@ void PlayerObject::ParsePlayerCommand( string theCmd )
 				m_abilitySystem->loadAbility(68, 1, 2); // PersonalFirewall1Ability
 				m_abilitySystem->loadAbility(60, 1, 3); // LogicBomb1Ability
 				m_abilitySystem->sendFullLoadout();
+				m_abilitySystem->saveToDB();
 				m_parent.QueueCommand(make_shared<SystemChatMsg>(
 					"{c:00FFCC}[DISCIPLINE] Hacker kit loaded into memory: 1:LogicBlast 2:HarmfulCode 3:Firewall 4:LogicBomb{/c}"));
 			}
@@ -846,6 +847,7 @@ void PlayerObject::ParsePlayerCommand( string theCmd )
 				m_abilitySystem->loadAbility(39, 1, 2); // BolsterHealth1Ability
 				m_abilitySystem->loadAbility(56, 1, 3); // GroupRepairs1Ability
 				m_abilitySystem->sendFullLoadout();
+				m_abilitySystem->saveToDB();
 				m_parent.QueueCommand(make_shared<SystemChatMsg>(
 					"{c:00FF00}[DISCIPLINE] Coder/Support kit loaded into memory: 1:RestoreHealth 2:FastHealing 3:BolsterHealth 4:GroupRepairs{/c}"));
 			}
@@ -858,6 +860,7 @@ void PlayerObject::ParsePlayerCommand( string theCmd )
 				m_abilitySystem->loadAbility(8449, 1, 3); // KungFuMasterAbility
 				setFightingStyle(FightingStyle::KungFu);
 				m_abilitySystem->sendFullLoadout();
+				m_abilitySystem->saveToDB();
 				m_parent.QueueCommand(make_shared<SystemChatMsg>(
 					"{c:00FF00}[DISCIPLINE] Kung Fu (Wushu) kit loaded into memory: 1:KungFu 2:Tactics 3:Damage 4:Master{/c}"));
 			}
@@ -870,6 +873,7 @@ void PlayerObject::ParsePlayerCommand( string theCmd )
 				m_abilitySystem->loadAbility(573, 1, 3);  // KarateDamageAbility
 				setFightingStyle(FightingStyle::Karate);
 				m_abilitySystem->sendFullLoadout();
+				m_abilitySystem->saveToDB();
 				m_parent.QueueCommand(make_shared<SystemChatMsg>(
 					"{c:00FF00}[DISCIPLINE] Karate kit loaded into memory: 1:Karate 2:Focus 3:Tactics 4:Damage{/c}"));
 			}
@@ -882,6 +886,7 @@ void PlayerObject::ParsePlayerCommand( string theCmd )
 				m_abilitySystem->loadAbility(572, 1, 3);  // AikidoDamageAbility
 				setFightingStyle(FightingStyle::Aikido);
 				m_abilitySystem->sendFullLoadout();
+				m_abilitySystem->saveToDB();
 				m_parent.QueueCommand(make_shared<SystemChatMsg>(
 					"{c:00FF00}[DISCIPLINE] Aikido kit loaded into memory: 1:Aikido 2:SpinClayPigeon 3:Tactics 4:Damage{/c}"));
 			}
@@ -894,6 +899,7 @@ void PlayerObject::ParsePlayerCommand( string theCmd )
 				m_abilitySystem->loadAbility(600, 1, 3);  // CloseCombatTrainingAbility
 				setFightingStyle(FightingStyle::None);
 				m_abilitySystem->sendFullLoadout();
+				m_abilitySystem->saveToDB();
 				m_parent.QueueCommand(make_shared<SystemChatMsg>(
 					"{c:00FF00}[DISCIPLINE] Self-Defense / Street Brawl kit loaded: 1:SelfDefense 2:HeadButt 3:CheapShot 4:CloseCombat{/c}"));
 			}
@@ -904,6 +910,7 @@ void PlayerObject::ParsePlayerCommand( string theCmd )
 				m_abilitySystem->loadAbility(137, 1, 1);
 				m_abilitySystem->loadAbility(17, 1, 2);
 				m_abilitySystem->sendFullLoadout();
+				m_abilitySystem->saveToDB();
 				m_parent.QueueCommand(make_shared<SystemChatMsg>(
 					"{c:FF8800}[DISCIPLINE] Martial Artist kit loaded into memory: 1:CloseCombat 2:MartialArts 3:SelfDefense{/c}"));
 			}
@@ -915,6 +922,7 @@ void PlayerObject::ParsePlayerCommand( string theCmd )
 				m_abilitySystem->loadAbility(147, 1, 2); // RiflesAbility
 				m_abilitySystem->loadAbility(453, 1, 3); // RifleButtSmashAbility
 				m_abilitySystem->sendFullLoadout();
+				m_abilitySystem->saveToDB();
 				m_parent.QueueCommand(make_shared<SystemChatMsg>(
 					"{c:FF4444}[DISCIPLINE] Soldier kit loaded into memory: 1:PowerShot 2:Handguns 3:Rifles 4:RifleButtSmash{/c}"));
 			}
@@ -926,6 +934,7 @@ void PlayerObject::ParsePlayerCommand( string theCmd )
 				m_abilitySystem->loadAbility(283, 1, 2); // KnifeThrowerAbility
 				m_abilitySystem->loadAbility(293, 1, 3); // StealthCountermeasuresAbility
 				m_abilitySystem->sendFullLoadout();
+				m_abilitySystem->saveToDB();
 				m_parent.QueueCommand(make_shared<SystemChatMsg>(
 					"{c:AA00FF}[DISCIPLINE] Spy kit loaded into memory: 1:Stealth 2:PoisonKnife 3:KnifeThrower 4:Countermeasures{/c}"));
 			}
@@ -974,7 +983,7 @@ void PlayerObject::ParsePlayerCommand( string theCmd )
 		// Spawns one passive, scaled training bot distM metres from the player along
 		// (facing + angleOffsetRad), turned to face the player. World units are 100/m and
 		// "forward" is (-sin(rot), -cos(rot)) - the same convention GoAhead() walks with.
-		auto spawnDojoBot = [&](float distM, float angleOffsetRad) -> bool
+		auto spawnDojoBot = [&](float distM, float angleOffsetRad, FightingStyle botStyle = FightingStyle::None, const std::string& botName = "") -> bool
 		{
 			const LocationVector botPos = DojoPlaceInFront(pos, distM, angleOffsetRad);
 			const double bx = botPos.x;
@@ -993,6 +1002,10 @@ void PlayerObject::ParsePlayerCommand( string theCmd )
 			bot->SetFaction(FACTION_MACHINES);
 			botPo->setFactionName("Machines");
 			bot->SetPassive(true);
+			botPo->setFightingStyle(botStyle);
+			if (!botName.empty()) {
+				botPo->setHandle(botName);
+			}
 
 			// place + face the player
 			botPo->setPosition(botPos);
@@ -1003,7 +1016,7 @@ void PlayerObject::ParsePlayerCommand( string theCmd )
 			// reasonable number of 4 s interlock rounds); damage scales with the player's HP pool
 			// so the dummy stays a threat for characters that have levelled up (+50 HP/level).
 			const uint8 botLvl = std::max<uint8>(1, getLevel());
-			const float hpF = (iequals(subCommand, "1v1")) ? 20.0f : std::max(120.0f, std::min(600.0f, 100.0f + 20.0f * botLvl));
+			const float hpF = (iequals(subCommand, "1v1") || iequals(subCommand, "kungfu") || iequals(subCommand, "karate") || iequals(subCommand, "aikido") || iequals(subCommand, "brawl") || iequals(subCommand, "street")) ? 20.0f : std::max(120.0f, std::min(600.0f, 100.0f + 20.0f * botLvl));
 			const float dmgScale = std::max(1.0f, std::min(20.0f, float(getMaximumHealth()) / 150.0f));
 			botPo->setLevel(botLvl);
 			botPo->setMaximumHealth((uint16)hpF);
@@ -1027,26 +1040,75 @@ void PlayerObject::ParsePlayerCommand( string theCmd )
 			return true;
 		};
 
-		if (iequals(subCommand, "1v1"))
+		FightingStyle targetStyle = FightingStyle::None;
+		std::string styleLabel = "Street Brawler";
+		bool is1v1 = false;
+
+		if (iequals(subCommand, "kungfu") || iequals(subCommand, "wushu")) {
+			targetStyle = FightingStyle::KungFu;
+			styleLabel = "Kung Fu Master";
+			is1v1 = true;
+		} else if (iequals(subCommand, "karate")) {
+			targetStyle = FightingStyle::Karate;
+			styleLabel = "Karate Master";
+			is1v1 = true;
+		} else if (iequals(subCommand, "aikido")) {
+			targetStyle = FightingStyle::Aikido;
+			styleLabel = "Aikido Sensei";
+			is1v1 = true;
+		} else if (iequals(subCommand, "brawl") || iequals(subCommand, "street")) {
+			targetStyle = FightingStyle::None;
+			styleLabel = "Street Brawler";
+			is1v1 = true;
+		} else if (iequals(subCommand, "1v1")) {
+			is1v1 = true;
+			string optStyle;
+			if (cmdStream >> optStyle) {
+				if (iequals(optStyle, "kungfu") || iequals(optStyle, "wushu")) {
+					targetStyle = FightingStyle::KungFu;
+					styleLabel = "Kung Fu Master";
+				} else if (iequals(optStyle, "karate")) {
+					targetStyle = FightingStyle::Karate;
+					styleLabel = "Karate Master";
+				} else if (iequals(optStyle, "aikido")) {
+					targetStyle = FightingStyle::Aikido;
+					styleLabel = "Aikido Sensei";
+				} else if (iequals(optStyle, "brawl") || iequals(optStyle, "street")) {
+					targetStyle = FightingStyle::None;
+					styleLabel = "Street Brawler";
+				}
+			} else {
+				static int s_cycleStyle = 0;
+				int s = (s_cycleStyle++) % 4;
+				if (s == 0) { targetStyle = FightingStyle::KungFu; styleLabel = "Kung Fu Master"; }
+				else if (s == 1) { targetStyle = FightingStyle::Karate; styleLabel = "Karate Master"; }
+				else if (s == 2) { targetStyle = FightingStyle::Aikido; styleLabel = "Aikido Sensei"; }
+				else { targetStyle = FightingStyle::None; styleLabel = "Street Brawler"; }
+			}
+		}
+
+		if (is1v1)
 		{
-			bool ok = spawnDojoBot(4.0f, 0.0f);
+			bool ok = spawnDojoBot(4.0f, 0.0f, targetStyle, "Dojo " + styleLabel);
 			if (ok && m_lastDojoBotGoId) {
 				sCombatSys.RequestInterlock(m_goId, m_lastDojoBotGoId);
 			}
 			m_parent.QueueCommand(make_shared<SystemChatMsg>(ok
-				? "{c:00FF00}Dojo: 1v1 Enemy spawned and engaged in close combat interlock!{/c}"
+				? (format("{c:00FF00}Dojo: 1v1 %1% spawned and engaged in close combat interlock!{/c}") % styleLabel).str()
 				: "{c:FF0000}Dojo: could not spawn an enemy.{/c}"));
 		}
 		else if (iequals(subCommand, "group"))
 		{
-			// four dummies in a 3-5 m arc in front of the player
+			// four dummies in a 3-5 m arc in front of the player, each with a different martial arts style!
 			static const float distM[4]   = { 4.5f, 3.5f, 3.5f, 4.5f };
 			static const float offRad[4]  = { -0.50f, -0.17f, 0.17f, 0.50f };
+			static const FightingStyle styles[4] = { FightingStyle::KungFu, FightingStyle::Karate, FightingStyle::Aikido, FightingStyle::None };
+			static const char* labels[4] = { "Dojo Kung Fu Master", "Dojo Karate Master", "Dojo Aikido Sensei", "Dojo Street Brawler" };
 			int spawned = 0;
 			for (int i = 0; i < 4; i++)
-				if (spawnDojoBot(distM[i], offRad[i]))
+				if (spawnDojoBot(distM[i], offRad[i], styles[i], labels[i]))
 					spawned++;
-			m_parent.QueueCommand(make_shared<SystemChatMsg>((format("{c:00FF00}Dojo: %1% enemies spawned ahead of you!{/c}") % spawned).str()));
+			m_parent.QueueCommand(make_shared<SystemChatMsg>((format("{c:00FF00}Dojo: %1% martial arts masters (Kung Fu, Karate, Aikido, Brawl) spawned ahead of you!{/c}") % spawned).str()));
 		}
 		else if (iequals(subCommand, "clear"))
 		{
