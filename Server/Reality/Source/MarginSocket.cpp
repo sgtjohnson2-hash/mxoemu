@@ -124,20 +124,6 @@ void MarginSocket::ProcessData( const byte *buf,size_t len )
 	if (len == 0 || buf == nullptr)
 		return;
 
-	// Fast drop for internet web crawlers, TLS handshakes, or plain HTTP probes
-	if (len >= 3)
-	{
-		if (memcmp(buf, "GET", 3) == 0 || memcmp(buf, "POS", 3) == 0 || memcmp(buf, "HEA", 3) == 0 ||
-		    memcmp(buf, "PRI", 3) == 0 || memcmp(buf, "OPT", 3) == 0 || memcmp(buf, "PUT", 3) == 0 ||
-		    memcmp(buf, "DEL", 3) == 0 || memcmp(buf, "CON", 3) == 0 ||
-		    (buf[0] == 0x16 && buf[1] >= 0x01 && buf[1] <= 0x04) ||
-		    (buf[0] == 0x03 && buf[1] == 0x01) || (buf[0] == 0x80 && len >= 2))
-		{
-			SetCloseAndDelete(true);
-			return;
-		}
-	}
-
 	try
 	{
 		ByteBuffer packetContents(buf,len);
@@ -565,15 +551,18 @@ void MarginSocket::ProcessData( const byte *buf,size_t len )
 					% m_charName % charId % m_username % m_userId);
 			}
 
-			// Don't allow multiple users with the same character id
-			if (sConfig.GetBoolDefault("MarginServer.AllowMultipleSessionsPerCharacter", false) == false)
+			// Clean up any stale sessions for this character so reconnecting operative loads cleanly
+			auto allUsers = sGame.GetClientsWithCharacterId(charId);
+			if (!allUsers.empty())
 			{
-				auto allUsers = sGame.GetClientsWithCharacterId(charId);
-				if (allUsers.size() > 0) // someone else already using account
+				INFO_LOG(format("MS_LoadCharacterRequest: Character '%1%' (charId=%2%) has %3% existing session(s), invalidating stale session(s)")
+					% m_charName % charId % allUsers.size());
+				for (auto& oldClient : allUsers)
 				{
-					ERROR_LOG(format("MS_LoadCharacterRequest: Closing connection for %1% (one already exists)") % m_charName );
-					this->SetCloseAndDelete(true);
-					return;
+					if (oldClient)
+					{
+						oldClient->Invalidate();
+					}
 				}
 			}
 

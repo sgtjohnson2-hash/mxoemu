@@ -211,7 +211,7 @@ vector<std::shared_ptr<GameClient>> GameSocket::GetClientsWithCharacterId( uint6
 	std::lock_guard<std::recursive_mutex> lock(m_clientsMutex);
 	for (GClientList::iterator it=m_clients.begin();it!=m_clients.end();++it)
 	{
-		if (it->second->GetCharacterId() == charId)
+		if (it->second && it->second->IsValid() && it->second->GetCharacterId() == charId)
 		{
 			returns.push_back(it->second);
 		}

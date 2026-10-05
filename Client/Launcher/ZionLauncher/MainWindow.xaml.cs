@@ -292,6 +292,9 @@ namespace ZionLauncher
 
         private void Window_Loaded(object sender, RoutedEventArgs e)
         {
+            SetBrowserEmulationMode();
+            try { wbCommunity.Navigated += (s, ev) => SetSilent(wbCommunity, true); } catch { }
+
             // Dynamic version labels
             txtLoaderSubTitle.Text = $"THE MATRIX ONLINE // NEURAL BRIDGE LOADER v{CurrentLauncherVersion}";
             txtConsoleSubTitle.Text = $"THE MATRIX ONLINE // REALITY REMASTER (v{CurrentLauncherVersion})";
@@ -529,6 +532,14 @@ namespace ZionLauncher
         {
             // 1. Startup Cleanup: remove old update artifacts if present
             CleanupOldUpdateArtifacts();
+
+            var args = Environment.GetCommandLineArgs();
+            bool fastMode = args.Any(a => a.Equals("--fast", StringComparison.OrdinalIgnoreCase) || a.Equals("--no-loader", StringComparison.OrdinalIgnoreCase));
+            if (fastMode)
+            {
+                DismissLoader();
+                return;
+            }
 
             // 2. Initial Loader HUD state
             txtLoaderPhase.Text = "INITIALIZING CONSTRUCT PROTOCOL...";
@@ -987,7 +998,7 @@ namespace ZionLauncher
                     {
                         await Task.Delay(400);
                         btnJackIn_Click(this, new RoutedEventArgs());
-                        await Task.Delay(2500);
+                        await Task.Delay(3500);
                         btnLaunchSelectedOperative_Click(this, new RoutedEventArgs());
                     }
                 }
@@ -1143,6 +1154,7 @@ namespace ZionLauncher
         {
             try
             {
+                SetSilent(wbCommunity, true);
                 string user = !string.IsNullOrWhiteSpace(_authenticatedUser) ? _authenticatedUser : "Slacker";
                 string url = $"http://{_currentServerIp}/community?user={Uri.EscapeDataString(user)}";
                 wbCommunity.Navigate(url);
@@ -1151,6 +1163,36 @@ namespace ZionLauncher
             {
                 txtStatus.Text = $"Community web view notice: {ex.Message}";
             }
+        }
+
+        private static void SetSilent(WebBrowser webBrowser, bool silent)
+        {
+            try
+            {
+                var fi = typeof(WebBrowser).GetField("_axIWebBrowser2", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
+                if (fi != null)
+                {
+                    dynamic? browser = fi.GetValue(webBrowser);
+                    if (browser != null)
+                    {
+                        browser.Silent = silent;
+                    }
+                }
+            }
+            catch { }
+        }
+
+        public static void SetBrowserEmulationMode()
+        {
+            try
+            {
+                using var key = Microsoft.Win32.Registry.CurrentUser.CreateSubKey(
+                    @"Software\Microsoft\Internet Explorer\Main\FeatureControl\FEATURE_BROWSER_EMULATION");
+                string appName = System.IO.Path.GetFileName(Environment.ProcessPath ?? "ZionLauncher.exe");
+                key?.SetValue(appName, 11001, Microsoft.Win32.RegistryValueKind.DWord);
+                key?.SetValue("ZionLauncher.exe", 11001, Microsoft.Win32.RegistryValueKind.DWord);
+            }
+            catch { }
         }
 
         private void btnOpenBrowserCommunity_Click(object sender, RoutedEventArgs e)
@@ -2266,10 +2308,10 @@ namespace ZionLauncher
             // 5. Resolve authentic matrix.exe (prioritize Client directory)
             string[] candidateClientPaths = new[]
             {
-                Path.Combine(GameRoot, "Client", "launcher.exe"),
                 Path.Combine(GameRoot, "Client", "matrix.exe"),
-                Path.Combine(GameRoot, "launcher.exe"),
-                Path.Combine(GameRoot, "matrix.exe")
+                Path.Combine(GameRoot, "matrix.exe"),
+                Path.Combine(GameRoot, "Client", "launcher.exe"),
+                Path.Combine(GameRoot, "launcher.exe")
             };
 
             string clientExe = "";

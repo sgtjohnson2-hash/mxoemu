@@ -44,6 +44,7 @@ private:
 	virtual void ProcessData(const byte *buf,size_t len) = 0;
 protected:
 	void SendPacket(const TCPVariableLengthPacket &varLenPacket);
+	bool m_firstPacketValidated;
 };
 
 #endif
