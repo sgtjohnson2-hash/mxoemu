@@ -373,27 +373,41 @@ void DataLoader::EnsureCoreAbilities()
     addCore(8461, "AikidoMasteryAbility", DisciplineType::MARTIAL_ARTIST, true, 0, 25, 0, 0x280006DF, false, 0);
 
     // Soldier / Gunner Discipline
-    addCore(14, "PowerShotAbility", DisciplineType::GUNNER, true, 2000, 15, 671090470, 0x280001C1, false, 0);
-    addCore(126, "PistolDisarmingShotAbility", DisciplineType::GUNNER, true, 1500, 20, 671090470, 0x280001C1, false, 0);
+    addCore(14, "PowerShotAbility", DisciplineType::GUNNER, true, 2000, 15, 671090470, 0x280006DF, false, 0);
+    addCore(126, "PistolDisarmingShotAbility", DisciplineType::GUNNER, true, 1500, 20, 671090470, 0x280006DF, false, 0);
     addCore(128, "GunmanAbility", DisciplineType::GUNNER, false, 0, 0, 0, 0, true, 0);
-    addCore(129, "HandgunsAbility", DisciplineType::GUNNER, true, 1000, 10, 671090470, 0x280001C1, false, 0);
-    addCore(147, "RiflesAbility", DisciplineType::GUNNER, true, 2000, 20, 671090470, 0x280001C1, false, 0);
+    addCore(129, "HandgunsAbility", DisciplineType::GUNNER, true, 1000, 10, 671090470, 0x280006DF, false, 0);
+    addCore(147, "RiflesAbility", DisciplineType::GUNNER, true, 2000, 20, 671090470, 0x280006DF, false, 0);
     addCore(154, "SoldierAbility", DisciplineType::GUNNER, false, 0, 0, 0, 0, true, 0);
     addCore(240, "GunslingerAbility", DisciplineType::GUNNER, false, 0, 0, 0, 0, true, 0);
     addCore(251, "RiflemanAbility", DisciplineType::GUNNER, false, 0, 0, 0, 0, true, 0);
-    addCore(453, "RifleButtSmashAbility", DisciplineType::GUNNER, true, 1000, 15, 0, 0x280001C1, false, 0);
-    addCore(499, "PistolPointBlankAbility", DisciplineType::GUNNER, true, 1000, 15, 671090470, 0x280001C1, false, 0);
-    addCore(501, "PistolWhipAbility", DisciplineType::GUNNER, true, 1000, 10, 0, 0x280001C1, false, 0);
-    addCore(505, "SniperShotAbility", DisciplineType::GUNNER, true, 4000, 35, 671090470, 0x280001C1, false, 0);
+    addCore(453, "RifleButtSmashAbility", DisciplineType::GUNNER, true, 1000, 15, 0, 0x280006DF, false, 0);
+    addCore(499, "PistolPointBlankAbility", DisciplineType::GUNNER, true, 1000, 15, 671090470, 0x280006DF, false, 0);
+    addCore(501, "PistolWhipAbility", DisciplineType::GUNNER, true, 1000, 10, 0, 0x280006DF, false, 0);
+    addCore(505, "SniperShotAbility", DisciplineType::GUNNER, true, 4000, 35, 671090470, 0x280006DF, false, 0);
 
     // Spy Discipline
     addCore(146, "PoisonKnifeAbility", DisciplineType::SPY, true, 1500, 20, 671090469, 0x280006DF, false, 0);
     addCore(155, "SpyAbility", DisciplineType::SPY, false, 0, 0, 0, 0, true, 0);
     addCore(209, "StealthAbility", DisciplineType::SPY, true, 2000, 25, 671090262, 0, true, 60);
-    addCore(283, "KnifeThrowerAbility", DisciplineType::SPY, true, 1500, 15, 671090469, 0x280001C1, false, 0);
+    addCore(283, "KnifeThrowerAbility", DisciplineType::SPY, true, 1500, 15, 671090469, 0x280006DF, false, 0);
     addCore(293, "StealthCountermeasuresAbility", DisciplineType::SPY, true, 2000, 20, 671091233, 0, true, 30);
     addCore(523, "StealthDamageAbility", DisciplineType::SPY, false, 0, 0, 0, 0, true, 0);
     addCore(1035, "StealthedCodeDamageAbility", DisciplineType::SPY, false, 0, 0, 0, 0, true, 0);
+
+    // Core Weapon Templates for Soldier Dual-Wielding
+    if (m_items.find(1001) == m_items.end())
+    {
+        ItemTemplate dualPistols;
+        dualPistols.templateId = 1001;
+        dualPistols.name = "Dual Beretta 92FS";
+        dualPistols.type = ITEM_TYPE_WEAPON;
+        dualPistols.isDualWield = true;
+        dualPistols.minDamage = 15;
+        dualPistols.maxDamage = 25;
+        dualPistols.attackSpeed = 1.0f;
+        m_items[1001] = dualPistols;
+    }
 }
 
 bool DataLoader::LoadNPCs(const std::string& filePath)

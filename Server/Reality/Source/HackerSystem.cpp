@@ -346,6 +346,25 @@ bool HackerSystem::ExecuteCoderAbility(PlayerObject* caster, uint16 abilityId, u
                 "{c:00FF00}[CODER] Passive Code Deflection algorithm active in RSI buffer.{/c}"));
         }
     }
+    else if (abilityId == 20) // FortifySimulacra1Ability
+    {
+        sStatusEffectManager.ApplyEffect(target->getGoId(), EFFECT_BOLSTER_HEALTH, 180.0f, 1.0f, 50.0f, caster->getGoId());
+        if (humanCaster)
+        {
+            caster->getClient().QueueCommand(std::make_shared<SystemChatMsg>(
+                "{c:00FF00}[CODER] Fortifying target RSI construct with reinforced subroutine shielding.{/c}"));
+        }
+    }
+    else if (abilityId == 30) // RepairSimulacra1Ability
+    {
+        target->applyHeal(caster->getGoId(), 120, 0x01000060);
+        sStatusEffectManager.ApplyEffect(target->getGoId(), EFFECT_REGEN_HOT, 10.0f, 2.0f, 15.0f, caster->getGoId());
+        if (humanCaster)
+        {
+            caster->getClient().QueueCommand(std::make_shared<SystemChatMsg>(
+                "{c:00FF00}[CODER] Performing diagnostic synthesis and repair on construct.{/c}"));
+        }
+    }
     else
     {
         uint16 healAmt = 50 + caster->getLevel() * 5;
@@ -475,7 +494,7 @@ bool HackerSystem::ExecuteSoldierAbility(PlayerObject* caster, uint16 abilityId,
 
     // 5. Ability Payload Execution
     uint16 damage = 25;
-    uint32 hitFx = 0x280001C1;
+    uint32 hitFx = 0x280006DF;
     if (abilityId == 14) // PowerShotAbility
     {
         damage = 50;
@@ -509,6 +528,11 @@ bool HackerSystem::ExecuteSoldierAbility(PlayerObject* caster, uint16 abilityId,
     else if (abilityId == 505) // SniperShotAbility
     {
         damage = 75;
+    }
+
+    if (caster->isDualWielding())
+    {
+        damage = static_cast<uint16>(damage * 1.5f);
     }
 
     target->takeDamage(caster->getGoId(), damage, hitFx);
@@ -635,16 +659,18 @@ bool HackerSystem::ExecuteSpyAbility(PlayerObject* caster, uint16 abilityId, uin
     }
     else if (abilityId == 146) // PoisonKnifeAbility
     {
+        uint16 dmg = 25;
         if (caster->isStealthed())
         {
+            dmg = static_cast<uint16>(dmg * 1.75f); // 1.75x Ambush critical strike
             caster->setStealth(false);
             if (humanCaster)
             {
                 caster->getClient().QueueCommand(std::make_shared<SystemChatMsg>(
-                    "{c:FFFF00}[SPY] Stealth broken by ambush attack!{/c}"));
+                    "{c:FFFF00}[SPY] Ambush critical strike! Concealment broken.{/c}"));
             }
         }
-        target->takeDamage(caster->getGoId(), 25, 0x280006DF);
+        target->takeDamage(caster->getGoId(), dmg, 0x280006DF);
         sStatusEffectManager.ApplyEffect(target->getGoId(), EFFECT_VIRUS_DOT, 10.0f, 1.0f, 8.0f, caster->getGoId());
         if (humanCaster)
         {
@@ -654,16 +680,18 @@ bool HackerSystem::ExecuteSpyAbility(PlayerObject* caster, uint16 abilityId, uin
     }
     else if (abilityId == 283) // KnifeThrowerAbility
     {
+        uint16 dmg = 30;
         if (caster->isStealthed())
         {
+            dmg = static_cast<uint16>(dmg * 1.5f); // 1.5x Ambush knife throw
             caster->setStealth(false);
             if (humanCaster)
             {
                 caster->getClient().QueueCommand(std::make_shared<SystemChatMsg>(
-                    "{c:FFFF00}[SPY] Stealth broken by ranged knife throw!{/c}"));
+                    "{c:FFFF00}[SPY] Concealment dropped to throw combat dagger.{/c}"));
             }
         }
-        target->takeDamage(caster->getGoId(), 30, 0x280001C1);
+        target->takeDamage(caster->getGoId(), dmg, 0x280006DF);
         if (humanCaster)
         {
             caster->getClient().QueueCommand(std::make_shared<SystemChatMsg>(

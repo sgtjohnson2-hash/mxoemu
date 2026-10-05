@@ -32,6 +32,8 @@
 #include "CombatAnimationMatrix.h"
 #include "DojoSpawn.h"
 #include "MessageTypes.h"
+#include "InventorySystem.h"
+#include "Item.h"
 #include "Timer.h"
 #include <iostream>
 #include <vector>
@@ -725,14 +727,24 @@ int RunCombatTestSuite()
 			}
 
 			// 2. Soldier Firearm Execution
+			human.po->getInventory()->clear();
 			Actor soldierVictim = makeBot(9200060, 10050.0, 10000.0, 1, 100);
 			human.po->setInnerStrength(100);
 			humanClient.captured.clear();
 			bool soldierOk = sCombatSys.UseAbility(human.po, 14, soldierVictim.go);
 			check(soldierOk, "Soldier PowerShot executes successfully on hostile target");
-			check(soldierVictim.po->getCurrentHealth() < 100, "PowerShot inflicts ballistic damage on victim");
+			check(soldierVictim.po->getCurrentHealth() == 50, "PowerShot inflicts 50 ballistic damage on victim");
 			check(human.po->getCurrentIS() < 100, "PowerShot deducts Inner Strength cost from caster");
 			check(humanClient.sawText("[SOLDIER]"), "Human caster receives [SOLDIER] ballistic chat feedback");
+
+			// Soldier Dual-Wielding 1.5x Multiplier
+			human.po->getInventory()->addItemAuto(std::make_shared<Item>(9901, 1001));
+			check(human.po->isDualWielding() == true, "Operative equipped with dual pistols enters dual-wielding state");
+			Actor dualVictim = makeBot(9200068, 10050.0, 10000.0, 1, 100);
+			human.po->setInnerStrength(100);
+			bool dualOk = sCombatSys.UseAbility(human.po, 14, dualVictim.go);
+			check(dualOk, "Soldier PowerShot executes while dual wielding");
+			check(dualVictim.po->getCurrentHealth() == 25, "PowerShot with dual wielding deals 1.5x damage (75 dmg, leaving 25 hp)");
 
 			// 3. Soldier Pistol Disarming Shot
 			Actor disarmVictim = makeBot(9200061, 10050.0, 10000.0, 1, 100);
@@ -757,20 +769,71 @@ int RunCombatTestSuite()
 			check(human.po->isStealthed() == true, "Operative enters stealth concealment mode");
 			check(humanClient.sawText("[SPY]"), "Human operative receives [SPY] concealment chat feedback");
 
-			// 6. Spy Poison Knife Ambush (Breaks Stealth)
+			// 6. Spy Poison Knife Ambush (1.75x Crit & Breaks Stealth)
 			Actor spyVictim = makeBot(9200063, 10050.0, 10000.0, 1, 100);
 			human.po->setInnerStrength(100);
+			human.po->setStealth(true);
 			bool poisonOk = sCombatSys.UseAbility(human.po, 146, spyVictim.go);
 			check(poisonOk, "PoisonKnifeAbility executes on target in melee range");
-			check(spyVictim.po->getCurrentHealth() < 100, "PoisonKnife inflicts puncture damage");
+			check(spyVictim.po->getCurrentHealth() == 57, "PoisonKnife ambush deals 1.75x critical strike (43 dmg, leaving 57 hp)");
 			check(human.po->isStealthed() == false, "Stealth concealment breaks upon attacking target");
 
-			// 7. Spy Knife Thrower Ranged Strike
+			// 7. Spy Knife Thrower Ranged Strike (1.5x Ambush)
 			Actor throwVictim = makeBot(9200064, 10000.0 + 2000.0, 10000.0, 1, 100); // 20m away
 			human.po->setInnerStrength(100);
+			human.po->setStealth(true);
 			bool throwOk = sCombatSys.UseAbility(human.po, 283, throwVictim.go);
 			check(throwOk, "KnifeThrowerAbility executes successfully at 20m range");
-			check(throwVictim.po->getCurrentHealth() < 100, "Thrown combat knife damages target");
+			check(throwVictim.po->getCurrentHealth() == 55, "KnifeThrower ambush deals 1.5x damage (45 dmg, leaving 55 hp)");
+			check(human.po->isStealthed() == false, "Stealth breaks after knife throw");
+
+			// 8. Hacker Discipline Attacks & Defenses
+			Actor hackVictim = makeBot(9200065, 10050.0, 10000.0, 1, 100);
+			human.po->setInnerStrength(100);
+			bool hackOk = sCombatSys.UseAbility(human.po, 57, hackVictim.go);
+			check(hackOk, "Hacker LogicBlast1 executes successfully on target");
+			check(hackVictim.po->getCurrentHealth() == 55, "LogicBlast1 inflicts 45 code damage (leaving 55 hp)");
+
+			human.po->setInnerStrength(100);
+			bool virusOk = sCombatSys.UseAbility(human.po, 53, hackVictim.go);
+			check(virusOk, "Hacker TransmitVirus compiles and applies viral payload");
+
+			human.po->setInnerStrength(100);
+			bool stunOk = sCombatSys.UseAbility(human.po, 43, hackVictim.go);
+			check(stunOk, "Hacker DisruptInputs executes and applies stun effect");
+
+			human.po->setInnerStrength(100);
+			bool firewallOk = sCombatSys.UseAbility(human.po, 68, human.go);
+			check(firewallOk, "Hacker PersonalFirewall compiles and shields operative");
+
+			// 9. Coder Discipline Restoration & Constructs
+			human.po->setCurrentHealth(40);
+			human.po->setInnerStrength(100);
+			bool healOk = sCombatSys.UseAbility(human.po, 77, human.go);
+			check(healOk, "Coder RestoreHealth1 executes successfully on self");
+			check(human.po->getCurrentHealth() == 100, "RestoreHealth1 heals 60 health (40 -> 100)");
+
+			Actor constructBot = makeBot(9200066, 10050.0, 10000.0, 1, 200);
+			constructBot.po->setCurrentHealth(50);
+			human.po->setInnerStrength(100);
+			bool fortifyOk = sCombatSys.UseAbility(human.po, 20, constructBot.go);
+			check(fortifyOk, "Coder FortifySimulacra1Ability executes on construct");
+			check(constructBot.po->getCurrentHealth() == 100, "FortifySimulacra restores 50 health buffer (50 -> 100)");
+
+			constructBot.po->setCurrentHealth(40);
+			human.po->setInnerStrength(100);
+			bool repairOk = sCombatSys.UseAbility(human.po, 30, constructBot.go);
+			check(repairOk, "Coder RepairSimulacra1Ability executes on construct");
+			check(constructBot.po->getCurrentHealth() == 160, "RepairSimulacra repairs 120 health (40 -> 160)");
+
+			Actor fallenBot = makeBot(9200067, 10050.0, 10000.0, 1, 100);
+			fallenBot.po->die(0);
+			check(fallenBot.po->isDead(), "Target bot is marked dead");
+			human.po->setInnerStrength(100);
+			bool reviveOk = sCombatSys.UseAbility(human.po, 375, fallenBot.go);
+			check(reviveOk, "Coder ReviveRSIAbility executes on downed operative");
+			check(!fallenBot.po->isDead(), "Downed operative is restored to live state by ReviveRSI");
+			check(fallenBot.po->getCurrentHealth() == 50, "Revived operative has 50% health restored");
 		}
 	}
 	catch (const std::exception& e)
