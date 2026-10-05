@@ -580,6 +580,46 @@ void PlayerObject::UpdateAoIStreaming()
 	}
 }
 
+void PlayerObject::ensureEntityKnown(PlayerObject* other)
+{
+	if (!other || other == this || other->isDead())
+		return;
+
+	uint32 otherGoId = other->getGoId();
+	if (otherGoId == 0 || otherGoId == m_goId)
+		return;
+
+	if (!knowsEntity(otherGoId))
+	{
+		noteEntitySpawned(otherGoId);
+		if (!m_parent.isBot())
+		{
+			try
+			{
+				vector<msgBaseClassPtr> statePackets = other->getCurrentStatePackets();
+				for (const auto& pkt : statePackets)
+				{
+					m_parent.QueueState(pkt);
+				}
+				m_parent.QueueState(make_shared<PositionStateMsg>(otherGoId));
+				m_parent.QueueState(make_shared<RotationStateMsg>(otherGoId, other->getPosition().getMxoRot()));
+				m_parent.QueueState(make_shared<LocomotionStateMsg>(otherGoId, 0, other->getPosition().getMxoRot()));
+				if (other->isInCombat())
+				{
+					m_parent.QueueState(make_shared<CombatantModeMsg>(otherGoId, 1));
+				}
+				INFO_LOG(format("ensureEntityKnown: guaranteed spawn of entity %1%:%2% on client %3%:%4%")
+					% other->getHandle() % otherGoId % m_handle % m_goId);
+			}
+			catch (...)
+			{
+				WARNING_LOG(format("ensureEntityKnown: failed to queue spawn packets for %1% on client %2%")
+					% otherGoId % m_goId);
+			}
+		}
+	}
+}
+
 void PlayerObject::setPosition(const LocationVector& pos)
 {
 	IGO::setPosition(pos);
@@ -698,6 +738,8 @@ void PlayerObject::HandleStateUpdate( ByteBuffer &srcData )
 		}
 	//sometimes happens, no info inside
 	case 0x02:
+	case 0x24:
+	case 0x26:
 		{
 			validUpdate = true;
 			break;

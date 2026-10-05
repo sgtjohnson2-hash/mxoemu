@@ -364,6 +364,10 @@ bool CombatSystem::RequestInterlock(uint32 attackerGoId, uint32 targetGoId)
 		}
 	}
 
+	// Guarantee both combatants know each other and have views spawned on their clients
+	pA->ensureEntityKnown(pB);
+	pB->ensureEntityKnown(pA);
+
     // Bystander Panic (15-20m radius = 1500-2000 units, SpatialGrid accelerated)
     const float panicRadius = 2000.0f;
     auto nearbyClients = sSpatialGrid.GetClientsInRadius(pA->getPosition().x, pA->getPosition().z, panicRadius);
@@ -451,6 +455,10 @@ bool CombatSystem::RequestInterlock(uint32 attackerGoId, uint32 targetGoId)
 		{
 			try
 			{
+				// Step 1: Engage combatant mode stance on self and notify other combatant
+				sides[i].self->getClient().QueueState(std::make_shared<SelfCombatantModeMsg>(1));
+				sides[i].self->getClient().QueueState(std::make_shared<CombatantModeMsg>(sides[i].other->getGoId(), 1));
+
 				uint16 ilViewId = sObjMgr.allocateDynamicView(&sides[i].self->getClient(), uint32(GOID_ILCOMBATHANDLER) << 16);
 				*(sides[i].viewSlot) = ilViewId;
 
@@ -493,6 +501,9 @@ bool CombatSystem::RequestRangedCombat(uint32 attackerGoId, uint32 targetGoId, u
 	PlayerObject* pA = getPlayerSafe(attackerGoId);
 	PlayerObject* pB = getPlayerSafe(targetGoId);
 	if (!pA || !pB || pA->isDead() || pB->isDead()) return false;
+
+	pA->ensureEntityKnown(pB);
+	pB->ensureEntityKnown(pA);
 
     // Bystander Panic (15-20m radius = 1500-2000 units, SpatialGrid accelerated)
     const float panicRadius = 2000.0f;
@@ -950,10 +961,14 @@ CombatSystem::AttackResult CombatSystem::ResolveAttack(PlayerObject* attacker, P
                 target->getFightingStyle(), targetTactic,
                 InterlockExchangeOutcome::GuardBreak, move.id
             );
-            sGame.AnnounceStateUpdateNear(attacker->getPosition().x, attacker->getPosition().z, 20000.0f,
-                std::make_shared<ExtendedAnimationMsg>(attacker->getGoId(), pair.attackerAnimId, 1));
-            sGame.AnnounceStateUpdateNear(target->getPosition().x, target->getPosition().z, 20000.0f,
-                std::make_shared<ExtendedAnimationMsg>(target->getGoId(), pair.defenderAnimId, 1));
+            auto animAtk = std::make_shared<ExtendedAnimationMsg>(attacker->getGoId(), pair.attackerAnimId, 1);
+            auto animDef = std::make_shared<ExtendedAnimationMsg>(target->getGoId(), pair.defenderAnimId, 1);
+            sGame.AnnounceStateUpdateNear(attacker->getPosition().x, attacker->getPosition().z, 20000.0f, animAtk);
+            sGame.AnnounceStateUpdateNear(target->getPosition().x, target->getPosition().z, 20000.0f, animDef);
+            attacker->getClient().QueueState(animAtk);
+            attacker->getClient().QueueState(animDef);
+            target->getClient().QueueState(animAtk);
+            target->getClient().QueueState(animDef);
         } else {
             uint32 emoteId = (move.dmgType == DAMAGE_MELEE) ? 43 : 42;
             sGame.AnnounceStateUpdateNear(attacker->getPosition().x, attacker->getPosition().z, 20000.0f, std::make_shared<EmoteMsg>(attacker->getGoId(), emoteId, 1)); 
@@ -978,10 +993,14 @@ CombatSystem::AttackResult CombatSystem::ResolveAttack(PlayerObject* attacker, P
             target->getFightingStyle(), targetTactic,
             hitOutcome, move.id
         );
-        sGame.AnnounceStateUpdateNear(attacker->getPosition().x, attacker->getPosition().z, 20000.0f,
-            std::make_shared<ExtendedAnimationMsg>(attacker->getGoId(), pair.attackerAnimId, 1));
-        sGame.AnnounceStateUpdateNear(target->getPosition().x, target->getPosition().z, 20000.0f,
-            std::make_shared<ExtendedAnimationMsg>(target->getGoId(), pair.defenderAnimId, 1));
+        auto animAtk = std::make_shared<ExtendedAnimationMsg>(attacker->getGoId(), pair.attackerAnimId, 1);
+        auto animDef = std::make_shared<ExtendedAnimationMsg>(target->getGoId(), pair.defenderAnimId, 1);
+        sGame.AnnounceStateUpdateNear(attacker->getPosition().x, attacker->getPosition().z, 20000.0f, animAtk);
+        sGame.AnnounceStateUpdateNear(target->getPosition().x, target->getPosition().z, 20000.0f, animDef);
+        attacker->getClient().QueueState(animAtk);
+        attacker->getClient().QueueState(animDef);
+        target->getClient().QueueState(animAtk);
+        target->getClient().QueueState(animDef);
     }
 
 	if (res.hit)
@@ -1166,8 +1185,14 @@ bool CombatSystem::RunInterlockRound(InterlockSession &session)
 	} else if (isClash) {
 		// Both combatants selected identical stance - dispatch clash rebound animations
 		InterlockAnimPair pair = CombatAnimationMatrix::GetAnimationPair(styleA, tacA, styleB, tacB, InterlockExchangeOutcome::Clash, moveA ? moveA->id : 0);
-		sGame.AnnounceStateUpdateNear(pA->getPosition().x, pA->getPosition().z, 20000.0f, std::make_shared<ExtendedAnimationMsg>(pA->getGoId(), pair.attackerAnimId, 1));
-		sGame.AnnounceStateUpdateNear(pB->getPosition().x, pB->getPosition().z, 20000.0f, std::make_shared<ExtendedAnimationMsg>(pB->getGoId(), pair.defenderAnimId, 1));
+		auto animA = std::make_shared<ExtendedAnimationMsg>(pA->getGoId(), pair.attackerAnimId, 1);
+		auto animB = std::make_shared<ExtendedAnimationMsg>(pB->getGoId(), pair.defenderAnimId, 1);
+		sGame.AnnounceStateUpdateNear(pA->getPosition().x, pA->getPosition().z, 20000.0f, animA);
+		sGame.AnnounceStateUpdateNear(pB->getPosition().x, pB->getPosition().z, 20000.0f, animB);
+		pA->getClient().QueueState(animA);
+		pA->getClient().QueueState(animB);
+		pB->getClient().QueueState(animA);
+		pB->getClient().QueueState(animB);
 		std::string clashName = (tacA == TACTIC_POWER) ? "Power" : (tacA == TACTIC_SPEED ? "Speed" : (tacA == TACTIC_RETALIATE ? "Grab" : "Guard"));
 		if (!pA->getClient().isBot()) pA->getClient().QueueCommand(std::make_shared<SystemChatMsg>((format("{c:FFFF00}[MARTIAL ARTS] Stance Clash! Both combatants chose %1%. Glancing exchange.{/c}") % clashName).str()));
 		if (!pB->getClient().isBot()) pB->getClient().QueueCommand(std::make_shared<SystemChatMsg>((format("{c:FFFF00}[MARTIAL ARTS] Stance Clash! Both combatants chose %1%. Glancing exchange.{/c}") % clashName).str()));
@@ -1284,6 +1309,16 @@ bool CombatSystem::UseAbility(PlayerObject* caster, uint16 abilityId, uint32 tar
 {
     std::lock_guard<std::recursive_mutex> lock(m_combatMutex);
     if (!caster) return false;
+
+    // Resolve target if not explicitly provided
+    if (targetGoId == 0)
+    {
+        if (IsInterlocked(caster->getGoId()))
+            targetGoId = caster->getInterlockPartner();
+        else if (caster->getTargetGoId() != 0)
+            targetGoId = caster->getTargetGoId();
+    }
+
     const bool humanCaster = !caster->getClient().isBot();
     const uint16 requestedAbilityId = abilityId;
 

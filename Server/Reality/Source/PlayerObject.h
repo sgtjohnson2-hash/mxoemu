@@ -393,6 +393,7 @@ public:
     void noteEntitySpawned(uint32 goId) { std::lock_guard<std::mutex> l(m_knownMutex); m_knownEntities.insert(goId); }
     void noteEntityDeleted(uint32 goId) { std::lock_guard<std::mutex> l(m_knownMutex); m_knownEntities.erase(goId); }
     bool knowsEntity(uint32 goId) const { std::lock_guard<std::mutex> l(m_knownMutex); return m_knownEntities.count(goId) > 0; }
+    void ensureEntityKnown(PlayerObject* other);
     uint32 m_lastAoIUpdateMs = 0;
 };
 

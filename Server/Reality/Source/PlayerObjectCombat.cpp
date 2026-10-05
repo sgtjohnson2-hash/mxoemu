@@ -107,12 +107,29 @@ void PlayerObject::takeDamage( uint32 attackerGoId, uint16 damage, uint32 fxId )
 	if (fxId == 0)
 		fxId = 0x280006DF;
 
-	if (m_parent.isBot() && attackerGoId != 0 && attackerGoId != m_goId)
+	if (attackerGoId != 0 && attackerGoId != m_goId)
 	{
-		BotClient* bot = dynamic_cast<BotClient*>(&m_parent);
-		if (bot && bot->GetTargetGoId() == 0)
+		PlayerObject* attackerObj = sObjMgr.getGOPtrSafe(attackerGoId);
+		if (attackerObj)
 		{
-			bot->SetTargetGoId(attackerGoId);
+			ensureEntityKnown(attackerObj);
+			if (m_targetGoId == 0)
+			{
+				m_targetGoId = attackerGoId;
+				if (!m_parent.isBot())
+				{
+					m_parent.QueueCommand(shared_ptr<SystemChatMsg>(new SystemChatMsg(
+						(format("{c:FF3333}[COMBAT] Under attack by %1%! Target locked.{/c}") % attackerObj->getHandle()).str())));
+				}
+			}
+		}
+		if (m_parent.isBot())
+		{
+			BotClient* bot = dynamic_cast<BotClient*>(&m_parent);
+			if (bot && bot->GetTargetGoId() == 0)
+			{
+				bot->SetTargetGoId(attackerGoId);
+			}
 		}
 	}
 
@@ -543,6 +560,8 @@ void PlayerObject::RPC_HandleAbilityUse( ByteBuffer &srcCmd )
 	uint32 targetGoId = sObjMgr.getGOForView(&m_parent,targetViewId);
 	if (targetGoId == 0)
 		targetGoId = m_targetGoId;
+	if (targetGoId == 0 && m_ilPartner != 0)
+		targetGoId = m_ilPartner;
 
 	INFO_LOG(format("(%1%) %2%:%3% UseAbility request ability %4% view %5% -> target go %6%")
 		% m_parent.Address() % m_handle % m_goId % abilityId % targetViewId % targetGoId);

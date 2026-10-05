@@ -600,7 +600,7 @@ const ByteBuffer& EmoteMsg::toBuf()
 	bool isCombatEmote = (m_emoteAnimation == 41 || m_emoteAnimation == 42 || m_emoteAnimation == 43 || m_emoteAnimation == 50 || m_emoteAnimation == 51);
 	if (m_player->getClient().isBot())
 	{
-		if (!isCombatEmote || m_player->getInterlockPartner() == 0)
+		if (!isCombatEmote || (!m_player->isInCombat() && m_player->getInterlockPartner() == 0))
 		{
 			m_buf.clear();
 			throw PacketNoLongerValid();
@@ -655,7 +655,7 @@ const ByteBuffer& ExtendedAnimationMsg::toBuf()
 
 	if (m_player->getClient().isBot())
 	{
-		if (m_player->getInterlockPartner() == 0)
+		if (!m_player->isInCombat() && m_player->getInterlockPartner() == 0)
 		{
 			m_buf.clear();
 			throw PacketNoLongerValid();
