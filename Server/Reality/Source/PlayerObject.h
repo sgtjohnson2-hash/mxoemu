@@ -289,6 +289,7 @@ public:
     uint32 m_stunExpiresMS = 0;
     uint32 m_deathDelayMS = 0;
     uint32 m_deathDelayKillerId = 0;
+    uint32 m_lastDojoBotGoId = 0;
     
     std::string m_crewName;
     std::string m_factionName;

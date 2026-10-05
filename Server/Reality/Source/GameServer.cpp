@@ -217,6 +217,13 @@ void GameServer::SimulationLoop()
 				po->getClient().FlushQueue();
 			});
 
+			// High-frequency update for active bot combatants and pending takedown death timers
+			sObjMgr.ForEachGO([](PlayerObject* po) {
+				if (po && po->getClient().isBot() && (po->m_deathDelayMS > 0 || po->getInterlockPartner() != 0)) {
+					po->Update();
+				}
+			});
+
 			// Tier 2: Medium-Frequency (5Hz / ~200ms) - Bot Navigation & Viewport AI
 			static uint32 lastBotSimMs = 0;
 			if (currentMs - lastBotSimMs >= 200)

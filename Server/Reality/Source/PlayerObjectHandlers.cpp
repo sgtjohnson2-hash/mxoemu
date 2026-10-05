@@ -964,6 +964,7 @@ void PlayerObject::ParsePlayerCommand( string theCmd )
 
 			noteEntitySpawned(botGoId);
 			setTargetGoId(botGoId);
+			m_lastDojoBotGoId = botGoId;
 			INFO_LOG(format("(%1%) %2%:%3% selected dynamic object view id 0001 objType 0001 (targetGoId=%4%)")
 				% m_parent.Address() % m_handle % m_goId % botGoId);
 			auto pkts = botPo->getCurrentStatePackets();
@@ -1020,17 +1021,24 @@ void PlayerObject::ParsePlayerCommand( string theCmd )
 	else if (iequals(command, "target"))
 	{
 		uint32 bestGoId = 0;
-		float bestDistSq = 2000.0f * 2000.0f;
-		for (uint32 gid : sObjMgr.getAllGOIds())
+		if (m_lastDojoBotGoId != 0 && sObjMgr.getGOPtrSafe(m_lastDojoBotGoId) && !sObjMgr.getGOPtrSafe(m_lastDojoBotGoId)->isDead())
 		{
-			PlayerObject* po = sObjMgr.getGOPtrSafe(gid);
-			if (po && po != this && !po->isDead() && (po->getFaction() == FACTION_MACHINES || po->getFactionName() == "Machines"))
+			bestGoId = m_lastDojoBotGoId;
+		}
+		else
+		{
+			float bestDistSq = 2000.0f * 2000.0f;
+			for (uint32 gid : sObjMgr.getAllGOIds())
 			{
-				float d = (float)m_pos.DistanceSq(po->getPosition());
-				if (d < bestDistSq)
+				PlayerObject* po = sObjMgr.getGOPtrSafe(gid);
+				if (po && po != this && !po->isDead() && (po->getFaction() == FACTION_MACHINES || po->getFactionName() == "Machines"))
 				{
-					bestDistSq = d;
-					bestGoId = gid;
+					float d = (float)m_pos.DistanceSq(po->getPosition());
+					if (d < bestDistSq)
+					{
+						bestDistSq = d;
+						bestGoId = gid;
+					}
 				}
 			}
 		}

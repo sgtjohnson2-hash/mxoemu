@@ -40,6 +40,7 @@
 #include "GameServer.h"
 #include "EncryptedPacket.h"
 #include "Config.h"
+#include "CombatSystem.h"
 
 MarginSocket::MarginSocket(ISocketHandler& h) : TCPVarLenSocket(h)
 {
@@ -561,6 +562,11 @@ void MarginSocket::ProcessData( const byte *buf,size_t len )
 				{
 					if (oldClient)
 					{
+						uint32 oldGo = oldClient->GetPlayerGoId();
+						if (oldGo != 0)
+						{
+							sCombatSys.EndInterlock(oldGo, false);
+						}
 						oldClient->Invalidate();
 					}
 				}
