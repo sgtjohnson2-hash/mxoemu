@@ -242,6 +242,27 @@ bool DataLoader::LoadAbilities(const std::string& filePath)
             {
                 templ.discipline = DisciplineType::MARTIAL_ARTIST;
             }
+            else if (templ.name.find("Soldier") != std::string::npos ||
+                     templ.name.find("Gunman") != std::string::npos ||
+                     templ.name.find("Gunner") != std::string::npos ||
+                     templ.name.find("Handgun") != std::string::npos ||
+                     templ.name.find("Pistol") != std::string::npos ||
+                     templ.name.find("Rifle") != std::string::npos ||
+                     templ.name.find("Sniper") != std::string::npos ||
+                     templ.name.find("Submachine") != std::string::npos ||
+                     templ.name.find("PowerShot") != std::string::npos)
+            {
+                templ.discipline = DisciplineType::GUNNER;
+            }
+            else if (templ.name.find("Spy") != std::string::npos ||
+                     templ.name.find("Stealth") != std::string::npos ||
+                     templ.name.find("Knife") != std::string::npos ||
+                     templ.name.find("Dagger") != std::string::npos ||
+                     templ.name.find("Conceal") != std::string::npos ||
+                     templ.name.find("Sabotage") != std::string::npos)
+            {
+                templ.discipline = DisciplineType::SPY;
+            }
             else
             {
                 templ.discipline = DisciplineType::NONE;
@@ -315,6 +336,29 @@ void DataLoader::EnsureCoreAbilities()
     addCore(600, "CloseCombatTrainingAbility", DisciplineType::MARTIAL_ARTIST, true, 0, 0, 0, 0, false, 0);
     addCore(137, "MartialArtsInitiateAbility", DisciplineType::MARTIAL_ARTIST, true, 0, 0, 0, 0, false, 0);
     addCore(17, "SelfDefenseAbility", DisciplineType::MARTIAL_ARTIST, true, 0, 0, 0, 0, false, 0);
+
+    // Soldier / Gunner Discipline
+    addCore(14, "PowerShotAbility", DisciplineType::GUNNER, true, 2000, 15, 671090470, 0x280001C1, false, 0);
+    addCore(126, "PistolDisarmingShotAbility", DisciplineType::GUNNER, true, 1500, 20, 671090470, 0x280001C1, false, 0);
+    addCore(128, "GunmanAbility", DisciplineType::GUNNER, false, 0, 0, 0, 0, true, 0);
+    addCore(129, "HandgunsAbility", DisciplineType::GUNNER, true, 1000, 10, 671090470, 0x280001C1, false, 0);
+    addCore(147, "RiflesAbility", DisciplineType::GUNNER, true, 2000, 20, 671090470, 0x280001C1, false, 0);
+    addCore(154, "SoldierAbility", DisciplineType::GUNNER, false, 0, 0, 0, 0, true, 0);
+    addCore(240, "GunslingerAbility", DisciplineType::GUNNER, false, 0, 0, 0, 0, true, 0);
+    addCore(251, "RiflemanAbility", DisciplineType::GUNNER, false, 0, 0, 0, 0, true, 0);
+    addCore(453, "RifleButtSmashAbility", DisciplineType::GUNNER, true, 1000, 15, 0, 0x280001C1, false, 0);
+    addCore(499, "PistolPointBlankAbility", DisciplineType::GUNNER, true, 1000, 15, 671090470, 0x280001C1, false, 0);
+    addCore(501, "PistolWhipAbility", DisciplineType::GUNNER, true, 1000, 10, 0, 0x280001C1, false, 0);
+    addCore(505, "SniperShotAbility", DisciplineType::GUNNER, true, 4000, 35, 671090470, 0x280001C1, false, 0);
+
+    // Spy Discipline
+    addCore(146, "PoisonKnifeAbility", DisciplineType::SPY, true, 1500, 20, 671090469, 0x280006DF, false, 0);
+    addCore(155, "SpyAbility", DisciplineType::SPY, false, 0, 0, 0, 0, true, 0);
+    addCore(209, "StealthAbility", DisciplineType::SPY, true, 2000, 25, 671090262, 0, true, 60);
+    addCore(283, "KnifeThrowerAbility", DisciplineType::SPY, true, 1500, 15, 671090469, 0x280001C1, false, 0);
+    addCore(293, "StealthCountermeasuresAbility", DisciplineType::SPY, true, 2000, 20, 671091233, 0, true, 30);
+    addCore(523, "StealthDamageAbility", DisciplineType::SPY, false, 0, 0, 0, 0, true, 0);
+    addCore(1035, "StealthedCodeDamageAbility", DisciplineType::SPY, false, 0, 0, 0, 0, true, 0);
 }
 
 bool DataLoader::LoadNPCs(const std::string& filePath)

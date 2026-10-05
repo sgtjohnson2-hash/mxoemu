@@ -133,6 +133,16 @@ void PlayerObject::takeDamage( uint32 attackerGoId, uint16 damage, uint32 fxId )
 		}
 	}
 
+	if (m_isStealthed && actualDamage > 0)
+	{
+		m_isStealthed = false;
+		if (!m_parent.isBot())
+		{
+			m_parent.QueueCommand(shared_ptr<SystemChatMsg>(new SystemChatMsg(
+				"{c:FF5555}[SPY] Concealment broken by incoming damage!{/c}")));
+		}
+	}
+
 	uint16 healthBefore = m_healthC;
 	if (actualDamage >= m_healthC)
 		m_healthC = 0;

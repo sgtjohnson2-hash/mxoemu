@@ -149,6 +149,10 @@ void StatusEffectManager::Update(float deltaTime)
             else if (effect.type == EFFECT_FIREWALL && target) {
                 target->setFirewall(0);
             }
+            else if (effect.type == EFFECT_STEALTH && target) {
+                target->setStealth(false);
+                INFO_LOG(format("Stealth expired for %1%") % target->getHandle());
+            }
 
             if (std::next(it) == m_effects.end()) {
                 m_effects.pop_back();
@@ -243,6 +247,8 @@ void StatusEffectManager::ApplyEffect(uint32 targetGoId, EffectType type, float 
         target->applyHeal(sourceGoId, static_cast<uint16>(value), 0x01000060);
     } else if (type == EFFECT_FIREWALL && target) {
         target->setFirewall(static_cast<uint16>(value));
+    } else if (type == EFFECT_STEALTH && target) {
+        target->setStealth(true);
     }
     INFO_LOG(format("Applied Status Effect %1% to %2%") % static_cast<int>(type) % targetGoId);
 }

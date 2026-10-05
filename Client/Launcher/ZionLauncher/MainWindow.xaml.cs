@@ -24,7 +24,7 @@ namespace ZionLauncher
 {
     public partial class MainWindow : Window
     {
-        public static readonly Version CurrentLauncherVersion = new("1.2.1");
+        public static readonly Version CurrentLauncherVersion = new("1.3.0");
         private static readonly HttpClient _httpClient = new() { Timeout = TimeSpan.FromSeconds(5) };
         private readonly Random _random = new();
         private DispatcherTimer? _diagTimer;
@@ -33,6 +33,10 @@ namespace ZionLauncher
         private const string LocalServerIp = "127.0.0.1";
         private string _currentServerIp = RemoteServerIp;
         private const int DatabasePort = 3307;
+        private string _authenticatedUser = "";
+        private string _authenticatedPassword = "";
+        private List<OperativeProfile> _operativesList = new List<OperativeProfile>();
+        private OperativeProfile? _selectedOperative = null;
 
         // Authentic Matrix glyph set: Half-width Katakana, digits, uppercase letters, symbols
         private static readonly string MatrixGlyphChars =
@@ -916,6 +920,79 @@ namespace ZionLauncher
             LoaderOverlay.Visibility = Visibility.Collapsed;
             MainConsoleBorder.Visibility = Visibility.Visible;
             txtStatus.Text = "Zion Mainframe online. Ready to Jack In.";
+            _ = ProcessCommandLineArgsAsync();
+        }
+
+        private void Window_KeyDown(object sender, KeyEventArgs e)
+        {
+            if (e.Key == Key.F1)
+            {
+                btnShowLogin_Click(sender, e);
+            }
+            else if (e.Key == Key.F2)
+            {
+                btnShowCommunity_Click(sender, e);
+            }
+            else if (e.Key == Key.F3)
+            {
+                btnShowPatchNotes_Click(sender, e);
+            }
+            else if (e.Key == Key.F4)
+            {
+                btnShowRegister_Click(sender, e);
+            }
+            else if (e.Key == Key.F5)
+            {
+                btnShowServer_Click(sender, e);
+            }
+            else if (e.Key == Key.F6)
+            {
+                btnShowPatch_Click(sender, e);
+            }
+            else if (e.Key == Key.F7)
+            {
+                if (OperativeRosterPanel.Visibility == Visibility.Visible && btnLaunchSelectedOperative.IsEnabled)
+                {
+                    btnLaunchSelectedOperative_Click(sender, e);
+                }
+                else if (LoginPanel.Visibility == Visibility.Visible && btnJackIn.IsEnabled)
+                {
+                    btnJackIn_Click(sender, e);
+                }
+            }
+        }
+
+        private async Task ProcessCommandLineArgsAsync()
+        {
+            try
+            {
+                var args = Environment.GetCommandLineArgs();
+                for (int i = 1; i < args.Length; i++)
+                {
+                    string a = args[i].ToLowerInvariant();
+                    if (a == "--transmissions" || a == "-transmissions" || a == "-patchnotes" || (a == "--tab" && i + 1 < args.Length && args[i + 1].ToLowerInvariant() == "transmissions"))
+                    {
+                        btnShowPatchNotes_Click(this, new RoutedEventArgs());
+                    }
+                    else if (a == "--community" || a == "-community" || a == "-forum" || (a == "--tab" && i + 1 < args.Length && args[i + 1].ToLowerInvariant() == "community"))
+                    {
+                        btnShowCommunity_Click(this, new RoutedEventArgs());
+                    }
+                    else if (a == "--roster" || a == "-roster" || a == "--auth-select" || (a == "--tab" && i + 1 < args.Length && args[i + 1].ToLowerInvariant() == "roster"))
+                    {
+                        await Task.Delay(300);
+                        btnJackIn_Click(this, new RoutedEventArgs());
+                    }
+                    else if (a == "--jackin" || a == "-jackin")
+                    {
+                        await Task.Delay(400);
+                        btnJackIn_Click(this, new RoutedEventArgs());
+                        await Task.Delay(2500);
+                        btnLaunchSelectedOperative_Click(this, new RoutedEventArgs());
+                    }
+                }
+            }
+            catch { }
         }
 
         private void btnLoaderProceed_Click(object sender, RoutedEventArgs e)
@@ -990,7 +1067,7 @@ namespace ZionLauncher
             if (installed)
             {
                 clientStatusBanner.Visibility = Visibility.Collapsed;
-                btnJackIn.Content = "JACK IN TO THE MATRIX";
+                btnJackIn.Content = "AUTHENTICATE & SELECT OPERATIVE";
                 btnStartPatch.Content = "DOWNLOAD / REPAIR CLIENT";
             }
             else
@@ -1004,8 +1081,30 @@ namespace ZionLauncher
 
         private void btnShowLogin_Click(object sender, RoutedEventArgs e)
         {
-            ShowPanel(LoginPanel);
-            txtStatus.Text = "Ready to Jack In.";
+            if (_operativesList.Count > 0 && !string.IsNullOrEmpty(_authenticatedUser))
+            {
+                ShowPanel(OperativeRosterPanel);
+                txtStatus.Text = "Operative selection terminal active.";
+            }
+            else
+            {
+                ShowPanel(LoginPanel);
+                txtStatus.Text = "Ready to Jack In. Enter credentials.";
+            }
+        }
+
+        private void btnShowCommunity_Click(object sender, RoutedEventArgs e)
+        {
+            ShowPanel(CommunityPanel);
+            txtStatus.Text = "Connected to Zion Construct Community Hub & Forums.";
+            LoadCommunityWeb();
+        }
+
+        private void btnShowPatchNotes_Click(object sender, RoutedEventArgs e)
+        {
+            ShowPanel(TransmissionsPanel);
+            txtStatus.Text = "Loading Matrix Transmissions & Patch Notes...";
+            LoadPatchNotesAsync();
         }
 
         private void btnShowRegister_Click(object sender, RoutedEventArgs e)
@@ -1030,11 +1129,199 @@ namespace ZionLauncher
         private void ShowPanel(StackPanel panelToShow)
         {
             LoginPanel.Visibility = Visibility.Collapsed;
+            OperativeRosterPanel.Visibility = Visibility.Collapsed;
+            CommunityPanel.Visibility = Visibility.Collapsed;
+            TransmissionsPanel.Visibility = Visibility.Collapsed;
             RegisterPanel.Visibility = Visibility.Collapsed;
             ServerPanel.Visibility = Visibility.Collapsed;
             PatchPanel.Visibility = Visibility.Collapsed;
             panelToShow.Visibility = Visibility.Visible;
             txtStatus.Foreground = Brushes.Lime;
+        }
+
+        private void LoadCommunityWeb()
+        {
+            try
+            {
+                string user = !string.IsNullOrWhiteSpace(_authenticatedUser) ? _authenticatedUser : "Slacker";
+                string url = $"http://{_currentServerIp}/community?user={Uri.EscapeDataString(user)}";
+                wbCommunity.Navigate(url);
+            }
+            catch (Exception ex)
+            {
+                txtStatus.Text = $"Community web view notice: {ex.Message}";
+            }
+        }
+
+        private void btnOpenBrowserCommunity_Click(object sender, RoutedEventArgs e)
+        {
+            try
+            {
+                string user = !string.IsNullOrWhiteSpace(_authenticatedUser) ? _authenticatedUser : "Slacker";
+                string url = $"http://{_currentServerIp}/community?user={Uri.EscapeDataString(user)}";
+                Process.Start(new ProcessStartInfo
+                {
+                    FileName = url,
+                    UseShellExecute = true
+                });
+            }
+            catch (Exception ex)
+            {
+                txtStatus.Text = $"Browser launch error: {ex.Message}";
+            }
+        }
+
+        private void btnRefreshCommunity_Click(object sender, RoutedEventArgs e)
+        {
+            LoadCommunityWeb();
+        }
+
+        private void btnViewAvatars_Click(object sender, RoutedEventArgs e)
+        {
+            btnOpenBrowserCommunity_Click(sender, e);
+        }
+
+        private void btnRefreshTransmissions_Click(object sender, RoutedEventArgs e)
+        {
+            LoadPatchNotesAsync();
+        }
+
+        private async void LoadPatchNotesAsync()
+        {
+            PatchNotesCardsContainer.Children.Clear();
+            var loading = new TextBlock
+            {
+                Text = "Decrypting Matrix Transmissions from live server...",
+                Foreground = Brushes.LightGreen,
+                Padding = new Thickness(8)
+            };
+            PatchNotesCardsContainer.Children.Add(loading);
+
+            try
+            {
+                using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+                var res = await _httpClient.GetAsync($"http://{_currentServerIp}/api/news", cts.Token);
+                if (res.IsSuccessStatusCode)
+                {
+                    var json = await res.Content.ReadAsStringAsync();
+                    using var doc = JsonDocument.Parse(json);
+                    if (doc.RootElement.TryGetProperty("news", out var newsArray))
+                    {
+                        PatchNotesCardsContainer.Children.Clear();
+                        foreach (var item in newsArray.EnumerateArray())
+                        {
+                            string title = item.TryGetProperty("title", out var tp) ? tp.GetString() ?? "" : "";
+                            string date = item.TryGetProperty("date", out var dp) ? dp.GetString() ?? "" : "";
+                            string author = item.TryGetProperty("author", out var ap) ? ap.GetString() ?? "" : "";
+                            string category = item.TryGetProperty("category", out var cp) ? cp.GetString() ?? "" : "";
+                            string content = item.TryGetProperty("content", out var conP) ? conP.GetString() ?? "" : "";
+
+                            var card = CreatePatchNoteCard(title, date, author, category, content);
+                            PatchNotesCardsContainer.Children.Add(card);
+                        }
+                        return;
+                    }
+                }
+            }
+            catch { }
+
+            PopulateFallbackPatchNotes();
+        }
+
+        private Border CreatePatchNoteCard(string title, string date, string author, string category, string content)
+        {
+            var card = new Border
+            {
+                Background = new SolidColorBrush(Color.FromRgb(8, 26, 12)),
+                BorderBrush = new SolidColorBrush(Color.FromRgb(0, 150, 40)),
+                BorderThickness = new Thickness(1),
+                CornerRadius = new CornerRadius(4),
+                Padding = new Thickness(10),
+                Margin = new Thickness(0, 0, 0, 8)
+            };
+
+            var stack = new StackPanel();
+            var titleGrid = new Grid();
+            titleGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            titleGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
+            var titleBlock = new TextBlock
+            {
+                Text = title,
+                FontWeight = FontWeights.Bold,
+                FontSize = 13,
+                Foreground = new SolidColorBrush(Color.FromRgb(57, 255, 20)),
+                TextWrapping = TextWrapping.Wrap
+            };
+            Grid.SetColumn(titleBlock, 0);
+
+            var catBlock = new TextBlock
+            {
+                Text = $"[{category} // {date}]",
+                FontSize = 10,
+                Foreground = new SolidColorBrush(Color.FromRgb(0, 255, 170)),
+                VerticalAlignment = VerticalAlignment.Center
+            };
+            Grid.SetColumn(catBlock, 1);
+
+            titleGrid.Children.Add(titleBlock);
+            titleGrid.Children.Add(catBlock);
+            stack.Children.Add(titleGrid);
+
+            var authorBlock = new TextBlock
+            {
+                Text = $"Broadcast Author: {author}",
+                FontSize = 10,
+                Foreground = new SolidColorBrush(Color.FromRgb(136, 255, 170)),
+                Margin = new Thickness(0, 2, 0, 4)
+            };
+            stack.Children.Add(authorBlock);
+
+            var contentBlock = new TextBlock
+            {
+                Text = content.Replace("### ", "").Replace("- ", "• "),
+                FontSize = 11,
+                Foreground = new SolidColorBrush(Color.FromRgb(200, 255, 200)),
+                TextWrapping = TextWrapping.Wrap,
+                LineHeight = 15
+            };
+            stack.Children.Add(contentBlock);
+
+            card.Child = stack;
+            return card;
+        }
+
+        private void PopulateFallbackPatchNotes()
+        {
+            PatchNotesCardsContainer.Children.Clear();
+            PatchNotesCardsContainer.Children.Add(CreatePatchNoteCard(
+                "⚡ Patch 1.3.0: Martial Arts Disciplines & Synchronized Combat Netcode",
+                "2026-10-04",
+                "Reality Lead Architect",
+                "COMBAT",
+                "• Martial Arts Forms: Karate, Kung Fu, Aikido, and Tae Kwon Do postures synchronized.\n• Synchronized Defense: Block and dodge reactions serialize in real-time with incoming strikes.\n• 16-bit Extended Animation Netcode: Eliminates stance desync across clients.\n• Authentic Damage FX: Replaced placeholder textures with retail floating damage numbers (0x280006DF)."
+            ));
+            PatchNotesCardsContainer.Children.Add(CreatePatchNoteCard(
+                "⚡ Patch 1.2.5: Hacker & Coder Disciplines Reconstructed",
+                "2026-10-04",
+                "Operator Tank",
+                "DISCIPLINE",
+                "• Hacker Kit: Logic Blast 1-3, Harmful Code DoTs, Code Freeze, and Network Firewalls.\n• Coder / Support Kit: Restore Health 1-3, Fast Healing, Emergency Repairs (<35%), and Revive RSI for downed operatives.\n• Personal Firewall: Actively absorbs hostile viral packets and direct damage."
+            ));
+            PatchNotesCardsContainer.Children.Add(CreatePatchNoteCard(
+                "⚡ Patch 1.2.0: Widescreen HUD, Zero-Drift Locomotion & Megacity Elevation",
+                "2026-10-03",
+                "Morpheus",
+                "WORLD",
+                "• Widescreen Anchoring: Vitals, Compass, Chat, and Quickbar fluidly anchor to modern 1080p/1440p bounds.\n• Zero-Drift Locomotion: Directional sprinting and mouse orbiting stabilized.\n• Elevation Clamping: Operative feet remain flush with ground pavement at Y = 572.0 ± 0.5."
+            ));
+            PatchNotesCardsContainer.Children.Add(CreatePatchNoteCard(
+                "⚡ Patch 1.1.0: Live VPS Mainframe & MariaDB Dedicated Persistence",
+                "2026-10-01",
+                "The Architect",
+                "MAINFRAME",
+                "• VPS Shard Active: 15.204.82.250 dedicated reality container with isolated internal DB.\n• Auto Hosts Redirection: Automatic DNS/hosts synchronization for instant login."
+            ));
         }
 
         private void rbServer_Checked(object sender, RoutedEventArgs e)
@@ -1241,7 +1528,7 @@ namespace ZionLauncher
             {
                 OperativeSelectPanel.Visibility = Visibility.Collapsed;
                 cmbOperatives.Items.Clear();
-                btnJackIn.Content = "JACK IN";
+                btnJackIn.Content = "AUTHENTICATE & SELECT OPERATIVE";
             }
         }
 
@@ -1341,51 +1628,221 @@ namespace ZionLauncher
                 return;
             }
 
-            if (operatives != null && operatives.Count > 0)
+            _authenticatedUser = username;
+            _authenticatedPassword = password;
+            _operativesList = operatives ?? new List<OperativeProfile>();
+
+            btnJackIn.IsEnabled = true;
+            DisplayOperativeRoster(_operativesList);
+            ShowPanel(OperativeRosterPanel);
+
+            txtStatus.Foreground = Brushes.Lime;
+            txtStatus.Text = _operativesList.Count > 0 
+                ? $"ACCESS GRANTED. Select your operative from the roster to Jack In."
+                : $"ACCESS GRANTED. No operatives detected. Click [+] CREATE OPERATIVE to begin.";
+        }
+
+        private void DisplayOperativeRoster(List<OperativeProfile> operatives)
+        {
+            OperativeCardsContainer.Children.Clear();
+            lblAccountSummary.Text = $"OPERATOR ACCOUNT: {_authenticatedUser} | MATRIX SHARD: LIVE ({_currentServerIp}) | [{operatives.Count} Operatives]";
+
+            if (operatives.Count == 0)
             {
-                cmbOperatives.Items.Clear();
-                foreach (var op in operatives)
+                var emptyNotice = new TextBlock
                 {
-                    var item = new ComboBoxItem
-                    {
-                        Content = $"{op.Handle} (Level {op.Level}{(op.Profession > 0 ? $", Prof {op.Profession}" : "")})",
-                        Tag = op.Handle
-                    };
-                    cmbOperatives.Items.Add(item);
-                }
-
-                var createNewItem = new ComboBoxItem
-                {
-                    Content = "[+ Create New Operative]",
-                    Tag = ""
+                    Text = "No Operatives detected on this account.\nClick [+] CREATE OPERATIVE below to enter character creation in the construct.",
+                    TextAlignment = TextAlignment.Center,
+                    Foreground = Brushes.LightGreen,
+                    Margin = new Thickness(0, 30, 0, 0),
+                    FontSize = 13
                 };
-                cmbOperatives.Items.Add(createNewItem);
-
-                cmbOperatives.SelectedIndex = 0;
-                OperativeSelectPanel.Visibility = Visibility.Visible;
-                lblOperativeCount.Text = $"[{operatives.Count} Found]";
-                btnJackIn.Content = "JACK IN AS OPERATIVE";
-
-                if (operatives.Count == 1)
-                {
-                    string singleHandle = operatives[0].Handle;
-                    txtStatus.Foreground = Brushes.Lime;
-                    txtStatus.Text = $"ACCESS GRANTED. Jacking in as operative '{singleHandle}'...";
-                    JackIn(username, password, singleHandle);
-                    btnJackIn.IsEnabled = true;
-                    return;
-                }
-
-                txtStatus.Foreground = Brushes.Lime;
-                txtStatus.Text = $"Operative(s) found. Select operative and click JACK IN (or choose [+ Create New Operative]).";
-                btnJackIn.IsEnabled = true;
+                OperativeCardsContainer.Children.Add(emptyNotice);
+                SelectedOperativeDossier.Visibility = Visibility.Collapsed;
+                btnLaunchSelectedOperative.IsEnabled = false;
                 return;
             }
 
+            SelectedOperativeDossier.Visibility = Visibility.Visible;
+            btnLaunchSelectedOperative.IsEnabled = true;
+
+            for (int i = 0; i < operatives.Count; i++)
+            {
+                var op = operatives[i];
+                var card = new Border
+                {
+                    Background = new SolidColorBrush(Color.FromRgb(5, 25, 10)),
+                    BorderBrush = new SolidColorBrush(Color.FromRgb(0, 100, 35)),
+                    BorderThickness = new Thickness(1),
+                    CornerRadius = new CornerRadius(4),
+                    Padding = new Thickness(10, 8, 10, 8),
+                    Margin = new Thickness(0, 0, 0, 6),
+                    Cursor = Cursors.Hand,
+                    Tag = op
+                };
+
+                var grid = new Grid();
+                grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(40) });
+                grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+                grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
+                string iconStr = GetProfessionIcon(op.Profession);
+                var iconBlock = new TextBlock
+                {
+                    Text = iconStr,
+                    FontSize = 22,
+                    VerticalAlignment = VerticalAlignment.Center
+                };
+                Grid.SetColumn(iconBlock, 0);
+
+                var infoStack = new StackPanel { VerticalAlignment = VerticalAlignment.Center };
+                var nameBlock = new TextBlock
+                {
+                    Text = op.Handle,
+                    FontWeight = FontWeights.Bold,
+                    FontSize = 14,
+                    Foreground = new SolidColorBrush(Color.FromRgb(57, 255, 20))
+                };
+                string discStr = GetProfessionName(op.Profession);
+                string distStr = !string.IsNullOrWhiteSpace(op.District) ? op.District : "Megacity";
+                var statsBlock = new TextBlock
+                {
+                    Text = $"Level {op.Level} {discStr}  //  Sector: {distStr}",
+                    FontSize = 11,
+                    Foreground = new SolidColorBrush(Color.FromRgb(136, 255, 170))
+                };
+                infoStack.Children.Add(nameBlock);
+                infoStack.Children.Add(statsBlock);
+                Grid.SetColumn(infoStack, 1);
+
+                var statusBlock = new TextBlock
+                {
+                    Text = "READY",
+                    FontWeight = FontWeights.Bold,
+                    FontSize = 11,
+                    Foreground = new SolidColorBrush(Color.FromRgb(0, 255, 102)),
+                    VerticalAlignment = VerticalAlignment.Center
+                };
+                Grid.SetColumn(statusBlock, 2);
+
+                grid.Children.Add(iconBlock);
+                grid.Children.Add(infoStack);
+                grid.Children.Add(statusBlock);
+                card.Child = grid;
+
+                card.MouseDown += (s, e) =>
+                {
+                    if (s is Border b && b.Tag is OperativeProfile clickedOp)
+                    {
+                        SelectOperative(clickedOp, b);
+                    }
+                };
+
+                OperativeCardsContainer.Children.Add(card);
+
+                if (i == 0)
+                {
+                    SelectOperative(op, card);
+                }
+            }
+        }
+
+        private void SelectOperative(OperativeProfile op, Border cardBorder)
+        {
+            _selectedOperative = op;
+
+            foreach (var child in OperativeCardsContainer.Children)
+            {
+                if (child is Border b)
+                {
+                    b.BorderBrush = new SolidColorBrush(Color.FromRgb(0, 100, 35));
+                    b.Background = new SolidColorBrush(Color.FromRgb(5, 25, 10));
+                }
+            }
+
+            cardBorder.BorderBrush = new SolidColorBrush(Color.FromRgb(57, 255, 20));
+            cardBorder.Background = new SolidColorBrush(Color.FromRgb(10, 45, 18));
+
+            txtSelectedOperativeName.Text = $"OPERATIVE: {op.Handle}";
+            string disc = GetProfessionName(op.Profession);
+            string dist = !string.IsNullOrWhiteSpace(op.District) ? op.District : "Megacity";
+            txtSelectedOperativeStats.Text = $"DISCIPLINE: Level {op.Level} {disc} | SECTOR: {dist}";
+            txtSelectedOperativeIcon.Text = GetProfessionIcon(op.Profession);
+            txtSelectedOperativeRsi.Text = "RSI STATUS: 100% HEALTHY // READY FOR BROADCAST";
+            btnLaunchSelectedOperative.Content = $"⚡ JACK IN AS {op.Handle.ToUpperInvariant()}";
+        }
+
+        private void btnLaunchSelectedOperative_Click(object sender, RoutedEventArgs e)
+        {
+            if (_selectedOperative == null && _operativesList.Count > 0)
+                _selectedOperative = _operativesList[0];
+
+            string chosenHandle = _selectedOperative != null ? _selectedOperative.Handle : _authenticatedUser;
             txtStatus.Foreground = Brushes.Lime;
-            txtStatus.Text = "ACCESS GRANTED. No operatives detected. Entering Character Creation... (NOTE: Operative handle must not contain spaces, e.g. 'TheOne')";
-            JackIn(username, password, null);
-            btnJackIn.IsEnabled = true;
+            txtStatus.Text = $"ACCESS GRANTED. Jacking in as operative '{chosenHandle}'...";
+            JackIn(_authenticatedUser, _authenticatedPassword, chosenHandle);
+        }
+
+        private void btnCreateNewOperative_Click(object sender, RoutedEventArgs e)
+        {
+            txtStatus.Foreground = Brushes.Lime;
+            txtStatus.Text = "ACCESS GRANTED. Entering Character Creation... (NOTE: Operative handle must not contain spaces)";
+            JackIn(_authenticatedUser, _authenticatedPassword, null);
+        }
+
+        private void btnLogout_Click(object sender, RoutedEventArgs e)
+        {
+            _authenticatedUser = "";
+            _authenticatedPassword = "";
+            _operativesList.Clear();
+            _selectedOperative = null;
+            ShowPanel(LoginPanel);
+            txtStatus.Text = "Logged out. Enter credentials to Jack In.";
+        }
+
+        private string GetProfessionName(int prof)
+        {
+            return prof switch
+            {
+                1 => "Hacker",
+                2 => "Coder / Support",
+                3 => "Martial Artist",
+                4 => "Spy",
+                5 => "Gunner / Soldier",
+                _ => "Operative"
+            };
+        }
+
+        private string GetProfessionIcon(int prof)
+        {
+            return prof switch
+            {
+                1 => "💻",
+                2 => "🧬",
+                3 => "🥋",
+                4 => "🕶️",
+                5 => "🎯",
+                _ => "⚡"
+            };
+        }
+
+        private string GetDistrictName(int districtId)
+        {
+            return districtId switch
+            {
+                1 => "Slums",
+                2 => "Downtown",
+                3 => "International",
+                4 => "Richland",
+                _ => "Megacity"
+            };
+        }
+
+        private string FormatDistrictDisplay(string district)
+        {
+            if (string.IsNullOrWhiteSpace(district)) return "Megacity";
+            if (int.TryParse(district, out int id)) return GetDistrictName(id);
+            return district;
         }
 
         private async Task<(bool Success, string Message, System.Collections.Generic.List<OperativeProfile> Operatives)> ValidateCredentialsAsync(string username, string password)
@@ -1410,13 +1867,34 @@ namespace ZionLauncher
                             foreach (var c in charsProp.EnumerateArray())
                             {
                                 var op = new OperativeProfile();
-                                if (c.TryGetProperty("charId", out var idProp)) op.Id = idProp.GetInt64();
-                                if (c.TryGetProperty("handle", out var handleProp)) op.Handle = handleProp.GetString() ?? "";
-                                if (c.TryGetProperty("firstName", out var fnProp)) op.FirstName = fnProp.GetString() ?? "";
-                                if (c.TryGetProperty("lastName", out var lnProp)) op.LastName = lnProp.GetString() ?? "";
-                                if (c.TryGetProperty("level", out var lvlProp)) op.Level = lvlProp.GetInt32();
-                                if (c.TryGetProperty("profession", out var profProp)) op.Profession = profProp.GetInt32();
-                                if (c.TryGetProperty("district", out var distProp)) op.District = distProp.GetString() ?? "";
+                                if (c.TryGetProperty("charId", out var idProp))
+                                {
+                                    if (idProp.ValueKind == JsonValueKind.Number) op.Id = idProp.GetInt64();
+                                    else if (long.TryParse(idProp.GetString(), out long parsedId)) op.Id = parsedId;
+                                }
+                                if (c.TryGetProperty("handle", out var handleProp) && handleProp.ValueKind == JsonValueKind.String)
+                                    op.Handle = handleProp.GetString() ?? "";
+                                if (c.TryGetProperty("firstName", out var fnProp) && fnProp.ValueKind == JsonValueKind.String)
+                                    op.FirstName = fnProp.GetString() ?? "";
+                                if (c.TryGetProperty("lastName", out var lnProp) && lnProp.ValueKind == JsonValueKind.String)
+                                    op.LastName = lnProp.GetString() ?? "";
+                                if (c.TryGetProperty("level", out var lvlProp))
+                                {
+                                    if (lvlProp.ValueKind == JsonValueKind.Number) op.Level = lvlProp.GetInt32();
+                                    else if (int.TryParse(lvlProp.GetString(), out int parsedLvl)) op.Level = parsedLvl;
+                                }
+                                if (c.TryGetProperty("profession", out var profProp))
+                                {
+                                    if (profProp.ValueKind == JsonValueKind.Number) op.Profession = profProp.GetInt32();
+                                    else if (int.TryParse(profProp.GetString(), out int parsedProf)) op.Profession = parsedProf;
+                                }
+                                if (c.TryGetProperty("district", out var distProp))
+                                {
+                                    if (distProp.ValueKind == JsonValueKind.String)
+                                        op.District = FormatDistrictDisplay(distProp.GetString() ?? "");
+                                    else if (distProp.ValueKind == JsonValueKind.Number && distProp.TryGetInt32(out int distId))
+                                        op.District = GetDistrictName(distId);
+                                }
 
                                 if (!string.IsNullOrWhiteSpace(op.Handle))
                                 {

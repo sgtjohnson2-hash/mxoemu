@@ -370,3 +370,306 @@ bool HackerSystem::ExtractSourceCode(PlayerObject* hacker, uint32 targetGoId) {
     hacker->restoreIS(25);
     return true;
 }
+
+bool HackerSystem::ExecuteSoldierAbility(PlayerObject* caster, uint16 abilityId, uint32 targetGoId, const AbilityTemplate* templ)
+{
+    if (!caster) return false;
+    const bool humanCaster = !caster->getClient().isBot();
+
+    // 1. Resolve Target
+    if (targetGoId == 0)
+        targetGoId = caster->getTargetGoId();
+
+    PlayerObject* target = sObjMgr.getGOPtrSafe(targetGoId);
+    if (!target)
+    {
+        if (humanCaster)
+        {
+            caster->getClient().QueueCommand(std::make_shared<SystemChatMsg>(
+                "{c:FF0000}[SOLDIER] You must select a valid hostile target.{/c}"));
+        }
+        return false;
+    }
+
+    if (target->getGoId() == caster->getGoId())
+    {
+        if (humanCaster)
+        {
+            caster->getClient().QueueCommand(std::make_shared<SystemChatMsg>(
+                "{c:FF0000}[SOLDIER] You cannot target yourself with firearm attacks.{/c}"));
+        }
+        return false;
+    }
+
+    // Distance checks based on weapon type
+    LocationVector posA = caster->getPosition();
+    LocationVector posB = target->getPosition();
+    double dx = posB.x - posA.x;
+    double dz = posB.z - posA.z;
+    double distSq = dx * dx + dz * dz;
+
+    double maxRange = 3500.0; // default 35m
+    if (abilityId == 505) // SniperShotAbility
+        maxRange = 8000.0; // 80m sniper range
+    else if (abilityId == 147) // RiflesAbility
+        maxRange = 4500.0; // 45m rifle range
+    else if (abilityId == 453 || abilityId == 501) // RifleButtSmash, PistolWhip
+        maxRange = 400.0; // 4m melee range
+
+    if (distSq > (maxRange * maxRange))
+    {
+        if (humanCaster)
+        {
+            caster->getClient().QueueCommand(std::make_shared<SystemChatMsg>(
+                (format("{c:FF0000}[SOLDIER] Target is out of range (max %1%m).{/c}") % (int)(maxRange / 100.0)).str()));
+        }
+        return false;
+    }
+
+    // 2. Resource check: Inner Strength
+    uint16 isCost = templ ? templ->innerStrengthCost : 15;
+    if (caster->getCurrentIS() < isCost)
+    {
+        if (humanCaster)
+        {
+            caster->getClient().QueueCommand(std::make_shared<SystemChatMsg>(
+                "{c:FF0000}[SOLDIER] Insufficient Inner Strength to execute tactical technique.{/c}"));
+        }
+        return false;
+    }
+    caster->spendIS(isCost);
+
+    // If caster was stealthed, firing breaks stealth
+    if (caster->isStealthed())
+    {
+        caster->setStealth(false);
+        if (humanCaster)
+        {
+            caster->getClient().QueueCommand(std::make_shared<SystemChatMsg>(
+                "{c:FFFF00}[SPY] Concealment dropped to engage target.{/c}"));
+        }
+    }
+
+    // 3. Cast Bar: RPC 0x80ac
+    float castSec = templ ? float(templ->castTime) / 1000.0f : 1.0f;
+    if (castSec > 0.05f && humanCaster)
+    {
+        caster->getClient().QueueCommand(std::make_shared<CastBarMsg>(abilityId, castSec));
+    }
+
+    // 4. Caster Animation: 16-bit ExtendedAnimationMsg (opcode 0x29)
+    uint16 animId = (abilityId == 147 || abilityId == 505 || abilityId == 453) ? 0x0529 : 0x0528;
+    sGame.AnnounceStateUpdateNear(caster->getPosition().x, caster->getPosition().z, 20000.0f,
+        std::make_shared<ExtendedAnimationMsg>(caster->getGoId(), animId, 1));
+
+    std::string abilName = templ ? templ->name : "Firearm Ability";
+    INFO_LOG(format("HackerSystem: %1%:%2% executes Soldier ability %3% (id %4%) on %5%:%6%")
+        % caster->getHandle() % caster->getGoId() % abilName % abilityId
+        % target->getHandle() % target->getGoId());
+
+    if (humanCaster)
+    {
+        caster->getClient().QueueCommand(std::make_shared<SystemChatMsg>(
+            (format("{c:FF4444}[SOLDIER] Executing %1% on %2%.{/c}") % abilName % target->getHandle()).str()));
+    }
+
+    // 5. Ability Payload Execution
+    uint16 damage = 25;
+    uint32 hitFx = 0x280001C1;
+    if (abilityId == 14) // PowerShotAbility
+    {
+        damage = 50;
+    }
+    else if (abilityId == 126) // PistolDisarmingShotAbility
+    {
+        damage = 25;
+        sStatusEffectManager.ApplyEffect(target->getGoId(), EFFECT_DISARMED, 6.0f, 1.0f, 0.0f, caster->getGoId());
+        target->getClient().QueueCommand(std::make_shared<SystemChatMsg>("{c:FFAA00}[DISARMED] Your weapon has been disarmed!{/c}"));
+    }
+    else if (abilityId == 129) // HandgunsAbility
+    {
+        damage = 25;
+    }
+    else if (abilityId == 147) // RiflesAbility
+    {
+        damage = 40;
+    }
+    else if (abilityId == 453) // RifleButtSmashAbility
+    {
+        damage = 30;
+    }
+    else if (abilityId == 499) // PistolPointBlankAbility
+    {
+        damage = 45;
+    }
+    else if (abilityId == 501) // PistolWhipAbility
+    {
+        damage = 20;
+    }
+    else if (abilityId == 505) // SniperShotAbility
+    {
+        damage = 75;
+    }
+
+    target->takeDamage(caster->getGoId(), damage, hitFx);
+    return true;
+}
+
+bool HackerSystem::ExecuteSpyAbility(PlayerObject* caster, uint16 abilityId, uint32 targetGoId, const AbilityTemplate* templ)
+{
+    if (!caster) return false;
+    const bool humanCaster = !caster->getClient().isBot();
+
+    // 1. Resolve Target / Mode
+    bool isSelfCast = (abilityId == 209 || abilityId == 293 || (templ && templ->isBuff));
+    PlayerObject* target = nullptr;
+
+    if (isSelfCast)
+    {
+        target = caster;
+        targetGoId = caster->getGoId();
+    }
+    else
+    {
+        if (targetGoId == 0)
+            targetGoId = caster->getTargetGoId();
+
+        target = sObjMgr.getGOPtrSafe(targetGoId);
+        if (!target)
+        {
+            if (humanCaster)
+            {
+                caster->getClient().QueueCommand(std::make_shared<SystemChatMsg>(
+                    "{c:AA00FF}[SPY] You must select a valid hostile target.{/c}"));
+            }
+            return false;
+        }
+
+        if (target->getGoId() == caster->getGoId())
+        {
+            if (humanCaster)
+            {
+                caster->getClient().QueueCommand(std::make_shared<SystemChatMsg>(
+                    "{c:AA00FF}[SPY] You cannot target yourself with offensive blade attacks.{/c}"));
+            }
+            return false;
+        }
+
+        // Distance check
+        LocationVector posA = caster->getPosition();
+        LocationVector posB = target->getPosition();
+        double dx = posB.x - posA.x;
+        double dz = posB.z - posA.z;
+        double distSq = dx * dx + dz * dz;
+
+        double maxRange = 3000.0; // 30m for knife throwing, 4m for poison knife
+        if (abilityId == 146) // PoisonKnifeAbility
+            maxRange = 400.0; // 4m melee range
+
+        if (distSq > (maxRange * maxRange))
+        {
+            if (humanCaster)
+            {
+                caster->getClient().QueueCommand(std::make_shared<SystemChatMsg>(
+                    (format("{c:AA00FF}[SPY] Target is out of range (max %1%m).{/c}") % (int)(maxRange / 100.0)).str()));
+            }
+            return false;
+        }
+    }
+
+    // 2. Resource check: Inner Strength
+    uint16 isCost = templ ? templ->innerStrengthCost : 15;
+    if (caster->getCurrentIS() < isCost)
+    {
+        if (humanCaster)
+        {
+            caster->getClient().QueueCommand(std::make_shared<SystemChatMsg>(
+                "{c:AA00FF}[SPY] Insufficient Inner Strength to execute covert operation.{/c}"));
+        }
+        return false;
+    }
+    caster->spendIS(isCost);
+
+    // 3. Cast Bar: RPC 0x80ac
+    float castSec = templ ? float(templ->castTime) / 1000.0f : 1.5f;
+    if (castSec > 0.05f && humanCaster)
+    {
+        caster->getClient().QueueCommand(std::make_shared<CastBarMsg>(abilityId, castSec));
+    }
+
+    // 4. Caster Animation: 16-bit ExtendedAnimationMsg (opcode 0x29)
+    sGame.AnnounceStateUpdateNear(caster->getPosition().x, caster->getPosition().z, 20000.0f,
+        std::make_shared<ExtendedAnimationMsg>(caster->getGoId(), 0x052A, 1));
+
+    std::string abilName = templ ? templ->name : "Spy Ability";
+    INFO_LOG(format("HackerSystem: %1%:%2% executes Spy ability %3% (id %4%) on %5%:%6%")
+        % caster->getHandle() % caster->getGoId() % abilName % abilityId
+        % (target ? target->getHandle() : "none") % targetGoId);
+
+    if (humanCaster)
+    {
+        caster->getClient().QueueCommand(std::make_shared<SystemChatMsg>(
+            (format("{c:AA00FF}[SPY] Executing %1% on %2%.{/c}")
+                % abilName % (target == caster ? "Self" : target->getHandle())).str()));
+    }
+
+    // 5. Ability Payload Execution
+    if (abilityId == 209) // StealthAbility
+    {
+        caster->setStealth(true);
+        sStatusEffectManager.ApplyEffect(caster->getGoId(), EFFECT_STEALTH, 60.0f, 1.0f, 0.0f, caster->getGoId());
+        if (humanCaster)
+        {
+            caster->getClient().QueueCommand(std::make_shared<SystemChatMsg>(
+                "{c:AA00FF}[SPY] Stealth cloak active. You are masked from sensory detection.{/c}"));
+        }
+    }
+    else if (abilityId == 293) // StealthCountermeasuresAbility
+    {
+        sStatusEffectManager.ApplyEffect(caster->getGoId(), EFFECT_ORACLE_PREMONITION_BOOST, 30.0f, 1.0f, 25.0f, caster->getGoId());
+        if (humanCaster)
+        {
+            caster->getClient().QueueCommand(std::make_shared<SystemChatMsg>(
+                "{c:AA00FF}[SPY] Countermeasures deployed. Evasion profile increased.{/c}"));
+        }
+    }
+    else if (abilityId == 146) // PoisonKnifeAbility
+    {
+        if (caster->isStealthed())
+        {
+            caster->setStealth(false);
+            if (humanCaster)
+            {
+                caster->getClient().QueueCommand(std::make_shared<SystemChatMsg>(
+                    "{c:FFFF00}[SPY] Stealth broken by ambush attack!{/c}"));
+            }
+        }
+        target->takeDamage(caster->getGoId(), 25, 0x280006DF);
+        sStatusEffectManager.ApplyEffect(target->getGoId(), EFFECT_VIRUS_DOT, 10.0f, 1.0f, 8.0f, caster->getGoId());
+        if (humanCaster)
+        {
+            caster->getClient().QueueCommand(std::make_shared<SystemChatMsg>(
+                (format("{c:AA00FF}[SPY] Poisoned blade inserted into %1%'s RSI.{/c}") % target->getHandle()).str()));
+        }
+    }
+    else if (abilityId == 283) // KnifeThrowerAbility
+    {
+        if (caster->isStealthed())
+        {
+            caster->setStealth(false);
+            if (humanCaster)
+            {
+                caster->getClient().QueueCommand(std::make_shared<SystemChatMsg>(
+                    "{c:FFFF00}[SPY] Stealth broken by ranged knife throw!{/c}"));
+            }
+        }
+        target->takeDamage(caster->getGoId(), 30, 0x280001C1);
+        if (humanCaster)
+        {
+            caster->getClient().QueueCommand(std::make_shared<SystemChatMsg>(
+                (format("{c:AA00FF}[SPY] Thrown combat dagger impales %1%.{/c}") % target->getHandle()).str()));
+        }
+    }
+
+    return true;
+}

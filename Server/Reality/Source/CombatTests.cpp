@@ -633,6 +633,85 @@ int RunCombatTestSuite()
 			check(!deadOperative.po->isDead() && deadOperative.po->getCurrentHealth() > 0,
 				"Downed operative is resuscitated at positive health");
 		}
+
+		// ---------------------------------------------------------------- Soldier / Gunner & Spy disciplines
+		{
+			// 1. Template Classification
+			const AbilityTemplate* soldierT = sDataLoader.GetAbilityTemplate(14); // PowerShotAbility
+			check(soldierT != nullptr, "PowerShotAbility template is registered");
+			if (soldierT) {
+				check(soldierT->discipline == DisciplineType::GUNNER, "PowerShotAbility is classified as GUNNER");
+				check(soldierT->isCastable == true, "PowerShotAbility is castable");
+				check(soldierT->innerStrengthCost == 15, "PowerShotAbility authentic IS cost is 15");
+			}
+
+			const AbilityTemplate* rifleT = sDataLoader.GetAbilityTemplate(147); // RiflesAbility
+			check(rifleT != nullptr, "RiflesAbility template is registered");
+			if (rifleT) {
+				check(rifleT->discipline == DisciplineType::GUNNER, "RiflesAbility is classified as GUNNER");
+			}
+
+			const AbilityTemplate* spyT = sDataLoader.GetAbilityTemplate(209); // StealthAbility
+			check(spyT != nullptr, "StealthAbility template is registered");
+			if (spyT) {
+				check(spyT->discipline == DisciplineType::SPY, "StealthAbility is classified as SPY");
+				check(spyT->isBuff == true, "StealthAbility is classified as buff");
+			}
+
+			const AbilityTemplate* knifeT = sDataLoader.GetAbilityTemplate(146); // PoisonKnifeAbility
+			check(knifeT != nullptr, "PoisonKnifeAbility template is registered");
+			if (knifeT) {
+				check(knifeT->discipline == DisciplineType::SPY, "PoisonKnifeAbility is classified as SPY");
+			}
+
+			// 2. Soldier Firearm Execution
+			Actor soldierVictim = makeBot(9200060, 10050.0, 10000.0, 1, 100);
+			human.po->setInnerStrength(100);
+			humanClient.captured.clear();
+			bool soldierOk = sCombatSys.UseAbility(human.po, 14, soldierVictim.go);
+			check(soldierOk, "Soldier PowerShot executes successfully on hostile target");
+			check(soldierVictim.po->getCurrentHealth() < 100, "PowerShot inflicts ballistic damage on victim");
+			check(human.po->getCurrentIS() < 100, "PowerShot deducts Inner Strength cost from caster");
+			check(humanClient.sawText("[SOLDIER]"), "Human caster receives [SOLDIER] ballistic chat feedback");
+
+			// 3. Soldier Pistol Disarming Shot
+			Actor disarmVictim = makeBot(9200061, 10050.0, 10000.0, 1, 100);
+			human.po->setInnerStrength(100);
+			bool disarmOk = sCombatSys.UseAbility(human.po, 126, disarmVictim.go);
+			check(disarmOk, "PistolDisarmingShot executes on target");
+			check(disarmVictim.po->getCurrentHealth() < 100, "PistolDisarmingShot inflicts damage");
+
+			// 4. Soldier Long-Range Sniper Shot
+			Actor sniperVictim = makeBot(9200062, 10000.0 + 7000.0, 10000.0, 1, 150); // 70m away
+			human.po->setInnerStrength(100);
+			bool sniperOk = sCombatSys.UseAbility(human.po, 505, sniperVictim.go);
+			check(sniperOk, "SniperShot executes successfully at 70m long range");
+			check(sniperVictim.po->getCurrentHealth() <= 75, "SniperShot inflicts heavy ballistic damage (75 dmg)");
+
+			// 5. Spy Stealth Cloak
+			human.po->setInnerStrength(100);
+			human.po->setStealth(false);
+			humanClient.captured.clear();
+			bool stealthOk = sCombatSys.UseAbility(human.po, 209, human.go);
+			check(stealthOk, "Spy StealthAbility executes on self");
+			check(human.po->isStealthed() == true, "Operative enters stealth concealment mode");
+			check(humanClient.sawText("[SPY]"), "Human operative receives [SPY] concealment chat feedback");
+
+			// 6. Spy Poison Knife Ambush (Breaks Stealth)
+			Actor spyVictim = makeBot(9200063, 10050.0, 10000.0, 1, 100);
+			human.po->setInnerStrength(100);
+			bool poisonOk = sCombatSys.UseAbility(human.po, 146, spyVictim.go);
+			check(poisonOk, "PoisonKnifeAbility executes on target in melee range");
+			check(spyVictim.po->getCurrentHealth() < 100, "PoisonKnife inflicts puncture damage");
+			check(human.po->isStealthed() == false, "Stealth concealment breaks upon attacking target");
+
+			// 7. Spy Knife Thrower Ranged Strike
+			Actor throwVictim = makeBot(9200064, 10000.0 + 2000.0, 10000.0, 1, 100); // 20m away
+			human.po->setInnerStrength(100);
+			bool throwOk = sCombatSys.UseAbility(human.po, 283, throwVictim.go);
+			check(throwOk, "KnifeThrowerAbility executes successfully at 20m range");
+			check(throwVictim.po->getCurrentHealth() < 100, "Thrown combat knife damages target");
+		}
 	}
 	catch (const std::exception& e)
 	{

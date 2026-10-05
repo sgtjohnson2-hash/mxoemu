@@ -109,6 +109,8 @@ public:
 	virtual void revive(uint32 reviverGoId, float healthPct = 0.5f);
 	void setFirewall(uint16 amount) { m_firewallPoints = amount; }
 	uint16 getFirewall() const { return m_firewallPoints; }
+	void setStealth(bool stealth) { m_isStealthed = stealth; }
+	bool isStealthed() const { return m_isStealthed; }
 	void killPlayer(uint32 killerGoId = 0, uint32 fxId = 0x280001C2);
 	void sayChat(const std::string& msg);
 	void Emote(uint32 emoteId);
@@ -380,6 +382,7 @@ private:
 
     FightingStyle m_fightingStyle = FightingStyle::None;
     uint16 m_firewallPoints = 0;
+    bool m_isStealthed = false;
 
     std::unordered_set<uint32> m_knownEntities;
     mutable std::mutex m_knownMutex;

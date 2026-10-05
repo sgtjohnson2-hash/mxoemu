@@ -27,7 +27,9 @@ enum EffectType {
     EFFECT_BOLSTER_HEALTH,
     EFFECT_CODE_FREEZE,
     EFFECT_UI_LAG,
-    EFFECT_DRAIN_CODE
+    EFFECT_DRAIN_CODE,
+    EFFECT_STEALTH,
+    EFFECT_DISARMED
 };
 
 struct StatusEffect {

@@ -3,7 +3,7 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="Zion Mainframe - The Matrix Online" Height="680" Width="880"
         Background="Black" WindowStartupLocation="CenterScreen" ResizeMode="NoResize"
-        Loaded="Window_Loaded" Closing="Window_Closing" SizeChanged="Window_SizeChanged">
+        Loaded="Window_Loaded" Closing="Window_Closing" SizeChanged="Window_SizeChanged" KeyDown="Window_KeyDown">
     <Window.Resources>
         <Style TargetType="TextBlock">
             <Setter Property="FontFamily" Value="Consolas"/>
@@ -83,15 +83,15 @@
             <Border.Effect>
                 <DropShadowEffect Color="#00FF44" BlurRadius="20" ShadowDepth="0" Opacity="0.4"/>
             </Border.Effect>
-            <StackPanel Width="520">
-                <TextBlock Text="==========================================================" TextAlignment="Center" Margin="0,0,0,3" Foreground="#00AA33"/>
+            <StackPanel Width="720">
+                <TextBlock Text="==========================================================================================" TextAlignment="Center" Margin="0,0,0,3" Foreground="#00AA33"/>
                 <TextBlock Text="Z I O N   M A I N F R A M E" TextAlignment="Center" FontWeight="Bold" FontSize="22" Margin="0,0,0,3" Foreground="#39FF14">
                     <TextBlock.Effect>
                         <DropShadowEffect Color="#00FF66" BlurRadius="8" ShadowDepth="0" Opacity="0.8"/>
                     </TextBlock.Effect>
                 </TextBlock>
-                <TextBlock x:Name="txtConsoleSubTitle" Text="THE MATRIX ONLINE // REALITY REMASTER (v1.2.0)" TextAlignment="Center" FontSize="11" Foreground="#00FF66" Opacity="0.8" Margin="0,0,0,3"/>
-                <TextBlock Text="==========================================================" TextAlignment="Center" Margin="0,0,0,15" Foreground="#00AA33"/>
+                <TextBlock x:Name="txtConsoleSubTitle" Text="THE MATRIX ONLINE // REALITY REMASTER (v1.3.0)" TextAlignment="Center" FontSize="11" Foreground="#00FF66" Opacity="0.8" Margin="0,0,0,3"/>
+                <TextBlock Text="==========================================================================================" TextAlignment="Center" Margin="0,0,0,15" Foreground="#00AA33"/>
 
                 <!-- Navigation Tabs -->
                 <Grid Margin="0,0,0,15">
@@ -100,11 +100,15 @@
                         <ColumnDefinition Width="*"/>
                         <ColumnDefinition Width="*"/>
                         <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="*"/>
                     </Grid.ColumnDefinitions>
                     <Button x:Name="btnShowLogin" Content="JACK IN" Height="28" Margin="0,0,2,0" Click="btnShowLogin_Click"/>
-                    <Button x:Name="btnShowRegister" Content="REGISTER" Height="28" Grid.Column="1" Margin="2,0,2,0" Click="btnShowRegister_Click"/>
-                    <Button x:Name="btnShowServer" Content="SERVERS" Height="28" Grid.Column="2" Margin="2,0,2,0" Click="btnShowServer_Click"/>
-                    <Button x:Name="btnShowPatch" Content="UPDATE" Height="28" Grid.Column="3" Margin="2,0,0,0" Click="btnShowPatch_Click"/>
+                    <Button x:Name="btnShowCommunity" Content="COMMUNITY" Height="28" Grid.Column="1" Margin="2,0,2,0" Click="btnShowCommunity_Click"/>
+                    <Button x:Name="btnShowPatchNotes" Content="TRANSMISSIONS" Height="28" Grid.Column="2" Margin="2,0,2,0" Click="btnShowPatchNotes_Click"/>
+                    <Button x:Name="btnShowRegister" Content="REGISTER" Height="28" Grid.Column="3" Margin="2,0,2,0" Click="btnShowRegister_Click"/>
+                    <Button x:Name="btnShowServer" Content="SERVERS" Height="28" Grid.Column="4" Margin="2,0,2,0" Click="btnShowServer_Click"/>
+                    <Button x:Name="btnShowPatch" Content="UPDATE" Height="28" Grid.Column="5" Margin="2,0,0,0" Click="btnShowPatch_Click"/>
                 </Grid>
 
                 <!-- Current Server Banner -->
@@ -145,7 +149,91 @@
                         </StackPanel>
                     </Border>
 
-                    <Button x:Name="btnJackIn" Content="JACK IN TO THE MATRIX" FontSize="16" FontWeight="Bold" Height="42" Click="btnJackIn_Click"/>
+                    <Button x:Name="btnJackIn" Content="AUTHENTICATE &amp; SELECT OPERATIVE" FontSize="15" FontWeight="Bold" Height="42" Click="btnJackIn_Click"/>
+                </StackPanel>
+
+                <!-- SOE Operative Selection Terminal -->
+                <StackPanel x:Name="OperativeRosterPanel" Visibility="Collapsed">
+                    <Grid Margin="0,0,0,10">
+                        <StackPanel>
+                            <TextBlock Text="╔═ SOE OPERATIVE SELECTION TERMINAL ═╗" FontWeight="Bold" Foreground="#39FF14" FontSize="14"/>
+                            <TextBlock x:Name="lblAccountSummary" Text="OPERATOR ACCOUNT: Slacker | MATRIX SHARD: LIVE (15.204.82.250)" Foreground="#00FF66" FontSize="11" Margin="0,2,0,0"/>
+                        </StackPanel>
+                        <Button x:Name="btnLogout" Content="🚪 LOG OUT" Width="95" Height="26" HorizontalAlignment="Right" Click="btnLogout_Click"/>
+                    </Grid>
+
+                    <!-- Operative Cards List -->
+                    <Border Background="#051206" BorderBrush="#006622" BorderThickness="1" CornerRadius="4" Padding="6" Margin="0,0,0,12" Height="175">
+                        <ScrollViewer VerticalScrollBarVisibility="Auto">
+                            <StackPanel x:Name="OperativeCardsContainer">
+                                <!-- Populated dynamically via code -->
+                            </StackPanel>
+                        </ScrollViewer>
+                    </Border>
+
+                    <!-- Selected Operative Dossier Details -->
+                    <Border x:Name="SelectedOperativeDossier" Background="#08180A" BorderBrush="#39FF14" BorderThickness="1" CornerRadius="4" Padding="12" Margin="0,0,0,14">
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto"/>
+                                <ColumnDefinition Width="*"/>
+                            </Grid.ColumnDefinitions>
+                            <Border Width="56" Height="56" Background="#002208" BorderBrush="#00FF66" BorderThickness="1" CornerRadius="4" Margin="0,0,14,0">
+                                <TextBlock x:Name="txtSelectedOperativeIcon" Text="🕶️" FontSize="32" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                            </Border>
+                            <StackPanel Grid.Column="1">
+                                <TextBlock x:Name="txtSelectedOperativeName" Text="OPERATIVE: Slacker" FontWeight="Bold" FontSize="16" Foreground="#39FF14"/>
+                                <TextBlock x:Name="txtSelectedOperativeStats" Text="DISCIPLINE: Level 50 Hacker | SECTOR: Slums" FontSize="12" Foreground="#88FF88" Margin="0,2,0,0"/>
+                                <TextBlock x:Name="txtSelectedOperativeRsi" Text="RSI STATUS: 100% HEALTHY // READY FOR BROADCAST" FontSize="11" Foreground="#00FFAA" Margin="0,2,0,0"/>
+                            </StackPanel>
+                        </Grid>
+                    </Border>
+
+                    <!-- Action Buttons -->
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="2*"/>
+                            <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>
+                        <Button x:Name="btnLaunchSelectedOperative" Content="⚡ JACK IN AS SELECTED OPERATIVE" FontSize="14" FontWeight="Bold" Height="40" Margin="0,0,6,0" Click="btnLaunchSelectedOperative_Click"/>
+                        <Button x:Name="btnCreateNewOperative" Content="[+] CREATE OPERATIVE" FontSize="12" FontWeight="Bold" Height="40" Grid.Column="1" Click="btnCreateNewOperative_Click"/>
+                    </Grid>
+                </StackPanel>
+
+                <!-- Community Hub & Forum View -->
+                <StackPanel x:Name="CommunityPanel" Visibility="Collapsed">
+                    <Grid Margin="0,0,0,8">
+                        <StackPanel>
+                            <TextBlock Text="ZION CONSTRUCT COMMUNITY HUB // FORUMS &amp; DISPATCH" FontWeight="Bold" FontSize="13" Foreground="#39FF14"/>
+                            <TextBlock Text="Connect with redpills, browse Staff Announcements, Support, and Player discussions." Foreground="#88FF88" FontSize="11"/>
+                        </StackPanel>
+                        <Button x:Name="btnOpenBrowserCommunity" Content="🌐 OPEN IN BROWSER" Width="140" Height="26" HorizontalAlignment="Right" Click="btnOpenBrowserCommunity_Click"/>
+                    </Grid>
+                    <Border Background="#051206" BorderBrush="#006622" BorderThickness="1" CornerRadius="4" Height="260" Margin="0,0,0,10">
+                        <WebBrowser x:Name="wbCommunity" Margin="2"/>
+                    </Border>
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>
+                        <Button x:Name="btnRefreshCommunity" Content="🔄 RELOAD FORUM STREAM" Height="32" Margin="0,0,4,0" Click="btnRefreshCommunity_Click"/>
+                        <Button x:Name="btnViewAvatars" Content="🕶️ BROWSE 30 MATRIX AVATARS" Height="32" Grid.Column="1" Margin="4,0,0,0" Click="btnViewAvatars_Click"/>
+                    </Grid>
+                </StackPanel>
+
+                <!-- Transmissions & Patch Notes View -->
+                <StackPanel x:Name="TransmissionsPanel" Visibility="Collapsed">
+                    <TextBlock Text="ZION TRANSMISSIONS // OFFICIAL PATCH ARCHIVE" FontWeight="Bold" FontSize="13" Margin="0,0,0,4" Foreground="#39FF14"/>
+                    <TextBlock Text="Chronological system updates, netcode changes, and discipline notes from the Development Team." Foreground="#88FF88" FontSize="11" TextWrapping="Wrap" Margin="0,0,0,8"/>
+                    <Border Background="#051206" BorderBrush="#006622" BorderThickness="1" CornerRadius="4" Padding="6" Height="250" Margin="0,0,0,10">
+                        <ScrollViewer VerticalScrollBarVisibility="Auto">
+                            <StackPanel x:Name="PatchNotesCardsContainer">
+                                <!-- Populated dynamically from /api/news -->
+                            </StackPanel>
+                        </ScrollViewer>
+                    </Border>
+                    <Button x:Name="btnRefreshTransmissions" Content="🔄 REFRESH TRANSMISSIONS" Height="32" Click="btnRefreshTransmissions_Click"/>
                 </StackPanel>
 
                 <!-- Register View -->

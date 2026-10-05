@@ -135,6 +135,19 @@ void CombatSystem::LoadAbilities()
 			{ 573, "KarateDamageAbility",          20, 22.0f, 30.0f },
 			{ 574, "KungFuDamageAbility",          20, 20.0f, 28.0f },
 			{ 600, "CloseCombatTrainingAbility",    0, 10.0f, 14.0f },
+			// Soldier Moves
+			{ 14,  "PowerShotAbility",             15, 25.0f, 35.0f },
+			{ 126, "PistolDisarmingShotAbility",   20, 15.0f, 22.0f },
+			{ 129, "HandgunsAbility",              10, 12.0f, 18.0f },
+			{ 147, "RiflesAbility",                20, 20.0f, 30.0f },
+			{ 453, "RifleButtSmashAbility",        15, 18.0f, 24.0f },
+			{ 499, "PistolPointBlankAbility",      15, 22.0f, 30.0f },
+			{ 501, "PistolWhipAbility",            10, 14.0f, 20.0f },
+			{ 505, "SniperShotAbility",            35, 45.0f, 65.0f },
+			// Spy Moves
+			{ 146, "PoisonKnifeAbility",           20, 18.0f, 26.0f },
+			{ 209, "StealthAbility",               25, 0.0f,   0.0f },
+			{ 283, "KnifeThrowerAbility",          15, 16.0f, 24.0f },
 		};
 		for (const auto& rm : s_retailMoves) {
 			if (m_moveTable.find(rm.id) == m_moveTable.end()) {
@@ -1228,6 +1241,14 @@ bool CombatSystem::UseAbility(PlayerObject* caster, uint16 abilityId, uint32 tar
         else if (abilTempl->discipline == DisciplineType::CODER)
         {
             return sHackerSystem.ExecuteCoderAbility(caster, requestedAbilityId, targetGoId, abilTempl);
+        }
+        else if (abilTempl->discipline == DisciplineType::GUNNER)
+        {
+            return sHackerSystem.ExecuteSoldierAbility(caster, requestedAbilityId, targetGoId, abilTempl);
+        }
+        else if (abilTempl->discipline == DisciplineType::SPY)
+        {
+            return sHackerSystem.ExecuteSpyAbility(caster, requestedAbilityId, targetGoId, abilTempl);
         }
     }
 

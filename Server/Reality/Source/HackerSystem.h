@@ -13,9 +13,11 @@ public:
 
     void Initialize();
     
-    // Core Hacker & Coder Ability Dispatch
+    // Core Discipline Ability Dispatch
     bool ExecuteHackerAbility(PlayerObject* caster, uint16 abilityId, uint32 targetGoId, const struct AbilityTemplate* templ);
     bool ExecuteCoderAbility(PlayerObject* caster, uint16 abilityId, uint32 targetGoId, const struct AbilityTemplate* templ);
+    bool ExecuteSoldierAbility(PlayerObject* caster, uint16 abilityId, uint32 targetGoId, const struct AbilityTemplate* templ);
+    bool ExecuteSpyAbility(PlayerObject* caster, uint16 abilityId, uint32 targetGoId, const struct AbilityTemplate* templ);
 
     // Legacy signatures
     bool CompileProgram(PlayerObject* hacker, uint32 programId, uint32 targetGoId);

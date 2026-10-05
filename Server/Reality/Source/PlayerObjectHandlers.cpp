@@ -859,10 +859,32 @@ void PlayerObject::ParsePlayerCommand( string theCmd )
 				m_parent.QueueCommand(make_shared<SystemChatMsg>(
 					"{c:FF8800}[DISCIPLINE] Martial Artist kit loaded into memory: 1:CloseCombat 2:MartialArts 3:SelfDefense{/c}"));
 			}
+			else if (iequals(discStr, "soldier") || iequals(discStr, "gunner"))
+			{
+				m_abilitySystem->clearLoadout();
+				m_abilitySystem->loadAbility(14, 1, 0);  // PowerShotAbility
+				m_abilitySystem->loadAbility(129, 1, 1); // HandgunsAbility
+				m_abilitySystem->loadAbility(147, 1, 2); // RiflesAbility
+				m_abilitySystem->loadAbility(453, 1, 3); // RifleButtSmashAbility
+				m_abilitySystem->sendFullLoadout();
+				m_parent.QueueCommand(make_shared<SystemChatMsg>(
+					"{c:FF4444}[DISCIPLINE] Soldier kit loaded into memory: 1:PowerShot 2:Handguns 3:Rifles 4:RifleButtSmash{/c}"));
+			}
+			else if (iequals(discStr, "spy"))
+			{
+				m_abilitySystem->clearLoadout();
+				m_abilitySystem->loadAbility(209, 1, 0); // StealthAbility
+				m_abilitySystem->loadAbility(146, 1, 1); // PoisonKnifeAbility
+				m_abilitySystem->loadAbility(283, 1, 2); // KnifeThrowerAbility
+				m_abilitySystem->loadAbility(293, 1, 3); // StealthCountermeasuresAbility
+				m_abilitySystem->sendFullLoadout();
+				m_parent.QueueCommand(make_shared<SystemChatMsg>(
+					"{c:AA00FF}[DISCIPLINE] Spy kit loaded into memory: 1:Stealth 2:PoisonKnife 3:KnifeThrower 4:Countermeasures{/c}"));
+			}
 			else
 			{
 				m_parent.QueueCommand(make_shared<SystemChatMsg>(
-					"{c:FF0000}Usage: &discipline <hacker|coder|martialartist>{/c}"));
+					"{c:FF0000}Usage: &discipline <hacker|coder|martialartist|soldier|spy>{/c}"));
 			}
 		}
 		return;
