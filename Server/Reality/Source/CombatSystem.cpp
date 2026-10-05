@@ -19,6 +19,7 @@
 #include "StaticObjectManager.h"
 #include "AbilitySystem.h"
 #include "CombatAnimationMatrix.h"
+#include "HackerSystem.h"
 #include <boost/property_tree/ptree.hpp>
 #include <boost/property_tree/json_parser.hpp>
 
@@ -1215,6 +1216,20 @@ bool CombatSystem::UseAbility(PlayerObject* caster, uint16 abilityId, uint32 tar
     if (!caster) return false;
     const bool humanCaster = !caster->getClient().isBot();
     const uint16 requestedAbilityId = abilityId;
+
+    // Check authentic discipline routing (Hacker viral logic / Coder RSI support)
+    const AbilityTemplate* abilTempl = sDataLoader.GetAbilityTemplate(requestedAbilityId);
+    if (abilTempl)
+    {
+        if (abilTempl->discipline == DisciplineType::HACKER)
+        {
+            return sHackerSystem.ExecuteHackerAbility(caster, requestedAbilityId, targetGoId, abilTempl);
+        }
+        else if (abilTempl->discipline == DisciplineType::CODER)
+        {
+            return sHackerSystem.ExecuteCoderAbility(caster, requestedAbilityId, targetGoId, abilTempl);
+        }
+    }
 
     const CombatMove* move = GetMove(abilityId);
     if (!move)

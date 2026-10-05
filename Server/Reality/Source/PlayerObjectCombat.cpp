@@ -120,6 +120,19 @@ void PlayerObject::takeDamage( uint32 attackerGoId, uint16 damage, uint32 fxId )
 	uint16 mitigation = m_lvl / 2;
 	uint16 actualDamage = (damage > mitigation) ? (damage - mitigation) : 1;
 
+	// Apply firewall absorption
+	if (m_firewallPoints > 0 && actualDamage > 0)
+	{
+		uint16 absorbed = std::min<uint16>(m_firewallPoints, actualDamage);
+		m_firewallPoints -= absorbed;
+		actualDamage -= absorbed;
+		if (!m_parent.isBot())
+		{
+			m_parent.QueueCommand(shared_ptr<SystemChatMsg>(new SystemChatMsg(
+				(format("{c:00FFFF}[FIREWALL] Absorbed %1% damage (%2% shield remaining).{/c}") % absorbed % m_firewallPoints).str())));
+		}
+	}
+
 	uint16 healthBefore = m_healthC;
 	if (actualDamage >= m_healthC)
 		m_healthC = 0;
@@ -154,6 +167,57 @@ void PlayerObject::takeDamage( uint32 attackerGoId, uint16 damage, uint32 fxId )
 		    die(attackerGoId);
         }
     }
+}
+
+void PlayerObject::applyHeal( uint32 healerGoId, uint16 amount, uint32 fxId )
+{
+	if (isDead()) return;
+
+	uint16 healthBefore = m_healthC;
+	uint32 newHealth = uint32(m_healthC) + uint32(amount);
+	if (newHealth > m_healthM)
+		newHealth = m_healthM;
+	m_healthC = (uint16)newHealth;
+	uint16 actualHeal = m_healthC - healthBefore;
+
+	m_hitCounter++;
+
+	PlayerObject* healerObj = sObjMgr.getGOPtrSafe(healerGoId);
+	if (!m_parent.isBot() || (healerObj && !healerObj->getClient().isBot()))
+	{
+		INFO_LOG(format("Heal applied: %1%:%2% -> %3%:%4% raw %5% actual %6% fx 0x%7$X HP %8% -> %9%/%10%")
+			% (healerObj ? healerObj->getHandle() : std::string("<none>")) % healerGoId
+			% m_handle % m_goId % amount % actualHeal % fxId
+			% healthBefore % m_healthC % m_healthM);
+	}
+
+	sGame.AnnounceStateUpdate(&m_parent, shared_ptr<CombatHitFxMsg>(new CombatHitFxMsg(m_goId, fxId, m_hitCounter)));
+	m_parent.QueueState(shared_ptr<SelfHitFxMsg>(new SelfHitFxMsg(this, fxId, m_hitCounter)));
+	sendVitals();
+}
+
+void PlayerObject::revive( uint32 reviverGoId, float healthPct )
+{
+	if (!isDead()) return;
+
+	m_isDead = false;
+	m_deathDelayMS = 0;
+	m_healthC = std::max<uint16>(1, (uint16)(m_healthM * healthPct));
+	m_innerStrC = m_innerStrM / 2;
+
+	PlayerObject* reviver = sObjMgr.getGOPtrSafe(reviverGoId);
+	INFO_LOG(format("Character %1% revived by %2% with %3% HP")
+		% m_handle % (reviver ? reviver->getHandle() : "<system>") % m_healthC);
+
+	if (!m_parent.isBot())
+	{
+		m_parent.QueueCommand(shared_ptr<SystemChatMsg>(new SystemChatMsg(
+			(format("{c:00FF00}[RSI RECONSTRUCTION] You have been resuscitated by %1%!{/c}")
+				% (reviver ? reviver->getHandle() : "Support Operative")).str())));
+	}
+
+	sGame.AnnounceStateUpdate(&m_parent, shared_ptr<HealthUpdateMsg>(new HealthUpdateMsg(m_goId, true, true)));
+	sendVitals(true, true);
 }
 
 bool PlayerObject::spendIS( uint16 amount )

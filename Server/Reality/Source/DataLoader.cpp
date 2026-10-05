@@ -54,6 +54,7 @@ bool DataLoader::LoadAll(const std::string& directoryPath)
     // Try loading available data files.
     LoadClothing(directoryPath + "mxoClothing.csv");
     LoadAbilities(directoryPath + "abilityIDs.csv");
+    EnsureCoreAbilities();
     LoadNPCs(directoryPath + "mob_parsed.csv");
     LoadBlueprints(directoryPath + "blueprints.csv");
     LoadPropheticGlitchNodes(directoryPath + "prophetic_glitch_nodes.csv");
@@ -144,8 +145,17 @@ bool DataLoader::LoadAbilities(const std::string& filePath)
 {
     std::ifstream file(filePath.c_str());
     if (!file.is_open())
+        file.open("Data/hd_dump/abilityIDs.csv");
+    if (!file.is_open())
+        file.open("mxoemu_live/Server/Reality/Data/hd_dump/abilityIDs.csv");
+    if (!file.is_open())
+        file.open("../../Data/hd_dump/abilityIDs.csv");
+    if (!file.is_open())
+        file.open("../Data/hd_dump/abilityIDs.csv");
+    if (!file.is_open())
     {
         WARNING_LOG(format("Could not open abilities data file: %1%") % filePath);
+        EnsureCoreAbilities();
         return false;
     }
 
@@ -190,12 +200,36 @@ bool DataLoader::LoadAbilities(const std::string& filePath)
             }
 
             templ.maxLevel = 1;
-            // Identify Abilities based on name
+            // Identify Abilities based on authentic retail discipline taxonomy
             if (templ.name.find("Virus") != std::string::npos || 
                 templ.name.find("Logic") != std::string::npos ||
-                templ.name.find("Simulacra") != std::string::npos)
+                templ.name.find("Nuke") != std::string::npos ||
+                templ.name.find("Firewall") != std::string::npos ||
+                templ.name.find("Freeze") != std::string::npos ||
+                templ.name.find("Bomb") != std::string::npos ||
+                templ.name.find("Phage") != std::string::npos ||
+                templ.name.find("Overheat") != std::string::npos ||
+                templ.name.find("Overload") != std::string::npos ||
+                templ.name.find("Disrupt") != std::string::npos ||
+                templ.name.find("Lag") != std::string::npos ||
+                templ.name.find("Hacker") != std::string::npos ||
+                templ.name.find("Drain") != std::string::npos ||
+                templ.name.find("DeflectVirus") != std::string::npos)
             {
                 templ.discipline = DisciplineType::HACKER;
+            }
+            else if (templ.name.find("Repair") != std::string::npos ||
+                     templ.name.find("Heal") != std::string::npos ||
+                     templ.name.find("Restore") != std::string::npos ||
+                     templ.name.find("Revive") != std::string::npos ||
+                     templ.name.find("Bolster") != std::string::npos ||
+                     templ.name.find("Simulacra") != std::string::npos ||
+                     templ.name.find("Coder") != std::string::npos ||
+                     templ.name.find("Decoy") != std::string::npos ||
+                     templ.name.find("Tinkering") != std::string::npos ||
+                     templ.name.find("DeflectCode") != std::string::npos)
+            {
+                templ.discipline = DisciplineType::CODER;
             }
             else if (templ.name.find("KungFu") != std::string::npos ||
                      templ.name.find("Karate") != std::string::npos ||
@@ -219,7 +253,68 @@ bool DataLoader::LoadAbilities(const std::string& filePath)
             }
         }
     }
+    EnsureCoreAbilities();
     return true;
+}
+
+void DataLoader::EnsureCoreAbilities()
+{
+    auto addCore = [this](uint16 id, const std::string& name, DisciplineType disc, bool castable,
+                          uint16 castTimeMs, uint16 isCost, uint32 actFx, uint32 execFx, bool isBuff, uint32 buffSec)
+    {
+        if (m_abilities.find(id) == m_abilities.end())
+        {
+            AbilityTemplate t;
+            t.abilityId = id;
+            t.goId = -2147400000 + id;
+            t.name = name;
+            t.description = "Authentic Retail Ability";
+            t.discipline = disc;
+            t.isCastable = castable;
+            t.castTime = castTimeMs;
+            t.innerStrengthCost = isCost;
+            t.memoryCost = 10;
+            t.cooldown = 2000;
+            t.maxLevel = 1;
+            t.activationFX = actFx;
+            t.executionFX = execFx;
+            t.isBuff = isBuff;
+            t.buffTime = buffSec;
+            m_abilities[id] = t;
+        }
+    };
+
+    // Hacker Discipline
+    addCore(57, "LogicBlast1Ability", DisciplineType::HACKER, true, 2000, 15, 671089111, 0xAF050028, false, 0);
+    addCore(58, "LogicBlast2Ability", DisciplineType::HACKER, true, 2000, 20, 671089087, 0xAF050028, false, 0);
+    addCore(59, "LogicBlast3Ability", DisciplineType::HACKER, true, 2000, 25, 671091200, 0xAF050028, false, 0);
+    addCore(60, "LogicBomb1Ability", DisciplineType::HACKER, true, 4000, 30, 671090676, 671091267, false, 0);
+    addCore(359, "CodeNukeAbility", DisciplineType::HACKER, true, 4000, 50, 671091217, 0x110A0028, false, 0);
+    addCore(53, "HarmfulCodeAbility", DisciplineType::HACKER, true, 4000, 20, 671089139, 0, false, 0);
+    addCore(40, "CodeFreeze1Ability", DisciplineType::HACKER, true, 2000, 20, 671088783, 0, false, 0);
+    addCore(68, "PersonalFirewall1Ability", DisciplineType::HACKER, true, 2000, 25, 671089003, 0, true, 45);
+    addCore(63, "NetworkFirewall1Ability", DisciplineType::HACKER, true, 6000, 45, 671089032, 671091263, true, 60);
+    addCore(43, "DisruptInputs1Ability", DisciplineType::HACKER, true, 2000, 15, 671090653, 0, false, 0);
+    addCore(97, "UILag1Ability", DisciplineType::HACKER, true, 2000, 15, 671088882, 671091266, false, 0);
+
+    // Coder / Support Discipline
+    addCore(77, "RestoreHealth1Ability", DisciplineType::CODER, true, 2000, 15, 671091234, 0x01000060, false, 0);
+    addCore(80, "RestoreHealth2Ability", DisciplineType::CODER, true, 2000, 25, 671088928, 0x01000060, false, 0);
+    addCore(234, "RestoreHealth3Ability", DisciplineType::CODER, true, 2000, 35, 671091238, 0x01000060, false, 0);
+    addCore(46, "FastHealing1Ability", DisciplineType::CODER, true, 1000, 20, 671090613, 0x01000060, false, 0);
+    addCore(169, "EmergencyRepairs1Ability", DisciplineType::CODER, true, 2000, 30, 671091173, 0x01000060, false, 0);
+    addCore(56, "GroupRepairs1Ability", DisciplineType::CODER, true, 4000, 40, 671091250, 671091265, false, 0);
+    addCore(50, "GroupRepairs2Ability", DisciplineType::CODER, true, 4000, 55, 671090992, 671091265, false, 0);
+    addCore(39, "BolsterHealth1Ability", DisciplineType::CODER, true, 2000, 25, 671088751, 0, true, 300);
+    addCore(375, "ReviveRSIAbility", DisciplineType::CODER, true, 6000, 60, 0x10314612, 0x01000060, false, 0);
+    addCore(23, "DeflectCodeAbility", DisciplineType::CODER, false, 0, 0, 0x1D0A0028, 0, true, 0);
+    addCore(20, "FortifySimulacra1Ability", DisciplineType::CODER, true, 2000, 20, 671090781, 0, false, 0);
+    addCore(30, "RepairSimulacra1Ability", DisciplineType::CODER, true, 2000, 20, 671090845, 0, false, 0);
+
+    // Starter Martial Arts
+    addCore(600, "CloseCombatTrainingAbility", DisciplineType::MARTIAL_ARTIST, true, 0, 0, 0, 0, false, 0);
+    addCore(137, "MartialArtsInitiateAbility", DisciplineType::MARTIAL_ARTIST, true, 0, 0, 0, 0, false, 0);
+    addCore(17, "SelfDefenseAbility", DisciplineType::MARTIAL_ARTIST, true, 0, 0, 0, 0, false, 0);
 }
 
 bool DataLoader::LoadNPCs(const std::string& filePath)

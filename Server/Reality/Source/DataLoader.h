@@ -53,6 +53,7 @@ public:
     bool LoadMissions(const std::string& directoryPath);
 
     bool LoadAbilities(const std::string& filePath);
+    void EnsureCoreAbilities();
     bool LoadClothing(const std::string& filePath);
     bool LoadNPCs(const std::string& filePath);
     bool LoadBlueprints(const std::string& filePath);

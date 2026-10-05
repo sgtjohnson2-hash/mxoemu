@@ -92,6 +92,7 @@ public:
 
     bool loadAbility(uint16 abilityId, uint16 level, uint16 slot);
     bool unloadAbility(uint16 abilityId);
+    void clearLoadout();
     shared_ptr<Ability> getAbility(uint16 abilityId);
 
     uint16 getTotalMemoryUsed() const;

@@ -156,6 +156,11 @@ bool AbilitySystem::unloadAbility(uint16 abilityId)
     return false;
 }
 
+void AbilitySystem::clearLoadout()
+{
+    m_loadedAbilities.clear();
+}
+
 shared_ptr<Ability> AbilitySystem::getAbility(uint16 abilityId)
 {
     auto it = m_loadedAbilities.find(abilityId);

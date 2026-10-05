@@ -821,6 +821,73 @@ void PlayerObject::ParsePlayerCommand( string theCmd )
 		}
 		return;
 	}
+	else if (iequals(command, "discipline") || iequals(command, "class"))
+	{
+		string discStr;
+		cmdStream >> discStr;
+		if (m_abilitySystem)
+		{
+			if (iequals(discStr, "hacker"))
+			{
+				m_abilitySystem->clearLoadout();
+				m_abilitySystem->loadAbility(57, 1, 0); // LogicBlast1Ability
+				m_abilitySystem->loadAbility(53, 1, 1); // HarmfulCodeAbility
+				m_abilitySystem->loadAbility(68, 1, 2); // PersonalFirewall1Ability
+				m_abilitySystem->loadAbility(60, 1, 3); // LogicBomb1Ability
+				m_abilitySystem->sendFullLoadout();
+				m_parent.QueueCommand(make_shared<SystemChatMsg>(
+					"{c:00FFCC}[DISCIPLINE] Hacker kit loaded into memory: 1:LogicBlast 2:HarmfulCode 3:Firewall 4:LogicBomb{/c}"));
+			}
+			else if (iequals(discStr, "coder") || iequals(discStr, "support"))
+			{
+				m_abilitySystem->clearLoadout();
+				m_abilitySystem->loadAbility(77, 1, 0); // RestoreHealth1Ability
+				m_abilitySystem->loadAbility(46, 1, 1); // FastHealing1Ability
+				m_abilitySystem->loadAbility(39, 1, 2); // BolsterHealth1Ability
+				m_abilitySystem->loadAbility(56, 1, 3); // GroupRepairs1Ability
+				m_abilitySystem->sendFullLoadout();
+				m_parent.QueueCommand(make_shared<SystemChatMsg>(
+					"{c:00FF00}[DISCIPLINE] Coder/Support kit loaded into memory: 1:RestoreHealth 2:FastHealing 3:BolsterHealth 4:GroupRepairs{/c}"));
+			}
+			else if (iequals(discStr, "martialartist") || iequals(discStr, "operative"))
+			{
+				m_abilitySystem->clearLoadout();
+				m_abilitySystem->loadAbility(600, 1, 0);
+				m_abilitySystem->loadAbility(137, 1, 1);
+				m_abilitySystem->loadAbility(17, 1, 2);
+				m_abilitySystem->sendFullLoadout();
+				m_parent.QueueCommand(make_shared<SystemChatMsg>(
+					"{c:FF8800}[DISCIPLINE] Martial Artist kit loaded into memory: 1:CloseCombat 2:MartialArts 3:SelfDefense{/c}"));
+			}
+			else
+			{
+				m_parent.QueueCommand(make_shared<SystemChatMsg>(
+					"{c:FF0000}Usage: &discipline <hacker|coder|martialartist>{/c}"));
+			}
+		}
+		return;
+	}
+	else if (iequals(command, "loadability") || iequals(command, "learn"))
+	{
+		uint16 abId = 0;
+		uint16 slot = 0;
+		cmdStream >> abId;
+		if (cmdStream >> slot) {} else { slot = 0; }
+		if (abId > 0 && m_abilitySystem)
+		{
+			const AbilityTemplate* t = sDataLoader.GetAbilityTemplate(abId);
+			m_abilitySystem->loadAbility(abId, 1, slot);
+			m_parent.QueueCommand(make_shared<AbilityLoadRspMsg>(abId, 1, slot));
+			m_parent.QueueCommand(make_shared<SystemChatMsg>(
+				(format("{c:00FF00}[ABILITY] Loaded %1% (ID %2%) into slot %3%.{/c}")
+					% (t ? t->name : "Ability") % abId % slot).str()));
+		}
+		else
+		{
+			m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FF0000}Usage: &loadability <abilityId> [slot]{/c}"));
+		}
+		return;
+	}
 	else if (iequals(command, "withdraw") || iequals(command, "escape"))
 	{
 		sCombatSys.StopFreeFire(m_goId);

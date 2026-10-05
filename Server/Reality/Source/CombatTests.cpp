@@ -28,6 +28,7 @@
 #include "BotClient.h"
 #include "SpatialGrid.h"
 #include "AbilitySystem.h"
+#include "DataLoader.h"
 #include "CombatAnimationMatrix.h"
 #include "DojoSpawn.h"
 #include "MessageTypes.h"
@@ -171,6 +172,7 @@ int RunCombatTestSuite()
 		new GameServer(); // never started: m_mainSocket stays null so every Announce* is a no-op
 	sSpatialGrid.Initialize(15000.0f);
 	sCombatSys.Init();
+	sDataLoader.EnsureCoreAbilities();
 
 	try
 	{
@@ -562,6 +564,74 @@ int RunCombatTestSuite()
 			check(human.po->getFightingStyle() == FightingStyle::KungFu, "PlayerObject fighting style sets to Kung Fu");
 			human.po->setFightingStyle(FightingStyle::None);
 			check(human.po->getFightingStyle() == FightingStyle::None, "PlayerObject fighting style resets to Self-Defense");
+		}
+
+		// ---------------------------------------------------------------- Hacker & Coder/Support disciplines
+		{
+			// 1. Template Classification
+			const AbilityTemplate* hackT = sDataLoader.GetAbilityTemplate(57); // LogicBlast1Ability
+			check(hackT != nullptr, "LogicBlast1Ability template is registered");
+			if (hackT) {
+				check(hackT->discipline == DisciplineType::HACKER, "LogicBlast1Ability is classified as HACKER");
+				check(hackT->isCastable == true, "LogicBlast1Ability is castable");
+				check(hackT->castTime == 2000, "LogicBlast1Ability authentic cast time is 2000ms");
+			}
+
+			const AbilityTemplate* coderT = sDataLoader.GetAbilityTemplate(77); // RestoreHealth1Ability
+			check(coderT != nullptr, "RestoreHealth1Ability template is registered");
+			if (coderT) {
+				check(coderT->discipline == DisciplineType::CODER, "RestoreHealth1Ability is classified as CODER");
+				check(coderT->isCastable == true, "RestoreHealth1Ability is castable");
+			}
+
+			// 2. Hacker Offensive Logic Attack
+			Actor hackVictim = makeBot(9200050, 10050.0, 10000.0, 1, 100);
+			human.po->setInnerStrength(100);
+			humanClient.captured.clear();
+			bool hackOk = sCombatSys.UseAbility(human.po, 57, hackVictim.go);
+			check(hackOk, "Hacker LogicBlast1 executes successfully on hostile target");
+			check(hackVictim.po->getCurrentHealth() < 100, "LogicBlast1 inflicts direct damage on victim");
+			check(human.po->getCurrentIS() < 100, "LogicBlast1 deducts Inner Strength cost from caster");
+			check(humanClient.sawText("[HACK]"), "Human caster receives [HACK] compilation chat feedback");
+
+			// 3. Personal Firewall
+			bool fwOk = sCombatSys.UseAbility(human.po, 68, human.go);
+			check(fwOk, "PersonalFirewall1 executes on self");
+			check(human.po->getFirewall() > 0, "PersonalFirewall grants positive shield absorption points");
+			uint16 curFw = human.po->getFirewall();
+			uint16 preDmgHp = human.po->getCurrentHealth();
+			human.po->takeDamage(hackVictim.go, 50, 0x280006DF);
+			check(human.po->getFirewall() == curFw - 50, "Firewall absorbed exactly 50 incoming damage points");
+			check(human.po->getCurrentHealth() == preDmgHp, "Health remains unharmed while firewall shield holds");
+			human.po->setFirewall(0); // clear shield
+
+			// 4. Coder Restore Health
+			human.po->setCurrentHealth(40);
+			human.po->setInnerStrength(100);
+			humanClient.captured.clear();
+			bool healOk = sCombatSys.UseAbility(human.po, 77, human.go);
+			check(healOk, "Coder RestoreHealth1 executes successfully on self");
+			check(human.po->getCurrentHealth() == 100, "RestoreHealth1 reconstructs 60 HP to full 100 HP");
+			check(humanClient.sawText("[CODER]"), "Human caster receives [CODER] RSI reconstruction chat feedback");
+
+			// 5. Coder Emergency Repairs condition
+			human.po->setCurrentHealth(90); // 90% health (> 35%)
+			bool emerFail = sCombatSys.UseAbility(human.po, 169, human.go);
+			check(!emerFail && human.po->getCurrentHealth() == 90, "EmergencyRepairs refused when health is above 35%");
+			human.po->setCurrentHealth(20); // 20% health (< 35%)
+			bool emerOk = sCombatSys.UseAbility(human.po, 169, human.go);
+			check(emerOk && human.po->getCurrentHealth() > 20, "EmergencyRepairs executes when health is below 35%");
+
+			// 6. Coder Revive RSI
+			Actor deadOperative = makeBot(9200051, 10050.0, 10000.0, 1, 100);
+			deadOperative.po->setCurrentHealth(0);
+			deadOperative.po->killPlayer(human.go);
+			check(deadOperative.po->isDead(), "Target operative is marked dead");
+			human.po->setInnerStrength(100);
+			bool reviveOk = sCombatSys.UseAbility(human.po, 375, deadOperative.go);
+			check(reviveOk, "ReviveRSIAbility executes on downed operative");
+			check(!deadOperative.po->isDead() && deadOperative.po->getCurrentHealth() > 0,
+				"Downed operative is resuscitated at positive health");
 		}
 	}
 	catch (const std::exception& e)

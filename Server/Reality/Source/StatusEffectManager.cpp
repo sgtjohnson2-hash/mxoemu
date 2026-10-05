@@ -64,7 +64,7 @@ void StatusEffectManager::Update(float deltaTime)
             {
                 if (effect.type == EFFECT_VIRUS_DOT)
                 {
-                    target->takeDamage(effect.sourceGoId, static_cast<uint16>(effect.value), 0x280001C1); // Mock FX
+                    target->takeDamage(effect.sourceGoId, static_cast<uint16>(effect.value), 0x280006DF); // Authentic damage text FX
                     INFO_LOG(format("StatusEffect: VIRUS ticked for %1% damage on %2%") % effect.value % target->getHandle());
                     
                     // V18: Viral Contagion (Item 26)
@@ -89,10 +89,16 @@ void StatusEffectManager::Update(float deltaTime)
                 }
                 else if (effect.type == EFFECT_REGEN_HOT)
                 {
-                    uint16 newHealth = target->getCurrentHealth() + static_cast<uint16>(effect.value);
-                    if (newHealth > target->getMaximumHealth()) newHealth = target->getMaximumHealth();
-                    target->setCurrentHealth(newHealth);
-                    target->sendHealthUpdate();
+                    target->applyHeal(effect.sourceGoId, static_cast<uint16>(effect.value), 0x01000060);
+                }
+                else if (effect.type == EFFECT_DRAIN_CODE)
+                {
+                    uint16 drained = std::min<uint16>(target->getCurrentIS(), static_cast<uint16>(effect.value));
+                    target->spendIS(drained);
+                    PlayerObject* srcObj = sObjMgr.getGOPtrSafe(effect.sourceGoId);
+                    if (srcObj && !srcObj->isDead()) {
+                        srcObj->restoreIS(drained);
+                    }
                 }
                 else if (effect.type == EFFECT_THE_ANOMALY)
                 {
@@ -117,25 +123,31 @@ void StatusEffectManager::Update(float deltaTime)
         if (effect.durationRemaining <= 0.0f)
         {
             if (effect.type == EFFECT_LOGIC_BOMB && target) {
-                // Detonate
-                auto nearby = sSpatialGrid.GetClientsInRadius(target->getPosition().x, target->getPosition().z);
+                // Detonate target
+                target->takeDamage(effect.sourceGoId, static_cast<uint16>(effect.value * 2.0f), 0x280006DF);
+                // Detonate AoE to nearby entities
+                auto nearby = sSpatialGrid.GetClientsInRadius(target->getPosition().x, target->getPosition().z, 1500.0f);
                 for (GameClient* client : nearby) {
                     if (client->GetPlayerGoId() != effect.targetGoId) {
                         PlayerObject* po = sObjMgr.getGOPtrSafe(client->GetPlayerGoId());
                         if (po && !po->isDead()) {
-                            StatusEffect explosionEffect;
-                            explosionEffect.targetGoId = po->getGoId();
-                            explosionEffect.type = EFFECT_VIRUS_DOT;
-                            explosionEffect.durationRemaining = 15.0f;
-                            explosionEffect.tickTimer = 0.0f;
-                            explosionEffect.tickInterval = 1.0f;
-                            explosionEffect.value = effect.value; // Pass the damage along
-                            explosionEffect.sourceGoId = effect.sourceGoId;
-                            pendingEffects.push_back(explosionEffect);
+                            po->takeDamage(effect.sourceGoId, static_cast<uint16>(effect.value), 0x280006DF);
                         }
                     }
                 }
                 INFO_LOG(format("Logic Bomb detonated on %1%, spreading to nearby targets.") % target->getHandle());
+            }
+            else if (effect.type == EFFECT_BOLSTER_HEALTH && target) {
+                uint16 curMax = target->getMaximumHealth();
+                uint16 val = static_cast<uint16>(effect.value);
+                target->setMaximumHealth(curMax > val ? curMax - val : 100);
+                if (target->getCurrentHealth() > target->getMaximumHealth()) {
+                    target->setCurrentHealth(target->getMaximumHealth());
+                }
+                target->sendVitals(true);
+            }
+            else if (effect.type == EFFECT_FIREWALL && target) {
+                target->setFirewall(0);
             }
 
             if (std::next(it) == m_effects.end()) {
@@ -195,6 +207,13 @@ void StatusEffectManager::ApplyEffect(uint32 targetGoId, EffectType type, float 
 
     // V18: Firewall Resistance
     if (target && type == EFFECT_VIRUS_DOT) {
+        if (target->getFirewall() > 0) {
+            uint16 fw = target->getFirewall();
+            uint16 toAbsorb = static_cast<uint16>(value);
+            target->setFirewall(fw > toAbsorb ? fw - toAbsorb : 0);
+            target->getClient().QueueCommand(make_shared<SystemChatMsg>("{c:00FFFF}[FIREWALL] Hostile virus packet absorbed by firewall.{/c}"));
+            return;
+        }
         if (rand() % 100 < 15) {
             target->getClient().QueueCommand(make_shared<SystemChatMsg>("{c:00FF00}Firewall resisted hostile payload.{/c}"));
             return;
@@ -218,6 +237,13 @@ void StatusEffectManager::ApplyEffect(uint32 targetGoId, EffectType type, float 
     newEffect.sourceGoId = sourceGoId;
     
     m_effects.push_back(newEffect);
+
+    if (type == EFFECT_BOLSTER_HEALTH && target) {
+        target->setMaximumHealth(target->getMaximumHealth() + static_cast<uint16>(value));
+        target->applyHeal(sourceGoId, static_cast<uint16>(value), 0x01000060);
+    } else if (type == EFFECT_FIREWALL && target) {
+        target->setFirewall(static_cast<uint16>(value));
+    }
     INFO_LOG(format("Applied Status Effect %1% to %2%") % static_cast<int>(type) % targetGoId);
 }
 

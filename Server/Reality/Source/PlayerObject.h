@@ -105,6 +105,10 @@ public:
 	std::shared_ptr<class InventorySystem> getInventory();
 	
 	virtual void takeDamage(uint32 attackerGoId, uint16 damage, uint32 fxId = 0);
+	virtual void applyHeal(uint32 healerGoId, uint16 amount, uint32 fxId = 0x01000060);
+	virtual void revive(uint32 reviverGoId, float healthPct = 0.5f);
+	void setFirewall(uint16 amount) { m_firewallPoints = amount; }
+	uint16 getFirewall() const { return m_firewallPoints; }
 	void killPlayer(uint32 killerGoId = 0, uint32 fxId = 0x280001C2);
 	void sayChat(const std::string& msg);
 	void Emote(uint32 emoteId);
@@ -375,6 +379,7 @@ private:
     uint64 m_timeDilationExpires = 0;
 
     FightingStyle m_fightingStyle = FightingStyle::None;
+    uint16 m_firewallPoints = 0;
 
     std::unordered_set<uint32> m_knownEntities;
     mutable std::mutex m_knownMutex;
