@@ -93,6 +93,7 @@ bool GameServer::Start()
     
     // Now that DataLoader has finished loading blueprints, it's safe for CraftSys to copy them
     sCraftSys.LoadBlueprints();
+    sCombatSys.LoadAbilities(); // Synthesize moves for all retail abilities loaded by DataLoader
 
     sBotMgr.PopulateWorld();
     if (sConfig.GetBoolDefault("GameServer.EnableStartupStressTest", false)) {

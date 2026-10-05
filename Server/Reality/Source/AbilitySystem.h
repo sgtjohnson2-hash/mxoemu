@@ -47,6 +47,11 @@ struct AbilityTemplate
     uint32 executionFX;
     bool isBuff;
     uint32 buffTime;
+    uint32 valueFrom = 0;
+    uint32 valueTo = 0;
+    uint32 castAnimStart = 0;
+    uint32 castAnimMid = 0;
+    uint32 castAnimEnd = 0;
 };
 
 // Represents an ability loaded into memory

@@ -1170,6 +1170,140 @@ void PlayerObject::ParsePlayerCommand( string theCmd )
 		}
 		return;
 	}
+	else if (iequals(command, "loadout"))
+	{
+		string disc;
+		cmdStream >> disc;
+		if (cmdStream.fail() || disc.empty())
+		{
+			m_parent.QueueCommand(make_shared<SystemChatMsg>(
+				"{c:FF8800}Usage: &loadout <martial|kungfu|karate|aikido|hacker|coder|soldier|spy|default>{/c}"));
+			return;
+		}
+
+		if (!m_abilitySystem)
+		{
+			m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FF0000}[LOADOUT] Ability system unavailable.{/c}"));
+			return;
+		}
+
+		m_abilitySystem->clearLoadout();
+
+		struct LoadoutItem { uint16 id; uint16 level; uint16 slot; };
+		std::vector<LoadoutItem> items;
+		std::string discName = "Default";
+
+		if (iequals(disc, "kungfu") || iequals(disc, "martial"))
+		{
+			discName = "Kung Fu / Martial Arts";
+			items = {
+				{ 600, 1, 0 },  // CloseCombatTrainingAbility
+				{ 137, 1, 1 },  // MartialArtsInitiateAbility
+				{  17, 1, 2 },  // SelfDefenseAbility
+				{ 133, 1, 3 },  // KungFuAbility
+				{ 197, 1, 4 },  // Head Butt
+				{ 198, 1, 5 },  // Cheap Shot
+				{ 574, 1, 6 },  // KungFuDamageAbility
+			};
+			setFightingStyle(FightingStyle::KungFu);
+		}
+		else if (iequals(disc, "karate"))
+		{
+			discName = "Karate";
+			items = {
+				{ 600, 1, 0 },  // CloseCombatTrainingAbility
+				{ 132, 1, 1 },  // KarateAbility
+				{ 531, 1, 2 },  // KarateFocusAbility
+				{ 569, 1, 3 },  // KarateCombatTacticsAbility
+				{ 573, 1, 4 },  // KarateDamageAbility
+				{ 197, 1, 5 },  // Head Butt
+			};
+			setFightingStyle(FightingStyle::Karate);
+		}
+		else if (iequals(disc, "aikido"))
+		{
+			discName = "Aikido";
+			items = {
+				{ 600, 1, 0 },  // CloseCombatTrainingAbility
+				{ 101, 1, 1 },  // AikidoAbility
+				{ 296, 1, 2 },  // AikidoSpinClayPigeonAbility
+				{ 571, 1, 3 },  // AikidoCombatTacticsAbility
+				{ 572, 1, 4 },  // AikidoDamageAbility
+				{ 8597, 1, 5 }, // AikidoRedirectionAbility
+			};
+			setFightingStyle(FightingStyle::Aikido);
+		}
+		else if (iequals(disc, "hacker"))
+		{
+			discName = "Hacker (Viral Logic)";
+			items = {
+				{  57, 1, 0 },  // LogicBlast1Ability
+				{  58, 1, 1 },  // LogicBlast2Ability
+				{  60, 1, 2 },  // LogicBomb1Ability
+				{ 359, 1, 3 },  // CodeNukeAbility
+				{  68, 1, 4 },  // PersonalFirewall1Ability
+				{  43, 1, 5 },  // DisruptInputs1Ability
+				{  40, 1, 6 },  // CodeFreeze1Ability
+			};
+		}
+		else if (iequals(disc, "coder"))
+		{
+			discName = "Coder (RSI Repair & Support)";
+			items = {
+				{  77, 1, 0 },  // RestoreHealth1Ability
+				{  80, 1, 1 },  // RestoreHealth2Ability
+				{ 169, 1, 2 },  // EmergencyRepairs1Ability
+				{  56, 1, 3 },  // GroupRepairs1Ability
+				{  39, 1, 4 },  // BolsterHealth1Ability
+				{ 375, 1, 5 },  // ReviveRSIAbility
+			};
+		}
+		else if (iequals(disc, "soldier") || iequals(disc, "gunner"))
+		{
+			discName = "Soldier (Tactical Firearms)";
+			items = {
+				{ 129, 1, 0 },  // HandgunsAbility
+				{  14, 1, 1 },  // PowerShotAbility
+				{ 126, 1, 2 },  // PistolDisarmingShotAbility
+				{ 147, 1, 3 },  // RiflesAbility
+				{ 499, 1, 4 },  // PistolPointBlankAbility
+				{ 505, 1, 5 },  // SniperShotAbility
+			};
+		}
+		else if (iequals(disc, "spy"))
+		{
+			discName = "Spy (Stealth & Blades)";
+			items = {
+				{ 209, 1, 0 },  // StealthAbility
+				{ 146, 1, 1 },  // PoisonKnifeAbility
+				{ 283, 1, 2 },  // KnifeThrowerAbility
+				{ 293, 1, 3 },  // StealthCountermeasuresAbility
+			};
+		}
+		else
+		{
+			discName = "Default Operative";
+			items = {
+				{ 600, 1, 0 },
+				{ 137, 1, 1 },
+				{  17, 1, 2 },
+			};
+		}
+
+		for (const auto& itm : items)
+		{
+			m_abilitySystem->loadAbility(itm.id, itm.level, itm.slot);
+		}
+
+		m_abilitySystem->saveToDB();
+		m_abilitySystem->sendFullLoadout();
+
+		m_parent.QueueCommand(make_shared<SystemChatMsg>(
+			(format("{c:00FF00}[LOADOUT] Equipped %1% loadout (%2% abilities) on hotbar.{/c}")
+				% discName % items.size()).str()
+		));
+		return;
+	}
 	else if (iequals(command, "botdebug"))
 	{
 		string targetName;

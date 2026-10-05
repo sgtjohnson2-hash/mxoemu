@@ -175,100 +175,166 @@ bool DataLoader::LoadAbilities(const std::string& filePath)
             try {
                 uint16 id = (uint16)safe_stoul(tokens[0]);
             
-            AbilityTemplate templ;
-            templ.abilityId = id;
-            templ.goId = std::stol(tokens[1]);
-            templ.name = tokens[2];
-            templ.isCastable = (tokens[3] == "True" || tokens[3] == "true" || tokens[3] == "1");
-            templ.castTime = safe_stoul(tokens[4]);
-            templ.activationFX = safe_stoul(tokens[8]);
-            templ.isBuff = (tokens[11] == "True" || tokens[11] == "true" || tokens[11] == "1");
-            templ.buffTime = safe_stoul(tokens[12]);
-            templ.executionFX = safe_stoul(tokens[13]);
-            
-            // Default fallback stats
-            templ.description = "Authentic Ability";
-            templ.memoryCost = 10;
-            
-            // Basic Attacks (1) should not cost IS or have long cooldowns
-            if (templ.abilityId == 1) {
-                templ.innerStrengthCost = 0;
-                templ.cooldown = 0;
-            } else {
-                templ.innerStrengthCost = 15;
-                templ.cooldown = 2000;
-            }
+                AbilityTemplate templ;
+                templ.abilityId = id;
+                templ.goId = std::stol(tokens[1]);
+                templ.name = tokens[2];
+                templ.isCastable = (tokens[3] == "True" || tokens[3] == "true" || tokens[3] == "1");
+                
+                // tokens[4] is CastTime (seconds in CSV, convert to ms)
+                uint32 rawCast = safe_stoul(tokens[4]);
+                templ.castTime = (rawCast > 0 && rawCast <= 30) ? (rawCast * 1000) : rawCast;
+                
+                // tokens[5..7] are 32-bit hex animation tags
+                try {
+                    templ.castAnimStart = tokens[5].empty() ? 0 : std::stoul(tokens[5], nullptr, 16);
+                    templ.castAnimMid   = tokens[6].empty() ? 0 : std::stoul(tokens[6], nullptr, 16);
+                    templ.castAnimEnd   = tokens[7].empty() ? 0 : std::stoul(tokens[7], nullptr, 16);
+                } catch (...) {}
 
-            templ.maxLevel = 1;
-            // Identify Abilities based on authentic retail discipline taxonomy
-            if (templ.name.find("Virus") != std::string::npos || 
-                templ.name.find("Logic") != std::string::npos ||
-                templ.name.find("Nuke") != std::string::npos ||
-                templ.name.find("Firewall") != std::string::npos ||
-                templ.name.find("Freeze") != std::string::npos ||
-                templ.name.find("Bomb") != std::string::npos ||
-                templ.name.find("Phage") != std::string::npos ||
-                templ.name.find("Overheat") != std::string::npos ||
-                templ.name.find("Overload") != std::string::npos ||
-                templ.name.find("Disrupt") != std::string::npos ||
-                templ.name.find("Lag") != std::string::npos ||
-                templ.name.find("Hacker") != std::string::npos ||
-                templ.name.find("Drain") != std::string::npos ||
-                templ.name.find("DeflectVirus") != std::string::npos)
-            {
-                templ.discipline = DisciplineType::HACKER;
-            }
-            else if (templ.name.find("Repair") != std::string::npos ||
-                     templ.name.find("Heal") != std::string::npos ||
-                     templ.name.find("Restore") != std::string::npos ||
-                     templ.name.find("Revive") != std::string::npos ||
-                     templ.name.find("Bolster") != std::string::npos ||
-                     templ.name.find("Simulacra") != std::string::npos ||
-                     templ.name.find("Coder") != std::string::npos ||
-                     templ.name.find("Decoy") != std::string::npos ||
-                     templ.name.find("Tinkering") != std::string::npos ||
-                     templ.name.find("DeflectCode") != std::string::npos)
-            {
-                templ.discipline = DisciplineType::CODER;
-            }
-            else if (templ.name.find("KungFu") != std::string::npos ||
-                     templ.name.find("Karate") != std::string::npos ||
-                     templ.name.find("Aikido") != std::string::npos ||
-                     templ.name.find("MartialArts") != std::string::npos ||
-                     templ.name.find("CloseCombat") != std::string::npos ||
-                     templ.name.find("SelfDefense") != std::string::npos ||
-                     templ.name.find("Head Butt") != std::string::npos ||
-                     templ.name.find("Cheap Shot") != std::string::npos)
-            {
-                templ.discipline = DisciplineType::MARTIAL_ARTIST;
-            }
-            else if (templ.name.find("Soldier") != std::string::npos ||
-                     templ.name.find("Gunman") != std::string::npos ||
-                     templ.name.find("Gunner") != std::string::npos ||
-                     templ.name.find("Handgun") != std::string::npos ||
-                     templ.name.find("Pistol") != std::string::npos ||
-                     templ.name.find("Rifle") != std::string::npos ||
-                     templ.name.find("Sniper") != std::string::npos ||
-                     templ.name.find("Submachine") != std::string::npos ||
-                     templ.name.find("PowerShot") != std::string::npos)
-            {
-                templ.discipline = DisciplineType::GUNNER;
-            }
-            else if (templ.name.find("Spy") != std::string::npos ||
-                     templ.name.find("Stealth") != std::string::npos ||
-                     templ.name.find("Knife") != std::string::npos ||
-                     templ.name.find("Dagger") != std::string::npos ||
-                     templ.name.find("Conceal") != std::string::npos ||
-                     templ.name.find("Sabotage") != std::string::npos)
-            {
-                templ.discipline = DisciplineType::SPY;
-            }
-            else
-            {
-                templ.discipline = DisciplineType::NONE;
-            }
-            
-            m_abilities[id] = templ;
+                templ.activationFX = safe_stoul(tokens[8]);
+                templ.valueFrom = safe_stoul(tokens[9]);
+                templ.valueTo = safe_stoul(tokens[10]);
+                templ.isBuff = (tokens[11] == "True" || tokens[11] == "true" || tokens[11] == "1");
+                templ.buffTime = safe_stoul(tokens[12]);
+                templ.executionFX = safe_stoul(tokens[13]);
+                
+                // Fallback stats and scaling
+                templ.description = "Authentic Retail Ability";
+                templ.memoryCost = 10;
+                
+                // Basic Attacks (1) and core basics should not cost IS or have long cooldowns
+                if (templ.abilityId == 1 || templ.name.find("SelfDefense") != std::string::npos) {
+                    templ.innerStrengthCost = 0;
+                    templ.cooldown = 0;
+                } else {
+                    templ.innerStrengthCost = templ.valueFrom > 50 ? 25 : 15;
+                    templ.cooldown = 2000;
+                }
+
+                templ.maxLevel = 1;
+                // Comprehensive retail discipline taxonomy
+                if (templ.name.find("Virus") != std::string::npos || 
+                    templ.name.find("Logic") != std::string::npos ||
+                    templ.name.find("Nuke") != std::string::npos ||
+                    templ.name.find("Firewall") != std::string::npos ||
+                    templ.name.find("Freeze") != std::string::npos ||
+                    templ.name.find("Bomb") != std::string::npos ||
+                    templ.name.find("Phage") != std::string::npos ||
+                    templ.name.find("Overheat") != std::string::npos ||
+                    templ.name.find("Overload") != std::string::npos ||
+                    templ.name.find("Disrupt") != std::string::npos ||
+                    templ.name.find("Lag") != std::string::npos ||
+                    templ.name.find("Hacker") != std::string::npos ||
+                    templ.name.find("Drain") != std::string::npos ||
+                    templ.name.find("DeflectVirus") != std::string::npos ||
+                    templ.name.find("Bug") != std::string::npos ||
+                    templ.name.find("Crash") != std::string::npos ||
+                    templ.name.find("Cascade") != std::string::npos ||
+                    templ.name.find("Corrupt") != std::string::npos ||
+                    templ.name.find("Degrade") != std::string::npos ||
+                    templ.name.find("Scramble") != std::string::npos ||
+                    templ.name.find("Decryption") != std::string::npos ||
+                    templ.name.find("Injection") != std::string::npos)
+                {
+                    templ.discipline = DisciplineType::HACKER;
+                }
+                else if (templ.name.find("Repair") != std::string::npos ||
+                         templ.name.find("Heal") != std::string::npos ||
+                         templ.name.find("Restore") != std::string::npos ||
+                         templ.name.find("Revive") != std::string::npos ||
+                         templ.name.find("Bolster") != std::string::npos ||
+                         templ.name.find("Simulacra") != std::string::npos ||
+                         templ.name.find("Coder") != std::string::npos ||
+                         templ.name.find("Decoy") != std::string::npos ||
+                         templ.name.find("Tinkering") != std::string::npos ||
+                         templ.name.find("DeflectCode") != std::string::npos ||
+                         templ.name.find("Compile") != std::string::npos ||
+                         templ.name.find("Patch") != std::string::npos ||
+                         templ.name.find("Shield") != std::string::npos ||
+                         templ.name.find("Ward") != std::string::npos ||
+                         templ.name.find("Regrowth") != std::string::npos ||
+                         templ.name.find("Regen") != std::string::npos ||
+                         templ.name.find("Optimize") != std::string::npos)
+                {
+                    templ.discipline = DisciplineType::CODER;
+                }
+                else if (templ.name.find("KungFu") != std::string::npos ||
+                         templ.name.find("Karate") != std::string::npos ||
+                         templ.name.find("Aikido") != std::string::npos ||
+                         templ.name.find("MartialArts") != std::string::npos ||
+                         templ.name.find("CloseCombat") != std::string::npos ||
+                         templ.name.find("SelfDefense") != std::string::npos ||
+                         templ.name.find("Head Butt") != std::string::npos ||
+                         templ.name.find("Cheap Shot") != std::string::npos ||
+                         templ.name.find("Strike") != std::string::npos ||
+                         templ.name.find("Kick") != std::string::npos ||
+                         templ.name.find("Punch") != std::string::npos ||
+                         templ.name.find("Throw") != std::string::npos ||
+                         templ.name.find("Block") != std::string::npos ||
+                         templ.name.find("Sweep") != std::string::npos ||
+                         templ.name.find("Kata") != std::string::npos ||
+                         templ.name.find("Takedown") != std::string::npos ||
+                         templ.name.find("Jab") != std::string::npos ||
+                         templ.name.find("Uppercut") != std::string::npos ||
+                         templ.name.find("Palm") != std::string::npos ||
+                         templ.name.find("IronShirt") != std::string::npos ||
+                         templ.name.find("Tiger") != std::string::npos ||
+                         templ.name.find("Crane") != std::string::npos ||
+                         templ.name.find("Mantis") != std::string::npos ||
+                         templ.name.find("Dragon") != std::string::npos)
+                {
+                    templ.discipline = DisciplineType::MARTIAL_ARTIST;
+                }
+                else if (templ.name.find("Soldier") != std::string::npos ||
+                         templ.name.find("Gunman") != std::string::npos ||
+                         templ.name.find("Gunner") != std::string::npos ||
+                         templ.name.find("Handgun") != std::string::npos ||
+                         templ.name.find("Pistol") != std::string::npos ||
+                         templ.name.find("Rifle") != std::string::npos ||
+                         templ.name.find("Sniper") != std::string::npos ||
+                         templ.name.find("Submachine") != std::string::npos ||
+                         templ.name.find("PowerShot") != std::string::npos ||
+                         templ.name.find("Shotgun") != std::string::npos ||
+                         templ.name.find("PointBlank") != std::string::npos ||
+                         templ.name.find("PistolWhip") != std::string::npos ||
+                         templ.name.find("Disarm") != std::string::npos ||
+                         templ.name.find("Bullet") != std::string::npos ||
+                         templ.name.find("Ballistic") != std::string::npos ||
+                         templ.name.find("AimedShot") != std::string::npos ||
+                         templ.name.find("DoubleTap") != std::string::npos ||
+                         templ.name.find("Burst") != std::string::npos ||
+                         templ.name.find("Suppress") != std::string::npos)
+                {
+                    templ.discipline = DisciplineType::GUNNER;
+                }
+                else if (templ.name.find("Spy") != std::string::npos ||
+                         templ.name.find("Stealth") != std::string::npos ||
+                         templ.name.find("Knife") != std::string::npos ||
+                         templ.name.find("Dagger") != std::string::npos ||
+                         templ.name.find("Conceal") != std::string::npos ||
+                         templ.name.find("Sabotage") != std::string::npos ||
+                         templ.name.find("Backstab") != std::string::npos ||
+                         templ.name.find("Silent") != std::string::npos ||
+                         templ.name.find("Shadow") != std::string::npos ||
+                         templ.name.find("Cloak") != std::string::npos ||
+                         templ.name.find("Poison") != std::string::npos ||
+                         templ.name.find("Shuriken") != std::string::npos ||
+                         templ.name.find("Ambush") != std::string::npos ||
+                         templ.name.find("Garrote") != std::string::npos ||
+                         templ.name.find("Camouflage") != std::string::npos ||
+                         templ.name.find("Infiltrat") != std::string::npos ||
+                         templ.name.find("Sneak") != std::string::npos ||
+                         templ.name.find("Assassinate") != std::string::npos)
+                {
+                    templ.discipline = DisciplineType::SPY;
+                }
+                else
+                {
+                    templ.discipline = DisciplineType::OPERATIVE;
+                }
+                
+                m_abilities[id] = templ;
             } catch (const std::exception& e) {
                 WARNING_LOG(format("DataLoader: Failed to parse ability line: %1%") % e.what());
             }

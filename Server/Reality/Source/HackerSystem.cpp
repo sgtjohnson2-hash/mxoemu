@@ -169,8 +169,39 @@ bool HackerSystem::ExecuteHackerAbility(PlayerObject* caster, uint16 abilityId, 
     }
     else
     {
-        uint16 dmg = 35 + caster->getLevel() * 5;
-        target->takeDamage(caster->getGoId(), dmg, 0x280006DF);
+        uint32 hitFx = (templ && templ->executionFX != 0) ? templ->executionFX : 0x280006DF;
+        if (abilName.find("Bomb") != std::string::npos)
+        {
+            float bombDmg = (templ && templ->valueFrom > 0) ? float(templ->valueFrom) : (65.0f + caster->getLevel() * 5);
+            sStatusEffectManager.ApplyEffect(target->getGoId(), EFFECT_LOGIC_BOMB, 10.0f, 1.0f, bombDmg, caster->getGoId());
+        }
+        else if (abilName.find("Firewall") != std::string::npos)
+        {
+            float shield = (templ && templ->valueFrom > 0) ? float(templ->valueFrom) : 200.0f;
+            sStatusEffectManager.ApplyEffect(caster->getGoId(), EFFECT_FIREWALL, 45.0f, 1.0f, shield, caster->getGoId());
+        }
+        else if (abilName.find("Freeze") != std::string::npos || abilName.find("Crash") != std::string::npos)
+        {
+            sStatusEffectManager.ApplyEffect(target->getGoId(), EFFECT_CODE_FREEZE, 8.0f, 1.0f, 1.0f, caster->getGoId());
+        }
+        else if (abilName.find("Disrupt") != std::string::npos || abilName.find("Stun") != std::string::npos)
+        {
+            sStatusEffectManager.ApplyEffect(target->getGoId(), EFFECT_STUN, 2.5f, 0.5f, 1.0f, caster->getGoId());
+        }
+        else if (abilName.find("Lag") != std::string::npos)
+        {
+            sStatusEffectManager.ApplyEffect(target->getGoId(), EFFECT_UI_LAG, 10.0f, 1.0f, 1.0f, caster->getGoId());
+        }
+        else if (abilName.find("Nuke") != std::string::npos)
+        {
+            uint16 nukeDmg = (templ && templ->valueFrom > 0) ? (templ->valueFrom + caster->getLevel() * 6) : 220;
+            target->takeDamage(caster->getGoId(), nukeDmg, 0x110A0028);
+        }
+        else
+        {
+            uint16 dmg = (templ && templ->valueFrom > 0) ? (templ->valueFrom + caster->getLevel() * 3) : (35 + caster->getLevel() * 5);
+            target->takeDamage(caster->getGoId(), dmg, hitFx);
+        }
     }
 
     return true;
@@ -367,8 +398,37 @@ bool HackerSystem::ExecuteCoderAbility(PlayerObject* caster, uint16 abilityId, u
     }
     else
     {
-        uint16 healAmt = 50 + caster->getLevel() * 5;
-        target->applyHeal(caster->getGoId(), healAmt, 0x01000060);
+        if (abilName.find("Revive") != std::string::npos)
+        {
+            target->revive(caster->getGoId(), 0.5f);
+        }
+        else if (abilName.find("Group") != std::string::npos)
+        {
+            uint16 groupHeal = (templ && templ->valueFrom > 0) ? (templ->valueFrom + caster->getLevel() * 2) : 75;
+            target->applyHeal(caster->getGoId(), groupHeal, 0x01000060);
+            auto nearby = sSpatialGrid.GetClientsInRadius(caster->getPosition().x, caster->getPosition().z, 2000.0f);
+            for (GameClient* client : nearby)
+            {
+                if (client->GetPlayerGoId() != target->getGoId())
+                {
+                    PlayerObject* po = sObjMgr.getGOPtrSafe(client->GetPlayerGoId());
+                    if (po && !po->isDead())
+                    {
+                        po->applyHeal(caster->getGoId(), groupHeal, 0x01000060);
+                    }
+                }
+            }
+        }
+        else if (abilName.find("Bolster") != std::string::npos || abilName.find("Fortify") != std::string::npos)
+        {
+            float bonus = (templ && templ->valueFrom > 0) ? float(templ->valueFrom) : 100.0f;
+            sStatusEffectManager.ApplyEffect(target->getGoId(), EFFECT_BOLSTER_HEALTH, 300.0f, 1.0f, bonus, caster->getGoId());
+        }
+        else
+        {
+            uint16 healAmt = (templ && templ->valueFrom > 0) ? (templ->valueFrom + caster->getLevel() * 3) : (50 + caster->getLevel() * 5);
+            target->applyHeal(caster->getGoId(), healAmt, 0x01000060);
+        }
     }
 
     return true;
@@ -528,6 +588,23 @@ bool HackerSystem::ExecuteSoldierAbility(PlayerObject* caster, uint16 abilityId,
     else if (abilityId == 505) // SniperShotAbility
     {
         damage = 75;
+    }
+    else
+    {
+        damage = (templ && templ->valueFrom > 0) ? (templ->valueFrom + caster->getLevel() * 3) : (30 + caster->getLevel() * 4);
+        if (abilName.find("Sniper") != std::string::npos)
+        {
+            damage = static_cast<uint16>(damage * 2.2f);
+        }
+        else if (abilName.find("PointBlank") != std::string::npos)
+        {
+            damage = static_cast<uint16>(damage * 1.8f);
+        }
+        else if (abilName.find("Disarm") != std::string::npos)
+        {
+            sStatusEffectManager.ApplyEffect(target->getGoId(), EFFECT_DISARMED, 6.0f, 1.0f, 0.0f, caster->getGoId());
+            target->getClient().QueueCommand(std::make_shared<SystemChatMsg>("{c:FFAA00}[DISARMED] Your weapon has been disarmed!{/c}"));
+        }
     }
 
     if (caster->isDualWielding())
@@ -696,6 +773,38 @@ bool HackerSystem::ExecuteSpyAbility(PlayerObject* caster, uint16 abilityId, uin
         {
             caster->getClient().QueueCommand(std::make_shared<SystemChatMsg>(
                 (format("{c:AA00FF}[SPY] Thrown combat dagger impales %1%.{/c}") % target->getHandle()).str()));
+        }
+    }
+    else
+    {
+        if (abilName.find("Stealth") != std::string::npos || abilName.find("Cloak") != std::string::npos || abilName.find("Conceal") != std::string::npos)
+        {
+            caster->setStealth(true);
+            sStatusEffectManager.ApplyEffect(caster->getGoId(), EFFECT_STEALTH, 60.0f, 1.0f, 0.0f, caster->getGoId());
+            if (humanCaster)
+            {
+                caster->getClient().QueueCommand(std::make_shared<SystemChatMsg>(
+                    "{c:AA00FF}[SPY] Stealth cloak active. You are masked from sensory detection.{/c}"));
+            }
+        }
+        else
+        {
+            uint16 dmg = (templ && templ->valueFrom > 0) ? (templ->valueFrom + caster->getLevel() * 3) : (25 + caster->getLevel() * 4);
+            if (caster->isStealthed())
+            {
+                dmg = static_cast<uint16>(dmg * 1.75f);
+                caster->setStealth(false);
+                if (humanCaster)
+                {
+                    caster->getClient().QueueCommand(std::make_shared<SystemChatMsg>(
+                        "{c:FFFF00}[SPY] Ambush critical strike! Concealment broken.{/c}"));
+                }
+            }
+            target->takeDamage(caster->getGoId(), dmg, 0x280006DF);
+            if (abilName.find("Poison") != std::string::npos)
+            {
+                sStatusEffectManager.ApplyEffect(target->getGoId(), EFFECT_VIRUS_DOT, 10.0f, 1.0f, 8.0f, caster->getGoId());
+            }
         }
     }
 

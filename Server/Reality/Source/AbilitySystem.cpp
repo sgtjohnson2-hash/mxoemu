@@ -19,13 +19,14 @@
 #include "Log.h"
 #include "Timer.h"
 #include "MessageTypes.h"
+#include "DataLoader.h"
 #include <algorithm>
 
 AbilitySystem::AbilitySystem(PlayerObject* owner) : m_owner(owner), m_maxMemory(100)
 {
     if (m_owner)
     {
-        m_maxMemory = m_owner->getLevel() * 5 + 50;
+        m_maxMemory = m_owner->getLevel() * 10 + 100;
     }
 }
 
@@ -130,9 +131,10 @@ bool AbilitySystem::loadAbility(uint16 abilityId, uint16 level, uint16 slot)
     // Hardline proximity check (placeholder)
     // if (!m_owner->isNearHardline()) return false;
 
-    // For now, let's assume all abilities cost 10 memory
-    // In a full implementation, we'd look up the AbilityTemplate by ID
     uint16 memoryCost = 10;
+    const AbilityTemplate* t = sDataLoader.GetAbilityTemplate(abilityId);
+    if (t && t->memoryCost > 0)
+        memoryCost = t->memoryCost;
     
     if (getTotalMemoryUsed() + memoryCost > getMaxMemory())
     {

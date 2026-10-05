@@ -180,6 +180,83 @@ void CombatSystem::LoadAbilities()
 				m_moveTable[m.id] = m;
 			}
 		}
+
+		// Dynamic Move Table Synthesis: Synthesize CombatMove definitions for all abilities in DataLoader
+		for (const auto& kv : sDataLoader.GetAllAbilities())
+		{
+			const AbilityTemplate& templ = kv.second;
+			if (m_moveTable.find(templ.abilityId) != m_moveTable.end())
+				continue;
+
+			CombatMove m;
+			m.id = templ.abilityId;
+			m.name = templ.name;
+			m.isCost = templ.innerStrengthCost;
+			m.castTime = float(templ.castTime) / 1000.0f;
+			m.hitFxId = (templ.executionFX != 0) ? templ.executionFX : 0x280006DF;
+			m.specialFlags = 0;
+
+			// Base damage calculation from ValueFrom/ValueTo or level scaling
+			float baseMin = (templ.valueFrom > 0) ? float(templ.valueFrom) : (12.0f + float(templ.abilityId % 20));
+			float baseMax = (templ.valueTo > templ.valueFrom) ? float(templ.valueTo) : (baseMin * 1.4f);
+			m.minDmg = baseMin;
+			m.maxDmg = baseMax;
+			m.minDmgPerLvl = 1.0f + float(templ.abilityId % 5) * 0.2f;
+			m.maxDmgPerLvl = 1.5f + float(templ.abilityId % 5) * 0.3f;
+
+			switch (templ.discipline)
+			{
+				case DisciplineType::MARTIAL_ARTIST:
+					m.dmgType = DAMAGE_MELEE;
+					m.range = 300.0f; // 3m
+					m.interlockOnly = true;
+					m.freefireOnly = false;
+					break;
+				case DisciplineType::GUNNER:
+					m.dmgType = DAMAGE_RANGED;
+					if (templ.name.find("Sniper") != std::string::npos)
+						m.range = 8000.0f; // 80m
+					else if (templ.name.find("Rifle") != std::string::npos)
+						m.range = 4500.0f; // 45m
+					else if (templ.name.find("PointBlank") != std::string::npos || templ.name.find("Whip") != std::string::npos)
+						m.range = 400.0f; // 4m close quarters
+					else
+						m.range = 3500.0f; // 35m standard firearm
+					m.interlockOnly = false;
+					m.freefireOnly = true;
+					break;
+				case DisciplineType::HACKER:
+					m.dmgType = DAMAGE_VIRAL;
+					m.range = 3500.0f; // 35m
+					m.interlockOnly = false;
+					m.freefireOnly = true;
+					break;
+				case DisciplineType::CODER:
+					m.dmgType = DAMAGE_HACKING;
+					m.range = 2500.0f; // 25m
+					m.interlockOnly = false;
+					m.freefireOnly = true;
+					break;
+				case DisciplineType::SPY:
+					m.dmgType = DAMAGE_MELEE;
+					if (templ.name.find("Throw") != std::string::npos || templ.name.find("Shuriken") != std::string::npos)
+						m.range = 3000.0f; // 30m thrown
+					else
+						m.range = 400.0f; // 4m melee blade
+					m.interlockOnly = false;
+					m.freefireOnly = false;
+					break;
+				case DisciplineType::OPERATIVE:
+				default:
+					m.dmgType = DAMAGE_MELEE;
+					m.range = 300.0f;
+					m.interlockOnly = false;
+					m.freefireOnly = false;
+					break;
+			}
+			m_moveTable[m.id] = m;
+		}
+		INFO_LOG(format("CombatSystem: Loaded and synthesized %1% combat moves from retail definitions.") % m_moveTable.size());
 	}
 }
 
@@ -1360,8 +1437,36 @@ bool CombatSystem::UseAbility(PlayerObject* caster, uint16 abilityId, uint32 tar
     const CombatMove* move = GetMove(abilityId);
     if (!move)
     {
-        // H2: unknown ability ids used to be dropped silently. Bots keep that behaviour (their
-        // random template ids are not combat moves); humans get the basic strike plus feedback.
+        const AbilityTemplate* dynTempl = sDataLoader.GetAbilityTemplate(requestedAbilityId);
+        if (dynTempl)
+        {
+            CombatMove dynMove;
+            dynMove.id = dynTempl->abilityId;
+            dynMove.name = dynTempl->name;
+            dynMove.dmgType = (dynTempl->discipline == DisciplineType::GUNNER) ? DAMAGE_RANGED :
+                              (dynTempl->discipline == DisciplineType::HACKER) ? DAMAGE_VIRAL :
+                              (dynTempl->discipline == DisciplineType::CODER) ? DAMAGE_HACKING : DAMAGE_MELEE;
+            dynMove.minDmg = (dynTempl->valueFrom > 0) ? float(dynTempl->valueFrom) : 15.0f;
+            dynMove.maxDmg = (dynTempl->valueTo > dynTempl->valueFrom) ? float(dynTempl->valueTo) : (dynMove.minDmg * 1.4f);
+            dynMove.minDmgPerLvl = 1.0f;
+            dynMove.maxDmgPerLvl = 1.5f;
+            dynMove.isCost = dynTempl->innerStrengthCost;
+            dynMove.range = (dynTempl->discipline == DisciplineType::GUNNER || dynTempl->discipline == DisciplineType::HACKER) ? 3500.0f : 300.0f;
+            dynMove.hitFxId = dynTempl->executionFX != 0 ? dynTempl->executionFX : 0x280006DF;
+            dynMove.interlockOnly = (dynTempl->discipline == DisciplineType::MARTIAL_ARTIST);
+            dynMove.freefireOnly = (dynTempl->discipline == DisciplineType::GUNNER || dynTempl->discipline == DisciplineType::HACKER || dynTempl->discipline == DisciplineType::CODER);
+            dynMove.castTime = float(dynTempl->castTime) / 1000.0f;
+            dynMove.specialFlags = 0;
+            {
+                std::lock_guard<std::recursive_mutex> lock(m_combatMutex);
+                m_moveTable[dynMove.id] = dynMove;
+            }
+            move = GetMove(abilityId);
+        }
+    }
+    if (!move)
+    {
+        // Unknown ability ids fallback to basic strike for humans
         if (!humanCaster) return false;
 
         const CombatMove* fallback = DefaultMelee();

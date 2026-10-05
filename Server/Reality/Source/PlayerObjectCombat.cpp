@@ -34,6 +34,7 @@
 #include "DataLoader.h"
 #include "MissionSystem.h"
 #include "InventorySystem.h"
+#include "SpatialGrid.h"
 
 std::map<uint32, std::vector<LocationVector>> PlayerObject::s_hardlineCache;
 
@@ -562,6 +563,42 @@ void PlayerObject::RPC_HandleAbilityUse( ByteBuffer &srcCmd )
 		targetGoId = m_targetGoId;
 	if (targetGoId == 0 && m_ilPartner != 0)
 		targetGoId = m_ilPartner;
+
+	// Auto-acquire nearest hostile entity if no target is currently locked
+	if (targetGoId == 0)
+	{
+		auto nearby = sSpatialGrid.GetClientsInRadius(m_pos.x, m_pos.z, 1500.0f);
+		double closestDistSq = 1500.0 * 1500.0;
+		for (GameClient* gc : nearby)
+		{
+			if (!gc) continue;
+			uint32 otherGoId = gc->GetPlayerGoId();
+			if (otherGoId == 0 || otherGoId == m_goId) continue;
+			PlayerObject* po = sObjMgr.getGOPtrSafe(otherGoId);
+			if (po && !po->isDead() && (po->getFaction() == FACTION_MACHINES || po->getFactionName() == "Machines" || m_lastDojoBotGoId == otherGoId))
+			{
+				double dSq = m_pos.DistanceSq(po->getPosition());
+				if (dSq < closestDistSq)
+				{
+					closestDistSq = dSq;
+					targetGoId = otherGoId;
+				}
+			}
+		}
+		if (targetGoId != 0)
+		{
+			m_targetGoId = targetGoId;
+		}
+	}
+
+	if (targetGoId != 0)
+	{
+		PlayerObject* targetObj = sObjMgr.getGOPtrSafe(targetGoId);
+		if (targetObj)
+		{
+			ensureEntityKnown(targetObj);
+		}
+	}
 
 	INFO_LOG(format("(%1%) %2%:%3% UseAbility request ability %4% view %5% -> target go %6%")
 		% m_parent.Address() % m_handle % m_goId % abilityId % targetViewId % targetGoId);
