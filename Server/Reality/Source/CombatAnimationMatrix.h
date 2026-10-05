@@ -54,7 +54,8 @@ public:
         uint8 attackerTactic,
         FightingStyle defenderStyle,
         uint8 defenderTactic,
-        InterlockExchangeOutcome outcome
+        InterlockExchangeOutcome outcome,
+        uint16 moveId = 0
     );
 
     static uint16 GetDisarmAnimation(FightingStyle attackerStyle, uint32 weaponType);

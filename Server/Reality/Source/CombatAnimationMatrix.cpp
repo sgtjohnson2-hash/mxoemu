@@ -19,7 +19,8 @@ InterlockAnimPair CombatAnimationMatrix::GetAnimationPair(
     uint8 attackerTactic,
     FightingStyle defenderStyle,
     uint8 defenderTactic,
-    InterlockExchangeOutcome outcome
+    InterlockExchangeOutcome outcome,
+    uint16 moveId
 )
 {
     (void)defenderStyle;
@@ -151,6 +152,40 @@ InterlockAnimPair CombatAnimationMatrix::GetAnimationPair(
                 break;
         }
         return pair;
+    }
+
+    // Handle Special Combat Moves (Headbutt, Cheap Shot, Spin Clay Pigeon, Karate Focus Ki Blast)
+    if (moveId != 0 && (outcome == InterlockExchangeOutcome::NormalHit || outcome == InterlockExchangeOutcome::SpecialHit))
+    {
+        switch (moveId)
+        {
+            case 197: // Head Butt
+                pair.attackerAnimId = 0x1135; // S_A_SRSM_SLb_HeadButt_F100
+                pair.defenderAnimId = 0x1136; // V_D_SRSM_HeadButt_B100
+                pair.hitFxId = 0x280006DF;
+                pair.contactDelaySeconds = 0.45f;
+                return pair;
+            case 198: // Cheap Shot
+                pair.attackerAnimId = 0x112F; // S_A_SRSM_SLb_CheapShot
+                pair.defenderAnimId = 0x1131; // V_D_SRSM_CheapShot_B50
+                pair.hitFxId = 0x280006DF;
+                pair.contactDelaySeconds = 0.50f;
+                return pair;
+            case 296: // AikidoSpinClayPigeonAbility
+                pair.attackerAnimId = 0x01B4; // A_A_SRSM_ALb_SpinClayPigeon_F100
+                pair.defenderAnimId = 0x1132; // V_D_SRSM_CutthroatFootsweep
+                pair.hitFxId = 0x28000432;
+                pair.contactDelaySeconds = 0.70f;
+                return pair;
+            case 531: // KarateFocusAbility
+                pair.attackerAnimId = 0x04F3; // KP_A_SRSM_FtSwLF_KiPunchMF_F50
+                pair.defenderAnimId = 0x0AE7; // V_D_MRSM_BodyShot_F390
+                pair.hitFxId = 0x2800045A;    // FX_INTERLOCK_KI_AURA_IMPACT
+                pair.contactDelaySeconds = 0.73f;
+                return pair;
+            default:
+                break;
+        }
     }
 
     // Handle Style-Specific Clean Hits & Crushes (Power crushes Speed, Speed interrupts Grab, etc.)

@@ -135,6 +135,17 @@ void CombatSystem::LoadAbilities()
 			{ 573, "KarateDamageAbility",          20, 22.0f, 30.0f },
 			{ 574, "KungFuDamageAbility",          20, 20.0f, 28.0f },
 			{ 600, "CloseCombatTrainingAbility",    0, 10.0f, 14.0f },
+			{ 8449, "KungFuMasterAbility",         25, 22.0f, 32.0f },
+			{ 8450, "KungfuMasteryAbility",        25, 24.0f, 34.0f },
+			{ 8455, "KarateMasterAbility",         25, 24.0f, 34.0f },
+			{ 8456, "KarateExpertiseAbility",      20, 20.0f, 28.0f },
+			{ 8461, "AikidoMasteryAbility",        25, 22.0f, 32.0f },
+			{ 8462, "AikidoMasterAbility",         25, 24.0f, 34.0f },
+			{ 8597, "AikidoRedirectionAbility",    25, 20.0f, 30.0f },
+			{ 8602, "AikidoGrandmasterAbility",    30, 28.0f, 40.0f },
+			{ 8618, "KungFuGrandmasterAbility",    30, 28.0f, 40.0f },
+			{ 8623, "KungFuPerfectionAbility",     35, 32.0f, 45.0f },
+			{ 8725, "KarateGrandmasterAbility",    30, 28.0f, 40.0f },
 			// Soldier Moves
 			{ 14,  "PowerShotAbility",             15, 25.0f, 35.0f },
 			{ 126, "PistolDisarmingShotAbility",   20, 15.0f, 22.0f },
@@ -773,36 +784,32 @@ CombatSystem::AttackResult CombatSystem::ResolveAttack(PlayerObject* attacker, P
         return res; // Agent Dodge
     }
     
-    // Tiered Bot Combat AI: Adaptive learning for Elite Agents / Bosses, uniform random for street thugs
-    if (target->getClient().isBot()) {
-        uint8 newTactic = TACTIC_POWER;
-        bool isElite = (target->getHandle().find("Agent") != std::string::npos || target->getLevel() >= 30);
-        if (isElite) {
-            switch (attackerTactic) {
-                case TACTIC_POWER:     newTactic = TACTIC_RETALIATE; break; // Grab counters Power windup
-                case TACTIC_SPEED:     newTactic = TACTIC_POWER;     break; // Power crushes Speed
-                case TACTIC_RETALIATE: newTactic = TACTIC_SPEED;     break; // Speed interrupts Grab
-                case TACTIC_DEFENSE:   newTactic = TACTIC_RETALIATE; break; // Grab breaks Guard
-                default:               newTactic = (rand() % 2 == 0) ? TACTIC_POWER : TACTIC_SPEED; break;
-            }
-        } else {
-            // Street thugs choose randomly among the 4 core martial arts tactics
-            const uint8 thugTactics[] = { TACTIC_POWER, TACTIC_SPEED, TACTIC_RETALIATE, TACTIC_DEFENSE };
-            newTactic = thugTactics[rand() % 4];
-        }
-        SetTactic(target->getGoId(), newTactic);
-    }
-
-	//authentic hit resolution: attack roll vs defense roll (d100 + level accuracy)
+	// Authentic hit resolution: attack roll vs defense roll (d100 + level accuracy)
+	// Blocking in interlock actively absorbs the strike rather than evading it.
+	bool isMeleeBlock = (targetTactic == TACTIC_DEFENSE && !bypassBlock && attackerTactic != TACTIC_RETALIATE);
+	if (isMeleeBlock)
+	{
+		res.hit = true;
+		res.isBlocked = true;
+	}
+	else
 	{
 		int attackRoll = (rand() % 100) + int(attacker->getLevel()) * 2;
 		int defenseRoll = (rand() % 100) + int(target->getLevel()) * 2;
-		if (targetTactic == TACTIC_DEFENSE)
-			defenseRoll += 25; //a blocking defender is much harder to hit cleanly
 		if (attackRoll < defenseRoll)
 		{
 			res.hit = false;
-			if (!inInterlock) {
+			if (inInterlock) {
+				InterlockAnimPair pair = CombatAnimationMatrix::GetAnimationPair(
+					attacker->getFightingStyle(), attackerTactic,
+					target->getFightingStyle(), targetTactic,
+					InterlockExchangeOutcome::Dodged, move.id
+				);
+				sGame.AnnounceStateUpdateNear(attacker->getPosition().x, attacker->getPosition().z, 20000.0f,
+					std::make_shared<ExtendedAnimationMsg>(attacker->getGoId(), pair.attackerAnimId, 1));
+				sGame.AnnounceStateUpdateNear(target->getPosition().x, target->getPosition().z, 20000.0f,
+					std::make_shared<ExtendedAnimationMsg>(target->getGoId(), pair.defenderAnimId, 1));
+			} else {
 				sGame.AnnounceStateUpdateNear(target->getPosition().x, target->getPosition().z, 20000.0f, std::make_shared<EmoteMsg>(target->getGoId(), 41, 1));
 			}
 			if (!attacker->getClient().isBot()) {
@@ -935,13 +942,13 @@ CombatSystem::AttackResult CombatSystem::ResolveAttack(PlayerObject* attacker, P
         attacker->degradeEquippedWeapon(1);
     }
     
-    // Item 32: Takedown Moves
+    // Item 32: Takedown Moves & Interlock Animation Dispatch
     if (res.hit && target->getCurrentHealth() <= res.damageTaken) {
         if (inInterlock) {
             InterlockAnimPair pair = CombatAnimationMatrix::GetAnimationPair(
                 attacker->getFightingStyle(), attackerTactic,
                 target->getFightingStyle(), targetTactic,
-                InterlockExchangeOutcome::GuardBreak
+                InterlockExchangeOutcome::GuardBreak, move.id
             );
             sGame.AnnounceStateUpdateNear(attacker->getPosition().x, attacker->getPosition().z, 20000.0f,
                 std::make_shared<ExtendedAnimationMsg>(attacker->getGoId(), pair.attackerAnimId, 1));
@@ -959,28 +966,75 @@ CombatSystem::AttackResult CombatSystem::ResolveAttack(PlayerObject* attacker, P
             target->m_deathDelayKillerId = attacker->getGoId();
         }
     }
+    else if (res.hit && inInterlock && !(attackerTactic == targetTactic && attackerTactic != TACTIC_NORMAL)) {
+        InterlockExchangeOutcome hitOutcome = res.isBlocked ? InterlockExchangeOutcome::Blocked :
+            ((attackerTactic == TACTIC_POWER && targetTactic == TACTIC_SPEED) ? InterlockExchangeOutcome::StanceCrush :
+            ((attackerTactic == TACTIC_SPEED && targetTactic == TACTIC_RETALIATE) ? InterlockExchangeOutcome::FastInterrupt :
+            ((attackerTactic == TACTIC_RETALIATE && (targetTactic == TACTIC_DEFENSE || targetTactic == TACTIC_POWER)) ? InterlockExchangeOutcome::GuardBreak :
+            ((move.id == 197 || move.id == 198 || move.id == 296 || move.id == 531) ? InterlockExchangeOutcome::SpecialHit :
+            InterlockExchangeOutcome::NormalHit))));
+        InterlockAnimPair pair = CombatAnimationMatrix::GetAnimationPair(
+            attacker->getFightingStyle(), attackerTactic,
+            target->getFightingStyle(), targetTactic,
+            hitOutcome, move.id
+        );
+        sGame.AnnounceStateUpdateNear(attacker->getPosition().x, attacker->getPosition().z, 20000.0f,
+            std::make_shared<ExtendedAnimationMsg>(attacker->getGoId(), pair.attackerAnimId, 1));
+        sGame.AnnounceStateUpdateNear(target->getPosition().x, target->getPosition().z, 20000.0f,
+            std::make_shared<ExtendedAnimationMsg>(target->getGoId(), pair.defenderAnimId, 1));
+    }
 
 	if (res.hit)
 	{
-		// Synchronized combat animation subpacket trigger (0x280006DF)
-		uint32 hitFx = inInterlock ? 0x280006DF : ((move.hitFxId != 0 && move.hitFxId != 1234) ? move.hitFxId : 0x280006DF);
+		// Synchronized combat animation subpacket trigger
+		uint32 hitFx = 0x280006DF;
+		if (res.isBlocked) {
+			hitFx = 0x28000794; // FX_CHARACTER_BLOCK_INTERLOCK (authentic block spark)
+		} else if (inInterlock) {
+			if (bypassBlock || attackerTactic == TACTIC_RETALIATE) {
+				hitFx = (attacker->getFightingStyle() == FightingStyle::Karate) ? 0x2800045A : 0x28000432;
+			} else if (move.id == 531) {
+				hitFx = 0x2800045A; // Ki aura impact
+			} else if (move.id == 296) {
+				hitFx = 0x28000432; // Throw impact
+			} else {
+				hitFx = 0x280006DF;
+			}
+		} else if (move.hitFxId != 0 && move.hitFxId != 1234) {
+			hitFx = move.hitFxId;
+		}
 		target->takeDamage(attacker->getGoId(), res.damageTaken, hitFx);
         target->recordIncomingAttack(move.id);
 		if (!inInterlock) {
 			sGame.AnnounceStateUpdateNear(target->getPosition().x, target->getPosition().z, 20000.0f, std::make_shared<EmoteMsg>(target->getGoId(), 50, 1));
 		}
 
-		if (!attacker->getClient().isBot()) {
-			attacker->getClient().QueueCommand(std::make_shared<SystemChatMsg>(
-				(format("{c:00FF00}[COMBAT] You hit %1% for %2% damage with %3%!{/c}")
-				 % target->getHandle() % res.damageTaken % move.name).str()
-			));
-		}
-		if (!target->getClient().isBot()) {
-			target->getClient().QueueCommand(std::make_shared<SystemChatMsg>(
-				(format("{c:FF4444}[COMBAT] %1% hits you for %2% damage with %3%! (%4%/%5% HP){/c}")
-				 % attacker->getHandle() % res.damageTaken % move.name % target->getCurrentHealth() % target->getMaximumHealth()).str()
-			));
+		if (res.isBlocked) {
+			if (!attacker->getClient().isBot()) {
+				attacker->getClient().QueueCommand(std::make_shared<SystemChatMsg>(
+					(format("{c:FFFF00}[COMBAT] %1% blocked your %2%! (%3% damage, -50%%){/c}")
+					 % target->getHandle() % move.name % res.damageTaken).str()
+				));
+			}
+			if (!target->getClient().isBot()) {
+				target->getClient().QueueCommand(std::make_shared<SystemChatMsg>(
+					(format("{c:00FFFF}[COMBAT] You blocked %1%'s %2%! (%3% damage taken, +5 IS){/c}")
+					 % attacker->getHandle() % move.name % res.damageTaken).str()
+				));
+			}
+		} else {
+			if (!attacker->getClient().isBot()) {
+				attacker->getClient().QueueCommand(std::make_shared<SystemChatMsg>(
+					(format("{c:00FF00}[COMBAT] You hit %1% for %2% damage with %3%!{/c}")
+					 % target->getHandle() % res.damageTaken % move.name).str()
+				));
+			}
+			if (!target->getClient().isBot()) {
+				target->getClient().QueueCommand(std::make_shared<SystemChatMsg>(
+					(format("{c:FF4444}[COMBAT] %1% hits you for %2% damage with %3%! (%4%/%5% HP){/c}")
+					 % attacker->getHandle() % res.damageTaken % move.name % target->getCurrentHealth() % target->getMaximumHealth()).str()
+				));
+			}
 		}
 
 		// H1: the kill reward is paid by PlayerObject::die(), which runs for every death
@@ -1005,6 +1059,42 @@ bool CombatSystem::RunInterlockRound(InterlockSession &session)
 
 	const CombatMove* moveA = session.queuedMoveA ? GetMove(session.queuedMoveA) : DefaultMelee();
 	const CombatMove* moveB = session.queuedMoveB ? GetMove(session.queuedMoveB) : DefaultMelee();
+
+	// Bot combat AI: update round tactics
+	if (pA->getClient().isBot()) {
+		uint8 newTac = TACTIC_POWER;
+		bool isElite = (pA->getHandle().find("Agent") != std::string::npos || pA->getLevel() >= 30);
+		if (isElite) {
+			switch (session.tacticB) {
+				case TACTIC_POWER:     newTac = TACTIC_RETALIATE; break;
+				case TACTIC_SPEED:     newTac = TACTIC_POWER;     break;
+				case TACTIC_RETALIATE: newTac = TACTIC_SPEED;     break;
+				case TACTIC_DEFENSE:   newTac = TACTIC_RETALIATE; break;
+				default:               newTac = (rand() % 2 == 0) ? TACTIC_POWER : TACTIC_SPEED; break;
+			}
+		} else {
+			const uint8 thugTactics[] = { TACTIC_POWER, TACTIC_SPEED, TACTIC_RETALIATE, TACTIC_DEFENSE };
+			newTac = thugTactics[rand() % 4];
+		}
+		session.tacticA = newTac;
+	}
+	if (pB->getClient().isBot()) {
+		uint8 newTac = TACTIC_POWER;
+		bool isElite = (pB->getHandle().find("Agent") != std::string::npos || pB->getLevel() >= 30);
+		if (isElite) {
+			switch (session.tacticA) {
+				case TACTIC_POWER:     newTac = TACTIC_RETALIATE; break;
+				case TACTIC_SPEED:     newTac = TACTIC_POWER;     break;
+				case TACTIC_RETALIATE: newTac = TACTIC_SPEED;     break;
+				case TACTIC_DEFENSE:   newTac = TACTIC_RETALIATE; break;
+				default:               newTac = (rand() % 2 == 0) ? TACTIC_POWER : TACTIC_SPEED; break;
+			}
+		} else {
+			const uint8 thugTactics[] = { TACTIC_POWER, TACTIC_SPEED, TACTIC_RETALIATE, TACTIC_DEFENSE };
+			newTac = thugTactics[rand() % 4];
+		}
+		session.tacticB = newTac;
+	}
 
 	uint8 tacA = session.tacticA;
 	uint8 tacB = session.tacticB;
@@ -1040,64 +1130,51 @@ bool CombatSystem::RunInterlockRound(InterlockSession &session)
 	FightingStyle styleA = pA->getFightingStyle();
 	FightingStyle styleB = pB->getFightingStyle();
 
-	// Dispatch atomic 16-bit skeletal animation tracks (opcode 0x29) for attacker & defender
+	// Tactical banner announcements
 	if (aCrushesB) {
-		InterlockAnimPair pair = CombatAnimationMatrix::GetAnimationPair(styleA, tacA, styleB, tacB, InterlockExchangeOutcome::StanceCrush);
-		sGame.AnnounceStateUpdateNear(pA->getPosition().x, pA->getPosition().z, 20000.0f, std::make_shared<ExtendedAnimationMsg>(pA->getGoId(), pair.attackerAnimId, 1));
-		sGame.AnnounceStateUpdateNear(pB->getPosition().x, pB->getPosition().z, 20000.0f, std::make_shared<ExtendedAnimationMsg>(pB->getGoId(), pair.defenderAnimId, 1));
 		if (!pA->getClient().isBot())
 			pA->getClient().QueueCommand(std::make_shared<SystemChatMsg>((format("{c:00FF00}[MARTIAL ARTS] Power crushes Speed! Frame advantage secured against %1%! (+35%% Damage){/c}") % pB->getHandle()).str()));
 		if (!pB->getClient().isBot())
 			pB->getClient().QueueCommand(std::make_shared<SystemChatMsg>((format("{c:FF4444}[MARTIAL ARTS] %1%'s Power stance crushed your Speed attack!{/c}") % pA->getHandle()).str()));
 	} else if (bCrushesA) {
-		InterlockAnimPair pair = CombatAnimationMatrix::GetAnimationPair(styleB, tacB, styleA, tacA, InterlockExchangeOutcome::StanceCrush);
-		sGame.AnnounceStateUpdateNear(pB->getPosition().x, pB->getPosition().z, 20000.0f, std::make_shared<ExtendedAnimationMsg>(pB->getGoId(), pair.attackerAnimId, 1));
-		sGame.AnnounceStateUpdateNear(pA->getPosition().x, pA->getPosition().z, 20000.0f, std::make_shared<ExtendedAnimationMsg>(pA->getGoId(), pair.defenderAnimId, 1));
 		if (!pB->getClient().isBot())
 			pB->getClient().QueueCommand(std::make_shared<SystemChatMsg>((format("{c:00FF00}[MARTIAL ARTS] Power crushes Speed! Frame advantage secured against %1%! (+35%% Damage){/c}") % pA->getHandle()).str()));
 		if (!pA->getClient().isBot())
 			pA->getClient().QueueCommand(std::make_shared<SystemChatMsg>((format("{c:FF4444}[MARTIAL ARTS] %1%'s Power stance crushed your Speed attack!{/c}") % pB->getHandle()).str()));
 	} else if (aInterruptsB) {
-		InterlockAnimPair pair = CombatAnimationMatrix::GetAnimationPair(styleA, tacA, styleB, tacB, InterlockExchangeOutcome::FastInterrupt);
-		sGame.AnnounceStateUpdateNear(pA->getPosition().x, pA->getPosition().z, 20000.0f, std::make_shared<ExtendedAnimationMsg>(pA->getGoId(), pair.attackerAnimId, 1));
-		sGame.AnnounceStateUpdateNear(pB->getPosition().x, pB->getPosition().z, 20000.0f, std::make_shared<ExtendedAnimationMsg>(pB->getGoId(), pair.defenderAnimId, 1));
 		if (!pA->getClient().isBot())
 			pA->getClient().QueueCommand(std::make_shared<SystemChatMsg>((format("{c:00FF00}[MARTIAL ARTS] Speed interrupts Grab! Fast jab interrupted %1%'s grab maneuver! (+35%% Damage){/c}") % pB->getHandle()).str()));
 		if (!pB->getClient().isBot())
 			pB->getClient().QueueCommand(std::make_shared<SystemChatMsg>((format("{c:FF4444}[MARTIAL ARTS] %1%'s Speed strike interrupted your Grab maneuver!{/c}") % pA->getHandle()).str()));
 	} else if (bInterruptsA) {
-		InterlockAnimPair pair = CombatAnimationMatrix::GetAnimationPair(styleB, tacB, styleA, tacA, InterlockExchangeOutcome::FastInterrupt);
-		sGame.AnnounceStateUpdateNear(pB->getPosition().x, pB->getPosition().z, 20000.0f, std::make_shared<ExtendedAnimationMsg>(pB->getGoId(), pair.attackerAnimId, 1));
-		sGame.AnnounceStateUpdateNear(pA->getPosition().x, pA->getPosition().z, 20000.0f, std::make_shared<ExtendedAnimationMsg>(pA->getGoId(), pair.defenderAnimId, 1));
 		if (!pB->getClient().isBot())
 			pB->getClient().QueueCommand(std::make_shared<SystemChatMsg>((format("{c:00FF00}[MARTIAL ARTS] Speed interrupts Grab! Fast jab interrupted %1%'s grab maneuver! (+35%% Damage){/c}") % pA->getHandle()).str()));
 		if (!pA->getClient().isBot())
 			pA->getClient().QueueCommand(std::make_shared<SystemChatMsg>((format("{c:FF4444}[MARTIAL ARTS] %1%'s Speed strike interrupted your Grab maneuver!{/c}") % pB->getHandle()).str()));
 	} else if (aBreaksGuardB || aBreaksPowerB) {
-		InterlockAnimPair pair = CombatAnimationMatrix::GetAnimationPair(styleA, tacA, styleB, tacB, InterlockExchangeOutcome::GuardBreak);
-		sGame.AnnounceStateUpdateNear(pA->getPosition().x, pA->getPosition().z, 20000.0f, std::make_shared<ExtendedAnimationMsg>(pA->getGoId(), pair.attackerAnimId, 1));
-		sGame.AnnounceStateUpdateNear(pB->getPosition().x, pB->getPosition().z, 20000.0f, std::make_shared<ExtendedAnimationMsg>(pB->getGoId(), pair.defenderAnimId, 1));
 		const char* targetStance = aBreaksGuardB ? "Guard" : "Power";
 		if (!pA->getClient().isBot())
 			pA->getClient().QueueCommand(std::make_shared<SystemChatMsg>((format("{c:00FF00}[MARTIAL ARTS] Grab breaks %1%! Unblockable throw executed on %2%! (+%3%%% Damage){/c}") % targetStance % pB->getHandle() % (aBreaksGuardB ? 40 : 35)).str()));
 		if (!pB->getClient().isBot())
 			pB->getClient().QueueCommand(std::make_shared<SystemChatMsg>((format("{c:FF0000}[MARTIAL ARTS] Your %1% was broken by %2%'s Grab! Unblockable throw!{/c}") % targetStance % pA->getHandle()).str()));
 	} else if (bBreaksGuardA || bBreaksPowerA) {
-		InterlockAnimPair pair = CombatAnimationMatrix::GetAnimationPair(styleB, tacB, styleA, tacA, InterlockExchangeOutcome::GuardBreak);
-		sGame.AnnounceStateUpdateNear(pB->getPosition().x, pB->getPosition().z, 20000.0f, std::make_shared<ExtendedAnimationMsg>(pB->getGoId(), pair.attackerAnimId, 1));
-		sGame.AnnounceStateUpdateNear(pA->getPosition().x, pA->getPosition().z, 20000.0f, std::make_shared<ExtendedAnimationMsg>(pA->getGoId(), pair.defenderAnimId, 1));
 		const char* targetStance = bBreaksGuardA ? "Guard" : "Power";
 		if (!pB->getClient().isBot())
 			pB->getClient().QueueCommand(std::make_shared<SystemChatMsg>((format("{c:00FF00}[MARTIAL ARTS] Grab breaks %1%! Unblockable throw executed on %2%! (+%3%%% Damage){/c}") % targetStance % pA->getHandle() % (bBreaksGuardA ? 40 : 35)).str()));
 		if (!pA->getClient().isBot())
 			pA->getClient().QueueCommand(std::make_shared<SystemChatMsg>((format("{c:FF0000}[MARTIAL ARTS] Your %1% was broken by %2%'s Grab! Unblockable throw!{/c}") % targetStance % pB->getHandle()).str()));
 	} else if (isClash) {
-		InterlockAnimPair pair = CombatAnimationMatrix::GetAnimationPair(styleA, tacA, styleB, tacB, InterlockExchangeOutcome::Clash);
+		// Both combatants selected identical stance - dispatch clash rebound animations
+		InterlockAnimPair pair = CombatAnimationMatrix::GetAnimationPair(styleA, tacA, styleB, tacB, InterlockExchangeOutcome::Clash, moveA ? moveA->id : 0);
 		sGame.AnnounceStateUpdateNear(pA->getPosition().x, pA->getPosition().z, 20000.0f, std::make_shared<ExtendedAnimationMsg>(pA->getGoId(), pair.attackerAnimId, 1));
 		sGame.AnnounceStateUpdateNear(pB->getPosition().x, pB->getPosition().z, 20000.0f, std::make_shared<ExtendedAnimationMsg>(pB->getGoId(), pair.defenderAnimId, 1));
 		std::string clashName = (tacA == TACTIC_POWER) ? "Power" : (tacA == TACTIC_SPEED ? "Speed" : (tacA == TACTIC_RETALIATE ? "Grab" : "Guard"));
 		if (!pA->getClient().isBot()) pA->getClient().QueueCommand(std::make_shared<SystemChatMsg>((format("{c:FFFF00}[MARTIAL ARTS] Stance Clash! Both combatants chose %1%. Glancing exchange.{/c}") % clashName).str()));
 		if (!pB->getClient().isBot()) pB->getClient().QueueCommand(std::make_shared<SystemChatMsg>((format("{c:FFFF00}[MARTIAL ARTS] Stance Clash! Both combatants chose %1%. Glancing exchange.{/c}") % clashName).str()));
+
+		// Both combatants exchange glancing blows at 0.90x damage (TacticModifier handles 0.90x)
+		if (moveA) ResolveAttack(pA, pB, *moveA, tacA, tacB, true, false);
+		if (moveB && !pB->isDead()) ResolveAttack(pB, pA, *moveB, tacB, tacA, true, false);
 	}
 
 	// Execution & Interrupt Resolution:
@@ -1110,47 +1187,27 @@ bool CombatSystem::RunInterlockRound(InterlockSession &session)
 	} else if (aCrushesB) {
 		// A's Power crushes B's Speed with frame advantage
 		if (moveA) ResolveAttack(pA, pB, *moveA, tacA, tacB, true, false);
-		if (moveB && !pB->isDead()) {
-			ResolveAttack(pB, pA, *moveB, tacB, tacA, true, false);
-		}
 	} else if (bCrushesA) {
 		// B's Power crushes A's Speed with frame advantage
 		if (moveB) ResolveAttack(pB, pA, *moveB, tacB, tacA, true, false);
-		if (moveA && !pA->isDead()) {
-			ResolveAttack(pA, pB, *moveA, tacA, tacB, true, false);
-		}
-	} else if (aBreaksPowerB) {
-		// A's Grab counters B's heavy Power attack with an unblockable throw. B's power strike is cancelled!
+	} else if (aBreaksPowerB || aBreaksGuardB) {
+		// A's Grab counters B's heavy Power attack or breaks Guard with an unblockable throw.
 		if (moveA) ResolveAttack(pA, pB, *moveA, tacA, tacB, true, true);
-	} else if (bBreaksPowerA) {
-		// B's Grab counters A's heavy Power attack with an unblockable throw. A's power strike is cancelled!
+	} else if (bBreaksPowerA || bBreaksGuardA) {
+		// B's Grab counters A's heavy Power attack or breaks Guard with an unblockable throw.
 		if (moveB) ResolveAttack(pB, pA, *moveB, tacB, tacA, true, true);
-	} else if (aBreaksGuardB) {
-		// A's Grab breaks B's Guard with an unblockable throw. B was blocking and gets thrown.
-		if (moveA) ResolveAttack(pA, pB, *moveA, tacA, tacB, true, true);
-	} else if (bBreaksGuardA) {
-		// B's Grab breaks A's Guard with an unblockable throw. A was blocking and gets thrown.
-		if (moveB) ResolveAttack(pB, pA, *moveB, tacB, tacA, true, true);
-	} else {
+	} else if (!isClash) {
 		// Standard exchange: defenders only strike if an active special is queued
 		bool specialFromA = (session.queuedMoveA != 0);
 		if (tacA != TACTIC_DEFENSE || specialFromA) {
 			if (moveA) {
-				InterlockExchangeOutcome outcome = (tacB == TACTIC_DEFENSE) ? InterlockExchangeOutcome::Blocked : InterlockExchangeOutcome::NormalHit;
-				InterlockAnimPair pair = CombatAnimationMatrix::GetAnimationPair(styleA, tacA, styleB, tacB, outcome);
-				sGame.AnnounceStateUpdateNear(pA->getPosition().x, pA->getPosition().z, 20000.0f, std::make_shared<ExtendedAnimationMsg>(pA->getGoId(), pair.attackerAnimId, 1));
-				sGame.AnnounceStateUpdateNear(pB->getPosition().x, pB->getPosition().z, 20000.0f, std::make_shared<ExtendedAnimationMsg>(pB->getGoId(), pair.defenderAnimId, 1));
 				ResolveAttack(pA, pB, *moveA, tacA, tacB, true, false);
 			}
 		}
-		if (!specialFromA && !pB->isDead()) {
+		if (!pB->isDead()) {
 			bool specialFromB = (session.queuedMoveB != 0);
 			if (tacB != TACTIC_DEFENSE || specialFromB) {
 				if (moveB) {
-					InterlockExchangeOutcome outcome = (tacA == TACTIC_DEFENSE) ? InterlockExchangeOutcome::Blocked : InterlockExchangeOutcome::NormalHit;
-					InterlockAnimPair pair = CombatAnimationMatrix::GetAnimationPair(styleB, tacB, styleA, tacA, outcome);
-					sGame.AnnounceStateUpdateNear(pB->getPosition().x, pB->getPosition().z, 20000.0f, std::make_shared<ExtendedAnimationMsg>(pB->getGoId(), pair.attackerAnimId, 1));
-					sGame.AnnounceStateUpdateNear(pA->getPosition().x, pA->getPosition().z, 20000.0f, std::make_shared<ExtendedAnimationMsg>(pA->getGoId(), pair.defenderAnimId, 1));
 					ResolveAttack(pB, pA, *moveB, tacB, tacA, true, false);
 				}
 			}
@@ -1250,6 +1307,19 @@ bool CombatSystem::UseAbility(PlayerObject* caster, uint16 abilityId, uint32 tar
         {
             return sHackerSystem.ExecuteSpyAbility(caster, requestedAbilityId, targetGoId, abilTempl);
         }
+        else if (abilTempl->discipline == DisciplineType::MARTIAL_ARTIST)
+        {
+            if (abilTempl->name.find("KungFu") != std::string::npos)
+                caster->setFightingStyle(FightingStyle::KungFu);
+            else if (abilTempl->name.find("Karate") != std::string::npos)
+                caster->setFightingStyle(FightingStyle::Karate);
+            else if (abilTempl->name.find("Aikido") != std::string::npos)
+                caster->setFightingStyle(FightingStyle::Aikido);
+            else if (abilTempl->name.find("SelfDefense") != std::string::npos ||
+                     abilTempl->name.find("CloseCombat") != std::string::npos ||
+                     abilTempl->name.find("MartialArts") != std::string::npos)
+                caster->setFightingStyle(FightingStyle::None);
+        }
     }
 
     const CombatMove* move = GetMove(abilityId);
@@ -1267,6 +1337,20 @@ bool CombatSystem::UseAbility(PlayerObject* caster, uint16 abilityId, uint32 tar
             (format("{c:FFFF00}[COMBAT] Ability %1% is not implemented on this server yet - using basic strike.{/c}") % requestedAbilityId).str()));
         move = fallback;
         abilityId = fallback->id;
+    }
+
+    if (move && !abilTempl)
+    {
+        if (move->name.find("KungFu") != std::string::npos)
+            caster->setFightingStyle(FightingStyle::KungFu);
+        else if (move->name.find("Karate") != std::string::npos)
+            caster->setFightingStyle(FightingStyle::Karate);
+        else if (move->name.find("Aikido") != std::string::npos)
+            caster->setFightingStyle(FightingStyle::Aikido);
+        else if (move->name.find("SelfDefense") != std::string::npos ||
+                 move->name.find("CloseCombat") != std::string::npos ||
+                 move->name.find("MartialArts") != std::string::npos)
+            caster->setFightingStyle(FightingStyle::None);
     }
 
     INFO_LOG(format("UseAbility: %1%:%2% uses %3% (requested id %4%, move id %5%) on target go %6% [interlocked=%7% castTime=%8%]")

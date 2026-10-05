@@ -557,13 +557,73 @@ int RunCombatTestSuite()
 			uint16 disarmPistol = CombatAnimationMatrix::GetDisarmAnimation(FightingStyle::KungFu, 0);
 			check(disarmPistol == 0x0E3E, "Kung Fu pistol disarm animation is 0x0E3E");
 
-			// 6. FightingStyle switching
-			human.po->setFightingStyle(FightingStyle::Karate);
-			check(human.po->getFightingStyle() == FightingStyle::Karate, "PlayerObject fighting style sets to Karate");
-			human.po->setFightingStyle(FightingStyle::KungFu);
-			check(human.po->getFightingStyle() == FightingStyle::KungFu, "PlayerObject fighting style sets to Kung Fu");
-			human.po->setFightingStyle(FightingStyle::None);
-			check(human.po->getFightingStyle() == FightingStyle::None, "PlayerObject fighting style resets to Self-Defense");
+			// 6. Blocked animation pairs & FX (all 4 disciplines)
+			InterlockAnimPair kfBlock = CombatAnimationMatrix::GetAnimationPair(FightingStyle::KungFu, TACTIC_POWER, FightingStyle::KungFu, TACTIC_DEFENSE, InterlockExchangeOutcome::Blocked);
+			check(kfBlock.attackerAnimId == 0x0D5C && kfBlock.defenderAnimId == 0x0CDB && kfBlock.hitFxId == 0x28000794,
+				"Kung Fu Blocked paired animation is 0x0D5C vs 0x0CDB with block spark FX 0x28000794");
+			InterlockAnimPair karateBlock = CombatAnimationMatrix::GetAnimationPair(FightingStyle::Karate, TACTIC_POWER, FightingStyle::Karate, TACTIC_DEFENSE, InterlockExchangeOutcome::Blocked);
+			check(karateBlock.attackerAnimId == 0x04F4 && karateBlock.defenderAnimId == 0x0472 && karateBlock.hitFxId == 0x28000794,
+				"Karate Blocked paired animation is 0x04F4 vs 0x0472 with block spark FX 0x28000794");
+			InterlockAnimPair aikidoBlock = CombatAnimationMatrix::GetAnimationPair(FightingStyle::Aikido, TACTIC_POWER, FightingStyle::Aikido, TACTIC_DEFENSE, InterlockExchangeOutcome::Blocked);
+			check(aikidoBlock.attackerAnimId == 0x00FC && aikidoBlock.defenderAnimId == 0x0114 && aikidoBlock.hitFxId == 0x28000794,
+				"Aikido Blocked paired animation is 0x00FC vs 0x0114 with block spark FX 0x28000794");
+			InterlockAnimPair sdBlock = CombatAnimationMatrix::GetAnimationPair(FightingStyle::None, TACTIC_POWER, FightingStyle::None, TACTIC_DEFENSE, InterlockExchangeOutcome::Blocked);
+			check(sdBlock.attackerAnimId == 0x08AD && sdBlock.defenderAnimId == 0x08BE && sdBlock.hitFxId == 0x28000794,
+				"Self-Defense Blocked paired animation is 0x08AD vs 0x08BE with block spark FX 0x28000794");
+
+			// 7. Dodged animation pairs (all 4 disciplines)
+			InterlockAnimPair kfDodge = CombatAnimationMatrix::GetAnimationPair(FightingStyle::KungFu, TACTIC_POWER, FightingStyle::KungFu, TACTIC_NORMAL, InterlockExchangeOutcome::Dodged);
+			check(kfDodge.attackerAnimId == 0x0D58 && kfDodge.defenderAnimId == 0x0CFC && kfDodge.hitFxId == 0,
+				"Kung Fu Dodged paired animation is 0x0D58 vs 0x0CFC with zero FX");
+			InterlockAnimPair karateDodge = CombatAnimationMatrix::GetAnimationPair(FightingStyle::Karate, TACTIC_POWER, FightingStyle::Karate, TACTIC_NORMAL, InterlockExchangeOutcome::Dodged);
+			check(karateDodge.attackerAnimId == 0x04F0 && karateDodge.defenderAnimId == 0x0493 && karateDodge.hitFxId == 0,
+				"Karate Dodged paired animation is 0x04F0 vs 0x0493 with zero FX");
+			InterlockAnimPair aikidoDodge = CombatAnimationMatrix::GetAnimationPair(FightingStyle::Aikido, TACTIC_POWER, FightingStyle::Aikido, TACTIC_NORMAL, InterlockExchangeOutcome::Dodged);
+			check(aikidoDodge.attackerAnimId == 0x00FC && aikidoDodge.defenderAnimId == 0x009D && aikidoDodge.hitFxId == 0,
+				"Aikido Dodged paired animation is 0x00FC vs 0x009D with zero FX");
+			InterlockAnimPair sdDodge = CombatAnimationMatrix::GetAnimationPair(FightingStyle::None, TACTIC_POWER, FightingStyle::None, TACTIC_NORMAL, InterlockExchangeOutcome::Dodged);
+			check(sdDodge.attackerAnimId == 0x09E0 && sdDodge.defenderAnimId == 0x0AF0 && sdDodge.hitFxId == 0,
+				"Self-Defense Dodged paired animation is 0x09E0 vs 0x0AF0 with zero FX");
+
+			// 8. Special Combat Moves
+			InterlockAnimPair headbuttPair = CombatAnimationMatrix::GetAnimationPair(FightingStyle::None, TACTIC_POWER, FightingStyle::None, TACTIC_NORMAL, InterlockExchangeOutcome::NormalHit, 197);
+			check(headbuttPair.attackerAnimId == 0x1135 && headbuttPair.defenderAnimId == 0x1136, "Head Butt move 197 returns 0x1135 vs 0x1136");
+			InterlockAnimPair cheapShotPair = CombatAnimationMatrix::GetAnimationPair(FightingStyle::None, TACTIC_SPEED, FightingStyle::None, TACTIC_NORMAL, InterlockExchangeOutcome::NormalHit, 198);
+			check(cheapShotPair.attackerAnimId == 0x112F && cheapShotPair.defenderAnimId == 0x1131, "Cheap Shot move 198 returns 0x112F vs 0x1131");
+			InterlockAnimPair clayPigeonPair = CombatAnimationMatrix::GetAnimationPair(FightingStyle::Aikido, TACTIC_POWER, FightingStyle::None, TACTIC_NORMAL, InterlockExchangeOutcome::NormalHit, 296);
+			check(clayPigeonPair.attackerAnimId == 0x01B4 && clayPigeonPair.defenderAnimId == 0x1132 && clayPigeonPair.hitFxId == 0x28000432, "Spin Clay Pigeon move 296 returns 0x01B4 vs 0x1132");
+			InterlockAnimPair kiPunchPair = CombatAnimationMatrix::GetAnimationPair(FightingStyle::Karate, TACTIC_SPEED, FightingStyle::None, TACTIC_NORMAL, InterlockExchangeOutcome::NormalHit, 531);
+			check(kiPunchPair.attackerAnimId == 0x04F3 && kiPunchPair.defenderAnimId == 0x0AE7 && kiPunchPair.hitFxId == 0x2800045A, "Karate Focus move 531 returns 0x04F3 vs 0x0AE7 with Ki FX 0x2800045A");
+
+			// 9. Active Melee Block Resolution
+			Actor blockingBot = makeBot(9200040, 10100.0, 10000.0, 1, 100);
+			blockingBot.po->setInnerStrength(10);
+			sCombatSys.SetTactic(blockingBot.go, TACTIC_DEFENSE);
+			humanClient.captured.clear();
+			CombatSystem::AttackResult blockRes = sCombatSys.ResolveAttack(human.po, blockingBot.po, *CombatSystem::DefaultMelee(), TACTIC_POWER, TACTIC_DEFENSE, true, false);
+			check(blockRes.hit == true, "Attack on blocking target is registered as a hit (absorbed)");
+			check(blockRes.isBlocked == true, "Attack on blocking target has isBlocked = true");
+			check(blockingBot.po->getCurrentIS() == 15, "Blocking target restores +5 Inner Strength on successful block");
+			check(humanClient.sawText("blocked your"), "Attacker receives chat notification that strike was blocked");
+
+			// 10. Dynamic FightingStyle switching via UseAbility
+			sCombatSys.UseAbility(human.po, 133, blockingBot.go);
+			check(human.po->getFightingStyle() == FightingStyle::KungFu, "UseAbility(133 KungFu) dynamically switches style to Kung Fu");
+			sCombatSys.UseAbility(human.po, 132, blockingBot.go);
+			check(human.po->getFightingStyle() == FightingStyle::Karate, "UseAbility(132 Karate) dynamically switches style to Karate");
+			sCombatSys.UseAbility(human.po, 101, blockingBot.go);
+			check(human.po->getFightingStyle() == FightingStyle::Aikido, "UseAbility(101 Aikido) dynamically switches style to Aikido");
+			sCombatSys.UseAbility(human.po, 17, blockingBot.go);
+			check(human.po->getFightingStyle() == FightingStyle::None, "UseAbility(17 SelfDefense) dynamically resets style to Self-Defense");
+
+			// 11. Core Martial Arts Template Verification
+			const AbilityTemplate* kfT = sDataLoader.GetAbilityTemplate(133);
+			check(kfT && kfT->discipline == DisciplineType::MARTIAL_ARTIST && kfT->isCastable, "KungFuAbility template is registered and castable");
+			const AbilityTemplate* karateT = sDataLoader.GetAbilityTemplate(132);
+			check(karateT && karateT->discipline == DisciplineType::MARTIAL_ARTIST && karateT->isCastable, "KarateAbility template is registered and castable");
+			const AbilityTemplate* aikidoT = sDataLoader.GetAbilityTemplate(101);
+			check(aikidoT && aikidoT->discipline == DisciplineType::MARTIAL_ARTIST && aikidoT->isCastable, "AikidoAbility template is registered and castable");
+			sCombatSys.EndInterlock(human.go, false);
 		}
 
 		// ---------------------------------------------------------------- Hacker & Coder/Support disciplines

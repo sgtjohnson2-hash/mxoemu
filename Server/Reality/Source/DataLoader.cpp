@@ -283,7 +283,8 @@ void DataLoader::EnsureCoreAbilities()
     auto addCore = [this](uint16 id, const std::string& name, DisciplineType disc, bool castable,
                           uint16 castTimeMs, uint16 isCost, uint32 actFx, uint32 execFx, bool isBuff, uint32 buffSec)
     {
-        if (m_abilities.find(id) == m_abilities.end())
+        auto it = m_abilities.find(id);
+        if (it == m_abilities.end())
         {
             AbilityTemplate t;
             t.abilityId = id;
@@ -302,6 +303,15 @@ void DataLoader::EnsureCoreAbilities()
             t.isBuff = isBuff;
             t.buffTime = buffSec;
             m_abilities[id] = t;
+        }
+        else
+        {
+            it->second.discipline = disc;
+            it->second.isCastable = castable;
+            if (isCost > 0) it->second.innerStrengthCost = isCost;
+            if (castTimeMs > 0) it->second.castTime = castTimeMs;
+            if (actFx != 0) it->second.activationFX = actFx;
+            if (execFx != 0) it->second.executionFX = execFx;
         }
     };
 
@@ -332,10 +342,35 @@ void DataLoader::EnsureCoreAbilities()
     addCore(20, "FortifySimulacra1Ability", DisciplineType::CODER, true, 2000, 20, 671090781, 0, false, 0);
     addCore(30, "RepairSimulacra1Ability", DisciplineType::CODER, true, 2000, 20, 671090845, 0, false, 0);
 
-    // Starter Martial Arts
+    // Martial Arts Disciplines
+    // Self-Defense / Close Combat
     addCore(600, "CloseCombatTrainingAbility", DisciplineType::MARTIAL_ARTIST, true, 0, 0, 0, 0, false, 0);
-    addCore(137, "MartialArtsInitiateAbility", DisciplineType::MARTIAL_ARTIST, true, 0, 0, 0, 0, false, 0);
+    addCore(137, "MartialArtsInitiateAbility", DisciplineType::MARTIAL_ARTIST, true, 0, 10, 0, 0, false, 0);
     addCore(17, "SelfDefenseAbility", DisciplineType::MARTIAL_ARTIST, true, 0, 0, 0, 0, false, 0);
+    addCore(135, "MartialArtsAbility", DisciplineType::MARTIAL_ARTIST, true, 0, 15, 0, 0, false, 0);
+    addCore(197, "Head Butt", DisciplineType::MARTIAL_ARTIST, true, 0, 10, 0, 0x280006DF, false, 0);
+    addCore(198, "Cheap Shot", DisciplineType::MARTIAL_ARTIST, true, 0, 10, 0, 0x280006DF, false, 0);
+
+    // Kung Fu (Wushu)
+    addCore(133, "KungFuAbility", DisciplineType::MARTIAL_ARTIST, true, 0, 15, 0, 0x280006DF, false, 0);
+    addCore(570, "KungFuCombatTacticsAbility", DisciplineType::MARTIAL_ARTIST, true, 0, 15, 0, 0x280006DF, false, 0);
+    addCore(574, "KungFuDamageAbility", DisciplineType::MARTIAL_ARTIST, true, 0, 20, 0, 0x280006DF, false, 0);
+    addCore(8449, "KungFuMasterAbility", DisciplineType::MARTIAL_ARTIST, true, 0, 25, 0, 0x280006DF, false, 0);
+    addCore(8450, "KungfuMasteryAbility", DisciplineType::MARTIAL_ARTIST, true, 0, 25, 0, 0x280006DF, false, 0);
+
+    // Karate
+    addCore(132, "KarateAbility", DisciplineType::MARTIAL_ARTIST, true, 0, 15, 0, 0x280006DF, false, 0);
+    addCore(531, "KarateFocusAbility", DisciplineType::MARTIAL_ARTIST, true, 0, 25, 0, 0x2800045A, false, 0);
+    addCore(569, "KarateCombatTacticsAbility", DisciplineType::MARTIAL_ARTIST, true, 0, 15, 0, 0x280006DF, false, 0);
+    addCore(573, "KarateDamageAbility", DisciplineType::MARTIAL_ARTIST, true, 0, 20, 0, 0x280006DF, false, 0);
+    addCore(8455, "KarateMasterAbility", DisciplineType::MARTIAL_ARTIST, true, 0, 25, 0, 0x280006DF, false, 0);
+
+    // Aikido
+    addCore(101, "AikidoAbility", DisciplineType::MARTIAL_ARTIST, true, 0, 15, 0, 0x280006DF, false, 0);
+    addCore(296, "AikidoSpinClayPigeonAbility", DisciplineType::MARTIAL_ARTIST, true, 0, 25, 0, 0x28000432, false, 0);
+    addCore(571, "AikidoCombatTacticsAbility", DisciplineType::MARTIAL_ARTIST, true, 0, 15, 0, 0x280006DF, false, 0);
+    addCore(572, "AikidoDamageAbility", DisciplineType::MARTIAL_ARTIST, true, 0, 20, 0, 0x280006DF, false, 0);
+    addCore(8461, "AikidoMasteryAbility", DisciplineType::MARTIAL_ARTIST, true, 0, 25, 0, 0x280006DF, false, 0);
 
     // Soldier / Gunner Discipline
     addCore(14, "PowerShotAbility", DisciplineType::GUNNER, true, 2000, 15, 671090470, 0x280001C1, false, 0);

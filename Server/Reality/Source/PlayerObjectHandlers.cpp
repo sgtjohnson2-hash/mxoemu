@@ -849,6 +849,54 @@ void PlayerObject::ParsePlayerCommand( string theCmd )
 				m_parent.QueueCommand(make_shared<SystemChatMsg>(
 					"{c:00FF00}[DISCIPLINE] Coder/Support kit loaded into memory: 1:RestoreHealth 2:FastHealing 3:BolsterHealth 4:GroupRepairs{/c}"));
 			}
+			else if (iequals(discStr, "kungfu") || iequals(discStr, "wushu"))
+			{
+				m_abilitySystem->clearLoadout();
+				m_abilitySystem->loadAbility(133, 1, 0);  // KungFuAbility
+				m_abilitySystem->loadAbility(570, 1, 1);  // KungFuCombatTacticsAbility
+				m_abilitySystem->loadAbility(574, 1, 2);  // KungFuDamageAbility
+				m_abilitySystem->loadAbility(8449, 1, 3); // KungFuMasterAbility
+				setFightingStyle(FightingStyle::KungFu);
+				m_abilitySystem->sendFullLoadout();
+				m_parent.QueueCommand(make_shared<SystemChatMsg>(
+					"{c:00FF00}[DISCIPLINE] Kung Fu (Wushu) kit loaded into memory: 1:KungFu 2:Tactics 3:Damage 4:Master{/c}"));
+			}
+			else if (iequals(discStr, "karate"))
+			{
+				m_abilitySystem->clearLoadout();
+				m_abilitySystem->loadAbility(132, 1, 0);  // KarateAbility
+				m_abilitySystem->loadAbility(531, 1, 1);  // KarateFocusAbility
+				m_abilitySystem->loadAbility(569, 1, 2);  // KarateCombatTacticsAbility
+				m_abilitySystem->loadAbility(573, 1, 3);  // KarateDamageAbility
+				setFightingStyle(FightingStyle::Karate);
+				m_abilitySystem->sendFullLoadout();
+				m_parent.QueueCommand(make_shared<SystemChatMsg>(
+					"{c:00FF00}[DISCIPLINE] Karate kit loaded into memory: 1:Karate 2:Focus 3:Tactics 4:Damage{/c}"));
+			}
+			else if (iequals(discStr, "aikido"))
+			{
+				m_abilitySystem->clearLoadout();
+				m_abilitySystem->loadAbility(101, 1, 0);  // AikidoAbility
+				m_abilitySystem->loadAbility(296, 1, 1);  // AikidoSpinClayPigeonAbility
+				m_abilitySystem->loadAbility(571, 1, 2);  // AikidoCombatTacticsAbility
+				m_abilitySystem->loadAbility(572, 1, 3);  // AikidoDamageAbility
+				setFightingStyle(FightingStyle::Aikido);
+				m_abilitySystem->sendFullLoadout();
+				m_parent.QueueCommand(make_shared<SystemChatMsg>(
+					"{c:00FF00}[DISCIPLINE] Aikido kit loaded into memory: 1:Aikido 2:SpinClayPigeon 3:Tactics 4:Damage{/c}"));
+			}
+			else if (iequals(discStr, "street") || iequals(discStr, "selfdefense") || iequals(discStr, "brawl"))
+			{
+				m_abilitySystem->clearLoadout();
+				m_abilitySystem->loadAbility(17, 1, 0);   // SelfDefenseAbility
+				m_abilitySystem->loadAbility(197, 1, 1);  // Head Butt
+				m_abilitySystem->loadAbility(198, 1, 2);  // Cheap Shot
+				m_abilitySystem->loadAbility(600, 1, 3);  // CloseCombatTrainingAbility
+				setFightingStyle(FightingStyle::None);
+				m_abilitySystem->sendFullLoadout();
+				m_parent.QueueCommand(make_shared<SystemChatMsg>(
+					"{c:00FF00}[DISCIPLINE] Self-Defense / Street Brawl kit loaded: 1:SelfDefense 2:HeadButt 3:CheapShot 4:CloseCombat{/c}"));
+			}
 			else if (iequals(discStr, "martialartist") || iequals(discStr, "operative"))
 			{
 				m_abilitySystem->clearLoadout();
@@ -884,7 +932,7 @@ void PlayerObject::ParsePlayerCommand( string theCmd )
 			else
 			{
 				m_parent.QueueCommand(make_shared<SystemChatMsg>(
-					"{c:FF0000}Usage: &discipline <hacker|coder|martialartist|soldier|spy>{/c}"));
+					"{c:FF0000}Usage: &discipline <kungfu|karate|aikido|street|martialartist|soldier|spy|hacker|coder>{/c}"));
 			}
 		}
 		return;
