@@ -1,4 +1,4 @@
-﻿#include "Common.h"
+#include "Common.h"
 #include "BehaviorTree.h"
 #include "BotClient.h"
 #include "BotManager.h"
@@ -628,10 +628,6 @@ NodeStatus ActionCombatCycle::Tick(BotClient* bot)
 
     me->setTactic(chosen);
     sCombatSys.SetTactic(bot->GetPlayerGoId(), chosen);
-    if (sCombatSys.IsInterlocked(bot->GetPlayerGoId()))
-    {
-        sCombatSys.QueueAbility(bot->GetPlayerGoId(), 1);
-    }
     
     // Evaluate reward for previous state (mock simulation)
     // Normally, the damage taken/dealt events from CombatSystem would trigger UpdateQValue.

@@ -1182,8 +1182,8 @@ bool CombatSystem::RunInterlockRound(InterlockSession &session)
 		return false; //Update() reaps the session and tears down the IL views
 	}
 
-	const CombatMove* moveA = session.queuedMoveA ? GetMove(session.queuedMoveA) : GetDefaultStyleMove(pA);
-	const CombatMove* moveB = session.queuedMoveB ? GetMove(session.queuedMoveB) : GetDefaultStyleMove(pB);
+	const CombatMove* moveA = (session.queuedMoveA != 0 && session.queuedMoveA != 1) ? GetMove(session.queuedMoveA) : GetDefaultStyleMove(pA);
+	const CombatMove* moveB = (session.queuedMoveB != 0 && session.queuedMoveB != 1) ? GetMove(session.queuedMoveB) : GetDefaultStyleMove(pB);
 
 	// Bot combat AI: update round tactics and discipline moves
 	if (pA->getClient().isBot()) {
@@ -1203,7 +1203,7 @@ bool CombatSystem::RunInterlockRound(InterlockSession &session)
 		}
 		session.tacticA = newTac;
 
-		if (session.queuedMoveA == 0) {
+		if (session.queuedMoveA == 0 || session.queuedMoveA == 1) {
 			if (pA->getFightingStyle() == FightingStyle::KungFu) {
 				const uint16 kfMoves[] = { 133, 570, 574, 197, 198 };
 				uint16 selected = kfMoves[rand() % 5];
@@ -1219,6 +1219,8 @@ bool CombatSystem::RunInterlockRound(InterlockSession &session)
 				uint16 selected = aikidoMoves[rand() % 5];
 				const CombatMove* m = GetMove(selected);
 				if (m) moveA = m;
+			} else {
+				moveA = GetDefaultStyleMove(pA);
 			}
 		}
 	}
@@ -1239,7 +1241,7 @@ bool CombatSystem::RunInterlockRound(InterlockSession &session)
 		}
 		session.tacticB = newTac;
 
-		if (session.queuedMoveB == 0) {
+		if (session.queuedMoveB == 0 || session.queuedMoveB == 1) {
 			if (pB->getFightingStyle() == FightingStyle::KungFu) {
 				const uint16 kfMoves[] = { 133, 570, 574, 197, 198 };
 				uint16 selected = kfMoves[rand() % 5];
@@ -1255,6 +1257,8 @@ bool CombatSystem::RunInterlockRound(InterlockSession &session)
 				uint16 selected = aikidoMoves[rand() % 5];
 				const CombatMove* m = GetMove(selected);
 				if (m) moveB = m;
+			} else {
+				moveB = GetDefaultStyleMove(pB);
 			}
 		}
 	}
