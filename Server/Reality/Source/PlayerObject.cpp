@@ -1,4 +1,4 @@
-﻿// ***************************************************************************
+// ***************************************************************************
 //
 // Reality - The Matrix Online Server Emulator
 // Copyright (C) 2006-2010 Rajko Stojadinovic
@@ -837,6 +837,12 @@ void PlayerObject::HandleCommand( ByteBuffer &srcCmd )
 		m_RPCshort[0x8063] = &PlayerObject::RPC_HandleItemMountRSI;
 		m_RPCshort[0x8064] = &PlayerObject::RPC_HandleItemUnmountRSI;
 		m_RPCshort[0x8065] = &PlayerObject::RPC_HandleItemMoveSlot;
+		m_RPCshort[0x80be] = &PlayerObject::RPC_HandleAbilityHotbarSync;
+		m_RPCshort[0x8148] = &PlayerObject::RPC_HandleStatusQuery;
+		m_RPCshort[0x80f4] = &PlayerObject::RPC_HandleInteractionTrigger;
+		m_RPCshort[0x0c01] = &PlayerObject::RPC_HandleClientAck;
+		m_RPCshort[0x3e6b] = &PlayerObject::RPC_HandleCameraPitch;
+		m_RPCshort[0x3f6b] = &PlayerObject::RPC_HandleCameraYaw;
 	}
 
 	uint8 firstByte = srcCmd.read<uint8>();
@@ -873,9 +879,9 @@ void PlayerObject::HandleCommand( ByteBuffer &srcCmd )
 	{
 		uint32 opcodeKey = 0;
 		if (srcCmd.size() >= 2)
-			opcodeKey = (uint32(srcCmd.contents()[0]) << 8) | uint32(srcCmd.contents()[1]);
+			opcodeKey = (uint32(uint8(srcCmd.contents()[0])) << 8) | uint32(uint8(srcCmd.contents()[1]));
 		else if (srcCmd.size() == 1)
-			opcodeKey = uint32(srcCmd.contents()[0]);
+			opcodeKey = uint32(uint8(srcCmd.contents()[0]));
 		if (shouldLogUnhandledOpcode(0x010000u | opcodeKey))
 			INFO_LOG(format("(%1%) %2%:%3% unhandled RPC opcode 0x%4$04X data: %5%") % m_parent.Address() % m_handle % m_goId % opcodeKey % Bin2Hex(srcCmd) );
 	}
