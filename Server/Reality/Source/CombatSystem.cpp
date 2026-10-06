@@ -287,6 +287,39 @@ const CombatMove* CombatSystem::DefaultRanged()
     return GetMove(2);
 }
 
+const CombatMove* CombatSystem::GetDefaultStyleMove(PlayerObject* player)
+{
+    if (!player) return DefaultMelee();
+
+    FightingStyle style = player->getFightingStyle();
+    const CombatMove* move = nullptr;
+
+    switch (style)
+    {
+        case FightingStyle::KungFu:
+            move = GetMove(133); // KungFuAbility
+            if (!move) move = GetMoveByName("KungFuAbility");
+            break;
+        case FightingStyle::Karate:
+            move = GetMove(132); // KarateAbility
+            if (!move) move = GetMoveByName("KarateAbility");
+            break;
+        case FightingStyle::Aikido:
+            move = GetMove(101); // AikidoAbility
+            if (!move) move = GetMoveByName("AikidoAbility");
+            break;
+        case FightingStyle::None:
+        default:
+            move = GetMove(17);  // SelfDefenseAbility
+            if (!move) move = GetMove(600); // CloseCombatTrainingAbility
+            if (!move) move = GetMoveByName("SelfDefenseAbility");
+            break;
+    }
+
+    if (move) return move;
+    return DefaultMelee();
+}
+
 void CombatSystem::Update()
 {
 	std::lock_guard<std::recursive_mutex> lock(m_combatMutex);
@@ -1074,10 +1107,6 @@ CombatSystem::AttackResult CombatSystem::ResolveAttack(PlayerObject* attacker, P
         auto animDef = std::make_shared<ExtendedAnimationMsg>(target->getGoId(), pair.defenderAnimId, 1);
         sGame.AnnounceStateUpdateNear(attacker->getPosition().x, attacker->getPosition().z, 20000.0f, animAtk);
         sGame.AnnounceStateUpdateNear(target->getPosition().x, target->getPosition().z, 20000.0f, animDef);
-        attacker->getClient().QueueState(animAtk);
-        attacker->getClient().QueueState(animDef);
-        target->getClient().QueueState(animAtk);
-        target->getClient().QueueState(animDef);
     }
 
 	if (res.hit)
@@ -1153,10 +1182,10 @@ bool CombatSystem::RunInterlockRound(InterlockSession &session)
 		return false; //Update() reaps the session and tears down the IL views
 	}
 
-	const CombatMove* moveA = session.queuedMoveA ? GetMove(session.queuedMoveA) : DefaultMelee();
-	const CombatMove* moveB = session.queuedMoveB ? GetMove(session.queuedMoveB) : DefaultMelee();
+	const CombatMove* moveA = session.queuedMoveA ? GetMove(session.queuedMoveA) : GetDefaultStyleMove(pA);
+	const CombatMove* moveB = session.queuedMoveB ? GetMove(session.queuedMoveB) : GetDefaultStyleMove(pB);
 
-	// Bot combat AI: update round tactics
+	// Bot combat AI: update round tactics and discipline moves
 	if (pA->getClient().isBot()) {
 		uint8 newTac = TACTIC_POWER;
 		bool isElite = (pA->getHandle().find("Agent") != std::string::npos || pA->getLevel() >= 30);
@@ -1173,6 +1202,25 @@ bool CombatSystem::RunInterlockRound(InterlockSession &session)
 			newTac = thugTactics[rand() % 4];
 		}
 		session.tacticA = newTac;
+
+		if (session.queuedMoveA == 0) {
+			if (pA->getFightingStyle() == FightingStyle::KungFu) {
+				const uint16 kfMoves[] = { 133, 570, 574, 197, 198 };
+				uint16 selected = kfMoves[rand() % 5];
+				const CombatMove* m = GetMove(selected);
+				if (m) moveA = m;
+			} else if (pA->getFightingStyle() == FightingStyle::Karate) {
+				const uint16 karateMoves[] = { 132, 569, 573, 531, 197 };
+				uint16 selected = karateMoves[rand() % 5];
+				const CombatMove* m = GetMove(selected);
+				if (m) moveA = m;
+			} else if (pA->getFightingStyle() == FightingStyle::Aikido) {
+				const uint16 aikidoMoves[] = { 101, 296, 571, 572, 198 };
+				uint16 selected = aikidoMoves[rand() % 5];
+				const CombatMove* m = GetMove(selected);
+				if (m) moveA = m;
+			}
+		}
 	}
 	if (pB->getClient().isBot()) {
 		uint8 newTac = TACTIC_POWER;
@@ -1190,6 +1238,25 @@ bool CombatSystem::RunInterlockRound(InterlockSession &session)
 			newTac = thugTactics[rand() % 4];
 		}
 		session.tacticB = newTac;
+
+		if (session.queuedMoveB == 0) {
+			if (pB->getFightingStyle() == FightingStyle::KungFu) {
+				const uint16 kfMoves[] = { 133, 570, 574, 197, 198 };
+				uint16 selected = kfMoves[rand() % 5];
+				const CombatMove* m = GetMove(selected);
+				if (m) moveB = m;
+			} else if (pB->getFightingStyle() == FightingStyle::Karate) {
+				const uint16 karateMoves[] = { 132, 569, 573, 531, 197 };
+				uint16 selected = karateMoves[rand() % 5];
+				const CombatMove* m = GetMove(selected);
+				if (m) moveB = m;
+			} else if (pB->getFightingStyle() == FightingStyle::Aikido) {
+				const uint16 aikidoMoves[] = { 101, 296, 571, 572, 198 };
+				uint16 selected = aikidoMoves[rand() % 5];
+				const CombatMove* m = GetMove(selected);
+				if (m) moveB = m;
+			}
+		}
 	}
 
 	uint8 tacA = session.tacticA;

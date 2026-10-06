@@ -801,6 +801,21 @@ public:
 	~AbilityUnloadRspMsg() {}
 };
 
+//ability upgrade response (RPC 0x80b8)
+class AbilityUpgradeRspMsg : public StaticMsg
+{
+public:
+	AbilityUpgradeRspMsg(uint16 abilityId, uint16 level)
+	{
+		m_buf.clear();
+		m_buf << uint16(swap16(0x80b8));
+		m_buf << uint16(abilityId);
+		m_buf << uint16(level);
+		m_buf << uint32(0);
+	}
+	~AbilityUpgradeRspMsg() {}
+};
+
 //removes an arbitrary dynamic view from the client
 //wire format: 03 01 00 01 01 00 [viewId:2] 00 00 (same shape as player delete)
 class DeleteViewMsg : public StaticMsg

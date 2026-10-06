@@ -3521,6 +3521,8 @@ void PlayerObject::RPC_HandleUpgradeAbility(ByteBuffer& srcCmd)
 			m_abilitySystem->loadAbility(abilityId, targetLevel, freeSlot);
 		}
 		m_abilitySystem->saveToDB();
+		m_parent.QueueCommand(std::make_shared<AbilityUpgradeRspMsg>(abilityId, targetLevel));
+		m_parent.QueueCommand(std::make_shared<AbilityLoadRspMsg>(abilityId, targetLevel, ab ? ab->getMemorySlot() : 0));
 		m_parent.QueueCommand(std::make_shared<SystemChatMsg>(
 			(format("{c:00FF00}[ABILITY COMPILER] Ability 0x%04X compiled to Level %1%. Memory state persisted to MariaDB.{/c}")
 			 % abilityId % targetLevel).str()

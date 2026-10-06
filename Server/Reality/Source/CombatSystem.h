@@ -194,6 +194,7 @@ public:
 	static const CombatMove* GetMoveByName(const string &name);
 	static const CombatMove* DefaultMelee();
 	static const CombatMove* DefaultRanged();
+	static const CombatMove* GetDefaultStyleMove(PlayerObject* player);
 
 	//pays XP / $Info / loot-advance for a kill; invoked from PlayerObject::die()
 	void AwardKill(PlayerObject* killer, PlayerObject* victim);
