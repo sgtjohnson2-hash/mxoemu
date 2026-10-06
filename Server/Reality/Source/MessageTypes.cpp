@@ -1426,14 +1426,9 @@ SpawnILCombatHandlerMsg::SpawnILCombatHandlerMsg( uint16 viewId, uint8 spawnIdCo
 	m_buf << uint8(0x00);
 }
 
-InterlockInitMsg::InterlockInitMsg( uint16 ilViewId, LocationVector pos, uint32 targetViewWithSpawnId, uint16 spawnCounter )
+InterlockInitMsg::InterlockInitMsg( uint16 ilViewId, LocationVector pos, uint32 targetViewWithSpawnId, uint16 spawnCounter,
+                                   LocationVector attackerPos, LocationVector defenderPos, uint8 moveType, uint16 moveAnimId )
 {
-	//structure and trailing combat block from live CR2 interlock captures (HDS
-	//research) - the block content is not fully decoded yet, but it triggers
-	//the client's interlock pairing when it follows an ILCombatHandler spawn
-	static const char* interlockCombatBlob =
-		"0703070300bafc42000020c1801baf4200803e40000020c1e0b319430000010013010000f40134059a02233c5200008b0b0024145200008b0b0024262000008b0b00240000000000000000000000000000000021000000700000000010001000000000000000000000000000010000022b600000000000";
-
 	m_buf.clear();
 	m_buf << uint8(0x03);
 	m_buf << uint16(VIEWID_OBJECTMANAGER);
@@ -1452,18 +1447,62 @@ InterlockInitMsg::InterlockInitMsg( uint16 ilViewId, LocationVector pos, uint32 
 	m_buf << uint32(targetViewWithSpawnId);
 	m_buf << uint16(2);
 	m_buf << uint16(spawnCounter);
-	m_buf << uint8(0x01);
+
+	// Authentic exchange unmarshaling for CLTGOCmpILCombatHandlerClient (FUN_10564e00):
+	// 1 byte exchange count (0x01) followed by an array of 122-byte (0x7a) exchange structures.
+	m_buf << uint8(0x01); // 1 exchange
+
+	// Offset 0x00: attackerIdx (1), defenderIdx (2)
 	m_buf << uint8(0x01);
 	m_buf << uint8(0x02);
 
-	//decode and append the captured combat block
+	// Offset 0x02: attackerAdjustTime (uint16), defenderAdjustTime (uint16) (775ms / 0x0307)
+	m_buf << uint16(0x0307);
+	m_buf << uint16(0x0307);
+
+	// Offset 0x06: attackerPos (float[3] = 12 bytes)
+	float fAtk[3] = { (float)attackerPos.x, (float)attackerPos.y, (float)attackerPos.z };
+	m_buf.append((const byte*)fAtk, sizeof(fAtk));
+
+	// Offset 0x12: defenderPos (float[3] = 12 bytes)
+	float fDef[3] = { (float)defenderPos.x, (float)defenderPos.y, (float)defenderPos.z };
+	m_buf.append((const byte*)fDef, sizeof(fDef));
+
+	// Offset 0x1E: moveType (uint8)
+	m_buf << uint8(moveType);
+
+	// Offset 0x1F: moveAnimId (uint16, skeleton animation ID)
+	m_buf << uint16(moveAnimId);
+
+	// Offset 0x21: startTime (uint32)
+	m_buf << uint32(0x00010113);
+
+	// Offset 0x25: duration (int16, 500ms = 0x01f4)
+	m_buf << int16(0x01f4);
+
+	// Offset 0x27: flags (uint8, 0x03 = Adjust | Contact)
+	m_buf << uint8(0x03);
+
+	// Offset 0x28 - 0x79: Authentic VFX, sound, timing, secondary states, damage, and pad (82 bytes)
+	// (Completes the 122-byte exchange struct exactly: 2 + 2 + 2 + 12 + 12 + 1 + 2 + 4 + 2 + 1 + 82 = 122 bytes)
+	static const char* exchangeTailHex =
+		"34059a02233c5200008b0b0024145200008b0b0024262000008b0b00240000000000000000000000000000000021000000700000000010001000000000000000000000000000010000022b60000000000000";
 	{
 		string output;
 		CryptoPP::HexDecoder decoder;
 		decoder.Attach( new CryptoPP::StringSink( output ) );
-		decoder.Put( (const byte*)interlockCombatBlob, strlen(interlockCombatBlob) );
+		decoder.Put( (const byte*)exchangeTailHex, strlen(exchangeTailHex) );
 		decoder.MessageEnd();
 		m_buf.append(output);
 	}
+}
+
+InterlockInitMsg::InterlockInitMsg( uint16 ilViewId, LocationVector pos, uint32 targetViewWithSpawnId, uint16 spawnCounter )
+{
+	LocationVector atkPos = pos;
+	LocationVector defPos = pos;
+	atkPos.x -= 75.0;
+	defPos.x += 75.0;
+	*this = InterlockInitMsg(ilViewId, pos, targetViewWithSpawnId, spawnCounter, atkPos, defPos, 1, 256);
 }
 

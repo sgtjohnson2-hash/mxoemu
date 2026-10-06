@@ -816,6 +816,21 @@ public:
 	~AbilityUpgradeRspMsg() {}
 };
 
+// Show / Hide client UI control (RPC 0x0075)
+// controlId: 0x000E = Combat Tactics UI, 0x0022 = Target Frame, 0x0042 = Character Status Sheet
+class ShowControlMsg : public StaticMsg
+{
+public:
+	ShowControlMsg(uint16 controlId, bool bVisible)
+	{
+		m_buf.clear();
+		m_buf << uint16(swap16(0x0075));
+		m_buf << uint16(controlId);
+		m_buf << uint8(bVisible ? 1 : 0);
+	}
+	~ShowControlMsg() {}
+};
+
 //removes an arbitrary dynamic view from the client
 //wire format: 03 01 00 01 01 00 [viewId:2] 00 00 (same shape as player delete)
 class DeleteViewMsg : public StaticMsg
@@ -842,10 +857,12 @@ public:
 };
 
 //interlock pairing setup, sent right after the IL handler view spawns
-//(structure from live CR2 combat captures - partially understood)
+//(structure from live CR2 combat captures - dynamically serialized 122-byte exchange)
 class InterlockInitMsg : public StaticMsg
 {
 public:
+	InterlockInitMsg(uint16 ilViewId, class LocationVector pos, uint32 targetViewWithSpawnId, uint16 spawnCounter,
+	                 class LocationVector attackerPos, class LocationVector defenderPos, uint8 moveType = 1, uint16 moveAnimId = 256);
 	InterlockInitMsg(uint16 ilViewId, class LocationVector pos, uint32 targetViewWithSpawnId, uint16 spawnCounter);
 	~InterlockInitMsg() {}
 };

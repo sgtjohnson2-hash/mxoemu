@@ -569,6 +569,9 @@ bool CombatSystem::RequestInterlock(uint32 attackerGoId, uint32 targetGoId)
 				sides[i].self->getClient().QueueState(std::make_shared<SelfCombatantModeMsg>(1));
 				sides[i].self->getClient().QueueState(std::make_shared<CombatantModeMsg>(sides[i].other->getGoId(), 1));
 
+				// Step 2: Show Combat Tactics UI (Control 0x0E) natively on client
+				sides[i].self->getClient().QueueCommand(std::make_shared<ShowControlMsg>(0x000E, true));
+
 				uint16 ilViewId = sObjMgr.allocateDynamicView(&sides[i].self->getClient(), uint32(GOID_ILCOMBATHANDLER) << 16);
 				*(sides[i].viewSlot) = ilViewId;
 
@@ -581,7 +584,8 @@ bool CombatSystem::RequestInterlock(uint32 attackerGoId, uint32 targetGoId)
 				{
 					uint32 otherViewWithSpawnId = uint32(otherViewId) | (uint32(2) << 16);
 					sides[i].self->getClient().QueueState(std::make_shared<InterlockInitMsg>(
-						ilViewId, ilPos, otherViewWithSpawnId, uint16(2)));
+						ilViewId, ilPos, otherViewWithSpawnId, uint16(2),
+						sides[i].self->getPosition(), sides[i].other->getPosition()));
 				}
 				else
 				{
@@ -786,16 +790,22 @@ void CombatSystem::EndInterlock(uint32 goId, bool byWithdraw)
 		// the participants may have died / vanished during the parting shot - refetch
 		pA = getPlayerSafe(s.goIdA);
 		pB = getPlayerSafe(s.goIdB);
-		if (pA && s.ilViewIdA) {
-			pA->getClient().QueueState(std::make_shared<DeleteViewMsg>(s.ilViewIdA));
-			sObjMgr.releaseDynamicView(&pA->getClient(), s.ilViewIdA);
+		if (pA) {
+			if (s.ilViewIdA) {
+				pA->getClient().QueueState(std::make_shared<DeleteViewMsg>(s.ilViewIdA));
+				sObjMgr.releaseDynamicView(&pA->getClient(), s.ilViewIdA);
+			}
+			pA->getClient().QueueCommand(std::make_shared<ShowControlMsg>(0x000E, false));
+			pA->leaveInterlock();
 		}
-		if (pB && s.ilViewIdB) {
-			pB->getClient().QueueState(std::make_shared<DeleteViewMsg>(s.ilViewIdB));
-			sObjMgr.releaseDynamicView(&pB->getClient(), s.ilViewIdB);
+		if (pB) {
+			if (s.ilViewIdB) {
+				pB->getClient().QueueState(std::make_shared<DeleteViewMsg>(s.ilViewIdB));
+				sObjMgr.releaseDynamicView(&pB->getClient(), s.ilViewIdB);
+			}
+			pB->getClient().QueueCommand(std::make_shared<ShowControlMsg>(0x000E, false));
+			pB->leaveInterlock();
 		}
-		if (pA) pA->leaveInterlock();
-		if (pB) pB->leaveInterlock();
 	}
 }
 
