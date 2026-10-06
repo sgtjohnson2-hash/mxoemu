@@ -1,4 +1,4 @@
-// ***************************************************************************
+﻿// ***************************************************************************
 //
 // Reality - The Matrix Online Server Emulator
 // Copyright (C) 2006-2010 Rajko Stojadinovic
@@ -39,6 +39,8 @@
 #include "SpatialGrid.h"
 #include "MissionSystem.h"
 #include "AbilitySystem.h"
+#include <set>
+#include <mutex>
 #include <boost/algorithm/string.hpp>
 
 //Phase A observability: unknown RPC opcodes / 03 state types are logged at INFO so a live
@@ -690,7 +692,14 @@ void PlayerObject::HandleStateUpdate( ByteBuffer &srcData )
 			if (srcData.remaining() < sizeof(theAnimation))
 				return;
 			srcData >> theAnimation;
-			//we will just ignore the animation for now
+			//log the real values once per distinct id so bot locomotion can use them later
+			{
+				static std::mutex s_seenMutex;
+				static std::set<uint8> s_seenAnims;
+				std::lock_guard<std::mutex> g(s_seenMutex);
+				if (s_seenAnims.insert(theAnimation).second)
+					INFO_LOG(format("LOCOANIM client %1% sent 0x06 locomotion animation %2%") % m_handle % uint32(theAnimation));
+			}
 			uint8 theRotByte;
 			if (srcData.remaining() < sizeof(theRotByte))
 				return;

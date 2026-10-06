@@ -1,4 +1,4 @@
-// ***************************************************************************
+﻿// ***************************************************************************
 //
 // Reality - The Matrix Online Server Emulator
 // Copyright (C) 2006-2010 Rajko Stojadinovic
@@ -31,6 +31,7 @@
 #include "CombatAnimationMatrix.h"
 #include "IGO.h"
 #include <mutex>
+#include <atomic>
 #include <unordered_set>
 
 class PlayerObject : public IGO
@@ -79,6 +80,7 @@ public:
 	uint8 getCurrentAnimation() const {return m_currAnimation;}
 	void setCurrentAnimation(uint8 anim) { m_currAnimation = anim; }
 	uint8 getCurrentMood() const {return m_currMood;}
+	uint8 nextStateCounter() { uint8 c = ++m_emoteCounter; if (c == 0) c = ++m_emoteCounter; return c; }
 	void setCurrentMood(uint8 mood) { m_currMood = mood; }
 
 	class GameClient& getClient() { return m_parent; }
@@ -273,6 +275,12 @@ private:
 	void RPC_HandleDuelRequest( ByteBuffer &srcCmd );
 	void RPC_HandleAbilityUse( ByteBuffer &srcCmd );
 	void RPC_HandleAbilityLoad( ByteBuffer &srcCmd );
+	void RPC_HandleAbilityHotbarSync( ByteBuffer &srcCmd );
+	void RPC_HandleStatusQuery( ByteBuffer &srcCmd );
+	void RPC_HandleInteractionTrigger( ByteBuffer &srcCmd );
+	void RPC_HandleClientAck( ByteBuffer &srcCmd );
+	void RPC_HandleCameraPitch( ByteBuffer &srcCmd );
+	void RPC_HandleCameraYaw( ByteBuffer &srcCmd );
 
 public:
 	// StatusEffectManager
@@ -372,7 +380,7 @@ private:
 	uint8 m_currAnimation;
 	uint8 m_currMood;
 
-	uint8 m_emoteCounter;
+	std::atomic<uint8> m_emoteCounter; //shared 01 28 [counter] state counter (emotes + animations)
 
 	bool m_isAdmin;
 
@@ -384,6 +392,8 @@ private:
     FightingStyle m_fightingStyle = FightingStyle::None;
     uint16 m_firewallPoints = 0;
     bool m_isStealthed = false;
+    float m_cameraPitch = 0.0f;
+    float m_cameraYaw = 0.0f;
 
     std::unordered_set<uint32> m_knownEntities;
     mutable std::mutex m_knownMutex;
@@ -395,6 +405,8 @@ public:
     bool knowsEntity(uint32 goId) const { std::lock_guard<std::mutex> l(m_knownMutex); return m_knownEntities.count(goId) > 0; }
     void ensureEntityKnown(PlayerObject* other);
     uint32 m_lastAoIUpdateMs = 0;
+    float getCameraPitch() const { return m_cameraPitch; }
+    float getCameraYaw() const { return m_cameraYaw; }
 };
 
 #endif

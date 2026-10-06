@@ -40,6 +40,12 @@
 #include "GameSocket.h"
 #include "EncryptedPacket.h"
 
+//Message objects are shared between receivers (one shared_ptr queued to many clients) and
+//setReceiver()+toBuf() write per-receiver state into them. FlushQueue runs on the network and
+//sim threads, so two clients serializing the same message raced and produced packets with
+//another client's view ids / torn buffers. Serialize-and-copy is done under this lock.
+static std::mutex s_msgSerializeMutex;
+
 GameClient::GameClient(sockaddr_in inc_addr, GameSocket *sock):m_address(inc_addr),m_sock(sock)
 {
 	m_validClient = true;
@@ -756,6 +762,7 @@ string GameClient::GetNetStats()
 			ByteBuffer msgBuf;
 			try
 			{
+				std::lock_guard<std::mutex> serLock(s_msgSerializeMutex);
 				shared_ptr<ObjectUpdateMsg> objMsg = dynamic_pointer_cast<ObjectUpdateMsg>(sentState.stateData);
 				if (objMsg != NULL)
 					objMsg->setReceiver(this);
@@ -921,6 +928,7 @@ void GameClient::FlushQueue( bool alsoResend )
 			ByteBuffer packetStaticBuf;
 			try
 			{
+				std::lock_guard<std::mutex> serLock(s_msgSerializeMutex);
 				shared_ptr<ObjectUpdateMsg> objMsg = dynamic_pointer_cast<ObjectUpdateMsg>(currMsg.data);
 				if (objMsg != NULL)
 					objMsg->setReceiver(this);
@@ -1052,6 +1060,7 @@ void GameClient::FlushQueue( bool alsoResend )
 			ByteBuffer serializedData;
 			try
 			{
+				std::lock_guard<std::mutex> serLock(s_msgSerializeMutex);
 				shared_ptr<ObjectUpdateMsg> objMsg = dynamic_pointer_cast<ObjectUpdateMsg>(it->stateData);
 				if (objMsg != NULL)
 					objMsg->setReceiver(this);

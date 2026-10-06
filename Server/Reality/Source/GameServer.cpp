@@ -1,4 +1,4 @@
-// ***************************************************************************
+﻿// ***************************************************************************
 //
 // Reality - The Matrix Online Server Emulator
 // Copyright (C) 2006-2010 Rajko Stojadinovic
@@ -201,6 +201,7 @@ void GameServer::SimulationLoop()
 	INFO_LOG(format("SimulationLoop: legacy simulation engines %1%") % (legacySim ? "ON" : "OFF"));
 	while (m_runSimulation)
 	{
+		auto frameStartTime = std::chrono::steady_clock::now();
 		uint32 currentMs = getMSTime();
 		try {
 			// Tier 1: High-Frequency (30Hz / 33ms) - Combat, Player State & Network Queue
@@ -218,12 +219,19 @@ void GameServer::SimulationLoop()
 				po->getClient().FlushQueue();
 			});
 
-			// High-frequency update for active bot combatants and pending takedown death timers
-			sObjMgr.ForEachGO([](PlayerObject* po) {
-				if (po && po->getClient().isBot() && (po->m_deathDelayMS > 0 || po->getInterlockPartner() != 0)) {
-					po->Update();
+			// High-frequency zero-allocation update for active bot combatants and pending takedown death timers
+			auto botsSnapshot = sBotMgr.GetBotsSnapshot();
+			if (botsSnapshot)
+			{
+				for (const auto& bot : *botsSnapshot)
+				{
+					if (!bot) continue;
+					PlayerObject* po = bot->getPlayer();
+					if (po && (po->m_deathDelayMS > 0 || po->getInterlockPartner() != 0)) {
+						po->Update();
+					}
 				}
-			});
+			}
 
 			// Tier 2: Medium-Frequency (5Hz / ~200ms) - Bot Navigation & Viewport AI
 			static uint32 lastBotSimMs = 0;
@@ -262,12 +270,18 @@ void GameServer::SimulationLoop()
 				}
 
 				// Throttled background bot network queue flush
-				sObjMgr.ForEachGO([](PlayerObject* po) {
-					if (po->getClient().isBot()) {
-						po->Update();
-						po->getClient().FlushQueue();
+				if (botsSnapshot)
+				{
+					for (const auto& bot : *botsSnapshot)
+					{
+						if (!bot) continue;
+						PlayerObject* po = bot->getPlayer();
+						if (po) {
+							po->Update();
+							bot->FlushQueue();
+						}
 					}
-				});
+				}
 			}
 
 			// The Anomaly Event (Phase 50)
@@ -322,10 +336,18 @@ void GameServer::SimulationLoop()
 			ERROR_LOG("SimulationLoop caught unknown exception!");
 		}
 
-		// Adaptive frame rate regulator targeting 30 TPS (~33ms per tick)
-		uint32 frameWorkMs = getMSTime() - currentMs;
-		if (frameWorkMs < 33) {
-			std::this_thread::sleep_for(std::chrono::milliseconds(33 - frameWorkMs));
+		// High-precision adaptive frame regulator targeting 30 TPS (~33.33ms per tick)
+		auto frameEndTime = std::chrono::steady_clock::now();
+		auto frameWorkDuration = std::chrono::duration_cast<std::chrono::microseconds>(frameEndTime - frameStartTime);
+		constexpr std::chrono::microseconds targetFrameDuration(33333); // 33.333 ms
+		if (frameWorkDuration < targetFrameDuration) {
+			auto remaining = targetFrameDuration - frameWorkDuration;
+			if (remaining > std::chrono::milliseconds(3)) {
+				std::this_thread::sleep_for(remaining - std::chrono::milliseconds(2));
+			}
+			while (std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now() - frameStartTime) < targetFrameDuration) {
+				std::this_thread::yield();
+			}
 		} else {
 			std::this_thread::yield();
 		}

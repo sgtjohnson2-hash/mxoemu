@@ -12,7 +12,8 @@ try {
 
 const PORT = parseInt(process.env.PORT || '80', 10);
 const PATCH_DIR = path.join(__dirname, 'patch_data');
-const CRASHDUMPS_DIR = path.join(PATCH_DIR, 'crashdumps');
+// Crash dumps contain memory from players' machines: keep them OUT of the publicly served patch_data tree.
+const CRASHDUMPS_DIR = path.join(__dirname, 'crashdumps_private');
 
 if (!fs.existsSync(CRASHDUMPS_DIR)) {
     fs.mkdirSync(CRASHDUMPS_DIR, { recursive: true });
@@ -562,7 +563,7 @@ const server = http.createServer(async (req, res) => {
                 const bMatch = cType.match(/boundary=([^;]+)/i);
                 if (bMatch) boundary = bMatch[1].trim();
 
-                const rawBody = await readRawBody(req);
+                const rawBody = await readRawBody(req, 8 * 1024 * 1024); // retail minidump zips are small
                 const { fields, files } = parseMultipartBuffer(rawBody, boundary);
 
                 const username = (fields.username || fields.user || 'Unknown').trim();
@@ -621,6 +622,13 @@ const server = http.createServer(async (req, res) => {
     // Telemetry API: View Crash Reports
     if ((pathname === '/api/crash_reports' || pathname === '/api/crash-reports') && req.method === 'GET') {
         res.setHeader('Content-Type', 'application/json');
+        // Lists usernames and IP addresses: only answer requests from the host itself.
+        const remote = (req.socket.remoteAddress || '').replace('::ffff:', '');
+        if (remote !== '127.0.0.1' && remote !== '::1') {
+            res.writeHead(404);
+            res.end(JSON.stringify({ success: false }));
+            return;
+        }
         try {
             if (!pool) {
                 res.writeHead(503);
@@ -634,6 +642,13 @@ const server = http.createServer(async (req, res) => {
             res.writeHead(500);
             res.end(JSON.stringify({ success: false, message: e.message }));
         }
+        return;
+    }
+
+    // Never serve anything from a crash-dump folder (older builds stored uploads under patch_data)
+    if (pathname.toLowerCase().includes('crashdump')) {
+        res.writeHead(404, { 'Content-Type': 'text/plain' });
+        res.end('Not found\n');
         return;
     }
 

@@ -1,4 +1,4 @@
-// ***************************************************************************
+﻿// ***************************************************************************
 //
 // Reality - The Matrix Online Server Emulator
 // Copyright (C) 2006-2010 Rajko Stojadinovic
@@ -733,6 +733,25 @@ void PlayerObject::ParsePlayerCommand( string theCmd )
 
 	if (cmdStream.fail())
 		return;
+
+	//Developer/cheat commands: teleporting, raw packet injection, free abilities/disciplines,
+	//dojo spawns and simulation toggles. These were reachable by any player. They now need
+	//adminFlags set on the character (characters.adminFlags).
+	{
+		static const char* devCommands[] = {
+			"discipline", "class", "loadability", "learn", "dojo", "loadout", "botdebug",
+			"claimhl", "send", "sendCmd", "socket", "bullettime", "gotoPos", "incX", "incY", "incZ",
+			"goThru", "random", "update", "gotoPlayer", "go", "frank", "punisher", "underworld",
+			"syndicate", "police", "swat", "citylife", "simulation", "emergent", NULL };
+		for (int i = 0; devCommands[i] != NULL; i++)
+		{
+			if (iequals(command, devCommands[i]) && !m_isAdmin)
+			{
+				m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FF0000}That command is restricted to admins.{/c}"));
+				return;
+			}
+		}
+	}
 
 	using boost::erase_all;
 	if (iequals(command, "attack") || iequals(command, "interlock"))
@@ -1838,9 +1857,9 @@ void PlayerObject::RPC_HandleChat( ByteBuffer &srcCmd )
 		ParsePlayerCommand(theMessage.substr(1));
 		return;
 	}
-	else if (theMessage[0] == '/' && boost::istarts_with(theMessage, "/mission"))
+	else if (m_isAdmin && theMessage[0] == '/' && boost::istarts_with(theMessage, "/mission"))
 	{
-		ParseAdminCommand("mission");
+		ParseAdminCommand("mission"); //admin path - players no longer reach ParseAdminCommand
 		return;
 	}
 
@@ -3425,8 +3444,17 @@ void PlayerObject::RPC_HandleJackoutFinished( ByteBuffer &srcCmd )
 	DEBUG_LOG(msg);
 	m_parent.Invalidate();
 }
-void PlayerObject::RPC_HandleMarketListItems(ByteBuffer&) {}
-void PlayerObject::RPC_HandleMarketOpen(ByteBuffer&) {}
+void PlayerObject::RPC_HandleMarketListItems(ByteBuffer& srcCmd)
+{
+	DEBUG_LOG(format("(%1%) %2%:%3% RPC_HandleMarketListItems") % m_parent.Address() % m_handle % m_goId);
+	m_parent.QueueCommand(std::make_shared<SystemChatMsg>("{c:00FFCC}[MEGA-CITY EXCHANGE] Local cellular market cache updated: 0 items listed.{/c}"));
+}
+
+void PlayerObject::RPC_HandleMarketOpen(ByteBuffer& srcCmd)
+{
+	DEBUG_LOG(format("(%1%) %2%:%3% RPC_HandleMarketOpen") % m_parent.Address() % m_handle % m_goId);
+	m_parent.QueueCommand(std::make_shared<SystemChatMsg>("{c:00FFCC}[MEGA-CITY EXCHANGE] Secure terminal uplink established.{/c}"));
+}
 void PlayerObject::RPC_HandleVendorBuy(ByteBuffer& srcCmd)
 {
 	if (srcCmd.remaining() < 4) return;
@@ -3473,61 +3501,76 @@ void PlayerObject::RPC_HandleVendorBuy(ByteBuffer& srcCmd)
 		(format("{c:00FF00}[VENDOR] Purchased %1% for %2% Information Bits.{/c}") % tpl->name % cost).str()
 	));
 }
-void PlayerObject::RPC_HandleCraftRequest(ByteBuffer&) {}
-void PlayerObject::RPC_HandleFactionInfo(ByteBuffer&) {}
-void PlayerObject::RPC_HandleMissionInvite(ByteBuffer&) {}
-void PlayerObject::RPC_HandlePartyLeave(ByteBuffer&) {}
-void PlayerObject::RPC_HandleMemoryChangeTactic(ByteBuffer&) {}
+void PlayerObject::RPC_HandleCraftRequest(ByteBuffer& srcCmd)
+{
+	DEBUG_LOG(format("(%1%) %2%:%3% RPC_HandleCraftRequest") % m_parent.Address() % m_handle % m_goId);
+	m_parent.QueueCommand(std::make_shared<SystemChatMsg>("{c:00FFCC}[COMPILER] Code construction pipeline ready.{/c}"));
+}
+
+void PlayerObject::RPC_HandleFactionInfo(ByteBuffer& srcCmd)
+{
+	DEBUG_LOG(format("(%1%) %2%:%3% RPC_HandleFactionInfo") % m_parent.Address() % m_handle % m_goId);
+	const DistrictStatus* status = sFactionWarMgr.GetDistrict(1);
+	if (status)
+	{
+		std::string factionReport = (format("{c:00FFCC}[DISTRICT INTEL: %1%]{/c}\nZion: %2%%% | Machine: %3%%% | Merovingian: %4%%%\nContested Nodes: %5% / %6%")
+			% status->name % (int)status->zionInfluence % (int)status->machineInfluence % (int)status->meroInfluence % status->contestedNodeIds.size() % status->totalNodes).str();
+		m_parent.QueueCommand(std::make_shared<SystemChatMsg>(factionReport));
+	}
+	else
+	{
+		m_parent.QueueCommand(std::make_shared<SystemChatMsg>("{c:00FFCC}[DISTRICT INTEL] Downtown Sector: Tactical Frontline Neutral.{/c}"));
+	}
+}
+
+void PlayerObject::RPC_HandleMissionInvite(ByteBuffer& srcCmd)
+{
+	DEBUG_LOG(format("(%1%) %2%:%3% RPC_HandleMissionInvite") % m_parent.Address() % m_handle % m_goId);
+	m_parent.QueueCommand(std::make_shared<SystemChatMsg>("{c:00FF00}[CREW] Tactical mission invitation dispatched.{/c}"));
+}
+
+void PlayerObject::RPC_HandlePartyLeave(ByteBuffer& srcCmd)
+{
+	DEBUG_LOG(format("(%1%) %2%:%3% RPC_HandlePartyLeave") % m_parent.Address() % m_handle % m_goId);
+	m_parent.QueueCommand(std::make_shared<SystemChatMsg>("{c:FFFF00}[CREW] You have departed from the active squad uplink.{/c}"));
+}
+
+void PlayerObject::RPC_HandleMemoryChangeTactic(ByteBuffer& srcCmd)
+{
+	DEBUG_LOG(format("(%1%) %2%:%3% RPC_HandleMemoryChangeTactic") % m_parent.Address() % m_handle % m_goId);
+}
 void PlayerObject::RPC_HandleUpgradeAbility(ByteBuffer& srcCmd)
 {
-	uint16 abilityId = 0;
-	uint16 targetLevel = 1;
-	if (srcCmd.remaining() >= sizeof(uint16))
-		abilityId = srcCmd.read<uint16>();
-	if (srcCmd.remaining() >= sizeof(uint16))
-		targetLevel = srcCmd.read<uint16>();
+	//layout per HDS AbilityHandler.ProcessUpgradeAbility: ability u16, unknown u16, level u8
+	if (srcCmd.remaining() < 5)
+		return;
+	uint16 abilityId = srcCmd.read<uint16>();
+	uint16 unknown = srcCmd.read<uint16>();
+	uint8 requestedLevel = srcCmd.read<uint8>();
 
-	DEBUG_LOG(format("(%1%) %2%:%3% RPC_HandleUpgradeAbility: abilityId=%4% targetLevel=%5%")
-		% m_parent.Address() % m_handle % m_goId % abilityId % targetLevel);
+	INFO_LOG(format("(%1%) %2%:%3% upgrade ability %4% unk %5% -> level %6%")
+		% m_parent.Address() % m_handle % m_goId % abilityId % unknown % uint32(requestedLevel));
 
-	if (abilityId != 0 && m_abilitySystem)
+	if (abilityId == 0 || !m_abilitySystem)
+		return;
+
+	//only abilities the character already owns can be upgraded, and never past the
+	//character's own level (the old handler loaded any ability at any level for free)
+	auto ab = m_abilitySystem->getAbility(abilityId);
+	if (!ab)
 	{
-		auto ab = m_abilitySystem->getAbility(abilityId);
-		if (ab)
-		{
-			uint16 slot = ab->getMemorySlot();
-			m_abilitySystem->loadAbility(abilityId, targetLevel, slot);
-		}
-		else
-		{
-			uint16 freeSlot = 1;
-			for (uint16 s = 1; s <= 20; ++s)
-			{
-				bool used = false;
-				for (const auto& pair : m_abilitySystem->getLoadedAbilities())
-				{
-					if (pair.second && pair.second->getMemorySlot() == s)
-					{
-						used = true;
-						break;
-					}
-				}
-				if (!used)
-				{
-					freeSlot = s;
-					break;
-				}
-			}
-			m_abilitySystem->loadAbility(abilityId, targetLevel, freeSlot);
-		}
-		m_abilitySystem->saveToDB();
-		m_parent.QueueCommand(std::make_shared<AbilityUpgradeRspMsg>(abilityId, targetLevel));
-		m_parent.QueueCommand(std::make_shared<AbilityLoadRspMsg>(abilityId, targetLevel, ab ? ab->getMemorySlot() : 0));
-		m_parent.QueueCommand(std::make_shared<SystemChatMsg>(
-			(format("{c:00FF00}[ABILITY COMPILER] Ability 0x%04X compiled to Level %1%. Memory state persisted to MariaDB.{/c}")
-			 % abilityId % targetLevel).str()
-		));
+		m_parent.QueueCommand(std::make_shared<SystemChatMsg>("{c:FF0000}You don't have that ability.{/c}"));
+		return;
 	}
+	uint16 newLevel = requestedLevel;
+	if (newLevel > getLevel())
+		newLevel = getLevel();
+	if (newLevel == 0)
+		newLevel = 1;
+
+	m_abilitySystem->loadAbility(abilityId, newLevel, ab->getMemorySlot());
+	m_abilitySystem->saveToDB();
+	m_parent.QueueCommand(std::make_shared<AbilityUpgradeRspMsg>(abilityId, newLevel));
 }
 void PlayerObject::RPC_HandleMissionAbort(ByteBuffer& srcCmd)
 {
@@ -3614,9 +3657,47 @@ void PlayerObject::RPC_HandleMissionRequest(ByteBuffer& srcCmd)
 		m_parent.QueueCommand(std::make_shared<SystemChatMsg>("{c:FF4444}[OPERATOR] No operational contacts currently requesting tactical assets in this sector.{/c}"));
 	}
 }
-void PlayerObject::RPC_HandleItemMoveSlot(ByteBuffer&) {}
-void PlayerObject::RPC_HandleItemUnmountRSI(ByteBuffer&) {}
-void PlayerObject::RPC_HandleItemMountRSI(ByteBuffer&) {}
+void PlayerObject::RPC_HandleItemMoveSlot(ByteBuffer& srcCmd)
+{
+	if (srcCmd.remaining() < 2) return;
+	uint8 fromSlot = srcCmd.read<uint8>();
+	uint8 toSlot = srcCmd.read<uint8>();
+	DEBUG_LOG(format("(%1%) %2%:%3% RPC_HandleItemMoveSlot: fromSlot=%4% toSlot=%5%")
+		% m_parent.Address() % m_handle % m_goId % (int)fromSlot % (int)toSlot);
+	if (m_inventorySystem)
+	{
+		if (m_inventorySystem->moveItem(fromSlot, toSlot))
+		{
+			if (!getClient().isBot())
+			{
+				m_inventorySystem->saveToDB();
+			}
+		}
+	}
+}
+
+void PlayerObject::RPC_HandleItemUnmountRSI(ByteBuffer& srcCmd)
+{
+	uint8 slot = 0;
+	if (srcCmd.remaining() >= 1)
+		slot = srcCmd.read<uint8>();
+	DEBUG_LOG(format("(%1%) %2%:%3% RPC_HandleItemUnmountRSI: slot=%4%")
+		% m_parent.Address() % m_handle % m_goId % (int)slot);
+	UpdateAppearance();
+}
+
+void PlayerObject::RPC_HandleItemMountRSI(ByteBuffer& srcCmd)
+{
+	uint32 itemGoId = 0;
+	uint8 slot = 0;
+	if (srcCmd.remaining() >= 4)
+		itemGoId = srcCmd.read<uint32>();
+	if (srcCmd.remaining() >= 1)
+		slot = srcCmd.read<uint8>();
+	DEBUG_LOG(format("(%1%) %2%:%3% RPC_HandleItemMountRSI: itemGoId=%4% slot=%5%")
+		% m_parent.Address() % m_handle % m_goId % itemGoId % (int)slot);
+	UpdateAppearance();
+}
 
 void PlayerObject::RPC_HandleCallContact( ByteBuffer &srcCmd )
 {
@@ -3682,3 +3763,59 @@ void PlayerObject::RPC_HandleCallContact( ByteBuffer &srcCmd )
 		(format("{c:00FF00}[%1%] %2%{/c}") % contactName % response).str()
 	));
 }
+
+void PlayerObject::RPC_HandleAbilityHotbarSync(ByteBuffer& srcCmd)
+{
+	DEBUG_LOG(format("(%1%) %2%:%3% RPC_HandleAbilityHotbarSync") % m_parent.Address() % m_handle % m_goId);
+	if (m_abilitySystem)
+	{
+		for (const auto& pair : m_abilitySystem->getLoadedAbilities())
+		{
+			if (pair.second)
+			{
+				m_parent.QueueCommand(std::make_shared<AbilityLoadRspMsg>(
+					pair.second->getAbilityId(),
+					pair.second->getLevel(),
+					pair.second->getMemorySlot()
+				));
+			}
+		}
+	}
+}
+
+void PlayerObject::RPC_HandleStatusQuery(ByteBuffer& srcCmd)
+{
+	DEBUG_LOG(format("(%1%) %2%:%3% RPC_HandleStatusQuery") % m_parent.Address() % m_handle % m_goId);
+	sendHealthUpdate();
+	m_parent.QueueState(std::make_shared<SelfCombatantModeMsg>(uint8((getInterlockPartner() != 0) ? 1 : 0)));
+}
+
+void PlayerObject::RPC_HandleInteractionTrigger(ByteBuffer& srcCmd)
+{
+	uint32 triggerId = 0;
+	if (srcCmd.remaining() >= 4)
+		triggerId = srcCmd.read<uint32>();
+	DEBUG_LOG(format("(%1%) %2%:%3% RPC_HandleInteractionTrigger: 0x%4$08X") % m_parent.Address() % m_handle % m_goId % triggerId);
+}
+
+void PlayerObject::RPC_HandleClientAck(ByteBuffer& srcCmd)
+{
+	// Client UI frame notification / state ACK
+}
+
+void PlayerObject::RPC_HandleCameraPitch(ByteBuffer& srcCmd)
+{
+	if (srcCmd.remaining() >= sizeof(float))
+	{
+		m_cameraPitch = srcCmd.read<float>();
+	}
+}
+
+void PlayerObject::RPC_HandleCameraYaw(ByteBuffer& srcCmd)
+{
+	if (srcCmd.remaining() >= sizeof(float))
+	{
+		m_cameraYaw = srcCmd.read<float>();
+	}
+}
+

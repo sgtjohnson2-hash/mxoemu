@@ -101,11 +101,12 @@ public:
 			me->noteEntityDeleted(objId);
 			return true;
 		}
-		if (dynamic_pointer_cast<PositionStateMsg>(msg) != NULL || dynamic_pointer_cast<StateUpdateMsg>(msg) != NULL ||
-			dynamic_pointer_cast<EmoteMsg>(msg) != NULL || dynamic_pointer_cast<AnimationStateMsg>(msg) != NULL ||
-			dynamic_pointer_cast<RotationStateMsg>(msg) != NULL || dynamic_pointer_cast<LocomotionStateMsg>(msg) != NULL)
-			return me->knowsEntity(objId);
-		return true;
+		if (dynamic_pointer_cast<CloseDoorMsg>(msg) != NULL)
+			return true; //doors are static world objects, not streamed entities
+		//every other object update (position, animation, emote, health, hit FX, combatant mode,
+		//appearance, jackout) refers to a player-character view. If this client was never sent
+		//the spawn, the client has no such view and the update desyncs its state stream.
+		return me->knowsEntity(objId);
 	}
 
 	void QueueState(msgBaseClassPtr theData,bool immediateOnly=false,packetAckFunc callFunc=0)
@@ -140,6 +141,18 @@ public:
 			for (stateQueueType::iterator it=m_queuedStates.begin();it!=m_queuedStates.end();)
 			{
 				shared_ptr<RotationStateMsg> old = dynamic_pointer_cast<RotationStateMsg>(it->stateData);
+				if (old != NULL && !it->invalidated && it->callBack.empty() && old->getObjectId() == objId)
+					it = m_queuedStates.erase(it);
+				else
+					++it;
+			}
+		}
+		if (dynamic_pointer_cast<LocomotionStateMsg>(realPtr) != NULL)
+		{
+			const uint32 objId = amIObjectUpdate->getObjectId();
+			for (stateQueueType::iterator it=m_queuedStates.begin();it!=m_queuedStates.end();)
+			{
+				shared_ptr<LocomotionStateMsg> old = dynamic_pointer_cast<LocomotionStateMsg>(it->stateData);
 				if (old != NULL && !it->invalidated && it->callBack.empty() && old->getObjectId() == objId)
 					it = m_queuedStates.erase(it);
 				else

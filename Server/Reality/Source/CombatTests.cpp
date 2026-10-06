@@ -331,14 +331,15 @@ int RunCombatTestSuite()
 			Actor botEmoter = makeBot(9200026, 16000.0, 10000.0, 50, 5000);
 			Actor botPartner = makeBot(9200027, 16150.0, 10000.0, 50, 5000);
 			sCombatSys.RequestInterlock(botEmoter.go, botPartner.go);
-			bool combatEmoteOk = false;
+			bool combatEmoteSuppressed = false;
 			try {
 				EmoteMsg combatMsg(botEmoter.go, 43, 1);
 				combatMsg.setReceiver(&humanClient);
-				const ByteBuffer& b = combatMsg.toBuf();
-				combatEmoteOk = (b.size() > 0 && b.contents()[9] == 43);
-			} catch (...) {}
-			check(combatEmoteOk, "combat emote 43 serializes for bot combatant engaged in interlock");
+				combatMsg.toBuf();
+			} catch (const MsgBaseClass::PacketNoLongerValid&) {
+				combatEmoteSuppressed = true;
+			}
+			check(combatEmoteSuppressed, "bots never emote on the wire, even in interlock (client crash guard)");
 
 			bool nonCombatSuppressed = false;
 			try {

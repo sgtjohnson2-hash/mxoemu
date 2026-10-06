@@ -398,10 +398,8 @@ void PlayerObject::die( uint32 killerGoId )
     
 	sAdaptiveMusicSystem.clearThreat(m_goId, getMSTime());
 
-	setOnlineStatus(false);
-
-	//downed visual - the jackout beam doubles as the emergency-jackout effect
-	sGame.AnnounceStateUpdate(NULL,shared_ptr<JackoutEffectMsg>(new JackoutEffectMsg(m_goId,true)));
+	//(removed: setOnlineStatus(false) flagged dead players offline in the DB/friends list, and a
+	//jackout beam was used as a "downed" visual; the IsDead attribute above is the death state)
 
 	this->addEvent(EVENT_RESPAWN,boost::bind(&PlayerObject::respawn,this),8.0f);
 }
@@ -417,8 +415,6 @@ void PlayerObject::respawn()
 	m_tactic = TACTIC_NORMAL;
 	m_hitCounter = 0;
 
-	//clear the downed visual
-	sGame.AnnounceStateUpdate(NULL,shared_ptr<JackoutEffectMsg>(new JackoutEffectMsg(m_goId,false)));
 
 	//respawn at the nearest hardline in this district, if we know any
 	{
@@ -476,7 +472,9 @@ void PlayerObject::RPC_HandleCloseCombatRequest( ByteBuffer &srcCmd )
 		return;
 	}
 
-	if (sCombatSys.RequestInterlock(m_goId,targetGoId) == false)
+	//echo the client's own u32 (view | spawn<<16) back in the interlock pairing, as HDS does
+	uint32 clientTargetRef = uint32(targetViewId) | (uint32(spawnCounter) << 16);
+	if (sCombatSys.RequestInterlock(m_goId,targetGoId,clientTargetRef) == false)
 		m_parent.QueueCommand(shared_ptr<SystemChatMsg>(new SystemChatMsg("{c:FF0000}Interlock request failed.{/c}")));
 }
 
@@ -512,11 +510,14 @@ void PlayerObject::RPC_HandleRangeCombatRequest( ByteBuffer &srcCmd )
 //0x42 - combat tactic change
 void PlayerObject::RPC_HandleChangeTactic( ByteBuffer &srcCmd )
 {
+	//The client sends the ILDB tactic value directly (Block=3 Grab=0 Power=4 Speed=5, see
+	//mxoTacticType). The 0..3 "TacticAdapter" remap had no source and has been removed.
+	//Logged at INFO until the value set is confirmed from a real session.
 	uint8 rawClientTactic = srcCmd.read<uint8>();
-	uint8 serverTactic = TacticAdapter::ClientToServerTactic(rawClientTactic);
+	uint8 serverTactic = (rawClientTactic <= TACTIC_NORMAL) ? rawClientTactic : uint8(TACTIC_NORMAL);
 
-	DEBUG_LOG(format("(%1%) %2%:%3% changing combat tactic raw=%4% -> server=%5%")
-		% m_parent.Address() % m_handle % m_goId % uint32(rawClientTactic) % uint32(serverTactic));
+	INFO_LOG(format("(%1%) %2%:%3% tactic change raw=%4%")
+		% m_parent.Address() % m_handle % m_goId % uint32(rawClientTactic));
 
 	m_tactic = serverTactic;
 	sCombatSys.SetTactic(m_goId, serverTactic);
@@ -672,6 +673,11 @@ void PlayerObject::RPC_HandleAbilityLoad( ByteBuffer &srcCmd )
 
 	if (countAbilities > 20) //sanity
 		return;
+
+	//HDS PlayerHandler.ProcessLoadAbility starts the entries at index 11: one unread byte
+	//follows the 10-byte header
+	if (srcCmd.remaining() > 0)
+		srcCmd.read<uint8>();
 
 	for (uint16 i=0;i<countAbilities;i++)
 	{

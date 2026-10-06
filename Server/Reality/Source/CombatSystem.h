@@ -1,4 +1,4 @@
-// ***************************************************************************
+﻿// ***************************************************************************
 //
 // Reality - The Matrix Online Server Emulator
 //
@@ -48,36 +48,11 @@ typedef enum
 	TACTIC_NORMAL		= 8, //default, no tactic selected
 } mxoTacticType;
 
-// Bidirectional Tactic Enum Adapter: Server (mxoTacticType) <-> Client (CombatTactic)
-// Server: Retaliate/Grab=0, AimedShot=1, Burst=2, Defense/Block=3, Power=4, Speed=5
-// Client: Power=0, Speed=1, Grab=2, Block=3
+// Oracle premonition helper (the client->server tactic remap that lived here was invented
+// and has been removed: the client sends mxoTacticType values directly)
 class TacticAdapter
 {
 public:
-    static uint8 ServerToClientTactic(uint8 serverTactic)
-    {
-        switch (serverTactic)
-        {
-            case TACTIC_POWER:     return 0; // Client: Power
-            case TACTIC_SPEED:     return 1; // Client: Speed
-            case TACTIC_RETALIATE: return 2; // Client: Grab
-            case TACTIC_DEFENSE:   return 3; // Client: Block
-            default:               return 0;
-        }
-    }
-
-    static uint8 ClientToServerTactic(uint8 clientTactic)
-    {
-        switch (clientTactic)
-        {
-            case 0: return TACTIC_POWER;
-            case 1: return TACTIC_SPEED;
-            case 2: return TACTIC_RETALIATE;
-            case 3: return TACTIC_DEFENSE;
-            default: return TACTIC_NORMAL;
-        }
-    }
-
     // Calculates tactical premonition chance: P = min(0.85, 0.35 + Perception/200 + (InnerStrength/MaxIS)*0.25)
     static float CalculatePremonitionChance(float perception, float innerStrength, float maxInnerStrength)
     {
@@ -154,7 +129,7 @@ public:
 	void Update();
 
 	//combat requests (from client RPCs, chat commands and bot AI)
-	bool RequestInterlock(uint32 attackerGoId, uint32 targetGoId);
+	bool RequestInterlock(uint32 attackerGoId, uint32 targetGoId, uint32 clientTargetRef = 0);
 	bool RequestRangedCombat(uint32 attackerGoId, uint32 targetGoId, uint16 moveId=0);
 	void SetTactic(uint32 goId, uint8 tactic);
 	void QueueAbility(uint32 goId, uint16 moveId);
@@ -219,6 +194,7 @@ private:
 	float TacticModifier(uint8 attackerTactic, uint8 targetTactic);
 
 	std::unordered_map<uint16, CombatMove> m_moveTable;
+	std::unordered_map<std::string, const CombatMove*> m_movesByName;
 	mutable std::recursive_mutex m_combatMutex;
 	list<InterlockSession> m_interlocks;
 	list<FreeFireState> m_freefires;

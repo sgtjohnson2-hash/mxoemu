@@ -1,4 +1,4 @@
-#include "Common.h"
+﻿#include "Common.h"
 #include "CombatSystem.h"
 #include "PlayerObject.h"
 #include "ObjectMgr.h"
@@ -256,13 +256,15 @@ void CombatSystem::LoadAbilities()
 			}
 			m_moveTable[m.id] = m;
 		}
+		for (const auto& pair : m_moveTable) {
+			m_movesByName[pair.second.name] = &pair.second;
+		}
 		INFO_LOG(format("CombatSystem: Loaded and synthesized %1% combat moves from retail definitions.") % m_moveTable.size());
 	}
 }
 
 const CombatMove* CombatSystem::GetMove(uint16 moveId)
 {
-    std::lock_guard<std::recursive_mutex> lock(sCombatSys.m_combatMutex);
     auto it = sCombatSys.m_moveTable.find(moveId);
     if (it != sCombatSys.m_moveTable.end()) return &it->second;
     return nullptr;
@@ -270,10 +272,8 @@ const CombatMove* CombatSystem::GetMove(uint16 moveId)
 
 const CombatMove* CombatSystem::GetMoveByName(const std::string &name)
 {
-    std::lock_guard<std::recursive_mutex> lock(sCombatSys.m_combatMutex);
-    for (auto& pair : sCombatSys.m_moveTable) {
-        if (pair.second.name == name) return &pair.second;
-    }
+    auto it = sCombatSys.m_movesByName.find(name);
+    if (it != sCombatSys.m_movesByName.end()) return it->second;
     return nullptr;
 }
 
@@ -451,7 +451,7 @@ bool CombatSystem::GetInterlockSessionCopy(uint32 goId, InterlockSession& outSes
 	return false;
 }
 
-bool CombatSystem::RequestInterlock(uint32 attackerGoId, uint32 targetGoId)
+bool CombatSystem::RequestInterlock(uint32 attackerGoId, uint32 targetGoId, uint32 clientTargetRef)
 {
 	std::lock_guard<std::recursive_mutex> lock(m_combatMutex);
 	if (IsInterlocked(attackerGoId) || IsInterlocked(targetGoId)) {
@@ -565,12 +565,11 @@ bool CombatSystem::RequestInterlock(uint32 attackerGoId, uint32 targetGoId)
 		{
 			try
 			{
-				// Step 1: Engage combatant mode stance on self and notify other combatant
-				sides[i].self->getClient().QueueState(std::make_shared<SelfCombatantModeMsg>(1));
-				sides[i].self->getClient().QueueState(std::make_shared<CombatantModeMsg>(sides[i].other->getGoId(), 1));
+				if (sides[i].self->getClient().isBot())
+					continue; //bots have no client to drive
 
-				// Step 2: Show Combat Tactics UI (Control 0x0E) natively on client
-				sides[i].self->getClient().QueueCommand(std::make_shared<ShowControlMsg>(0x000E, true));
+				//combat mode on - exact HDS capture (CombatHandler.ProcessRequestCloseCombat)
+				sides[i].self->getClient().QueueState(std::make_shared<SelfCombatModeOnMsg>());
 
 				uint16 ilViewId = sObjMgr.allocateDynamicView(&sides[i].self->getClient(), uint32(GOID_ILCOMBATHANDLER) << 16);
 				*(sides[i].viewSlot) = ilViewId;
@@ -582,10 +581,15 @@ bool CombatSystem::RequestInterlock(uint32 attackerGoId, uint32 targetGoId)
 				uint16 otherViewId = sObjMgr.getViewForGO(&sides[i].self->getClient(), sides[i].other->getGoId());
 				if (otherViewId != 0)
 				{
-					uint32 otherViewWithSpawnId = uint32(otherViewId) | (uint32(2) << 16);
+					//HDS echoes the u32 the client sent in its close-combat request. For the
+					//requesting player we have it; for the defending side we rebuild it from the
+					//opponent's view id and the spawn counter byte our PlayerSpawnMsg uses.
+					uint32 otherViewWithSpawnId = uint32(otherViewId) | (uint32(PLAYER_SPAWN_COUNTER) << 16);
+					if (i == 0 && clientTargetRef != 0)
+						otherViewWithSpawnId = clientTargetRef;
+					//spawn counter: HDS never assigns selfSpawnIdCounter, so it always sends 0
 					sides[i].self->getClient().QueueState(std::make_shared<InterlockInitMsg>(
-						ilViewId, ilPos, otherViewWithSpawnId, uint16(2),
-						sides[i].self->getPosition(), sides[i].other->getPosition()));
+						ilViewId, ilPos, otherViewWithSpawnId, uint16(0)));
 				}
 				else
 				{
@@ -611,6 +615,7 @@ bool CombatSystem::RequestRangedCombat(uint32 attackerGoId, uint32 targetGoId, u
 {
 	std::lock_guard<std::recursive_mutex> lock(m_combatMutex);
 	if (IsFreeFiring(attackerGoId)) return false;
+	if (IsInterlocked(attackerGoId)) return false; //no shooting out of an interlock
 
 	PlayerObject* pA = getPlayerSafe(attackerGoId);
 	PlayerObject* pB = getPlayerSafe(targetGoId);
@@ -776,9 +781,6 @@ void CombatSystem::EndInterlock(uint32 goId, bool byWithdraw)
 				dmg *= 1.5f; // Parting shot does 50% extra damage
 				if (dmg > 65535.0f) dmg = 65535.0f;
 
-				if (pTarget->getCurrentHealth() <= dmg) {
-					sGame.AnnounceStateUpdateNear(pAttacker->getPosition().x, pAttacker->getPosition().z, 20000.0f, std::make_shared<EmoteMsg>(pAttacker->getGoId(), 43, 1));
-				}
 				pTarget->takeDamage(attackerId, (uint16)dmg, move->hitFxId);
 
 				if (!pTarget->getClient().isBot()) {
@@ -795,7 +797,6 @@ void CombatSystem::EndInterlock(uint32 goId, bool byWithdraw)
 				pA->getClient().QueueState(std::make_shared<DeleteViewMsg>(s.ilViewIdA));
 				sObjMgr.releaseDynamicView(&pA->getClient(), s.ilViewIdA);
 			}
-			pA->getClient().QueueCommand(std::make_shared<ShowControlMsg>(0x000E, false));
 			pA->leaveInterlock();
 		}
 		if (pB) {
@@ -803,7 +804,6 @@ void CombatSystem::EndInterlock(uint32 goId, bool byWithdraw)
 				pB->getClient().QueueState(std::make_shared<DeleteViewMsg>(s.ilViewIdB));
 				sObjMgr.releaseDynamicView(&pB->getClient(), s.ilViewIdB);
 			}
-			pB->getClient().QueueCommand(std::make_shared<ShowControlMsg>(0x000E, false));
 			pB->leaveInterlock();
 		}
 	}
@@ -940,8 +940,6 @@ CombatSystem::AttackResult CombatSystem::ResolveAttack(PlayerObject* attacker, P
 					std::make_shared<ExtendedAnimationMsg>(attacker->getGoId(), pair.attackerAnimId, 1));
 				sGame.AnnounceStateUpdateNear(target->getPosition().x, target->getPosition().z, 20000.0f,
 					std::make_shared<ExtendedAnimationMsg>(target->getGoId(), pair.defenderAnimId, 1));
-			} else {
-				sGame.AnnounceStateUpdateNear(target->getPosition().x, target->getPosition().z, 20000.0f, std::make_shared<EmoteMsg>(target->getGoId(), 41, 1));
 			}
 			if (!attacker->getClient().isBot()) {
 				attacker->getClient().QueueCommand(std::make_shared<SystemChatMsg>(
@@ -977,9 +975,6 @@ CombatSystem::AttackResult CombatSystem::ResolveAttack(PlayerObject* attacker, P
         dmg = 0;
         sMatrixThreatHeatmap.RecordDisruption(target->getPosition().x, target->getPosition().z, 15.0f, "Bullet Deflection");
         
-        if (!inInterlock) {
-            sGame.AnnounceStateUpdateNear(target->getPosition().x, target->getPosition().z, 20000.0f, std::make_shared<EmoteMsg>(target->getGoId(), 41, 1));
-        }
         
         if (!target->getClient().isBot())
             target->getClient().QueueCommand(std::make_shared<SystemChatMsg>("{c:00FFFF}You deflect the incoming fire!{/c}"));
@@ -1083,16 +1078,10 @@ CombatSystem::AttackResult CombatSystem::ResolveAttack(PlayerObject* attacker, P
             );
             auto animAtk = std::make_shared<ExtendedAnimationMsg>(attacker->getGoId(), pair.attackerAnimId, 1);
             auto animDef = std::make_shared<ExtendedAnimationMsg>(target->getGoId(), pair.defenderAnimId, 1);
+            //AnnounceStateUpdateNear already reaches both combatants - queueing the same
+            //shared message again serialized it twice and raced setReceiver/toBuf
             sGame.AnnounceStateUpdateNear(attacker->getPosition().x, attacker->getPosition().z, 20000.0f, animAtk);
             sGame.AnnounceStateUpdateNear(target->getPosition().x, target->getPosition().z, 20000.0f, animDef);
-            attacker->getClient().QueueState(animAtk);
-            attacker->getClient().QueueState(animDef);
-            target->getClient().QueueState(animAtk);
-            target->getClient().QueueState(animDef);
-        } else {
-            uint32 emoteId = (move.dmgType == DAMAGE_MELEE) ? 43 : 42;
-            sGame.AnnounceStateUpdateNear(attacker->getPosition().x, attacker->getPosition().z, 20000.0f, std::make_shared<EmoteMsg>(attacker->getGoId(), emoteId, 1)); 
-            sGame.AnnounceStateUpdateNear(target->getPosition().x, target->getPosition().z, 20000.0f, std::make_shared<EmoteMsg>(target->getGoId(), emoteId, 1)); // Victim plays matched emote
         }
         // arm the 3 s takedown timer only once; a second lethal hit must not push death out
         if (target->m_deathDelayMS == 0)
@@ -1140,9 +1129,6 @@ CombatSystem::AttackResult CombatSystem::ResolveAttack(PlayerObject* attacker, P
 		}
 		target->takeDamage(attacker->getGoId(), res.damageTaken, hitFx);
         target->recordIncomingAttack(move.id);
-		if (!inInterlock) {
-			sGame.AnnounceStateUpdateNear(target->getPosition().x, target->getPosition().z, 20000.0f, std::make_shared<EmoteMsg>(target->getGoId(), 50, 1));
-		}
 
 		if (res.isBlocked) {
 			if (!attacker->getClient().isBot()) {

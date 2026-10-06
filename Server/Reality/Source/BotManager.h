@@ -1,4 +1,4 @@
-#ifndef MXOSIM_BOTMANAGER_H
+﻿#ifndef MXOSIM_BOTMANAGER_H
 #define MXOSIM_BOTMANAGER_H
 
 #include "BotClient.h"
@@ -56,6 +56,15 @@ public:
     }
     const std::vector<LocationVector>& GetHardlines() const { return m_hardlines; }
     uint32 GetNextCrewId() { return ++m_nextCrewId; }
+
+    std::shared_ptr<const std::vector<std::shared_ptr<BotClient>>> GetBotsSnapshot() {
+        std::lock_guard<std::recursive_mutex> lock(m_botMutex);
+        if (m_botsDirty || !m_botsSnapshot) {
+            m_botsSnapshot = std::make_shared<const std::vector<std::shared_ptr<BotClient>>>(m_bots);
+            m_botsDirty = false;
+        }
+        return m_botsSnapshot;
+    }
 
 private:
     uint64 findOrCreateBotCharacter(int botNumber, float x, float y, float z, int faction);

@@ -386,7 +386,7 @@ void DataLoader::EnsureCoreAbilities()
     addCore(58, "LogicBlast2Ability", DisciplineType::HACKER, true, 2000, 20, 671089087, 0xAF050028, false, 0);
     addCore(59, "LogicBlast3Ability", DisciplineType::HACKER, true, 2000, 25, 671091200, 0xAF050028, false, 0);
     addCore(60, "LogicBomb1Ability", DisciplineType::HACKER, true, 4000, 30, 671090676, 671091267, false, 0);
-    addCore(359, "CodeNukeAbility", DisciplineType::HACKER, true, 4000, 50, 671091217, 0x110A0028, false, 0);
+    addCore(359, "CodeNukeAbility", DisciplineType::HACKER, true, 4000, 50, 671091217, 0x28000A11, false, 0);
     addCore(53, "HarmfulCodeAbility", DisciplineType::HACKER, true, 4000, 20, 671089139, 0, false, 0);
     addCore(40, "CodeFreeze1Ability", DisciplineType::HACKER, true, 2000, 20, 671088783, 0, false, 0);
     addCore(68, "PersonalFirewall1Ability", DisciplineType::HACKER, true, 2000, 25, 671089003, 0, true, 45);

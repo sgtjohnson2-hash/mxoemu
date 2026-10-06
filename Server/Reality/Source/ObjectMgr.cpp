@@ -115,6 +115,10 @@ void ObjectMgr::destroyObject( uint32 goId )
 		std::lock_guard<std::mutex> idLock(m_idAllocMutex);
 		m_recentlyFreedIds[goId] = getMSTime();
 	}
+	//The PlayerObject destructor broadcasts (QueueState -> per-client queue locks), so it must
+	//not run while m_objMutex is held: a FlushQueue holding a queue lock needs m_objMutex to
+	//serialize, which deadlocked against this. Detach under the lock, destroy after it.
+	objectPtr doomed;
 	std::unique_lock<std::shared_mutex> lock(m_objMutex);
 	//erase from valid objects
 	objectsMap::iterator it=m_objects.find(goId);
@@ -123,10 +127,7 @@ void ObjectMgr::destroyObject( uint32 goId )
 		if (it->second) {
 			it->second->getClient().setPlayer(nullptr);
 		}
-		it->second.reset();
-	}
-	if (it!=m_objects.end())
-	{
+		doomed = std::move(it->second);
 		m_objects.erase(it);
 	}
 
@@ -147,6 +148,8 @@ void ObjectMgr::destroyObject( uint32 goId )
 				++it2;
 		}
 	}
+	lock.unlock();
+	doomed.reset();
 }
 
 class PlayerObject* ObjectMgr::getGOPtr( uint32 goId )

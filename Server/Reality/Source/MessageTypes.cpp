@@ -596,15 +596,12 @@ const ByteBuffer& EmoteMsg::toBuf()
 	// Only real players emote on the wire by default. The simulation systems fire emote ids (41-51)
 	// at NPCs whose animation sets do not have them; the 7.6005 client crashed in
 	// playeranimation.cpp a few minutes after entering a busy area.
-	// Allow combat animations (emotes 41, 42, 43, 50, 51) for bot combatants during interlock.
-	bool isCombatEmote = (m_emoteAnimation == 41 || m_emoteAnimation == 42 || m_emoteAnimation == 43 || m_emoteAnimation == 50 || m_emoteAnimation == 51);
+	// Bots never emote on the wire - no exceptions. Emote ids 41-51 are social emotes, not
+	// combat animations; sending them for NPC models crashes the client in playeranimation.cpp.
 	if (m_player->getClient().isBot())
 	{
-		if (!isCombatEmote || (!m_player->isInCombat() && m_player->getInterlockPartner() == 0))
-		{
-			m_buf.clear();
-			throw PacketNoLongerValid();
-		}
+		m_buf.clear();
+		throw PacketNoLongerValid();
 	}
 	m_player->getPosition().toFloatBuf(&sampleEmoteMsg[0x0D],sizeof(float)*3);
 	uint16 viewId = 0;
@@ -627,6 +624,11 @@ const ByteBuffer& EmoteMsg::toBuf()
 ExtendedAnimationMsg::ExtendedAnimationMsg(uint32 objectId, uint16 animId, uint8 animCount)
 	: ObjectUpdateMsg(objectId), m_animId(animId), m_animCount(animCount)
 {
+	//the client only plays a state animation when the 01 28 [counter] byte changes for that
+	//entity, so every new animation takes the next per-entity counter (HDS uses a fresh value per send)
+	PlayerObject *player = sObjMgr.getGOPtrSafe(objectId);
+	if (player != NULL)
+		m_animCount = player->nextStateCounter();
 }
 
 ExtendedAnimationMsg::~ExtendedAnimationMsg()
@@ -839,8 +841,12 @@ const ByteBuffer& LocomotionStateMsg::toBuf()
 	m_buf << uint16(viewId);
 	m_buf << uint8(1);
 
-	m_buf << uint8(0x06); // update type 0x06: locomotion animation + rotation
-	m_buf << uint8(m_animation);
+	//The 0x06 form (animation byte + rotation) is what real clients send, but the animation
+	//values the client uses are not known - the 10/30 "WalkF/RunF" values were guesses, and a
+	//bad animation id is the kind of input that crashes the client in playeranimation.cpp.
+	//Until real values are captured (PlayerObject logs them), send rotation only (0x04).
+	(void)m_animation;
+	m_buf << uint8(0x04);
 	m_buf << uint8(m_rot);
 
 	return m_buf;
@@ -1362,7 +1368,8 @@ SelfVitalsMsg::SelfVitalsMsg( PlayerObject *thePlayer, bool includeMax, bool inc
 
 	m_buf << uint8(0x03);
 	m_buf << uint16(VIEWID_SELF);
-	ByteBuffer blockBuf = block.toBuf(false); //self view updates carry no count byte
+	m_buf << uint8(0x02); //self-view attribute update type (HDS: sendISCurrent, mood, appearance)
+	ByteBuffer blockBuf = block.toBuf(false); //self view updates: type byte 0x02, then groups, no count
 	m_buf.append(blockBuf.contents(),blockBuf.size());
 }
 
@@ -1382,6 +1389,7 @@ SelfHitFxMsg::SelfHitFxMsg( PlayerObject *thePlayer, uint32 fxId, uint8 hitCount
 
 	m_buf << uint8(0x03);
 	m_buf << uint16(VIEWID_SELF);
+	m_buf << uint8(0x02); //self-view attribute update type (HDS: sendISCurrent, mood, appearance)
 	ByteBuffer blockBuf = block.toBuf(false);
 	m_buf.append(blockBuf.contents(),blockBuf.size());
 }
@@ -1395,6 +1403,7 @@ SelfCombatantModeMsg::SelfCombatantModeMsg( uint8 mode )
 
 	m_buf << uint8(0x03);
 	m_buf << uint16(VIEWID_SELF);
+	m_buf << uint8(0x02); //self-view attribute update type (HDS: sendISCurrent, mood, appearance)
 	ByteBuffer blockBuf = block.toBuf(false);
 	m_buf.append(blockBuf.contents(),blockBuf.size());
 }
@@ -1426,9 +1435,14 @@ SpawnILCombatHandlerMsg::SpawnILCombatHandlerMsg( uint16 viewId, uint8 spawnIdCo
 	m_buf << uint8(0x00);
 }
 
-InterlockInitMsg::InterlockInitMsg( uint16 ilViewId, LocationVector pos, uint32 targetViewWithSpawnId, uint16 spawnCounter,
-                                   LocationVector attackerPos, LocationVector defenderPos, uint8 moveType, uint16 moveAnimId )
+InterlockInitMsg::InterlockInitMsg( uint16 ilViewId, LocationVector pos, uint32 targetViewWithSpawnId, uint16 spawnCounter )
 {
+	//Byte-exact port of Hardline Dreams CombatHandler.ProcessRequestCloseCombat.
+	//The trailing block is a captured live interlock exchange ("special agent test"); it is NOT
+	//decoded. It starts the client's interlock pairing - per-round exchanges are not implemented.
+	static const char* interlockCombatBlob =
+		"0703070300bafc42000020c1801baf4200803e40000020c1e0b319430000010013010000f40134059a02233c5200008b0b0024145200008b0b0024262000008b0b00240000000000000000000000000000000021000000700000000010001000000000000000000000000000010000022b600000000000";
+
 	m_buf.clear();
 	m_buf << uint8(0x03);
 	m_buf << uint16(VIEWID_OBJECTMANAGER);
@@ -1447,62 +1461,17 @@ InterlockInitMsg::InterlockInitMsg( uint16 ilViewId, LocationVector pos, uint32 
 	m_buf << uint32(targetViewWithSpawnId);
 	m_buf << uint16(2);
 	m_buf << uint16(spawnCounter);
-
-	// Authentic exchange unmarshaling for CLTGOCmpILCombatHandlerClient (FUN_10564e00):
-	// 1 byte exchange count (0x01) followed by an array of 122-byte (0x7a) exchange structures.
-	m_buf << uint8(0x01); // 1 exchange
-
-	// Offset 0x00: attackerIdx (1), defenderIdx (2)
+	m_buf << uint8(0x01);
 	m_buf << uint8(0x01);
 	m_buf << uint8(0x02);
 
-	// Offset 0x02: attackerAdjustTime (uint16), defenderAdjustTime (uint16) (775ms / 0x0307)
-	m_buf << uint16(0x0307);
-	m_buf << uint16(0x0307);
-
-	// Offset 0x06: attackerPos (float[3] = 12 bytes)
-	float fAtk[3] = { (float)attackerPos.x, (float)attackerPos.y, (float)attackerPos.z };
-	m_buf.append((const byte*)fAtk, sizeof(fAtk));
-
-	// Offset 0x12: defenderPos (float[3] = 12 bytes)
-	float fDef[3] = { (float)defenderPos.x, (float)defenderPos.y, (float)defenderPos.z };
-	m_buf.append((const byte*)fDef, sizeof(fDef));
-
-	// Offset 0x1E: moveType (uint8)
-	m_buf << uint8(moveType);
-
-	// Offset 0x1F: moveAnimId (uint16, skeleton animation ID)
-	m_buf << uint16(moveAnimId);
-
-	// Offset 0x21: startTime (uint32)
-	m_buf << uint32(0x00010113);
-
-	// Offset 0x25: duration (int16, 500ms = 0x01f4)
-	m_buf << int16(0x01f4);
-
-	// Offset 0x27: flags (uint8, 0x03 = Adjust | Contact)
-	m_buf << uint8(0x03);
-
-	// Offset 0x28 - 0x79: Authentic VFX, sound, timing, secondary states, damage, and pad (82 bytes)
-	// (Completes the 122-byte exchange struct exactly: 2 + 2 + 2 + 12 + 12 + 1 + 2 + 4 + 2 + 1 + 82 = 122 bytes)
-	static const char* exchangeTailHex =
-		"34059a02233c5200008b0b0024145200008b0b0024262000008b0b00240000000000000000000000000000000021000000700000000010001000000000000000000000000000010000022b60000000000000";
 	{
 		string output;
 		CryptoPP::HexDecoder decoder;
 		decoder.Attach( new CryptoPP::StringSink( output ) );
-		decoder.Put( (const byte*)exchangeTailHex, strlen(exchangeTailHex) );
+		decoder.Put( (const byte*)interlockCombatBlob, strlen(interlockCombatBlob) );
 		decoder.MessageEnd();
 		m_buf.append(output);
 	}
-}
-
-InterlockInitMsg::InterlockInitMsg( uint16 ilViewId, LocationVector pos, uint32 targetViewWithSpawnId, uint16 spawnCounter )
-{
-	LocationVector atkPos = pos;
-	LocationVector defPos = pos;
-	atkPos.x -= 75.0;
-	defPos.x += 75.0;
-	*this = InterlockInitMsg(ilViewId, pos, targetViewWithSpawnId, spawnCounter, atkPos, defPos, 1, 256);
 }
 

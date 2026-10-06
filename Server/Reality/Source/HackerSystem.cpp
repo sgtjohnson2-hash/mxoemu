@@ -133,7 +133,7 @@ bool HackerSystem::ExecuteHackerAbility(PlayerObject* caster, uint16 abilityId, 
     }
     else if (abilityId == 359) // CodeNukeAbility
     {
-        target->takeDamage(caster->getGoId(), 220, 0x110A0028);
+        target->takeDamage(caster->getGoId(), 220, 0x28000A11);
     }
     else if (abilityId == 53 || abilName.find("Virus") != std::string::npos) // HarmfulCode / TransmitVirus
     {
@@ -195,7 +195,7 @@ bool HackerSystem::ExecuteHackerAbility(PlayerObject* caster, uint16 abilityId, 
         else if (abilName.find("Nuke") != std::string::npos)
         {
             uint16 nukeDmg = (templ && templ->valueFrom > 0) ? (templ->valueFrom + caster->getLevel() * 6) : 220;
-            target->takeDamage(caster->getGoId(), nukeDmg, 0x110A0028);
+            target->takeDamage(caster->getGoId(), nukeDmg, 0x28000A11);
         }
         else
         {

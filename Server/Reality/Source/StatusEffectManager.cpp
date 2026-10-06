@@ -5,6 +5,7 @@
 #include "Log.h"
 #include "SpatialGrid.h"
 #include "GameClient.h"
+#include <functional>
 
 createFileSingleton(StatusEffectManager);
 
@@ -27,6 +28,16 @@ void StatusEffectManager::Update(float deltaTime)
     std::unique_lock<std::shared_mutex> lock(m_mutex);
 
     std::vector<StatusEffect> pendingEffects;
+    // Damage/heal must run AFTER m_mutex is released: takeDamage -> die -> CombatSystem takes
+    // m_combatMutex, while CombatSystem::UseAbility (holding m_combatMutex) calls ApplyEffect
+    // (m_mutex). Doing it under the lock was an ABBA deadlock that froze the sim thread.
+    std::vector<std::function<void()>> deferred;
+    auto deferDamage = [&deferred](uint32 tg, uint32 src, uint16 v) {
+        deferred.push_back([tg, src, v]() {
+            PlayerObject* t = sObjMgr.getGOPtrSafe(tg);
+            if (t && !t->isDead()) t->takeDamage(src, v, 0x280006DF);
+        });
+    };
 
     // Linear pass over all active effects
     for (auto it = m_effects.begin(); it != m_effects.end(); )
@@ -64,7 +75,7 @@ void StatusEffectManager::Update(float deltaTime)
             {
                 if (effect.type == EFFECT_VIRUS_DOT)
                 {
-                    target->takeDamage(effect.sourceGoId, static_cast<uint16>(effect.value), 0x280006DF); // Authentic damage text FX
+                    deferDamage(effect.targetGoId, effect.sourceGoId, static_cast<uint16>(effect.value));
                     INFO_LOG(format("StatusEffect: VIRUS ticked for %1% damage on %2%") % effect.value % target->getHandle());
                     
                     // V18: Viral Contagion (Item 26)
@@ -89,7 +100,12 @@ void StatusEffectManager::Update(float deltaTime)
                 }
                 else if (effect.type == EFFECT_REGEN_HOT)
                 {
-                    target->applyHeal(effect.sourceGoId, static_cast<uint16>(effect.value), 0x01000060);
+                    uint32 tg = effect.targetGoId, src = effect.sourceGoId;
+                    uint16 v = static_cast<uint16>(effect.value);
+                    deferred.push_back([tg, src, v]() {
+                        PlayerObject* t = sObjMgr.getGOPtrSafe(tg);
+                        if (t && !t->isDead()) t->applyHeal(src, v, 0x01000060);
+                    });
                 }
                 else if (effect.type == EFFECT_DRAIN_CODE)
                 {
@@ -124,14 +140,14 @@ void StatusEffectManager::Update(float deltaTime)
         {
             if (effect.type == EFFECT_LOGIC_BOMB && target) {
                 // Detonate target
-                target->takeDamage(effect.sourceGoId, static_cast<uint16>(effect.value * 2.0f), 0x280006DF);
+                deferDamage(effect.targetGoId, effect.sourceGoId, static_cast<uint16>(effect.value * 2.0f));
                 // Detonate AoE to nearby entities
                 auto nearby = sSpatialGrid.GetClientsInRadius(target->getPosition().x, target->getPosition().z, 1500.0f);
                 for (GameClient* client : nearby) {
                     if (client->GetPlayerGoId() != effect.targetGoId) {
                         PlayerObject* po = sObjMgr.getGOPtrSafe(client->GetPlayerGoId());
                         if (po && !po->isDead()) {
-                            po->takeDamage(effect.sourceGoId, static_cast<uint16>(effect.value), 0x280006DF);
+                            deferDamage(po->getGoId(), effect.sourceGoId, static_cast<uint16>(effect.value));
                         }
                     }
                 }
@@ -170,6 +186,9 @@ void StatusEffectManager::Update(float deltaTime)
     
     // Add pending contagion effects (we unlock first to avoid recursive locking issues if we called ApplyEffect)
     lock.unlock();
+    for (auto& fn : deferred) {
+        try { fn(); } catch (...) {}
+    }
     for (const StatusEffect& pe : pendingEffects) {
         ApplyEffect(pe.targetGoId, pe.type, pe.durationRemaining, pe.tickInterval, pe.value, pe.sourceGoId);
     }
