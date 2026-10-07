@@ -1,4 +1,4 @@
-﻿#include "Common.h"
+#include "Common.h"
 #include "CombatSystem.h"
 #include "PlayerObject.h"
 #include "ObjectMgr.h"
@@ -20,6 +20,7 @@
 #include "AbilitySystem.h"
 #include "CombatAnimationMatrix.h"
 #include "HackerSystem.h"
+#include "Config.h"
 #include <boost/property_tree/ptree.hpp>
 #include <boost/property_tree/json_parser.hpp>
 
@@ -1128,21 +1129,22 @@ CombatSystem::AttackResult CombatSystem::ResolveAttack(PlayerObject* attacker, P
 	if (res.hit)
 	{
 		// Synchronized combat animation subpacket trigger
-		uint32 hitFx = 0x280006DF;
+		static const uint32 s_cfgHitFx = (uint32)sConfig.GetIntDefault("Combat.HitFx", 0);
+		uint32 hitFx = s_cfgHitFx;
 		if (res.isBlocked) {
-			hitFx = 0x28000794; // FX_CHARACTER_BLOCK_INTERLOCK (authentic block spark)
+			hitFx = (s_cfgHitFx != 0) ? 0x28000794 : 0; // FX_CHARACTER_BLOCK_INTERLOCK (authentic block spark)
 		} else if (inInterlock) {
 			if (bypassBlock || attackerTactic == TACTIC_RETALIATE) {
-				hitFx = (attacker->getFightingStyle() == FightingStyle::Karate) ? 0x2800045A : 0x28000432;
+				hitFx = (s_cfgHitFx != 0) ? ((attacker->getFightingStyle() == FightingStyle::Karate) ? 0x2800045A : 0x28000432) : 0;
 			} else if (move.id == 531) {
-				hitFx = 0x2800045A; // Ki aura impact
+				hitFx = (s_cfgHitFx != 0) ? 0x2800045A : 0; // Ki aura impact
 			} else if (move.id == 296) {
-				hitFx = 0x28000432; // Throw impact
+				hitFx = (s_cfgHitFx != 0) ? 0x28000432 : 0; // Throw impact
 			} else {
-				hitFx = 0x280006DF;
+				hitFx = s_cfgHitFx;
 			}
 		} else if (move.hitFxId != 0 && move.hitFxId != 1234) {
-			hitFx = move.hitFxId;
+			hitFx = (s_cfgHitFx != 0) ? move.hitFxId : 0;
 		}
 		target->takeDamage(attacker->getGoId(), res.damageTaken, hitFx);
         target->recordIncomingAttack(move.id);

@@ -33,6 +33,7 @@
 #include "Database/PreparedStatement.h"
 #include "DataLoader.h"
 #include "MissionSystem.h"
+#include "Config.h"
 #include "InventorySystem.h"
 #include "SpatialGrid.h"
 
@@ -104,9 +105,13 @@ void PlayerObject::takeDamage( uint32 attackerGoId, uint16 damage, uint32 fxId )
 	if (m_isDead)
 		return;
 
-	// Authentic retail combat hit FX (0x280006DF) triggers floating damage indicators
-	if (fxId == 0)
-		fxId = 0x280006DF;
+	// Configurable retail hit FX (Task 3): 0x280006DF was a misidentified weapon skeleton model
+	// (resource/GameObjects/weapons/program_launcher2/skeleton/skeleton.ska) that crashed retail 7.6005
+	// in client.dll+0x59608C (resolving _GaussianBlur).
+	// Reality.conf "Combat.HitFx": 0 = disabled/safe (clean health update), 0xDF060028 = HDS wire byte order.
+	static const uint32 configuredHitFx = (uint32)sConfig.GetIntDefault("Combat.HitFx", 0);
+	if (fxId == 0 || fxId == 0x280006DF)
+		fxId = configuredHitFx;
 
 	if (attackerGoId != 0 && attackerGoId != m_goId)
 	{
