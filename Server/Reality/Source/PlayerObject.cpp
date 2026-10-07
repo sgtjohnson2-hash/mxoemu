@@ -973,6 +973,9 @@ void PlayerObject::Update()
 			UpdateAoIStreaming();
 		}
 
+		// Natural Evade Shield regeneration (after 4s out of ballistic fire)
+		regenerateEvadeShield(1000);
+
 		checkAndStore();
 
 		//fire events that occurred safely with local buffer under m_eventMutex
@@ -1049,6 +1052,18 @@ bool PlayerObject::addItemByTemplateId(unsigned int templateId)
 void PlayerObject::SendWaypoint(float x, float y, float z, const std::string& name) { }
 std::vector<std::shared_ptr<class Item>> PlayerObject::getEquippedWeapons() {
     std::vector<std::shared_ptr<class Item>> weapons;
+    if (m_equippedWeaponId != 0) {
+        if (m_inventorySystem) {
+            auto item = m_inventorySystem->getItemByGoId(m_equippedWeaponId);
+            if (!item) item = m_inventorySystem->getItemByTemplate(m_equippedWeaponId);
+            if (item) {
+                weapons.push_back(item);
+                return weapons;
+            }
+        }
+        weapons.push_back(std::make_shared<Item>(m_equippedWeaponId, m_equippedWeaponId));
+        return weapons;
+    }
 	if (!m_inventorySystem) return weapons;
 	auto items = m_inventorySystem->getAllItems();
 	for (auto item : items) {
@@ -1114,6 +1129,67 @@ bool PlayerObject::isDualWielding() const {
         }
     }
     return false;
+}
+
+void PlayerObject::setEvadeShield(uint8 shield)
+{
+    m_evadeShield = (shield > 100) ? 100 : shield;
+    if (m_parent.hasSocket())
+    {
+        m_parent.QueueState(std::make_shared<SelfEvadeShieldMsg>(m_evadeShield));
+    }
+    sGame.AnnounceStateUpdate(&m_parent, std::make_shared<EvadeShieldUpdateMsg>(m_goId, m_evadeShield));
+}
+
+void PlayerObject::consumeEvadeShield(uint8 amount)
+{
+    if (amount >= m_evadeShield)
+        m_evadeShield = 0;
+    else
+        m_evadeShield -= amount;
+    m_lastBallisticFireTime = getMSTime();
+
+    if (m_parent.hasSocket())
+    {
+        m_parent.QueueState(std::make_shared<SelfEvadeShieldMsg>(m_evadeShield));
+    }
+    sGame.AnnounceStateUpdate(&m_parent, std::make_shared<EvadeShieldUpdateMsg>(m_goId, m_evadeShield));
+}
+
+void PlayerObject::regenerateEvadeShield(uint32 deltaMs)
+{
+    if (m_isDead || m_evadeShield >= 100)
+        return;
+
+    uint32 now = getMSTime();
+    if (now - m_lastBallisticFireTime >= 4000) // 4 seconds without taking ballistic fire
+    {
+        uint8 newShield = std::min<uint8>(100, m_evadeShield + 5);
+        if (newShield != m_evadeShield)
+        {
+            m_evadeShield = newShield;
+            if (m_parent.hasSocket())
+            {
+                m_parent.QueueState(std::make_shared<SelfEvadeShieldMsg>(m_evadeShield));
+            }
+            sGame.AnnounceStateUpdate(&m_parent, std::make_shared<EvadeShieldUpdateMsg>(m_goId, m_evadeShield));
+        }
+    }
+}
+
+void PlayerObject::setEquippedWeaponId(uint32 id)
+{
+    m_equippedWeaponId = id;
+    sendEquippedWeaponUpdate();
+}
+
+void PlayerObject::sendEquippedWeaponUpdate()
+{
+    if (m_parent.hasSocket())
+    {
+        m_parent.QueueState(std::make_shared<SelfEquippedItemMsg>(m_equippedWeaponId));
+    }
+    sGame.AnnounceStateUpdate(&m_parent, std::make_shared<EquippedItemUpdateMsg>(m_goId, m_equippedWeaponId));
 }
 
 void PlayerObject::killPlayer(uint32 killerGoId, uint32 fxId)

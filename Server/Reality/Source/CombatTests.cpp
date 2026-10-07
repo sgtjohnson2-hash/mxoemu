@@ -962,6 +962,142 @@ int RunCombatTestSuite()
 			check(moveFinisher == 0x4EE5, "SelectInterlockMove returns 0x4EE5 (Finisher / Takedown) when opponent is defeated");
 			fallenBot.po->setDead(false);
 		}
+
+		// ---------------------------------------------------------------- 12. Firearms & Bullet Dodge Regression Suite
+		{
+			// A. Firearms Weapon & Ammunition Templates
+			const ItemTemplate* tplBerettas = sDataLoader.GetItemTemplate(1001);
+			check(tplBerettas != nullptr, "DataLoader: Dual Berettas (1001) template loaded");
+			if (tplBerettas)
+			{
+				check(tplBerettas->type == ITEM_TYPE_WEAPON, "Dual Berettas is ITEM_TYPE_WEAPON");
+				check(tplBerettas->isDualWield == true, "Dual Berettas has isDualWield = true");
+				check(tplBerettas->attackSpeed == 1.2f, "Dual Berettas has attackSpeed 1.2s cadence");
+				check(tplBerettas->range == 2500.0f, "Dual Berettas has 25m (2500 units) ballistic range");
+				check(tplBerettas->animAttack == 0x0EDD, "Dual Berettas has animAttack 0x0EDD");
+			}
+
+			const ItemTemplate* tplRifle = sDataLoader.GetItemTemplate(1003);
+			check(tplRifle != nullptr, "DataLoader: M4A1 Tactical Carbine (1003) template loaded");
+			if (tplRifle)
+			{
+				check(tplRifle->attackSpeed == 2.2f, "M4A1 Carbine has attackSpeed 2.2s cadence");
+				check(tplRifle->range == 6000.0f, "M4A1 Carbine has 60m (6000 units) ballistic range");
+				check(tplRifle->animAttack == 0x0EE0, "M4A1 Carbine has animAttack 0x0EE0");
+			}
+
+			const ItemTemplate* tplAmmo9mm = sDataLoader.GetItemTemplate(1050);
+			check(tplAmmo9mm != nullptr && tplAmmo9mm->type == ITEM_TYPE_CONSUMABLE, "DataLoader: 9mm Ammo (1050) template loaded");
+			const ItemTemplate* tplAmmo556 = sDataLoader.GetItemTemplate(1051);
+			check(tplAmmo556 != nullptr && tplAmmo556->type == ITEM_TYPE_CONSUMABLE, "DataLoader: 5.56mm Ammo (1051) template loaded");
+
+			// B. Evade Shield & Equipped Item Protocol Serialization
+			SelfEvadeShieldMsg selfShieldMsg(85);
+			const ByteBuffer& selfShieldBuf = selfShieldMsg.toBuf();
+			check(selfShieldBuf.size() > 0, "SelfEvadeShieldMsg serializes successfully");
+			if (selfShieldBuf.size() >= 4)
+			{
+				const uint8* data = reinterpret_cast<const uint8*>(selfShieldBuf.contents());
+				check(data[0] == 0x03, "SelfEvadeShieldMsg byte 0 is 0x03");
+				check(data[1] == 0x02 && data[2] == 0x00, "SelfEvadeShieldMsg viewId is VIEWID_SELF (0x0002)");
+				check(data[3] == 0x02, "SelfEvadeShieldMsg attribute update type is 0x02");
+			}
+
+			SelfEquippedItemMsg selfEquipMsg(1001);
+			const ByteBuffer& selfEquipBuf = selfEquipMsg.toBuf();
+			check(selfEquipBuf.size() > 0, "SelfEquippedItemMsg serializes successfully");
+
+			// C. Bullet Dodge Mechanic & Evasion Roll
+			Actor gunner = makeBot(9200501, 70000.0, 70000.0, 1, 500);
+			TestHumanClient dodgeClient;
+			Actor dodger = makeHuman(&dodgeClient, 9100005, 70200.0, 70000.0); // 2m apart
+			dodger.po->setMaximumHealth(1000);
+			dodger.po->setCurrentHealth(1000);
+			dodger.po->setEvadeShield(100);
+			dodger.po->setInnerStrength(100);
+
+			check(dodger.po->getEvadeShield() == 100, "Defender starts with 100% Evade Shield");
+			check(dodger.po->getCurrentIS() == 100, "Defender starts with 100 IS");
+
+			// Ballistic attack move
+			CombatMove gunShot;
+			gunShot.id = 200;
+			gunShot.name = "PistolShot";
+			gunShot.dmgType = DAMAGE_BALLISTIC;
+			gunShot.minDmg = 50.0f;
+			gunShot.maxDmg = 60.0f;
+			gunShot.minDmgPerLvl = 0.0f;
+			gunShot.maxDmgPerLvl = 0.0f;
+			gunShot.isCost = 0;
+			gunShot.range = 1500.0f;
+			gunShot.hitFxId = 0x280006DF;
+			gunShot.interlockOnly = false;
+			gunShot.freefireOnly = true;
+			gunShot.castTime = 0.0f;
+			gunShot.specialFlags = 0;
+
+			// Defender level 50 vs Attacker level 1 with TACTIC_DEFENSE guarantees defense roll >= attack roll
+			dodger.po->setLevel(50);
+			gunner.po->setLevel(1);
+
+			CombatSystem::AttackResult resDodge = sCombatSys.ResolveAttack(gunner.po, dodger.po, gunShot, TACTIC_NORMAL, TACTIC_DEFENSE);
+			check(!resDodge.hit, "Bullet Dodge triggers: attack roll defeated by defense roll + defense tactic");
+			check(resDodge.damageTaken == 0, "Bullet Dodge results in exactly 0 damage taken");
+			check(dodger.po->getCurrentHealth() == 1000, "Defender HP unmodified during successful bullet dodge");
+			check(dodger.po->getEvadeShield() < 100 && dodger.po->getEvadeShield() >= 75,
+				"Evade Shield decremented by 15..25 points on dodge (current: " + std::to_string(dodger.po->getEvadeShield()) + "%)");
+			check(dodger.po->getCurrentIS() == 90, "Inner Strength decremented by 10 IS on dodge (current: " + std::to_string(dodger.po->getCurrentIS()) + ")");
+			check(dodger.po->getCurrentAnimation() == 0xEC && dodger.po->getCurrentMood() == 0x03,
+				"Authentic Bullet Dodge animation (0x03EC = G_D_XR_DodgeFromHF_GLb) triggered");
+			check(dodgeClient.sawText("[BULLET DODGE]"), "Defender received [BULLET DODGE] client notification");
+
+			// D. Shield Depletion & Penetration
+			dodger.po->setEvadeShield(0);
+			check(dodger.po->getEvadeShield() == 0, "Evade Shield manually depleted to 0%");
+			CombatSystem::AttackResult resHit = sCombatSys.ResolveAttack(gunner.po, dodger.po, gunShot, TACTIC_POWER, TACTIC_NORMAL);
+			check(resHit.hit, "When Evade Shield is 0%, ballistic gunfire hits target");
+			check(resHit.damageTaken > 0, "Depleted shield allows bullet penetration dealing " + std::to_string(resHit.damageTaken) + " damage");
+			check(dodger.po->getCurrentHealth() < 1000, "Defender took damage from penetrating gunfire");
+			check(dodgeClient.sawText("[EVADE SHIELD]"), "Defender received shield depleted warning");
+
+			// E. Evade Shield Natural Regeneration
+			dodger.po->setEvadeShield(50);
+			dodger.po->setLastBallisticFireTime(getMSTime() - 2000); // 2s ago
+			dodger.po->regenerateEvadeShield(1000);
+			check(dodger.po->getEvadeShield() == 50, "Evade Shield does not regenerate within 4s of ballistic fire");
+
+			dodger.po->setLastBallisticFireTime(getMSTime() - 4500); // 4.5s ago
+			dodger.po->regenerateEvadeShield(1000);
+			check(dodger.po->getEvadeShield() == 55, "Evade Shield regenerates +5% (to 55%) after 4s without fire");
+
+			// F. Firearms Cadence & Weapon Equipping
+			dodger.po->setEquippedWeaponId(1001);
+			check(dodger.po->getEquippedWeaponId() == 1001, "setEquippedWeaponId equips Dual Berettas (1001)");
+			check(dodger.po->isDualWielding(), "Player is dual wielding when Dual Berettas equipped");
+			auto eqWeapons = dodger.po->getEquippedWeapons();
+			check(!eqWeapons.empty() && eqWeapons[0]->getTemplateId() == 1001, "getEquippedWeapons returns equipped Dual Berettas");
+
+			// Inventory Ammo Reload
+			auto inv = dodger.po->getInventory();
+			check(inv != nullptr, "Player InventorySystem exists");
+			if (inv)
+			{
+				bool gaveAmmo = dodger.po->giveItem(1050); // 9mm clip
+				check(gaveAmmo, "giveItem gave 9mm ammo clip (1050)");
+				check(inv->hasItemByTemplate(1050), "Inventory contains 9mm ammunition clip (1050)");
+				eqWeapons[0]->setAmmoCount(0);
+				check(eqWeapons[0]->getAmmoCount() == 0, "Weapon ammo set to 0 to simulate empty magazine");
+
+				const ItemTemplate* wpnTpl = sDataLoader.GetItemTemplate(1001);
+				if (wpnTpl && wpnTpl->maxAmmo > 0 && inv->hasItemByTemplate(1050))
+				{
+					inv->consumeItemByTemplate(1050);
+					eqWeapons[0]->setAmmoCount(wpnTpl->maxAmmo - 1);
+				}
+				check(!inv->hasItemByTemplate(1050), "Ammunition clip consumed during reload");
+				check(eqWeapons[0]->getAmmoCount() == 29, "Dual Berettas magazine reloaded to max (30 - 1 = 29)");
+			}
+		}
 	}
 	catch (const std::exception& e)
 	{

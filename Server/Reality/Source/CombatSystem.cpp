@@ -16,6 +16,7 @@
 #include "WorldDirector.h"
 #include "LogisticsManager.h"
 #include "StatusEffectManager.h"
+#include "InventorySystem.h"
 #include "StaticObjectManager.h"
 #include "AbilitySystem.h"
 #include "CombatAnimationMatrix.h"
@@ -379,9 +380,19 @@ void CombatSystem::Update()
 			keepAlive = RunFreeFireShot(*it);
             
             PlayerObject* pA = getPlayerSafe(it->attackerGoId);
+            float shotInterval = FREEFIRE_SHOT_SECONDS;
+            if (pA) {
+                auto weapons = pA->getEquippedWeapons();
+                if (!weapons.empty()) {
+                    const ItemTemplate* wpnTpl = sDataLoader.GetItemTemplate(weapons[0]->getTemplateId());
+                    if (wpnTpl && wpnTpl->type == ITEM_TYPE_WEAPON && wpnTpl->attackSpeed > 0.1f) {
+                        shotInterval = wpnTpl->attackSpeed;
+                    }
+                }
+            }
             float dilation = pA ? pA->GetTimeDilation() : 1.0f;
             if (dilation <= 0.1f) dilation = 0.1f;
-			it->nextShotTime = currTime + uint32((FREEFIRE_SHOT_SECONDS * 1000.0f) / dilation);
+			it->nextShotTime = currTime + uint32((shotInterval * 1000.0f) / dilation);
 		}
 		if (!keepAlive) {
 			PlayerObject* pA = getPlayerSafe(it->attackerGoId);
@@ -656,11 +667,26 @@ bool CombatSystem::RequestRangedCombat(uint32 attackerGoId, uint32 targetGoId, u
         }
     }
 
+	float shotIntervalSec = FREEFIRE_SHOT_SECONDS;
+	auto weapons = pA->getEquippedWeapons();
+	if (!weapons.empty())
+	{
+		const ItemTemplate* wpnTpl = sDataLoader.GetItemTemplate(weapons[0]->getTemplateId());
+		if (wpnTpl && wpnTpl->type == ITEM_TYPE_WEAPON && wpnTpl->attackSpeed > 0.1f)
+		{
+			shotIntervalSec = wpnTpl->attackSpeed;
+		}
+	}
+	float dilation = pA->GetTimeDilation();
+	if (dilation > 0.1f)
+		shotIntervalSec /= dilation;
+
 	FreeFireState state;
 	state.attackerGoId = attackerGoId;
 	state.targetGoId = targetGoId;
 	state.moveId = moveId;
-	state.nextShotTime = getMSTime() + uint32(FREEFIRE_SHOT_SECONDS * 1000.0f);
+	state.nextShotTime = getMSTime() + uint32(shotIntervalSec * 1000.0f);
+	state.shotCount = 0;
 
 	m_freefires.push_back(state);
 	pA->setCombatStance(true);
@@ -934,31 +960,99 @@ CombatSystem::AttackResult CombatSystem::ResolveAttack(PlayerObject* attacker, P
     }
     
 	// Authentic hit resolution: attack roll vs defense roll (d100 + level accuracy)
-	// Blocking in interlock actively absorbs the strike rather than evading it.
-	bool isMeleeBlock = (targetTactic == TACTIC_DEFENSE && !bypassBlock && attackerTactic != TACTIC_RETALIATE);
-	if (isMeleeBlock)
+	bool isBallistic = (move.dmgType == DAMAGE_RANGED || move.dmgType == DAMAGE_BALLISTIC);
+	if (isBallistic)
 	{
-		res.hit = true;
-		res.isBlocked = true;
+		int attackRoll = (rand() % 100) + int(attacker->getLevel()) * 2 + int(attacker->getPerception() / 2);
+		int defenseRoll = (rand() % 100) + int(target->getLevel()) * 2 + int(target->getEvasion() / 2);
+		if (targetTactic == TACTIC_DEFENSE)
+			defenseRoll += 25; // Bullet deflection stance bonus
+
+		if (defenseRoll >= attackRoll)
+		{
+			if (target->getEvadeShield() > 0)
+			{
+				// BULLET DODGE SUCCESSFUL!
+				res.hit = false;
+				res.damageTaken = 0;
+				res.isBlocked = true;
+
+				uint8 shieldDrain = (uint8)(15 + (rand() % 11)); // 15-25 points
+				target->consumeEvadeShield(shieldDrain);
+
+				if (target->getCurrentIS() >= 10)
+				{
+					target->setCurrentIS(target->getCurrentIS() - 10);
+				}
+
+				// Authentic deflection FX 0x2800059c (FX_CHARACTER_DEFLECTION)
+				static const uint32 deflectFx = 0x2800059c;
+				if (!target->getClient().isBot())
+				{
+					target->getClient().QueueState(std::make_shared<SelfHitFxMsg>(target, deflectFx, target->getHitCounter()));
+					// Authentic dodge animation (0x03EC = G_D_XR_DodgeFromHF_GLb)
+					target->setCurrentAnimation(0xEC);
+					target->setCurrentMood(0x03);
+					sGame.AnnounceStateUpdate(&target->getClient(), std::make_shared<AnimationStateMsg>(target->getGoId()));
+				}
+				sGame.AnnounceStateUpdate(&target->getClient(), std::make_shared<CombatHitFxMsg>(target->getGoId(), deflectFx, target->nextHitCounter()));
+
+				sMatrixThreatHeatmap.RecordDisruption(target->getPosition().x, target->getPosition().z, 15.0f, "Bullet Dodge");
+
+				if (!target->getClient().isBot())
+				{
+					target->getClient().QueueCommand(std::make_shared<SystemChatMsg>(
+						(format("{c:00FFFF}[BULLET DODGE] You dodged incoming gunfire! Evade Shield: %1%%%, -10 IS.{/c}") % uint32(target->getEvadeShield())).str()
+					));
+				}
+				if (!attacker->getClient().isBot())
+				{
+					attacker->getClient().QueueCommand(std::make_shared<SystemChatMsg>(
+						(format("{c:FFFF00}[COMBAT] %1% dodged your gunfire!{/c}") % target->getHandle()).str()
+					));
+				}
+				return res;
+			}
+			else
+			{
+				// Evade Shield is 0: unable to dodge!
+				if (!target->getClient().isBot())
+				{
+					target->getClient().QueueCommand(std::make_shared<SystemChatMsg>(
+						"{c:FF5555}[EVADE SHIELD] Evade Shield depleted! Unable to dodge gunfire!{/c}"
+					));
+				}
+			}
+		}
 	}
 	else
 	{
-		int attackRoll = (rand() % 100) + int(attacker->getLevel()) * 2;
-		int defenseRoll = (rand() % 100) + int(target->getLevel()) * 2;
-		if (attackRoll < defenseRoll)
+		// Authentic melee hit resolution: attack roll vs defense roll
+		bool isMeleeBlock = (targetTactic == TACTIC_DEFENSE && !bypassBlock && attackerTactic != TACTIC_RETALIATE);
+		if (isMeleeBlock)
 		{
-			res.hit = false;
-			if (!attacker->getClient().isBot()) {
-				attacker->getClient().QueueCommand(std::make_shared<SystemChatMsg>(
-					(format("{c:FFFF00}[COMBAT] You missed %1%!{/c}") % target->getHandle()).str()
-				));
+			res.hit = true;
+			res.isBlocked = true;
+		}
+		else
+		{
+			int attackRoll = (rand() % 100) + int(attacker->getLevel()) * 2;
+			int defenseRoll = (rand() % 100) + int(target->getLevel()) * 2;
+			if (attackRoll < defenseRoll)
+			{
+				res.hit = false;
+				if (!attacker->getClient().isBot()) {
+					attacker->getClient().QueueCommand(std::make_shared<SystemChatMsg>(
+						(format("{c:FFFF00}[COMBAT] You missed %1%!{/c}") % target->getHandle()).str()
+					));
+				}
+				if (!target->getClient().isBot()) {
+					target->getClient().QueueCommand(std::make_shared<SystemChatMsg>(
+						(format("{c:00FFFF}[COMBAT] You evaded %1%'s attack!{/c}") % attacker->getHandle()).str()
+					));
+				}
+				return res;
 			}
-			if (!target->getClient().isBot()) {
-				target->getClient().QueueCommand(std::make_shared<SystemChatMsg>(
-					(format("{c:00FFFF}[COMBAT] You evaded %1%'s attack!{/c}") % attacker->getHandle()).str()
-				));
-			}
-			return res;
 		}
 	}
 
@@ -975,24 +1069,10 @@ CombatSystem::AttackResult CombatSystem::ResolveAttack(PlayerObject* attacker, P
         dmg *= 1.5f; // 50% more damage for off-hand
     }
 
-    // Item 20: Deflection / Bullet Blocking
-    uint16 evasion = target->getEvasion();
-    if (targetTactic == TACTIC_DEFENSE && move.dmgType == DAMAGE_RANGED && (rand() % 100 < 15 + (evasion / 5))) {
-        res.isBlocked = true; // Deflection
-        dmg = 0;
-        sMatrixThreatHeatmap.RecordDisruption(target->getPosition().x, target->getPosition().z, 15.0f, "Bullet Deflection");
-        
-        
-        if (!target->getClient().isBot())
-            target->getClient().QueueCommand(std::make_shared<SystemChatMsg>("{c:00FFFF}You deflect the incoming fire!{/c}"));
-        if (!attacker->getClient().isBot())
-            attacker->getClient().QueueCommand(std::make_shared<SystemChatMsg>("{c:FFFF00}Your shot is deflected!{/c}"));
+    if (isBallistic) {
+        sMatrixThreatHeatmap.RecordDisruption(attacker->getPosition().x, attacker->getPosition().z, 8.0f, "Ballistic Fire");
     } else {
-        if (move.dmgType == DAMAGE_RANGED) {
-            sMatrixThreatHeatmap.RecordDisruption(attacker->getPosition().x, attacker->getPosition().z, 8.0f, "Ballistic Fire");
-        } else {
-            sMatrixThreatHeatmap.RecordDisruption(attacker->getPosition().x, attacker->getPosition().z, 12.0f, "Melee Interlock");
-        }
+        sMatrixThreatHeatmap.RecordDisruption(attacker->getPosition().x, attacker->getPosition().z, 12.0f, "Melee Interlock");
     }
 
     if (target->getClient().isBot() && target->getHandle().find("Agent") != std::string::npos) {
@@ -1507,10 +1587,67 @@ bool CombatSystem::RunFreeFireShot(FreeFireState &state)
 	if (!moveA)
 		return false;
 
-	//out of range pauses rather than ends the engagement
+	// Resolve equipped firearm properties
+	float shotRange = moveA->range;
+	uint16 firingAnim = 0x0EDF; // default pistol attack anim
+	auto weapons = pA->getEquippedWeapons();
+	if (!weapons.empty())
+	{
+		const ItemTemplate* wpnTpl = sDataLoader.GetItemTemplate(weapons[0]->getTemplateId());
+		if (wpnTpl && wpnTpl->type == ITEM_TYPE_WEAPON)
+		{
+			if (wpnTpl->range > 0)
+				shotRange = wpnTpl->range;
+			if (wpnTpl->animAttack != 0)
+				firingAnim = wpnTpl->animAttack;
+			else if (wpnTpl->isDualWield)
+				firingAnim = 0x0EDD;
+
+			// Ammunition tracking: if weapon has ammo tracked
+			if (weapons[0]->getAmmoCount() > 0)
+			{
+				weapons[0]->setAmmoCount(weapons[0]->getAmmoCount() - 1);
+			}
+			else if (wpnTpl->maxAmmo > 0)
+			{
+				// Check for ammo clip in inventory to reload
+				auto inv = pA->getInventory();
+				uint32 ammoTplId = (wpnTpl->attackSpeed >= 2.0f) ? 1051 : 1050; // 5.56 rifle vs 9mm pistol
+				if (inv && inv->hasItemByTemplate(ammoTplId))
+				{
+					inv->consumeItemByTemplate(ammoTplId);
+					weapons[0]->setAmmoCount(wpnTpl->maxAmmo - 1);
+					if (!pA->getClient().isBot())
+					{
+						pA->getClient().QueueCommand(std::make_shared<SystemChatMsg>(
+							"{c:00FF00}[RELOAD] Weapon reloaded with fresh ammunition clip.{/c}"));
+					}
+				}
+			}
+		}
+	}
+
+	// Check distance against firearm ballistic range
 	float dist = float(pA->getPosition().Distance(pB->getPosition()));
-	if (moveA->range > 0 && dist > moveA->range)
+	if (shotRange > 0 && dist > shotRange)
+	{
+		if (state.shotCount % 3 == 0 && !pA->getClient().isBot())
+		{
+			pA->getClient().QueueCommand(std::make_shared<SystemChatMsg>(
+				"{c:FFFF00}[COMBAT] Target is out of firearm range.{/c}"));
+		}
+		state.shotCount++;
 		return true;
+	}
+
+	state.shotCount++;
+
+	// Broadcast weapon firing animation (operatives only, bots never send animation state)
+	if (!pA->getClient().isBot())
+	{
+		pA->setCurrentAnimation(uint8(firingAnim & 0xFF));
+		sGame.AnnounceStateUpdate(&pA->getClient(), std::make_shared<AnimationStateMsg>(pA->getGoId()));
+	}
 
 	ResolveAttack(pA, pB, *moveA, pA->getTactic(), pB->getTactic());
 	return !pB->isDead();

@@ -124,6 +124,7 @@ struct FreeFireState
 	uint32 targetGoId;
 	uint16 moveId;
 	uint32 nextShotTime;	//ms timestamp (getMSTime)
+	uint32 shotCount;
 };
 
 class CombatSystem : public Singleton<CombatSystem>
@@ -186,11 +187,11 @@ public:
 
 	struct AttackResult
 	{
-		bool hit;
-		uint16 damageTaken;
-		bool isCrit;
-		bool isBlocked;
-		bool isGlancing;
+		bool hit = false;
+		uint16 damageTaken = 0;
+		bool isCrit = false;
+		bool isBlocked = false;
+		bool isGlancing = false;
 	};
 
 	AttackResult StrikeInterlock(InterlockSession &session, PlayerObject* attacker, PlayerObject* target,

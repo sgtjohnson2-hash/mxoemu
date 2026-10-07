@@ -757,6 +757,44 @@ public:
 	~SelfCombatantModeMsg() {}
 };
 
+//evade shield update on another player's view (PlayerAttrOther::EvadeShieldHealth, idx 21)
+class EvadeShieldUpdateMsg : public ObjectUpdateMsg
+{
+public:
+	EvadeShieldUpdateMsg(uint32 objectId, uint8 shield);
+	~EvadeShieldUpdateMsg();
+	const ByteBuffer& toBuf();
+private:
+	uint8 m_shield;
+};
+
+//self-view evade shield update (PlayerAttrSelf::EvadeShieldHealth, idx 30)
+class SelfEvadeShieldMsg : public StaticMsg
+{
+public:
+	SelfEvadeShieldMsg(uint8 shield);
+	~SelfEvadeShieldMsg() {}
+};
+
+//equipped weapon item update on another player's view (PlayerAttrOther::EquippedItemID, idx 22)
+class EquippedItemUpdateMsg : public ObjectUpdateMsg
+{
+public:
+	EquippedItemUpdateMsg(uint32 objectId, uint32 itemId);
+	~EquippedItemUpdateMsg();
+	const ByteBuffer& toBuf();
+private:
+	uint32 m_itemId;
+};
+
+//self-view equipped weapon item update (PlayerAttrSelf::EquippedItemID, idx 31)
+class SelfEquippedItemMsg : public StaticMsg
+{
+public:
+	SelfEquippedItemMsg(uint32 itemId);
+	~SelfEquippedItemMsg() {}
+};
+
 //ability cast bar (RPC 0x80ac): [abilityId] [10 zero bytes] [castTime seconds]
 class CastBarMsg : public StaticMsg
 {

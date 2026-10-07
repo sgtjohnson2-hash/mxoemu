@@ -66,6 +66,7 @@ void InventorySystem::loadFromDB()
 
 void InventorySystem::saveToDB()
 {
+    if (!m_owner || m_owner->getCharacterUID() >= 9000000) return;
     PreparedStatement* delStmt = new PreparedStatement("DELETE FROM `inventory` WHERE `charId` = ?0");
     delStmt->SetUInt64(0, m_owner->getCharacterUID());
     sAsyncDatabase.Enqueue(delStmt);

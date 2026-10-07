@@ -1287,6 +1287,7 @@ const ByteBuffer& HealthUpdateMsg::toBuf()
 
 	AttributeUpdateBlock block;
 	block.addUInt16(PlayerAttrOther::Health,m_player->getCurrentHealth());
+	block.addByte(PlayerAttrOther::EvadeShieldHealth,m_player->getEvadeShield());
 	if (m_includeMax)
 		block.addUInt16(PlayerAttrOther::MaxHealth,m_player->getMaximumHealth());
 	if (m_includeDead)
@@ -1331,6 +1332,7 @@ const ByteBuffer& CombatHitFxMsg::toBuf()
 
 	AttributeUpdateBlock block;
 	block.addUInt16(PlayerAttrOther::Health,m_player->getCurrentHealth());
+	block.addByte(PlayerAttrOther::EvadeShieldHealth,m_player->getEvadeShield());
 	static const uint32 s_cfgHitFx = (uint32)sConfig.GetIntDefault("Combat.HitFx", 0);
 	uint32 activeFxId = (s_cfgHitFx != 0) ? m_fxId : 0;
 	if (activeFxId == 0x280006DF || activeFxId == 0x28000794 || activeFxId == 0x28000432 || activeFxId == 0x2800045A)
@@ -1392,6 +1394,7 @@ SelfVitalsMsg::SelfVitalsMsg( PlayerObject *thePlayer, bool includeMax, bool inc
 	AttributeUpdateBlock block;
 	block.addUInt16(PlayerAttrSelf::InnerStrengthAvailable,thePlayer->getCurrentIS());
 	block.addUInt16(PlayerAttrSelf::Health,thePlayer->getCurrentHealth());
+	block.addByte(PlayerAttrSelf::EvadeShieldHealth,thePlayer->getEvadeShield());
 	if (includeMax)
 	{
 		block.addUInt16(PlayerAttrSelf::MaxHealth,thePlayer->getMaximumHealth());
@@ -1417,6 +1420,7 @@ SelfHitFxMsg::SelfHitFxMsg( PlayerObject *thePlayer, uint32 fxId, uint8 hitCount
 
 	AttributeUpdateBlock block;
 	block.addUInt16(PlayerAttrSelf::Health,thePlayer->getCurrentHealth());
+	block.addByte(PlayerAttrSelf::EvadeShieldHealth,thePlayer->getEvadeShield());
 	static const uint32 s_cfgHitFx = (uint32)sConfig.GetIntDefault("Combat.HitFx", 0);
 	uint32 activeFxId = (s_cfgHitFx != 0) ? fxId : 0;
 	if (activeFxId == 0x280006DF || activeFxId == 0x28000794 || activeFxId == 0x28000432 || activeFxId == 0x2800045A)
@@ -1433,6 +1437,110 @@ SelfHitFxMsg::SelfHitFxMsg( PlayerObject *thePlayer, uint32 fxId, uint8 hitCount
 	ByteBuffer blockBuf = block.toBuf(false);
 	m_buf.append(blockBuf.contents(),blockBuf.size());
 	m_buf << uint16(0); // nomoreattribs
+}
+
+EvadeShieldUpdateMsg::EvadeShieldUpdateMsg( uint32 objectId, uint8 shield )
+	:ObjectUpdateMsg(objectId),m_shield(shield)
+{
+}
+
+EvadeShieldUpdateMsg::~EvadeShieldUpdateMsg()
+{
+}
+
+const ByteBuffer& EvadeShieldUpdateMsg::toBuf()
+{
+	m_buf.clear();
+
+	PlayerObject *m_player = sObjMgr.getGOPtr(m_objectId);
+	if (m_player == NULL)
+		throw PacketNoLongerValid();
+
+	uint16 viewId = 0;
+	try
+	{
+		viewId = sObjMgr.getViewForGO(m_toWho,m_objectId);
+	}
+	catch (ObjectMgr::ClientNotAvailable)
+	{
+		throw PacketNoLongerValid();
+	}
+
+	AttributeUpdateBlock block;
+	block.addByte(PlayerAttrOther::EvadeShieldHealth, m_shield);
+
+	m_buf << uint8(0x03);
+	m_buf << uint16(viewId);
+	ByteBuffer blockBuf = block.toBuf(true);
+	m_buf.append(blockBuf.contents(),blockBuf.size());
+	m_buf << uint16(0); // nomoreattribs
+	return m_buf;
+}
+
+SelfEvadeShieldMsg::SelfEvadeShieldMsg( uint8 shield )
+{
+	m_buf.clear();
+	AttributeUpdateBlock block;
+	block.addByte(PlayerAttrSelf::EvadeShieldHealth, shield);
+
+	m_buf << uint8(0x03);
+	m_buf << uint16(VIEWID_SELF);
+	m_buf << uint8(0x02);
+	ByteBuffer blockBuf = block.toBuf(false);
+	m_buf.append(blockBuf.contents(),blockBuf.size());
+	m_buf << uint16(0);
+}
+
+EquippedItemUpdateMsg::EquippedItemUpdateMsg( uint32 objectId, uint32 itemId )
+	:ObjectUpdateMsg(objectId),m_itemId(itemId)
+{
+}
+
+EquippedItemUpdateMsg::~EquippedItemUpdateMsg()
+{
+}
+
+const ByteBuffer& EquippedItemUpdateMsg::toBuf()
+{
+	m_buf.clear();
+
+	PlayerObject *m_player = sObjMgr.getGOPtr(m_objectId);
+	if (m_player == NULL)
+		throw PacketNoLongerValid();
+
+	uint16 viewId = 0;
+	try
+	{
+		viewId = sObjMgr.getViewForGO(m_toWho,m_objectId);
+	}
+	catch (ObjectMgr::ClientNotAvailable)
+	{
+		throw PacketNoLongerValid();
+	}
+
+	AttributeUpdateBlock block;
+	block.addUInt32(PlayerAttrOther::EquippedItemID, m_itemId);
+
+	m_buf << uint8(0x03);
+	m_buf << uint16(viewId);
+	ByteBuffer blockBuf = block.toBuf(true);
+	m_buf.append(blockBuf.contents(),blockBuf.size());
+	m_buf << uint16(0); // nomoreattribs
+	return m_buf;
+}
+
+SelfEquippedItemMsg::SelfEquippedItemMsg( uint32 itemId )
+{
+	m_buf.clear();
+	AttributeUpdateBlock block;
+	block.addUInt32(PlayerAttrSelf::EquippedItemID, itemId);
+
+	m_buf << uint8(0x03);
+	m_buf << uint16(VIEWID_SELF);
+	m_buf << uint8(0x02);
+	ByteBuffer blockBuf = block.toBuf(false);
+	m_buf.append(blockBuf.contents(),blockBuf.size());
+	m_buf << uint16(0);
 }
 
 SelfCombatantModeMsg::SelfCombatantModeMsg( uint8 mode )

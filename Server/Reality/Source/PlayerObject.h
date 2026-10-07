@@ -1,4 +1,4 @@
-﻿// ***************************************************************************
+// ***************************************************************************
 //
 // Reality - The Matrix Online Server Emulator
 // Copyright (C) 2006-2010 Rajko Stojadinovic
@@ -81,6 +81,8 @@ public:
 	void setCurrentAnimation(uint8 anim) { m_currAnimation = anim; }
 	uint8 getCurrentMood() const {return m_currMood;}
 	uint8 nextStateCounter() { uint8 c = ++m_emoteCounter; if (c == 0) c = ++m_emoteCounter; return c; }
+	uint8 getHitCounter() const { return m_emoteCounter; }
+	uint8 nextHitCounter() { uint8 c = ++m_emoteCounter; if (c == 0) c = ++m_emoteCounter; return c; }
 	void setCurrentMood(uint8 mood) { m_currMood = mood; }
 
 	class GameClient& getClient() { return m_parent; }
@@ -203,6 +205,19 @@ public:
     void setHandle(const std::string& handle) { m_handle = handle; }
     void setRsiHex(const std::string& hexStr);
     std::string getRsiHex() const;
+
+    // Evade Shield & Bullet Dodge (retail PlayerAttrSelf/Other EvadeShieldHealth)
+    uint8 getEvadeShield() const { return m_evadeShield; }
+    void setEvadeShield(uint8 shield);
+    void consumeEvadeShield(uint8 amount);
+    void regenerateEvadeShield(uint32 deltaMs);
+    uint32 getLastBallisticFireTime() const { return m_lastBallisticFireTime; }
+    void setLastBallisticFireTime(uint32 t) { m_lastBallisticFireTime = t; }
+
+    // Equipped Weapon 3D attachment (PlayerAttrSelf/Other EquippedItemID)
+    uint32 getEquippedWeaponId() const { return m_equippedWeaponId; }
+    void setEquippedWeaponId(uint32 id);
+    void sendEquippedWeaponUpdate();
     
     // Combat
     
@@ -394,6 +409,10 @@ private:
     bool m_isStealthed = false;
     float m_cameraPitch = 0.0f;
     float m_cameraYaw = 0.0f;
+
+    uint8 m_evadeShield = 100;
+    uint32 m_lastBallisticFireTime = 0;
+    uint32 m_equippedWeaponId = 0;
 
     std::unordered_set<uint32> m_knownEntities;
     mutable std::mutex m_knownMutex;

@@ -52,6 +52,8 @@ struct ItemTemplate
     float attackSpeed;
     uint16 maxAmmo;
     bool isDualWield;
+    float range;
+    uint16 animAttack;
 
     // Clothing specifics
     uint16 bonusHacking;
