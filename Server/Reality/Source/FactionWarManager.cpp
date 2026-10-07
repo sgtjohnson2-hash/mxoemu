@@ -589,8 +589,7 @@ void FactionWarManager::updateStrikeSquads(uint32 deltaMs)
                                         enemyBot->StopInfecting();
                                         enemyBot->SetTargetGoId(0);
                                         LocationVector ePos = enemyPo->getPosition();
-                                        sGame.AnnounceStateUpdateNear((float)ePos.x, (float)ePos.z, 20000.0f, std::make_shared<EmoteMsg>(enemyGoId, 51, 1));
-                                        enemyPo->takeDamage(ma->getGoId(), 250, 43);
+                                        enemyPo->takeDamage(ma->getGoId(), 250, 0);
                                         BroadcastSquadCallout(squad, "Striker", "Wire-fu sweep! Knocked the clone down, breaking the channel!");
                                     }
                                 }

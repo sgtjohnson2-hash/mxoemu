@@ -94,9 +94,7 @@ bool SentientMajorCharacters::CheckMorpheusAuraDeflection(uint32 targetGoId, uin
             if (smithBot) {
                 smithBot->StopInfecting();
                 smithBot->MoveTo(kbX, (float)sPos.y, kbZ);
-                smithBot->Emote(51); // Knockdown stagger
             }
-            sGame.AnnounceStateUpdateNear((float)kbX, (float)kbZ, 20000.0f, std::make_shared<EmoteMsg>(smithGoId, 43, 1));
         }
         sBotMgr.LogCombat("[AURA OF FREE WILL] Morpheus's Aura deflected Agent Smith viral infection! Kinetic shockwave staggered clone.");
         return true; // Deflected!
@@ -159,7 +157,6 @@ bool SentientMajorCharacters::HijackHost(BotClient* bot, PlayerObject* po, uint3
     po->setCurrentHealth(5000);
 
     LocationVector p = po->getPosition();
-    sGame.AnnounceStateUpdateNear((float)p.x, (float)p.z, 20000.0f, std::make_shared<EmoteMsg>(goId, 43, 1));
     bot->Say("Agent Smith: Hear that, Mr. Anderson? That is the sound of inevitability.");
 
     sSmithCascade.InfectEntity(goId, smithGoId, 1);
@@ -224,8 +221,6 @@ bool SentientMajorCharacters::RevertHijackedHost(uint32 entityGoId)
     SetViralImmunity(entityGoId, 30000);
 
     LocationVector pos = po->getPosition();
-    // Green Matrix waterfall cleansing FX
-    sGame.AnnounceStateUpdateNear((float)pos.x, (float)pos.z, 20000.0f, std::make_shared<EmoteMsg>(entityGoId, 45, 1));
 
     auto bot = sBotMgr.GetBotByGOID(entityGoId);
     if (bot) {
@@ -279,7 +274,6 @@ void SentientMajorCharacters::ProcessMorpheusAura(PlayerObject* morpheusPo)
             if (bot) {
                 bot->SetPanicking(false);
                 bot->SetFearLevel(0.15f); // Calm alertness
-                target->getClient().QueueState(std::make_shared<EmoteMsg>(goId, 0, 1)); // Clear cower emote
                 LocationVector hl = sBotMgr.GetNearestHardline((float)target->getPosition().x, (float)target->getPosition().z);
                 if (hl.x != 0.0f || hl.z != 0.0f) {
                     bot->SetEvacTarget(hl);
@@ -379,9 +373,6 @@ bool SentientMajorCharacters::TriggerMerovingianBackdoorEscape(BotClient* meroBo
 
     LocationVector pos = meroPo->getPosition();
     meroBot->Say("The Merovingian: You see there is only one constant, one universal truth: causality. Au revoir, mon cher.");
-
-    // Visual backdoor code flash
-    sGame.AnnounceStateUpdateNear((float)pos.x, (float)pos.z, 20000.0f, std::make_shared<EmoteMsg>(meroPo->getGoId(), 43, 1));
 
     // Teleport to Club Hel safe retreat coordinates
     LocationVector clubHelSafe(-67862.0f, 95.0f, 16314.0f);

@@ -586,6 +586,15 @@ const ByteBuffer& EmoteMsg::toBuf()
 		throw PacketNoLongerValid();
 	}
 
+	// Emote IDs 40-51 (e.g. 50 = Cower, 43 = Kung Fu, 51 = Knockdown) are social emotes,
+	// not combat animations, and crash retail 7.6005 matrix.exe in playeranimation.cpp
+	// (memcpy NULL string in client.dll+0x5960ee) for both players and NPCs.
+	if (m_emoteAnimation >= 40 && m_emoteAnimation <= 51)
+	{
+		m_buf.clear();
+		throw PacketNoLongerValid();
+	}
+
 	PlayerObject *m_player = NULL;
 	m_player = sObjMgr.getGOPtr(m_objectId);
 	if (m_player == NULL)

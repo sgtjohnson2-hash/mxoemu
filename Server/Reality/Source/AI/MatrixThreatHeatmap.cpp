@@ -256,7 +256,6 @@ void MatrixThreatHeatmap::TriggerEscalationResponse(int gx, int gz, EscalationTi
                 po->setCurrentHealth(4000);
 
                 targetBot->Say("Agent Johnson: Anomaly detected at coordinates. Stand down. Your code has been revoked.");
-                sGame.AnnounceStateUpdateNear(wx, wz, 20000.0f, msgBaseClassPtr(new EmoteMsg(po->getGoId(), 43, 1)));
                 overwritten = true;
                 break;
             }

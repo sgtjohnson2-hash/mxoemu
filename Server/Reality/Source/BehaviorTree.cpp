@@ -344,7 +344,6 @@ NodeStatus ActionAgentInfect::Tick(BotClient* bot)
 
         // Channel in progress:
         if (now - bot->GetInfectChannelStartMs() < bot->GetInfectChannelDurationMs()) {
-            victim->getClient().QueueState(std::make_shared<EmoteMsg>(victimGoId, 50, 1)); // Cower/struggle
             return NodeStatus::RUNNING;
         }
 
@@ -423,8 +422,6 @@ NodeStatus ActionAgentInfect::Tick(BotClient* bot)
             {
                 // Start infection channel!
                 bot->StartInfecting(target->getGoId(), 2500);
-                sGame.AnnounceStateUpdateNear((float)myPos.x, (float)myPos.z, 20000.0f, std::make_shared<EmoteMsg>(me->getGoId(), 43, 1));
-                target->getClient().QueueState(std::make_shared<EmoteMsg>(target->getGoId(), 50, 1));
                 if (rand() % 10 == 0) {
                     bot->Say("Agent Smith: It is inevitable. Submit to the copy.");
                 }
@@ -487,12 +484,8 @@ NodeStatus ActionDisruptInfection::Tick(BotClient* bot)
             targetBot->StopInfecting();
             targetBot->SetTargetGoId(0);
 
-            // Knockdown emote on Smith clone
-            sGame.AnnounceStateUpdateNear((float)tPos.x, (float)tPos.z, 20000.0f, std::make_shared<EmoteMsg>(target->getGoId(), 51, 1));
-            
             // Disruption damage & visual kick FX
-            target->takeDamage(me->getGoId(), 250, 43);
-            sGame.AnnounceStateUpdateNear((float)myPos.x, (float)myPos.z, 20000.0f, std::make_shared<EmoteMsg>(me->getGoId(), 43, 1));
+            target->takeDamage(me->getGoId(), 250, 0);
 
             if (rand() % 4 == 0) {
                 bot->Say("Zion Strikemaster: Back off! Break the viral link!");

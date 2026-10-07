@@ -391,7 +391,6 @@ bool BackdoorNetwork::ExecuteCivilianJackout(uint32 entityGoId, uint32 hardlineI
 
     LocationVector pos = po->getPosition();
     sGame.BroadcastNear((float)pos.x, (float)pos.z, 2000.0f, std::make_shared<JackoutEffectMsg>(entityGoId, true)->toBuf(), false);
-    sGame.AnnounceStateUpdateNear((float)pos.x, (float)pos.z, 20000.0f, std::make_shared<EmoteMsg>(entityGoId, 45, 1)); // Digital dissolution FX
 
     auto bot = sBotMgr.GetBotByGOID(entityGoId);
     if (bot) {

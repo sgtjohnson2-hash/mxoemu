@@ -1,4 +1,4 @@
-﻿#include <memory>
+#include <memory>
 #include "BotClient.h"
 #include "BotManager.h"
 #include "ObjectMgr.h"
@@ -731,12 +731,9 @@ void BotClient::Say(const std::string& msg)
 
 void BotClient::Emote(uint32 emoteId)
 {
-    if (m_playerGoId == 0) return;
-    PlayerObject* me = BotGetPlayer(m_playerGoId);
-    if (!me) return;
-
-    // Emote counter doesn't matter too much for bots, just pass 1
-    sGame.AnnounceStateUpdateNear(me->getPosition().x, me->getPosition().z, 20000.0f, shared_ptr<EmoteMsg>(new EmoteMsg(m_playerGoId, emoteId, 1)));
+    // Bots never emote on the wire (GEMINI.md Rule 6.1)
+    (void)emoteId;
+    return;
 }
 
 BotVector2D BotClient::CalculateBoidsVelocity(PlayerObject* me)
