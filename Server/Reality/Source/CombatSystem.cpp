@@ -1233,7 +1233,7 @@ bool CombatSystem::RunInterlockRound(InterlockSession &session)
 	// Bot combat AI: update round tactics and discipline moves
 	if (pA->getClient().isBot()) {
 		uint8 newTac = TACTIC_POWER;
-		bool isElite = (pA->getHandle().find("Agent") != std::string::npos || pA->getLevel() >= 30);
+		bool isElite = (pA->getHandle().find("Agent") != std::string::npos || (pA->getLevel() >= 30 && pA->getHandle().find("Dojo") == std::string::npos));
 		if (isElite) {
 			switch (session.tacticB) {
 				case TACTIC_POWER:     newTac = TACTIC_RETALIATE; break;
@@ -1271,7 +1271,7 @@ bool CombatSystem::RunInterlockRound(InterlockSession &session)
 	}
 	if (pB->getClient().isBot()) {
 		uint8 newTac = TACTIC_POWER;
-		bool isElite = (pB->getHandle().find("Agent") != std::string::npos || pB->getLevel() >= 30);
+		bool isElite = (pB->getHandle().find("Agent") != std::string::npos || (pB->getLevel() >= 30 && pB->getHandle().find("Dojo") == std::string::npos));
 		if (isElite) {
 			switch (session.tacticA) {
 				case TACTIC_POWER:     newTac = TACTIC_RETALIATE; break;

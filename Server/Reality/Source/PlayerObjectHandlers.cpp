@@ -1035,7 +1035,7 @@ void PlayerObject::ParsePlayerCommand( string theCmd )
 			// reasonable number of 4 s interlock rounds); damage scales with the player's HP pool
 			// so the dummy stays a threat for characters that have levelled up (+50 HP/level).
 			const uint8 botLvl = std::max<uint8>(1, getLevel());
-			const float hpF = (iequals(subCommand, "1v1") || iequals(subCommand, "kungfu") || iequals(subCommand, "karate") || iequals(subCommand, "aikido") || iequals(subCommand, "brawl") || iequals(subCommand, "street")) ? 20.0f : std::max(120.0f, std::min(600.0f, 100.0f + 20.0f * botLvl));
+			const float hpF = (iequals(subCommand, "1v1") || iequals(subCommand, "kungfu") || iequals(subCommand, "karate") || iequals(subCommand, "aikido") || iequals(subCommand, "brawl") || iequals(subCommand, "street")) ? 10.0f : std::max(120.0f, std::min(600.0f, 100.0f + 20.0f * botLvl));
 			const float dmgScale = std::max(1.0f, std::min(20.0f, float(getMaximumHealth()) / 150.0f));
 			botPo->setLevel(botLvl);
 			botPo->setMaximumHealth((uint16)hpF);
