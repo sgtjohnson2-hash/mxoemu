@@ -670,6 +670,16 @@ const ByteBuffer& ExtendedAnimationMsg::toBuf()
 		throw PacketNoLongerValid();
 	}
 
+	// ExtendedAnimationMsg (opcode 0x29) is a synthetic packet format that crashes retail 7.6005
+	// matrix.exe in client.dll+0x59609D (msvcr71.dll+0x29C1 0xC0000005). Never emit onto the wire for
+	// real network clients unless explicitly enabled.
+	static const bool s_enableExtendedAnim = sConfig.GetBoolDefault("Combat.ExtendedAnim", false);
+	if (m_toWho != NULL && m_toWho->hasSocket() && !s_enableExtendedAnim)
+	{
+		m_buf.clear();
+		throw PacketNoLongerValid();
+	}
+
 	m_player->getPosition().toFloatBuf(&sampleExtendedAnimMsg[0x0D], sizeof(float)*3);
 	uint16 viewId = 0;
 	try

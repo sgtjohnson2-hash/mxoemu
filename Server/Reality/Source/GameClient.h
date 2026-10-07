@@ -48,6 +48,7 @@ public:
 	inline uint32 LastActive() { return m_lastActivity; }
 	inline bool IsValid() { return m_validClient; }
 	virtual bool isBot() const { return false; }
+	inline bool hasSocket() const { return m_sock != nullptr; }
 	void Invalidate() { m_validClient=false;}
 	string Address() { return m_address.Convert(true); }
 	uint32 GetSessionId() 

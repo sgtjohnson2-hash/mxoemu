@@ -97,11 +97,6 @@ bool HackerSystem::ExecuteHackerAbility(PlayerObject* caster, uint16 abilityId, 
         caster->getClient().QueueCommand(std::make_shared<CastBarMsg>(abilityId, castSec));
     }
 
-    // 4. Caster Animation: 16-bit ExtendedAnimationMsg (opcode 0x29)
-    // 0x0429 = Hacker_VirusLaunch_A
-    sGame.AnnounceStateUpdateNear(caster->getPosition().x, caster->getPosition().z, 20000.0f,
-        std::make_shared<ExtendedAnimationMsg>(caster->getGoId(), 0x0429, 1));
-
     std::string abilName = templ ? templ->name : "Logic Attack";
     INFO_LOG(format("HackerSystem: %1%:%2% executes %3% (id %4%) on %5%:%6%")
         % caster->getHandle() % caster->getGoId() % abilName % abilityId
@@ -290,11 +285,6 @@ bool HackerSystem::ExecuteCoderAbility(PlayerObject* caster, uint16 abilityId, u
     {
         caster->getClient().QueueCommand(std::make_shared<CastBarMsg>(abilityId, castSec));
     }
-
-    // 4. Caster Animation: 16-bit ExtendedAnimationMsg (opcode 0x29)
-    // 0x0428 = coding posture
-    sGame.AnnounceStateUpdateNear(caster->getPosition().x, caster->getPosition().z, 20000.0f,
-        std::make_shared<ExtendedAnimationMsg>(caster->getGoId(), 0x0428, 1));
 
     std::string abilName = templ ? templ->name : "Support Ability";
     INFO_LOG(format("HackerSystem: %1%:%2% executes Coder ability %3% (id %4%) on %5%:%6%")
@@ -536,11 +526,6 @@ bool HackerSystem::ExecuteSoldierAbility(PlayerObject* caster, uint16 abilityId,
         caster->getClient().QueueCommand(std::make_shared<CastBarMsg>(abilityId, castSec));
     }
 
-    // 4. Caster Animation: 16-bit ExtendedAnimationMsg (opcode 0x29)
-    uint16 animId = (abilityId == 147 || abilityId == 505 || abilityId == 453) ? 0x0529 : 0x0528;
-    sGame.AnnounceStateUpdateNear(caster->getPosition().x, caster->getPosition().z, 20000.0f,
-        std::make_shared<ExtendedAnimationMsg>(caster->getGoId(), animId, 1));
-
     std::string abilName = templ ? templ->name : "Firearm Ability";
     INFO_LOG(format("HackerSystem: %1%:%2% executes Soldier ability %3% (id %4%) on %5%:%6%")
         % caster->getHandle() % caster->getGoId() % abilName % abilityId
@@ -697,10 +682,6 @@ bool HackerSystem::ExecuteSpyAbility(PlayerObject* caster, uint16 abilityId, uin
     {
         caster->getClient().QueueCommand(std::make_shared<CastBarMsg>(abilityId, castSec));
     }
-
-    // 4. Caster Animation: 16-bit ExtendedAnimationMsg (opcode 0x29)
-    sGame.AnnounceStateUpdateNear(caster->getPosition().x, caster->getPosition().z, 20000.0f,
-        std::make_shared<ExtendedAnimationMsg>(caster->getGoId(), 0x052A, 1));
 
     std::string abilName = templ ? templ->name : "Spy Ability";
     INFO_LOG(format("HackerSystem: %1%:%2% executes Spy ability %3% (id %4%) on %5%:%6%")

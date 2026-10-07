@@ -948,17 +948,6 @@ CombatSystem::AttackResult CombatSystem::ResolveAttack(PlayerObject* attacker, P
 		if (attackRoll < defenseRoll)
 		{
 			res.hit = false;
-			if (inInterlock && !m_ilExchangeActive) {
-				InterlockAnimPair pair = CombatAnimationMatrix::GetAnimationPair(
-					attacker->getFightingStyle(), attackerTactic,
-					target->getFightingStyle(), targetTactic,
-					InterlockExchangeOutcome::Dodged, move.id
-				);
-				sGame.AnnounceStateUpdateNear(attacker->getPosition().x, attacker->getPosition().z, 20000.0f,
-					std::make_shared<ExtendedAnimationMsg>(attacker->getGoId(), pair.attackerAnimId, 1));
-				sGame.AnnounceStateUpdateNear(target->getPosition().x, target->getPosition().z, 20000.0f,
-					std::make_shared<ExtendedAnimationMsg>(target->getGoId(), pair.defenderAnimId, 1));
-			}
 			if (!attacker->getClient().isBot()) {
 				attacker->getClient().QueueCommand(std::make_shared<SystemChatMsg>(
 					(format("{c:FFFF00}[COMBAT] You missed %1%!{/c}") % target->getHandle()).str()
@@ -1088,42 +1077,12 @@ CombatSystem::AttackResult CombatSystem::ResolveAttack(PlayerObject* attacker, P
     
     // Item 32: Takedown Moves & Interlock Animation Dispatch
     if (res.hit && target->getCurrentHealth() <= res.damageTaken) {
-        if (inInterlock && !m_ilExchangeActive) {
-            InterlockAnimPair pair = CombatAnimationMatrix::GetAnimationPair(
-                attacker->getFightingStyle(), attackerTactic,
-                target->getFightingStyle(), targetTactic,
-                InterlockExchangeOutcome::GuardBreak, move.id
-            );
-            auto animAtk = std::make_shared<ExtendedAnimationMsg>(attacker->getGoId(), pair.attackerAnimId, 1);
-            auto animDef = std::make_shared<ExtendedAnimationMsg>(target->getGoId(), pair.defenderAnimId, 1);
-            //AnnounceStateUpdateNear already reaches both combatants - queueing the same
-            //shared message again serialized it twice and raced setReceiver/toBuf
-            sGame.AnnounceStateUpdateNear(attacker->getPosition().x, attacker->getPosition().z, 20000.0f, animAtk);
-            sGame.AnnounceStateUpdateNear(target->getPosition().x, target->getPosition().z, 20000.0f, animDef);
-        }
         // arm the 3 s takedown timer only once; a second lethal hit must not push death out
         if (target->m_deathDelayMS == 0)
         {
             target->m_deathDelayMS = getMSTime() + 3000; // 3 seconds takedown animation
             target->m_deathDelayKillerId = attacker->getGoId();
         }
-    }
-    else if (res.hit && inInterlock && !m_ilExchangeActive && !(attackerTactic == targetTactic && attackerTactic != TACTIC_NORMAL)) {
-        InterlockExchangeOutcome hitOutcome = res.isBlocked ? InterlockExchangeOutcome::Blocked :
-            ((attackerTactic == TACTIC_POWER && targetTactic == TACTIC_SPEED) ? InterlockExchangeOutcome::StanceCrush :
-            ((attackerTactic == TACTIC_SPEED && targetTactic == TACTIC_RETALIATE) ? InterlockExchangeOutcome::FastInterrupt :
-            ((attackerTactic == TACTIC_RETALIATE && (targetTactic == TACTIC_DEFENSE || targetTactic == TACTIC_POWER)) ? InterlockExchangeOutcome::GuardBreak :
-            ((move.id == 197 || move.id == 198 || move.id == 296 || move.id == 531) ? InterlockExchangeOutcome::SpecialHit :
-            InterlockExchangeOutcome::NormalHit))));
-        InterlockAnimPair pair = CombatAnimationMatrix::GetAnimationPair(
-            attacker->getFightingStyle(), attackerTactic,
-            target->getFightingStyle(), targetTactic,
-            hitOutcome, move.id
-        );
-        auto animAtk = std::make_shared<ExtendedAnimationMsg>(attacker->getGoId(), pair.attackerAnimId, 1);
-        auto animDef = std::make_shared<ExtendedAnimationMsg>(target->getGoId(), pair.defenderAnimId, 1);
-        sGame.AnnounceStateUpdateNear(attacker->getPosition().x, attacker->getPosition().z, 20000.0f, animAtk);
-        sGame.AnnounceStateUpdateNear(target->getPosition().x, target->getPosition().z, 20000.0f, animDef);
     }
 
 	if (res.hit)
@@ -1417,13 +1376,8 @@ bool CombatSystem::RunInterlockRound(InterlockSession &session)
 		if (!pA->getClient().isBot())
 			pA->getClient().QueueCommand(std::make_shared<SystemChatMsg>((format("{c:FF0000}[MARTIAL ARTS] Your %1% was broken by %2%'s Grab! Unblockable throw!{/c}") % targetStance % pB->getHandle()).str()));
 	} else if (isClash) {
-		// Both combatants selected identical stance - dispatch clash rebound animations
-		if (session.ilViewIdA == 0 && session.ilViewIdB == 0) //human interlocks animate through IL exchanges
-		{
-			InterlockAnimPair pair = CombatAnimationMatrix::GetAnimationPair(styleA, tacA, styleB, tacB, InterlockExchangeOutcome::Clash, moveA ? moveA->id : 0);
-			sGame.AnnounceStateUpdateNear(pA->getPosition().x, pA->getPosition().z, 20000.0f, std::make_shared<ExtendedAnimationMsg>(pA->getGoId(), pair.attackerAnimId, 1));
-			sGame.AnnounceStateUpdateNear(pB->getPosition().x, pB->getPosition().z, 20000.0f, std::make_shared<ExtendedAnimationMsg>(pB->getGoId(), pair.defenderAnimId, 1));
-		}
+		// Both combatants selected identical stance - glancing exchange.
+		// Interlocks animate exclusively through ILCombatStateMsg / ILExchange structures.
 		std::string clashName = (tacA == TACTIC_POWER) ? "Power" : (tacA == TACTIC_SPEED ? "Speed" : (tacA == TACTIC_RETALIATE ? "Grab" : "Guard"));
 		if (!pA->getClient().isBot()) pA->getClient().QueueCommand(std::make_shared<SystemChatMsg>((format("{c:FFFF00}[MARTIAL ARTS] Stance Clash! Both combatants chose %1%. Glancing exchange.{/c}") % clashName).str()));
 		if (!pB->getClient().isBot()) pB->getClient().QueueCommand(std::make_shared<SystemChatMsg>((format("{c:FFFF00}[MARTIAL ARTS] Stance Clash! Both combatants chose %1%. Glancing exchange.{/c}") % clashName).str()));
