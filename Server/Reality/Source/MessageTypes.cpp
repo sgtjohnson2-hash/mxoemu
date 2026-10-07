@@ -1435,43 +1435,58 @@ SpawnILCombatHandlerMsg::SpawnILCombatHandlerMsg( uint16 viewId, uint8 spawnIdCo
 	m_buf << uint8(0x00);
 }
 
-InterlockInitMsg::InterlockInitMsg( uint16 ilViewId, LocationVector pos, uint32 targetViewWithSpawnId, uint16 spawnCounter )
+ILExchange::ILExchange()
 {
-	//Byte-exact port of Hardline Dreams CombatHandler.ProcessRequestCloseCombat.
-	//The trailing block is a captured live interlock exchange ("special agent test"); it is NOT
-	//decoded. It starts the client's interlock pairing - per-round exchanges are not implemented.
-	static const char* interlockCombatBlob =
-		"0703070300bafc42000020c1801baf4200803e40000020c1e0b319430000010013010000f40134059a02233c5200008b0b0024145200008b0b0024262000008b0b00240000000000000000000000000000000021000000700000000010001000000000000000000000000000010000022b600000000000";
+	memset(this, 0, sizeof(*this));
+	unk5d = 0x1000;
+	unk5f = 0x1000;
+}
+
+void ILExchange::write( ByteBuffer &buf ) const
+{
+	const size_t startPos = buf.size();
+	buf << uint8(attackerSlot) << uint8(defenderSlot);
+	buf << uint16(attackerAdjustMs) << uint16(defenderAdjustMs);
+	for (int i=0;i<3;i++) buf << float(attackerPos[i]);
+	for (int i=0;i<3;i++) buf << float(defenderPos[i]);
+	buf << uint8(defenderStyle) << uint8(attackerStyle);
+	buf << uint16(number);
+	buf << int32(startMs);
+	buf << int16(defenderOffsetMs);
+	buf << uint16(attackerExtraMs) << uint16(defenderExtraMs);
+	buf << uint8(flags);
+	for (int i=0;i<5;i++) buf << uint32(moves[i][0]) << uint32(moves[i][1]);
+	buf << uint32(attackerHealth) << uint32(defenderHealth);
+	buf << uint16(unk5d) << uint16(unk5f);
+	while (buf.size() - startPos < 0x79)
+		buf << uint8(0);
+}
+
+ILCombatStateMsg::ILCombatStateMsg( uint16 ilViewId, LocationVector pos, uint32 seq,
+	const std::vector<uint32> &slotHandles, const std::vector<ILExchange> &exchanges )
+{
+	ByteBuffer payload;
+	payload << uint16(ilViewId);
+	payload << uint8(0x01);
+	byte posBuf[sizeof(double)*3];
+	pos.toDoubleBuf(posBuf,sizeof(posBuf));
+	payload.append(posBuf,sizeof(posBuf));
+	payload << uint32(seq);
+	uint32 mask = 0;
+	for (size_t i=0;i<slotHandles.size() && i<6;i++)
+		mask |= (1u << i);
+	payload << uint32(mask);
+	for (size_t i=0;i<slotHandles.size() && i<6;i++)
+		payload << uint32(slotHandles[i]);
+	payload << uint8(exchanges.size());
+	for (size_t i=0;i<exchanges.size();i++)
+		exchanges[i].write(payload);
 
 	m_buf.clear();
 	m_buf << uint8(0x03);
 	m_buf << uint16(VIEWID_OBJECTMANAGER);
 	m_buf << uint8(0x02);
-	m_buf << uint8(0xA7);
-	m_buf << uint8(0x00);
-	m_buf << uint16(ilViewId);
-	m_buf << uint8(0x01);
-	byte posBuf[sizeof(double)*3];
-	pos.toDoubleBuf(posBuf,sizeof(posBuf));
-	m_buf.append(posBuf,sizeof(posBuf));
-
-	const byte midBytes[8] = {0x01,0x00,0x00,0x00,0x03,0x00,0x00,0x00};
-	m_buf.append(midBytes,sizeof(midBytes));
-
-	m_buf << uint32(targetViewWithSpawnId);
-	m_buf << uint16(2);
-	m_buf << uint16(spawnCounter);
-	m_buf << uint8(0x01);
-	m_buf << uint8(0x01);
-	m_buf << uint8(0x02);
-
-	{
-		string output;
-		CryptoPP::HexDecoder decoder;
-		decoder.Attach( new CryptoPP::StringSink( output ) );
-		decoder.Put( (const byte*)interlockCombatBlob, strlen(interlockCombatBlob) );
-		decoder.MessageEnd();
-		m_buf.append(output);
-	}
+	m_buf << uint16(payload.size() + 2);
+	m_buf.append(payload.contents(),payload.size());
 }
 

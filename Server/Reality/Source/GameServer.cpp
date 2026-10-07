@@ -342,12 +342,8 @@ void GameServer::SimulationLoop()
 		constexpr std::chrono::microseconds targetFrameDuration(33333); // 33.333 ms
 		if (frameWorkDuration < targetFrameDuration) {
 			auto remaining = targetFrameDuration - frameWorkDuration;
-			if (remaining > std::chrono::milliseconds(3)) {
-				std::this_thread::sleep_for(remaining - std::chrono::milliseconds(2));
-			}
-			while (std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now() - frameStartTime) < targetFrameDuration) {
-				std::this_thread::yield();
-			}
+			//plain sleep: the old spin-yield loop burned a whole VPS core for ~2 ms every tick
+			std::this_thread::sleep_for(remaining);
 		} else {
 			std::this_thread::yield();
 		}

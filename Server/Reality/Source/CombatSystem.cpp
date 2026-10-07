@@ -265,6 +265,8 @@ void CombatSystem::LoadAbilities()
 
 const CombatMove* CombatSystem::GetMove(uint16 moveId)
 {
+    //UseAbility inserts synthesized moves at runtime from other threads - keep the lock
+    std::lock_guard<std::recursive_mutex> lock(sCombatSys.m_combatMutex);
     auto it = sCombatSys.m_moveTable.find(moveId);
     if (it != sCombatSys.m_moveTable.end()) return &it->second;
     return nullptr;
@@ -272,6 +274,7 @@ const CombatMove* CombatSystem::GetMove(uint16 moveId)
 
 const CombatMove* CombatSystem::GetMoveByName(const std::string &name)
 {
+    std::lock_guard<std::recursive_mutex> lock(sCombatSys.m_combatMutex);
     auto it = sCombatSys.m_movesByName.find(name);
     if (it != sCombatSys.m_movesByName.end()) return it->second;
     return nullptr;
@@ -503,6 +506,7 @@ bool CombatSystem::RequestInterlock(uint32 attackerGoId, uint32 targetGoId, uint
 	session.roundNumber = 0;
 	session.ilViewIdA = 0;
 	session.ilViewIdB = 0;
+	session.exchangeNum = 1; //exchange 1 is the opening sent with the IL state below
 
 	// Step interlock participants into melee range (~1.5m = 150.0 units) and face each other squarely
 	// before issuing InterlockInitMsg, ensuring accurate animation alignment and camera framing.
@@ -553,6 +557,8 @@ bool CombatSystem::RequestInterlock(uint32 attackerGoId, uint32 targetGoId, uint
 	{
 		float simTime = sGame.GetSimTime();
 		LocationVector ilPos(midX, (posA.y + posB.y) * 0.5, midZ);
+		session.ilPos = ilPos;
+		session.nextRoundTime = getMSTime() + 2500; //first resolved round right after the opening
 
 		struct SideSetup { PlayerObject* self; PlayerObject* other; uint16* viewSlot; };
 		SideSetup sides[2] =
@@ -574,8 +580,11 @@ bool CombatSystem::RequestInterlock(uint32 attackerGoId, uint32 targetGoId, uint
 				uint16 ilViewId = sObjMgr.allocateDynamicView(&sides[i].self->getClient(), uint32(GOID_ILCOMBATHANDLER) << 16);
 				*(sides[i].viewSlot) = ilViewId;
 
+				static std::atomic<uint8> s_ilSpawnCounter(0x40);
+				uint8 spawnCounter = ++s_ilSpawnCounter;
+				if (spawnCounter == 0) spawnCounter = ++s_ilSpawnCounter;
 				sides[i].self->getClient().QueueState(std::make_shared<SpawnILCombatHandlerMsg>(
-					ilViewId, uint8(0x41 + i), ilPos, simTime));
+					ilViewId, spawnCounter, ilPos, simTime));
 
 				//the pairing references the opponent's view as this client sees it
 				uint16 otherViewId = sObjMgr.getViewForGO(&sides[i].self->getClient(), sides[i].other->getGoId());
@@ -587,9 +596,17 @@ bool CombatSystem::RequestInterlock(uint32 attackerGoId, uint32 targetGoId, uint
 					uint32 otherViewWithSpawnId = uint32(otherViewId) | (uint32(PLAYER_SPAWN_COUNTER) << 16);
 					if (i == 0 && clientTargetRef != 0)
 						otherViewWithSpawnId = clientTargetRef;
-					//spawn counter: HDS never assigns selfSpawnIdCounter, so it always sends 0
-					sides[i].self->getClient().QueueState(std::make_shared<InterlockInitMsg>(
-						ilViewId, ilPos, otherViewWithSpawnId, uint16(0)));
+					//slot 1 = opponent, slot 2 = self (view 2, spawn counter 0 as in HDS).
+					//The opening exchange mirrors the captured interlock start: the initiator
+					//steps in with move 0x2026 after the 0x523C/0x5214 lead-ins.
+					std::vector<uint32> slots;
+					slots.push_back(otherViewWithSpawnId);
+					slots.push_back(uint32(VIEWID_SELF));
+					std::vector<ILExchange> opening;
+					opening.push_back(BuildExchange(session, sides[i].self, pA, pB, 1,
+						IL_MOVE_OPEN_ATTACKER_PRE, IL_MOVE_PRE, IL_MOVE_OPEN_MAIN));
+					sides[i].self->getClient().QueueState(std::make_shared<ILCombatStateMsg>(
+						ilViewId, ilPos, 1, slots, opening));
 				}
 				else
 				{
@@ -930,7 +947,7 @@ CombatSystem::AttackResult CombatSystem::ResolveAttack(PlayerObject* attacker, P
 		if (attackRoll < defenseRoll)
 		{
 			res.hit = false;
-			if (inInterlock) {
+			if (inInterlock && !m_ilExchangeActive) {
 				InterlockAnimPair pair = CombatAnimationMatrix::GetAnimationPair(
 					attacker->getFightingStyle(), attackerTactic,
 					target->getFightingStyle(), targetTactic,
@@ -1070,7 +1087,7 @@ CombatSystem::AttackResult CombatSystem::ResolveAttack(PlayerObject* attacker, P
     
     // Item 32: Takedown Moves & Interlock Animation Dispatch
     if (res.hit && target->getCurrentHealth() <= res.damageTaken) {
-        if (inInterlock) {
+        if (inInterlock && !m_ilExchangeActive) {
             InterlockAnimPair pair = CombatAnimationMatrix::GetAnimationPair(
                 attacker->getFightingStyle(), attackerTactic,
                 target->getFightingStyle(), targetTactic,
@@ -1090,7 +1107,7 @@ CombatSystem::AttackResult CombatSystem::ResolveAttack(PlayerObject* attacker, P
             target->m_deathDelayKillerId = attacker->getGoId();
         }
     }
-    else if (res.hit && inInterlock && !(attackerTactic == targetTactic && attackerTactic != TACTIC_NORMAL)) {
+    else if (res.hit && inInterlock && !m_ilExchangeActive && !(attackerTactic == targetTactic && attackerTactic != TACTIC_NORMAL)) {
         InterlockExchangeOutcome hitOutcome = res.isBlocked ? InterlockExchangeOutcome::Blocked :
             ((attackerTactic == TACTIC_POWER && targetTactic == TACTIC_SPEED) ? InterlockExchangeOutcome::StanceCrush :
             ((attackerTactic == TACTIC_SPEED && targetTactic == TACTIC_RETALIATE) ? InterlockExchangeOutcome::FastInterrupt :
@@ -1161,6 +1178,77 @@ CombatSystem::AttackResult CombatSystem::ResolveAttack(PlayerObject* attacker, P
 		// H1: the kill reward is paid by PlayerObject::die(), which runs for every death
 		// (zero-delay deaths inside takeDamage and the delayed takedown deaths alike).
 	}
+	return res;
+}
+
+ILExchange CombatSystem::BuildExchange(const InterlockSession &session, PlayerObject* viewer,
+	PlayerObject* attacker, PlayerObject* defender, uint16 number,
+	uint32 attackerPreMove, uint32 defenderPreMove, uint32 mainMove)
+{
+	ILExchange e;
+	//on every client: slot 2 = that client's own character, slot 1 = the opponent
+	e.attackerSlot = (attacker == viewer) ? 2 : 1;
+	e.defenderSlot = (defender == viewer) ? 2 : 1;
+	LocationVector a = attacker->getPosition();
+	LocationVector d = defender->getPosition();
+	e.attackerPos[0] = float(a.x - session.ilPos.x);
+	e.attackerPos[1] = float(a.y - session.ilPos.y);
+	e.attackerPos[2] = float(a.z - session.ilPos.z);
+	e.defenderPos[0] = float(d.x - session.ilPos.x);
+	e.defenderPos[1] = float(d.y - session.ilPos.y);
+	e.defenderPos[2] = float(d.z - session.ilPos.z);
+	e.number = number;
+	//far-future start + flag bit0: the client clamps it to "now + 5 ms" on its own clock,
+	//so server/client clock skew can't make it skip the exchange
+	e.startMs = 1000000;
+	e.defenderOffsetMs = 666;		//values from the captured exchanges
+	e.attackerExtraMs = 1332;
+	e.defenderExtraMs = 1333;
+	e.flags = 0x03;
+	if (attackerPreMove) { e.moves[0][0] = attackerPreMove; e.moves[0][1] = IL_MOVE_DATABASE; }
+	if (defenderPreMove) { e.moves[1][0] = defenderPreMove; e.moves[1][1] = IL_MOVE_DATABASE; }
+	e.moves[2][0] = mainMove; e.moves[2][1] = IL_MOVE_DATABASE;
+	e.attackerHealth = attacker->getCurrentHealth();
+	e.defenderHealth = defender->getCurrentHealth();
+	return e;
+}
+
+void CombatSystem::SendInterlockExchange(InterlockSession &session, PlayerObject* attacker, PlayerObject* defender)
+{
+	if (session.ilViewIdA == 0 && session.ilViewIdB == 0)
+		return;
+	//main moves seen in captured live exchanges (interlock database 0x24000B8B)
+	static const uint32 mainMoves[] = { 0x2026, 0x2388, 0x236D, 0x2367, 0x4EE5 };
+	session.exchangeNum++;
+	uint32 mainMove = mainMoves[session.exchangeNum % (sizeof(mainMoves)/sizeof(mainMoves[0]))];
+
+	PlayerObject* pA = getPlayerSafe(session.goIdA);
+	PlayerObject* pB = getPlayerSafe(session.goIdB);
+	struct { PlayerObject* p; uint16 view; } sides[2] = { { pA, session.ilViewIdA }, { pB, session.ilViewIdB } };
+	for (int i = 0; i < 2; i++)
+	{
+		if (!sides[i].p || sides[i].view == 0 || sides[i].p->getClient().isBot())
+			continue;
+		std::vector<ILExchange> ex;
+		ex.push_back(BuildExchange(session, sides[i].p, attacker, defender, session.exchangeNum,
+			IL_MOVE_PRE, IL_MOVE_PRE, mainMove));
+		sides[i].p->getClient().QueueState(std::make_shared<ILCombatStateMsg>(
+			sides[i].view, session.ilPos, session.exchangeNum, std::vector<uint32>(), ex));
+	}
+	INFO_LOG(format("Interlock exchange %1%: %2% -> %3% move 0x%4$04X (HP %5% / %6%)")
+		% session.exchangeNum % attacker->getHandle() % defender->getHandle() % mainMove
+		% attacker->getCurrentHealth() % defender->getCurrentHealth());
+}
+
+CombatSystem::AttackResult CombatSystem::StrikeInterlock(InterlockSession &session, PlayerObject* attacker,
+	PlayerObject* target, const CombatMove& move, uint8 attackerTactic, uint8 targetTactic, bool inInterlock, bool bypassBlock)
+{
+	const bool exchangeDriven = (session.ilViewIdA != 0 || session.ilViewIdB != 0);
+	m_ilExchangeActive = exchangeDriven;
+	AttackResult res = ResolveAttack(attacker, target, move, attackerTactic, targetTactic, inInterlock, bypassBlock);
+	m_ilExchangeActive = false;
+	if (exchangeDriven)
+		SendInterlockExchange(session, attacker, target);
 	return res;
 }
 
@@ -1328,56 +1416,53 @@ bool CombatSystem::RunInterlockRound(InterlockSession &session)
 			pA->getClient().QueueCommand(std::make_shared<SystemChatMsg>((format("{c:FF0000}[MARTIAL ARTS] Your %1% was broken by %2%'s Grab! Unblockable throw!{/c}") % targetStance % pB->getHandle()).str()));
 	} else if (isClash) {
 		// Both combatants selected identical stance - dispatch clash rebound animations
-		InterlockAnimPair pair = CombatAnimationMatrix::GetAnimationPair(styleA, tacA, styleB, tacB, InterlockExchangeOutcome::Clash, moveA ? moveA->id : 0);
-		auto animA = std::make_shared<ExtendedAnimationMsg>(pA->getGoId(), pair.attackerAnimId, 1);
-		auto animB = std::make_shared<ExtendedAnimationMsg>(pB->getGoId(), pair.defenderAnimId, 1);
-		sGame.AnnounceStateUpdateNear(pA->getPosition().x, pA->getPosition().z, 20000.0f, animA);
-		sGame.AnnounceStateUpdateNear(pB->getPosition().x, pB->getPosition().z, 20000.0f, animB);
-		pA->getClient().QueueState(animA);
-		pA->getClient().QueueState(animB);
-		pB->getClient().QueueState(animA);
-		pB->getClient().QueueState(animB);
+		if (session.ilViewIdA == 0 && session.ilViewIdB == 0) //human interlocks animate through IL exchanges
+		{
+			InterlockAnimPair pair = CombatAnimationMatrix::GetAnimationPair(styleA, tacA, styleB, tacB, InterlockExchangeOutcome::Clash, moveA ? moveA->id : 0);
+			sGame.AnnounceStateUpdateNear(pA->getPosition().x, pA->getPosition().z, 20000.0f, std::make_shared<ExtendedAnimationMsg>(pA->getGoId(), pair.attackerAnimId, 1));
+			sGame.AnnounceStateUpdateNear(pB->getPosition().x, pB->getPosition().z, 20000.0f, std::make_shared<ExtendedAnimationMsg>(pB->getGoId(), pair.defenderAnimId, 1));
+		}
 		std::string clashName = (tacA == TACTIC_POWER) ? "Power" : (tacA == TACTIC_SPEED ? "Speed" : (tacA == TACTIC_RETALIATE ? "Grab" : "Guard"));
 		if (!pA->getClient().isBot()) pA->getClient().QueueCommand(std::make_shared<SystemChatMsg>((format("{c:FFFF00}[MARTIAL ARTS] Stance Clash! Both combatants chose %1%. Glancing exchange.{/c}") % clashName).str()));
 		if (!pB->getClient().isBot()) pB->getClient().QueueCommand(std::make_shared<SystemChatMsg>((format("{c:FFFF00}[MARTIAL ARTS] Stance Clash! Both combatants chose %1%. Glancing exchange.{/c}") % clashName).str()));
 
 		// Both combatants exchange glancing blows at 0.90x damage (TacticModifier handles 0.90x)
-		if (moveA) ResolveAttack(pA, pB, *moveA, tacA, tacB, true, false);
-		if (moveB && !pB->isDead()) ResolveAttack(pB, pA, *moveB, tacB, tacA, true, false);
+		if (moveA) StrikeInterlock(session, pA, pB, *moveA, tacA, tacB, true, false);
+		if (moveB && !pB->isDead()) StrikeInterlock(session, pB, pA, *moveB, tacB, tacA, true, false);
 	}
 
 	// Execution & Interrupt Resolution:
 	if (aInterruptsB) {
 		// A's Speed interrupts B's Grab. A strikes, B's grab is cancelled!
-		if (moveA) ResolveAttack(pA, pB, *moveA, tacA, tacB, true, false);
+		if (moveA) StrikeInterlock(session, pA, pB, *moveA, tacA, tacB, true, false);
 	} else if (bInterruptsA) {
 		// B's Speed interrupts A's Grab. B strikes, A's grab is cancelled!
-		if (moveB) ResolveAttack(pB, pA, *moveB, tacB, tacA, true, false);
+		if (moveB) StrikeInterlock(session, pB, pA, *moveB, tacB, tacA, true, false);
 	} else if (aCrushesB) {
 		// A's Power crushes B's Speed with frame advantage
-		if (moveA) ResolveAttack(pA, pB, *moveA, tacA, tacB, true, false);
+		if (moveA) StrikeInterlock(session, pA, pB, *moveA, tacA, tacB, true, false);
 	} else if (bCrushesA) {
 		// B's Power crushes A's Speed with frame advantage
-		if (moveB) ResolveAttack(pB, pA, *moveB, tacB, tacA, true, false);
+		if (moveB) StrikeInterlock(session, pB, pA, *moveB, tacB, tacA, true, false);
 	} else if (aBreaksPowerB || aBreaksGuardB) {
 		// A's Grab counters B's heavy Power attack or breaks Guard with an unblockable throw.
-		if (moveA) ResolveAttack(pA, pB, *moveA, tacA, tacB, true, true);
+		if (moveA) StrikeInterlock(session, pA, pB, *moveA, tacA, tacB, true, true);
 	} else if (bBreaksPowerA || bBreaksGuardA) {
 		// B's Grab counters A's heavy Power attack or breaks Guard with an unblockable throw.
-		if (moveB) ResolveAttack(pB, pA, *moveB, tacB, tacA, true, true);
+		if (moveB) StrikeInterlock(session, pB, pA, *moveB, tacB, tacA, true, true);
 	} else if (!isClash) {
 		// Standard exchange: defenders only strike if an active special is queued
 		bool specialFromA = (session.queuedMoveA != 0);
 		if (tacA != TACTIC_DEFENSE || specialFromA) {
 			if (moveA) {
-				ResolveAttack(pA, pB, *moveA, tacA, tacB, true, false);
+				StrikeInterlock(session, pA, pB, *moveA, tacA, tacB, true, false);
 			}
 		}
 		if (!pB->isDead()) {
 			bool specialFromB = (session.queuedMoveB != 0);
 			if (tacB != TACTIC_DEFENSE || specialFromB) {
 				if (moveB) {
-					ResolveAttack(pB, pA, *moveB, tacB, tacA, true, false);
+					StrikeInterlock(session, pB, pA, *moveB, tacB, tacA, true, false);
 				}
 			}
 		}

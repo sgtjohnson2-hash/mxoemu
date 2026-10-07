@@ -859,13 +859,47 @@ public:
 	~SpawnILCombatHandlerMsg() {}
 };
 
-//interlock pairing setup, sent right after the IL handler view spawns
-//(byte-exact HDS port; trailing exchange block is a captured, undecoded blob)
-class InterlockInitMsg : public StaticMsg
+//One interlock exchange as the 7.6005 client stores it (0x79 = 121 bytes, packed).
+//Layout from client.dll: unmarshal FUN_6263ac00 (stride 0x79) and the exchange player
+//FUN_625f6580 / FUN_625f4ed0, cross-checked against five captured live exchanges (HDS).
+struct ILExchange
+{
+	uint8 attackerSlot;			//0x00 participant slot (1..6) - handles sent in the state mask
+	uint8 defenderSlot;			//0x01
+	uint16 attackerAdjustMs;	//0x02 time to slide the attacker to attackerPos
+	uint16 defenderAdjustMs;	//0x04
+	float attackerPos[3];		//0x06 relative to the IL handler position
+	float defenderPos[3];		//0x12
+	uint8 defenderStyle;		//0x1e
+	uint8 attackerStyle;		//0x1f
+	uint16 number;				//0x20 exchange number - the client only plays numbers it hasn't seen
+	int32 startMs;				//0x22 start time; flag bit0 makes the client clamp it to "now"
+	int16 defenderOffsetMs;		//0x26 defender timeline offset from startMs
+	uint16 attackerExtraMs;		//0x28
+	uint16 defenderExtraMs;		//0x2a
+	uint8 flags;				//0x2c bit0 relative start, bit1 dilation (captures use 0x03)
+	uint32 moves[5][2];			//0x2d attackerPre, defenderPre, main, attackerPost, defenderPost
+								//     each = (move id, interlock database rez id 0x24000B8B)
+	uint32 attackerHealth;		//0x55
+	uint32 defenderHealth;		//0x59
+	uint16 unk5d;				//0x5d 0x1000 in every capture
+	uint16 unk5f;				//0x5f 0x1000 in every capture
+	//0x61..0x78 result fields, zero in most captures
+
+	ILExchange();
+	void write(ByteBuffer &buf) const;
+};
+
+//Interlock (ILCombatHandler, GO 55) state update, sent through the object manager:
+//03 01 00 | 02 [u16 len incl. itself] [ilView] 01 [pos double x3] [u32 seq] [u32 slot mask]
+//[u32 slot handles...] [u8 exchange count] [exchanges]
+//The framing and length rule match the captured HDS interlock-start packet byte for byte.
+class ILCombatStateMsg : public StaticMsg
 {
 public:
-	InterlockInitMsg(uint16 ilViewId, class LocationVector pos, uint32 targetViewWithSpawnId, uint16 spawnCounter);
-	~InterlockInitMsg() {}
+	ILCombatStateMsg(uint16 ilViewId, class LocationVector pos, uint32 seq,
+		const std::vector<uint32> &slotHandles, const std::vector<ILExchange> &exchanges);
+	~ILCombatStateMsg() {}
 };
 
 #endif

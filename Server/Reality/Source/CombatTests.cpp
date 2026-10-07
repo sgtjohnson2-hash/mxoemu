@@ -176,6 +176,42 @@ int RunCombatTestSuite()
 	sCombatSys.Init();
 	sDataLoader.EnsureCoreAbilities();
 
+	// ---------------------------------------------------------------- IL exchange wire format
+	{
+		//captured live interlock-start exchange (HDS "special agent test"), 121 bytes
+		static const char* capHex =
+			"01020703070300bafc42000020c1801baf4200803e40000020c1e0b319430000010013010000f40134059a02233c5200008b0b0024145200008b0b0024262000008b0b00240000000000000000000000000000000021000000700000000010001000000000000000000000000000010000022b6000000000000";
+		ILExchange e;
+		e.attackerSlot = 1; e.defenderSlot = 2;
+		e.attackerAdjustMs = 0x0307; e.defenderAdjustMs = 0x0307;
+		const float fp[6] = { 126.36328125f, -10.0f, 87.5537109375f, 2.9765625f, -10.0f, 153.702636719f };
+		std::string cap;
+		for (size_t i = 0; i + 1 < strlen(capHex); i += 2) cap.push_back((char)strtol(std::string(capHex + i, 2).c_str(), NULL, 16));
+		memcpy(e.attackerPos, cap.data() + 6, 12);
+		memcpy(e.defenderPos, cap.data() + 0x12, 12);
+		(void)fp;
+		e.number = 1; e.startMs = 275; e.defenderOffsetMs = 500; e.attackerExtraMs = 1332; e.defenderExtraMs = 666;
+		e.flags = 0x23;
+		e.moves[0][0] = 0x523C; e.moves[0][1] = 0x24000B8B;
+		e.moves[1][0] = 0x5214; e.moves[1][1] = 0x24000B8B;
+		e.moves[2][0] = 0x2026; e.moves[2][1] = 0x24000B8B;
+		e.attackerHealth = 0x21; e.defenderHealth = 0x70;
+		ByteBuffer out;
+		e.write(out);
+		bool sizeOk = (out.size() == 0x79);
+		bool headOk = sizeOk && memcmp(out.contents(), cap.data(), 0x61) == 0;
+		check(sizeOk, "IL exchange serializes to 0x79 bytes (7.6005 stride)");
+		check(headOk, "IL exchange bytes 0x00-0x60 match the captured live exchange");
+
+		std::vector<uint32> slots; slots.push_back(0x00020001); slots.push_back(2);
+		std::vector<ILExchange> ex; ex.push_back(e);
+		ILCombatStateMsg m(0x1234, LocationVector(0,0,0), 1, slots, ex);
+		const ByteBuffer& mb = m.toBuf();
+		uint16 len = uint16(uint8(mb.contents()[4])) | (uint16(uint8(mb.contents()[5])) << 8);
+		check(mb.size() >= 6 && mb.contents()[3] == 0x02 && len == 0xA7 && size_t(len) + 4 == mb.size(),
+			"IL state message length field = 0xA7 like the captured interlock start");
+	}
+
 	try
 	{
 		// ---------------------------------------------------------------- loadout (N1)
@@ -228,6 +264,26 @@ int RunCombatTestSuite()
 
 			bool botOk = sCombatSys.UseAbility(target.po, 9999, human.go);
 			check(!botOk && !sCombatSys.IsInterlocked(target.go), "bots keep the silent drop for unknown abilities");
+
+			// human interlock: IL handler view + opening exchange, then rounds send new exchanges
+			place(target, 10100.0, 10000.0);
+			setHP(target, 5000, 5000);
+			bool il = sCombatSys.RequestInterlock(human.go, target.go, 0x002F0000 | 0x1234);
+			InterlockSession s0;
+			bool got = il && sCombatSys.GetInterlockSessionCopy(human.go, s0);
+			check(got && s0.ilViewIdA != 0 && s0.ilViewIdB == 0 && s0.exchangeNum == 1,
+				"human interlock spawns an IL handler view only for the human and sends exchange #1");
+			uint16 before = got ? s0.exchangeNum : 0;
+			for (int r = 0; r < 6 && sCombatSys.IsInterlocked(human.go); ++r)
+			{
+				InterlockSession* live = sCombatSys.GetInterlockSession(human.go);
+				if (live) { live->nextRoundTime = 0; live->tacticA = TACTIC_POWER; live->tacticB = TACTIC_SPEED; }
+				sCombatSys.Update();
+			}
+			InterlockSession s1;
+			bool got1 = sCombatSys.GetInterlockSessionCopy(human.go, s1);
+			check(got1 && s1.exchangeNum > before, "interlock rounds produce new numbered IL exchanges");
+			sCombatSys.EndInterlock(human.go, false);
 		}
 
 		// ---------------------------------------------------------------- kill reward (H1) + death timer (M2)

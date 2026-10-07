@@ -16,6 +16,8 @@
 
 #include "Common.h"
 #include "Singleton.h"
+#include "LocationVector.h"
+#include "MessageTypes.h"
 #include <mutex>
 #include <unordered_map>
 #include <string>
@@ -105,7 +107,15 @@ struct InterlockSession
 	uint32 roundNumber;
 	uint16 ilViewIdA;		//ILCombatHandler view spawned on A's client
 	uint16 ilViewIdB;		//ILCombatHandler view spawned on B's client
+	LocationVector ilPos;	//IL handler position; exchange positions are relative to it
+	uint16 exchangeNum;		//last interlock exchange number sent (client plays only newer ones)
 };
+
+// Interlock move references (interlock database rez 0x24000B8B), from captured live exchanges
+static const uint32 IL_MOVE_DATABASE = 0x24000B8B;
+static const uint32 IL_MOVE_PRE = 0x5214;			//lead-in used on both sides in 4 of 5 captures
+static const uint32 IL_MOVE_OPEN_ATTACKER_PRE = 0x523C;
+static const uint32 IL_MOVE_OPEN_MAIN = 0x2026;	//main move of the captured interlock start
 
 // One free-fire engagement (attacker keeps firing at target until it ends)
 struct FreeFireState
@@ -182,6 +192,13 @@ public:
 		bool isBlocked;
 		bool isGlancing;
 	};
+
+	AttackResult StrikeInterlock(InterlockSession &session, PlayerObject* attacker, PlayerObject* target,
+		const CombatMove& move, uint8 attackerTactic, uint8 targetTactic, bool inInterlock, bool bypassBlock);
+	ILExchange BuildExchange(const InterlockSession &session, PlayerObject* viewer, PlayerObject* attacker,
+		PlayerObject* defender, uint16 number, uint32 attackerPreMove, uint32 defenderPreMove, uint32 mainMove);
+	void SendInterlockExchange(InterlockSession &session, PlayerObject* attacker, PlayerObject* defender);
+	bool m_ilExchangeActive = false;
 
 	AttackResult ResolveAttack(PlayerObject* attacker, PlayerObject* target,
 		const CombatMove& move, uint8 attackerTactic, uint8 targetTactic, bool inInterlock = false, bool bypassBlock = false);

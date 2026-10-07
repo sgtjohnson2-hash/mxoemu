@@ -47,5 +47,5 @@ void SniffTrySerialize(const msgBaseClassPtr& msg, const char* kind, std::ofstre
 	tryDump<AbilityUnloadRspMsg>(msg, kind, out) ||
 	tryDump<DeleteViewMsg>(msg, kind, out) ||
 	tryDump<SpawnILCombatHandlerMsg>(msg, kind, out) ||
-	tryDump<InterlockInitMsg>(msg, kind, out);
+	tryDump<ILCombatStateMsg>(msg, kind, out);
 }

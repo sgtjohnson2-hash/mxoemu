@@ -3447,13 +3447,11 @@ void PlayerObject::RPC_HandleJackoutFinished( ByteBuffer &srcCmd )
 void PlayerObject::RPC_HandleMarketListItems(ByteBuffer& srcCmd)
 {
 	DEBUG_LOG(format("(%1%) %2%:%3% RPC_HandleMarketListItems") % m_parent.Address() % m_handle % m_goId);
-	m_parent.QueueCommand(std::make_shared<SystemChatMsg>("{c:00FFCC}[MEGA-CITY EXCHANGE] Local cellular market cache updated: 0 items listed.{/c}"));
 }
 
 void PlayerObject::RPC_HandleMarketOpen(ByteBuffer& srcCmd)
 {
 	DEBUG_LOG(format("(%1%) %2%:%3% RPC_HandleMarketOpen") % m_parent.Address() % m_handle % m_goId);
-	m_parent.QueueCommand(std::make_shared<SystemChatMsg>("{c:00FFCC}[MEGA-CITY EXCHANGE] Secure terminal uplink established.{/c}"));
 }
 void PlayerObject::RPC_HandleVendorBuy(ByteBuffer& srcCmd)
 {
@@ -3504,35 +3502,21 @@ void PlayerObject::RPC_HandleVendorBuy(ByteBuffer& srcCmd)
 void PlayerObject::RPC_HandleCraftRequest(ByteBuffer& srcCmd)
 {
 	DEBUG_LOG(format("(%1%) %2%:%3% RPC_HandleCraftRequest") % m_parent.Address() % m_handle % m_goId);
-	m_parent.QueueCommand(std::make_shared<SystemChatMsg>("{c:00FFCC}[COMPILER] Code construction pipeline ready.{/c}"));
 }
 
 void PlayerObject::RPC_HandleFactionInfo(ByteBuffer& srcCmd)
 {
-	DEBUG_LOG(format("(%1%) %2%:%3% RPC_HandleFactionInfo") % m_parent.Address() % m_handle % m_goId);
-	const DistrictStatus* status = sFactionWarMgr.GetDistrict(1);
-	if (status)
-	{
-		std::string factionReport = (format("{c:00FFCC}[DISTRICT INTEL: %1%]{/c}\nZion: %2%%% | Machine: %3%%% | Merovingian: %4%%%\nContested Nodes: %5% / %6%")
-			% status->name % (int)status->zionInfluence % (int)status->machineInfluence % (int)status->meroInfluence % status->contestedNodeIds.size() % status->totalNodes).str();
-		m_parent.QueueCommand(std::make_shared<SystemChatMsg>(factionReport));
-	}
-	else
-	{
-		m_parent.QueueCommand(std::make_shared<SystemChatMsg>("{c:00FFCC}[DISTRICT INTEL] Downtown Sector: Tactical Frontline Neutral.{/c}"));
-	}
+	DEBUG_LOG(format("(%1%) %2%:%3% RPC_HandleFactionInfo %4%") % m_parent.Address() % m_handle % m_goId % Bin2Hex(srcCmd));
 }
 
 void PlayerObject::RPC_HandleMissionInvite(ByteBuffer& srcCmd)
 {
 	DEBUG_LOG(format("(%1%) %2%:%3% RPC_HandleMissionInvite") % m_parent.Address() % m_handle % m_goId);
-	m_parent.QueueCommand(std::make_shared<SystemChatMsg>("{c:00FF00}[CREW] Tactical mission invitation dispatched.{/c}"));
 }
 
 void PlayerObject::RPC_HandlePartyLeave(ByteBuffer& srcCmd)
 {
 	DEBUG_LOG(format("(%1%) %2%:%3% RPC_HandlePartyLeave") % m_parent.Address() % m_handle % m_goId);
-	m_parent.QueueCommand(std::make_shared<SystemChatMsg>("{c:FFFF00}[CREW] You have departed from the active squad uplink.{/c}"));
 }
 
 void PlayerObject::RPC_HandleMemoryChangeTactic(ByteBuffer& srcCmd)
@@ -3766,28 +3750,14 @@ void PlayerObject::RPC_HandleCallContact( ByteBuffer &srcCmd )
 
 void PlayerObject::RPC_HandleAbilityHotbarSync(ByteBuffer& srcCmd)
 {
-	DEBUG_LOG(format("(%1%) %2%:%3% RPC_HandleAbilityHotbarSync") % m_parent.Address() % m_handle % m_goId);
-	if (m_abilitySystem)
-	{
-		for (const auto& pair : m_abilitySystem->getLoadedAbilities())
-		{
-			if (pair.second)
-			{
-				m_parent.QueueCommand(std::make_shared<AbilityLoadRspMsg>(
-					pair.second->getAbilityId(),
-					pair.second->getLevel(),
-					pair.second->getMemorySlot()
-				));
-			}
-		}
-	}
+	//0x80BE meaning is a guess - log the payload, don't answer with guessed packets
+	DEBUG_LOG(format("(%1%) %2%:%3% RPC 0x80BE %4%") % m_parent.Address() % m_handle % m_goId % Bin2Hex(srcCmd));
 }
 
 void PlayerObject::RPC_HandleStatusQuery(ByteBuffer& srcCmd)
 {
-	DEBUG_LOG(format("(%1%) %2%:%3% RPC_HandleStatusQuery") % m_parent.Address() % m_handle % m_goId);
-	sendHealthUpdate();
-	m_parent.QueueState(std::make_shared<SelfCombatantModeMsg>(uint8((getInterlockPartner() != 0) ? 1 : 0)));
+	//0x8148 meaning is a guess - log the payload, don't answer with guessed packets
+	DEBUG_LOG(format("(%1%) %2%:%3% RPC 0x8148 %4%") % m_parent.Address() % m_handle % m_goId % Bin2Hex(srcCmd));
 }
 
 void PlayerObject::RPC_HandleInteractionTrigger(ByteBuffer& srcCmd)
