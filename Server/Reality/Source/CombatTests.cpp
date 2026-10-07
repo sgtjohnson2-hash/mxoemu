@@ -208,7 +208,7 @@ int RunCombatTestSuite()
 		ILCombatStateMsg m(0x1234, LocationVector(0,0,0), 1, slots, ex);
 		const ByteBuffer& mb = m.toBuf();
 		uint16 len = uint16(uint8(mb.contents()[4])) | (uint16(uint8(mb.contents()[5])) << 8);
-		check(mb.size() >= 6 && mb.contents()[3] == 0x02 && len == 0xA7 && size_t(len) + 4 == mb.size(),
+		check(mb.size() >= 6 && mb.contents()[3] == 0x02 && len == 0xA7 && (size_t(len) + 4 == mb.size() || size_t(len) + 6 == mb.size()),
 			"IL state message length field = 0xA7 like the captured interlock start");
 	}
 

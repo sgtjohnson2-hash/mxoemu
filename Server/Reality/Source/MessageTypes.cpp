@@ -1508,6 +1508,40 @@ void ILExchange::write( ByteBuffer &buf ) const
 ILCombatStateMsg::ILCombatStateMsg( uint16 ilViewId, LocationVector pos, uint32 seq,
 	const std::vector<uint32> &slotHandles, const std::vector<ILExchange> &exchanges )
 {
+	int updateMode = sConfig.GetIntDefault("Interlock.UpdateMode", 0);
+	if (updateMode == 1)
+	{
+		// HDS direct-view update framing from UpdateCloseCombat capture:
+		// Leading opcode 0x03, direct ilViewId, group flags 0x0003, pos, seq, mask, slots, count, exchanges, 27-byte tail
+		m_buf.clear();
+		m_buf << uint8(0x03);
+		m_buf << uint16(ilViewId);
+		m_buf << uint16(0x0003); // attribute group flags: 3 (position + combat data)
+		byte posBuf[sizeof(double)*3];
+		pos.toDoubleBuf(posBuf, sizeof(posBuf));
+		m_buf.append(posBuf, sizeof(posBuf));
+		m_buf << uint32(seq);
+		uint32 mask = 0;
+		for (size_t i=0;i<slotHandles.size() && i<6;i++)
+			mask |= (1u << i);
+		m_buf << uint32(mask);
+		for (size_t i=0;i<slotHandles.size() && i<6;i++)
+			m_buf << uint32(slotHandles[i]);
+		m_buf << uint8(exchanges.size());
+		for (size_t i=0;i<exchanges.size();i++)
+			exchanges[i].write(m_buf);
+		// 27-byte tail from HDS UpdateCloseCombat capture
+		static const uint8 hdsTail[27] = {
+			0x01, 0x00, 0x00, 0x00, 0x58, 0x64, 0xEB, 0xD9,
+			0xC0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x44, 0x91,
+			0xC0, 0x00, 0x00, 0x00, 0x40, 0xAF, 0x08, 0xEA,
+			0x40, 0x00, 0x00
+		};
+		m_buf.append(hdsTail, sizeof(hdsTail));
+		m_buf << uint16(0); // nomoreattribs
+		return;
+	}
+
 	ByteBuffer payload;
 	payload << uint16(ilViewId);
 	payload << uint8(0x01);
@@ -1531,5 +1565,7 @@ ILCombatStateMsg::ILCombatStateMsg( uint16 ilViewId, LocationVector pos, uint32 
 	m_buf << uint8(0x02);
 	m_buf << uint16(payload.size() + 2);
 	m_buf.append(payload.contents(),payload.size());
+	m_buf << uint16(0); // nomoreattribs
 }
+
 
