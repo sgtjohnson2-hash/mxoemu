@@ -108,9 +108,8 @@ void PlayerObject::takeDamage( uint32 attackerGoId, uint16 damage, uint32 fxId )
 	// Configurable retail hit FX (Task 3): 0x280006DF was a misidentified weapon skeleton model
 	// (resource/GameObjects/weapons/program_launcher2/skeleton/skeleton.ska) that crashed retail 7.6005
 	// in client.dll+0x59608C (resolving _GaussianBlur).
-	// Reality.conf "Combat.HitFx": 0 = disabled/safe (clean health update), 0xDF060028 = HDS wire byte order.
 	static const uint32 configuredHitFx = (uint32)sConfig.GetIntDefault("Combat.HitFx", 0);
-	if (fxId == 0 || fxId == 0x280006DF)
+	if (configuredHitFx == 0 || fxId == 0x280006DF || fxId == 0x28000794 || fxId == 0x28000432 || fxId == 0x2800045A)
 		fxId = configuredHitFx;
 
 	if (attackerGoId != 0 && attackerGoId != m_goId)
@@ -205,6 +204,10 @@ void PlayerObject::takeDamage( uint32 attackerGoId, uint16 damage, uint32 fxId )
 void PlayerObject::applyHeal( uint32 healerGoId, uint16 amount, uint32 fxId )
 {
 	if (isDead()) return;
+
+	static const uint32 configuredHitFx = (uint32)sConfig.GetIntDefault("Combat.HitFx", 0);
+	if (configuredHitFx == 0 || fxId == 0x280006DF || fxId == 0x28000794 || fxId == 0x28000432 || fxId == 0x2800045A)
+		fxId = configuredHitFx;
 
 	uint16 healthBefore = m_healthC;
 	uint32 newHealth = uint32(m_healthC) + uint32(amount);

@@ -657,11 +657,8 @@ const ByteBuffer& ExtendedAnimationMsg::toBuf()
 
 	if (m_player->getClient().isBot())
 	{
-		if (!m_player->isInCombat() && m_player->getInterlockPartner() == 0)
-		{
-			m_buf.clear();
-			throw PacketNoLongerValid();
-		}
+		m_buf.clear();
+		throw PacketNoLongerValid();
 	}
 
 	m_player->getPosition().toFloatBuf(&sampleExtendedAnimMsg[0x0D], sizeof(float)*3);
@@ -1302,9 +1299,13 @@ const ByteBuffer& CombatHitFxMsg::toBuf()
 
 	AttributeUpdateBlock block;
 	block.addUInt16(PlayerAttrOther::Health,m_player->getCurrentHealth());
-	if (m_fxId != 0)
+	static const uint32 s_cfgHitFx = (uint32)sConfig.GetIntDefault("Combat.HitFx", 0);
+	uint32 activeFxId = (s_cfgHitFx != 0) ? m_fxId : 0;
+	if (activeFxId == 0x280006DF || activeFxId == 0x28000794 || activeFxId == 0x28000432 || activeFxId == 0x2800045A)
+		activeFxId = s_cfgHitFx;
+	if (activeFxId != 0)
 	{
-		block.addUInt32(PlayerAttrOther::EffectID,m_fxId);
+		block.addUInt32(PlayerAttrOther::EffectID,activeFxId);
 		block.addByte(PlayerAttrOther::EffectCounter,m_hitCounter);
 	}
 
@@ -1381,9 +1382,13 @@ SelfHitFxMsg::SelfHitFxMsg( PlayerObject *thePlayer, uint32 fxId, uint8 hitCount
 
 	AttributeUpdateBlock block;
 	block.addUInt16(PlayerAttrSelf::Health,thePlayer->getCurrentHealth());
-	if (fxId != 0)
+	static const uint32 s_cfgHitFx = (uint32)sConfig.GetIntDefault("Combat.HitFx", 0);
+	uint32 activeFxId = (s_cfgHitFx != 0) ? fxId : 0;
+	if (activeFxId == 0x280006DF || activeFxId == 0x28000794 || activeFxId == 0x28000432 || activeFxId == 0x2800045A)
+		activeFxId = s_cfgHitFx;
+	if (activeFxId != 0)
 	{
-		block.addUInt32(PlayerAttrSelf::EffectID,fxId);
+		block.addUInt32(PlayerAttrSelf::EffectID,activeFxId);
 		block.addByte(PlayerAttrSelf::EffectCounter,hitCounter);
 	}
 

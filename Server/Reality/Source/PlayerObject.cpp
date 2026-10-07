@@ -1130,6 +1130,8 @@ void PlayerObject::sayChat(const std::string& msg)
 
 void PlayerObject::Emote(uint32 emoteId)
 {
+    if (m_parent.isBot())
+        return;
     m_emoteCounter++;
     sGame.AnnounceStateUpdate(NULL, std::make_shared<EmoteMsg>(m_goId, emoteId, m_emoteCounter));
 }
