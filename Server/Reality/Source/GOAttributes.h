@@ -203,9 +203,9 @@ namespace PlayerAttrSelf
 static const uint16 VIEWID_OBJECTMANAGER = 1;
 static const uint16 VIEWID_SELF = 2;
 
-//ILCombatHandler game object (GOID 14, 0x0E CViewInterlock): creation attributes are
+//ILCombatHandler game object (GOID 55, 0x37): creation attributes are
 //Position(24B double vec, idx0), HalfExtents(12B, idx1), StartTime(float, idx2)
-static const uint16 GOID_ILCOMBATHANDLER = 14;
+static const uint16 GOID_ILCOMBATHANDLER = 55;
 static const uint16 GOID_PLAYERCHARACTER = 0x000C;
 
 #endif
