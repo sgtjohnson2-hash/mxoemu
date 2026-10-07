@@ -125,11 +125,13 @@ void AbilitySystem::saveToDB()
 
 bool AbilitySystem::loadAbility(uint16 abilityId, uint16 level, uint16 slot)
 {
-    if (m_loadedAbilities.find(abilityId) != m_loadedAbilities.end())
-        return false; // Already loaded
-
-    // Hardline proximity check (placeholder)
-    // if (!m_owner->isNearHardline()) return false;
+    auto it = m_loadedAbilities.find(abilityId);
+    if (it != m_loadedAbilities.end())
+    {
+        // Ability already loaded: update level and slot without deducting additional memory
+        it->second = make_shared<Ability>(abilityId, level, slot);
+        return true;
+    }
 
     uint16 memoryCost = 10;
     const AbilityTemplate* t = sDataLoader.GetAbilityTemplate(abilityId);
@@ -175,8 +177,19 @@ shared_ptr<Ability> AbilitySystem::getAbility(uint16 abilityId)
 
 uint16 AbilitySystem::getTotalMemoryUsed() const
 {
-    // TODO: Calculate based on AbilityTemplate
-    return (uint16)m_loadedAbilities.size() * 10; 
+    uint16 total = 0;
+    for (const auto& pair : m_loadedAbilities)
+    {
+        if (pair.second)
+        {
+            const AbilityTemplate* t = sDataLoader.GetAbilityTemplate(pair.second->getAbilityId());
+            if (t && t->memoryCost > 0)
+                total += t->memoryCost;
+            else
+                total += 10;
+        }
+    }
+    return total;
 }
 
 uint16 AbilitySystem::getMaxMemory() const
@@ -190,10 +203,16 @@ bool AbilitySystem::canCastAbility(uint16 abilityId) const
     if (it == m_loadedAbilities.end())
         return false;
     auto ability = it->second;
-        
-    // TODO: Cooldown checks
-    // uint64 now = getMSTime();
-    // if (now - ability->getLastUsedTime() < cooldown) return false;
+    if (!ability)
+        return false;
+
+    const AbilityTemplate* t = sDataLoader.GetAbilityTemplate(abilityId);
+    if (t && t->cooldown > 0)
+    {
+        uint64 now = getMSTime();
+        if (now < ability->getLastUsedTime() + t->cooldown)
+            return false;
+    }
     
     return true;
 }

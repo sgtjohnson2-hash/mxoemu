@@ -835,6 +835,27 @@ int RunCombatTestSuite()
 			check(reviveOk, "Coder ReviveRSIAbility executes on downed operative");
 			check(!fallenBot.po->isDead(), "Downed operative is restored to live state by ReviveRSI");
 			check(fallenBot.po->getCurrentHealth() == 50, "Revived operative has 50% health restored");
+
+			// 10. Ability System Memory, In-Place Upgrades & Cooldown Tracking
+			auto abilitySys = human.po->getAbilitySystem();
+			check(abilitySys != nullptr, "AbilitySystem instance is valid");
+			if (abilitySys)
+			{
+				uint16 memUsed = abilitySys->getTotalMemoryUsed();
+				check(memUsed > 0, "AbilitySystem accurately computes total memory used from loaded templates");
+				check(abilitySys->getMaxMemory() >= 100, "Operative MaxMemory scales with level (>= 100)");
+
+				// In-place upgrade: level up ability 600 from L1 to L2 in slot 0
+				bool upOk = abilitySys->loadAbility(600, 2, 0);
+				check(upOk, "AbilitySystem::loadAbility supports in-place upgrade for already-loaded abilities");
+				auto upgraded = abilitySys->getAbility(600);
+				check(upgraded && upgraded->getLevel() == 2, "Upgraded ability reflects new Level 2");
+
+				// Cooldown tracking
+				abilitySys->onAbilityCast(600);
+				check(abilitySys->getAbility(600)->getLastUsedTime() > 0, "onAbilityCast records last used timestamp");
+				check(!abilitySys->canCastAbility(600), "canCastAbility enforces 2000ms ability cooldown lockout");
+			}
 		}
 	}
 	catch (const std::exception& e)

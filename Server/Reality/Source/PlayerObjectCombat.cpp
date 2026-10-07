@@ -699,8 +699,17 @@ void PlayerObject::RPC_HandleAbilityLoad( ByteBuffer &srcCmd )
 		else
 		{
 			if (m_abilitySystem)
-				m_abilitySystem->loadAbility(abilityId,abilityLevel,slotId);
-			m_parent.QueueCommand(shared_ptr<AbilityLoadRspMsg>(new AbilityLoadRspMsg(abilityId,abilityLevel,slotId)));
+			{
+				if (m_abilitySystem->loadAbility(abilityId, abilityLevel, slotId))
+				{
+					m_parent.QueueCommand(shared_ptr<AbilityLoadRspMsg>(new AbilityLoadRspMsg(abilityId, abilityLevel, slotId)));
+				}
+				else
+				{
+					if (!m_parent.isBot())
+						m_parent.QueueCommand(std::make_shared<SystemChatMsg>("{c:FF0000}[MEMORY] Insufficient memory capacity to load ability.{/c}"));
+				}
+			}
 		}
 
 		DEBUG_LOG(format("%1%:%2% %3% ability %4% level %5% slot %6%")
