@@ -1098,6 +1098,119 @@ int RunCombatTestSuite()
 				check(eqWeapons[0]->getAmmoCount() == 29, "Dual Berettas magazine reloaded to max (30 - 1 = 29)");
 			}
 		}
+
+		// ---------------------------------------------------------------- 13. Martial Arts Disciplines & Animation Synchronization Suite
+		{
+			// A. Four Core Martial Arts Forms & Stance Crush Pairings
+			// 1. Kung Fu (Wushu) Power vs Speed Stance Crush
+			InterlockAnimPair kfPair = CombatAnimationMatrix::GetAnimationPair(
+				FightingStyle::KungFu, TACTIC_POWER,
+				FightingStyle::KungFu, TACTIC_SPEED,
+				InterlockExchangeOutcome::StanceCrush
+			);
+			check(kfPair.attackerAnimId == 0x0D58, "Kung Fu Stance Crush: Attacker plays Tiger Punch (0x0D58)");
+			check(kfPair.defenderAnimId == 0x0AFE, "Kung Fu Stance Crush: Defender plays heavy recoil (0x0AFE)");
+			check(kfPair.contactDelaySeconds == 0.53f, "Kung Fu Tiger Punch contact delay is authentic 0.53s (530ms)");
+			check(kfPair.hitFxId == 0x280006DF, "Kung Fu Tiger Punch plays text damage FX 0x280006DF");
+
+			// 2. Karate Power vs Speed Stance Crush
+			InterlockAnimPair karatePair = CombatAnimationMatrix::GetAnimationPair(
+				FightingStyle::Karate, TACTIC_POWER,
+				FightingStyle::Karate, TACTIC_SPEED,
+				InterlockExchangeOutcome::StanceCrush
+			);
+			check(karatePair.attackerAnimId == 0x04F0, "Karate Stance Crush: Attacker plays Jumping Spin Kick (0x04F0)");
+			check(karatePair.defenderAnimId == 0x0F44, "Karate Stance Crush: Defender plays leap kick victim (0x0F44)");
+			check(karatePair.contactDelaySeconds == 0.63f, "Karate Spin Kick contact delay is authentic 0.63s (630ms)");
+
+			// 3. Aikido Grab vs Guard Break Throw
+			InterlockAnimPair aikidoPair = CombatAnimationMatrix::GetAnimationPair(
+				FightingStyle::Aikido, TACTIC_RETALIATE,
+				FightingStyle::Aikido, TACTIC_DEFENSE,
+				InterlockExchangeOutcome::GuardBreak
+			);
+			check(aikidoPair.attackerAnimId == 0x0068, "Aikido Guard Break: Attacker plays Cartwheel Tomoe Nage (0x0068)");
+			check(aikidoPair.defenderAnimId == 0x0AF2, "Aikido Guard Break: Defender plays failed punch throw victim (0x0AF2)");
+			check(aikidoPair.contactDelaySeconds == 0.93f, "Aikido Tomoe Nage contact delay is authentic 0.93s (930ms)");
+			check(aikidoPair.hitFxId == 0x28000432, "Aikido throw plays falling impact FX 0x28000432");
+
+			// 4. Street Brawling / Self-Defense Fast Interrupt
+			InterlockAnimPair sdPair = CombatAnimationMatrix::GetAnimationPair(
+				FightingStyle::None, TACTIC_SPEED,
+				FightingStyle::None, TACTIC_RETALIATE,
+				InterlockExchangeOutcome::FastInterrupt
+			);
+			check(sdPair.attackerAnimId == 0x112F, "Street Brawling Fast Interrupt: Attacker plays Cheap Shot (0x112F)");
+			check(sdPair.defenderAnimId == 0x1131, "Street Brawling Fast Interrupt: Defender plays cheap shot recoil (0x1131)");
+			check(sdPair.contactDelaySeconds == 0.50f, "Street Cheap Shot contact delay is authentic 0.50s (500ms)");
+
+			// B. Cross-Discipline Block & Dodge Animation Synchronization
+			// Kung Fu strike vs Karate defender blocking:
+			InterlockAnimPair kfVsKarateBlock = CombatAnimationMatrix::GetAnimationPair(
+				FightingStyle::KungFu, TACTIC_POWER,
+				FightingStyle::Karate, TACTIC_DEFENSE,
+				InterlockExchangeOutcome::Blocked
+			);
+			check(kfVsKarateBlock.attackerAnimId == 0x0D5C, "Kung Fu strike vs Karate block: Attacker plays strike (0x0D5C)");
+			check(kfVsKarateBlock.defenderAnimId == 0x0472, "Kung Fu strike vs Karate block: Defender plays Karate block (0x0472 = KD_D_SR_BPegHR_KDLb)");
+			check(kfVsKarateBlock.contactDelaySeconds == 0.46f, "Kung Fu strike contact arrives at defender block at 0.46s (460ms)");
+			check(kfVsKarateBlock.hitFxId == 0x28000794, "Blocked strike triggers block spark FX 0x28000794");
+
+			// Karate strike vs Aikido defender dodging:
+			InterlockAnimPair karateVsAikidoDodge = CombatAnimationMatrix::GetAnimationPair(
+				FightingStyle::Karate, TACTIC_POWER,
+				FightingStyle::Aikido, TACTIC_NORMAL,
+				InterlockExchangeOutcome::Dodged
+			);
+			check(karateVsAikidoDodge.attackerAnimId == 0x04F0, "Karate strike vs Aikido dodge: Attacker plays spin kick (0x04F0)");
+			check(karateVsAikidoDodge.defenderAnimId == 0x009D, "Karate strike vs Aikido dodge: Defender plays Aikido circular dodge (0x009D = AD_D_SR_ADLb_DPegMF)");
+			check(karateVsAikidoDodge.contactDelaySeconds == 0.46f, "Karate kick evasion timing synchronizes at 0.46s (460ms)");
+			check(karateVsAikidoDodge.hitFxId == 0, "Dodged attack generates 0 hit FX");
+
+			// C. Stance Clash Synchronization
+			InterlockAnimPair clashPair = CombatAnimationMatrix::GetAnimationPair(
+				FightingStyle::KungFu, TACTIC_POWER,
+				FightingStyle::Aikido, TACTIC_POWER,
+				InterlockExchangeOutcome::Clash
+			);
+			check(clashPair.attackerAnimId == 0x0D5C, "Clash: Kung Fu attacker plays clash strike (0x0D5C)");
+			check(clashPair.defenderAnimId == 0x00A3, "Clash: Aikido defender plays clash recoil (0x00A3)");
+			check(clashPair.contactDelaySeconds == 0.40f, "Clash contact occurs at 0.40s (400ms)");
+			check(clashPair.hitFxId == 0x28000794, "Clash triggers block spark FX 0x28000794");
+
+			// D. End-to-End ILExchange Protocol Serialization with Contact Timing & Fighting Styles
+			TestHumanClient clientViewer;
+			Actor actorA = makeHuman(&clientViewer, 9100010, 9950.0, 10000.0);
+			Actor actorB = makeBot(9200070, 10050.0, 10000.0, 1, 100);
+			InterlockSession testSession;
+			testSession.goIdA = actorA.go;
+			testSession.goIdB = actorB.go;
+			testSession.ilPos = LocationVector(10000.0, 572.0, 10000.0);
+			testSession.exchangeNum = 4;
+			actorA.po->setFightingStyle(FightingStyle::KungFu);
+			actorB.po->setFightingStyle(FightingStyle::Karate);
+
+			ILExchange exchange = sCombatSys.BuildExchange(
+				testSession, actorA.po, actorA.po, actorB.po, 4,
+				IL_MOVE_PRE, IL_MOVE_PRE, 0x2026, &kfVsKarateBlock
+			);
+
+			check(exchange.attackerStyle == (uint8)FightingStyle::KungFu, "ILExchange: attackerStyle is Kung Fu (2)");
+			check(exchange.defenderStyle == (uint8)FightingStyle::Karate, "ILExchange: defenderStyle is Karate (3)");
+			check(exchange.defenderOffsetMs == 460, "ILExchange: defenderOffsetMs dynamically synchronized to 460ms");
+			check(exchange.moves[2][0] == 0x2026, "ILExchange: mainMove is 0x2026 (Kung Fu strike)");
+			check(exchange.moves[3][0] == 0x0D5C, "ILExchange: moves[3][0] is attacker strike animation (0x0D5C)");
+			check(exchange.moves[4][0] == 0x0472, "ILExchange: moves[4][0] is defender Karate block animation (0x0472)");
+
+			ByteBuffer ilBuf;
+			exchange.write(ilBuf);
+			check(ilBuf.size() == 0x79, "ILExchange serialized buffer size is exactly 121 bytes (0x79)");
+			const uint8* rawBytes = reinterpret_cast<const uint8*>(ilBuf.contents());
+			check(rawBytes[0x1E] == (uint8)FightingStyle::Karate, "ILExchange wire byte 0x1E is defenderStyle Karate (3)");
+			check(rawBytes[0x1F] == (uint8)FightingStyle::KungFu, "ILExchange wire byte 0x1F is attackerStyle Kung Fu (2)");
+			int16 wireOffset = *reinterpret_cast<const int16*>(&rawBytes[0x26]);
+			check(wireOffset == 460, "ILExchange wire bytes at 0x26 are 460ms defenderOffsetMs");
+		}
 	}
 	catch (const std::exception& e)
 	{

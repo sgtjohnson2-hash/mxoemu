@@ -1224,7 +1224,8 @@ CombatSystem::AttackResult CombatSystem::ResolveAttack(PlayerObject* attacker, P
 
 ILExchange CombatSystem::BuildExchange(const InterlockSession &session, PlayerObject* viewer,
 	PlayerObject* attacker, PlayerObject* defender, uint16 number,
-	uint32 attackerPreMove, uint32 defenderPreMove, uint32 mainMove)
+	uint32 attackerPreMove, uint32 defenderPreMove, uint32 mainMove,
+	const InterlockAnimPair* animPair)
 {
 	ILExchange e;
 	//on every client: slot 2 = that client's own character, slot 1 = the opponent
@@ -1242,13 +1243,35 @@ ILExchange CombatSystem::BuildExchange(const InterlockSession &session, PlayerOb
 	//far-future start + flag bit0: the client clamps it to "now + 5 ms" on its own clock,
 	//so server/client clock skew can't make it skip the exchange
 	e.startMs = 1000000;
-	e.defenderOffsetMs = 666;		//values from the captured exchanges
+
+	// Dynamic contact frame timing synchronization (aligns blocks/dodges with strike impact)
+	if (animPair && animPair->contactDelaySeconds > 0.05f)
+	{
+		e.defenderOffsetMs = int16(animPair->contactDelaySeconds * 1000.0f);
+	}
+	else
+	{
+		e.defenderOffsetMs = 666; // authentic default opening timing from captured exchanges
+	}
+
 	e.attackerExtraMs = 1332;
 	e.defenderExtraMs = 1333;
 	e.flags = 0x03;
+
+	// Propagate authentic martial arts fighting styles
+	e.attackerStyle = (uint8)attacker->getFightingStyle();
+	e.defenderStyle = (uint8)defender->getFightingStyle();
+
 	if (attackerPreMove) { e.moves[0][0] = attackerPreMove; e.moves[0][1] = IL_MOVE_DATABASE; }
 	if (defenderPreMove) { e.moves[1][0] = defenderPreMove; e.moves[1][1] = IL_MOVE_DATABASE; }
 	e.moves[2][0] = mainMove; e.moves[2][1] = IL_MOVE_DATABASE;
+
+	if (animPair)
+	{
+		if (animPair->attackerAnimId) { e.moves[3][0] = animPair->attackerAnimId; e.moves[3][1] = IL_MOVE_DATABASE; }
+		if (animPair->defenderAnimId) { e.moves[4][0] = animPair->defenderAnimId; e.moves[4][1] = IL_MOVE_DATABASE; }
+	}
+
 	e.attackerHealth = attacker->getCurrentHealth();
 	e.defenderHealth = defender->getCurrentHealth();
 	return e;
@@ -1291,13 +1314,51 @@ uint32 CombatSystem::SelectInterlockMove(const InterlockSession &session, Player
 	}
 }
 
-void CombatSystem::SendInterlockExchange(InterlockSession &session, PlayerObject* attacker, PlayerObject* defender)
+void CombatSystem::SendInterlockExchange(InterlockSession &session, PlayerObject* attacker, PlayerObject* defender,
+	const AttackResult& res, const CombatMove& move, uint8 attackerTactic, uint8 defenderTactic)
 {
 	if (session.ilViewIdA == 0 && session.ilViewIdB == 0)
 		return;
 
 	session.exchangeNum++;
 	uint32 mainMove = SelectInterlockMove(session, attacker, defender);
+
+	// Determine exchange outcome for fluid contact synchronization
+	InterlockExchangeOutcome outcome = InterlockExchangeOutcome::NormalHit;
+	if (res.isBlocked)
+	{
+		outcome = InterlockExchangeOutcome::Blocked;
+	}
+	else if (!res.hit)
+	{
+		outcome = InterlockExchangeOutcome::Dodged;
+	}
+	else if (attackerTactic == defenderTactic && attackerTactic != TACTIC_NORMAL)
+	{
+		outcome = InterlockExchangeOutcome::Clash;
+	}
+	else if (attackerTactic == TACTIC_POWER && defenderTactic == TACTIC_SPEED)
+	{
+		outcome = InterlockExchangeOutcome::StanceCrush;
+	}
+	else if (attackerTactic == TACTIC_SPEED && defenderTactic == TACTIC_RETALIATE)
+	{
+		outcome = InterlockExchangeOutcome::FastInterrupt;
+	}
+	else if (attackerTactic == TACTIC_RETALIATE && (defenderTactic == TACTIC_DEFENSE || defenderTactic == TACTIC_POWER))
+	{
+		outcome = InterlockExchangeOutcome::GuardBreak;
+	}
+	else if (move.id != 0 && move.id != 1)
+	{
+		outcome = InterlockExchangeOutcome::SpecialHit;
+	}
+
+	InterlockAnimPair pair = CombatAnimationMatrix::GetAnimationPair(
+		attacker->getFightingStyle(), attackerTactic,
+		defender->getFightingStyle(), defenderTactic,
+		outcome, move.id
+	);
 
 	PlayerObject* pA = getPlayerSafe(session.goIdA);
 	PlayerObject* pB = getPlayerSafe(session.goIdB);
@@ -1308,12 +1369,14 @@ void CombatSystem::SendInterlockExchange(InterlockSession &session, PlayerObject
 			continue;
 		std::vector<ILExchange> ex;
 		ex.push_back(BuildExchange(session, sides[i].p, attacker, defender, session.exchangeNum,
-			IL_MOVE_PRE, IL_MOVE_PRE, mainMove));
+			IL_MOVE_PRE, IL_MOVE_PRE, mainMove, &pair));
 		sides[i].p->getClient().QueueState(std::make_shared<ILCombatStateMsg>(
 			sides[i].view, session.ilPos, session.exchangeNum, std::vector<uint32>(), ex));
 	}
-	INFO_LOG(format("Interlock exchange %1%: %2% -> %3% move 0x%4$04X (HP %5% / %6%)")
-		% session.exchangeNum % attacker->getHandle() % defender->getHandle() % mainMove
+	INFO_LOG(format("Interlock exchange %1%: %2% (style %3%) -> %4% (style %5%) move 0x%6$04X (contact %7%ms, outcome %8%, HP %9% / %10%)")
+		% session.exchangeNum % attacker->getHandle() % (uint32)attacker->getFightingStyle()
+		% defender->getHandle() % (uint32)defender->getFightingStyle() % mainMove
+		% int32(pair.contactDelaySeconds * 1000.0f) % (uint32)outcome
 		% attacker->getCurrentHealth() % defender->getCurrentHealth());
 }
 
@@ -1325,7 +1388,7 @@ CombatSystem::AttackResult CombatSystem::StrikeInterlock(InterlockSession &sessi
 	AttackResult res = ResolveAttack(attacker, target, move, attackerTactic, targetTactic, inInterlock, bypassBlock);
 	m_ilExchangeActive = false;
 	if (exchangeDriven)
-		SendInterlockExchange(session, attacker, target);
+		SendInterlockExchange(session, attacker, target, res, move, attackerTactic, targetTactic);
 	return res;
 }
 

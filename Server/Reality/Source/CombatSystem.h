@@ -18,6 +18,7 @@
 #include "Singleton.h"
 #include "LocationVector.h"
 #include "MessageTypes.h"
+#include "CombatAnimationMatrix.h"
 #include <mutex>
 #include <unordered_map>
 #include <string>
@@ -197,8 +198,10 @@ public:
 	AttackResult StrikeInterlock(InterlockSession &session, PlayerObject* attacker, PlayerObject* target,
 		const CombatMove& move, uint8 attackerTactic, uint8 targetTactic, bool inInterlock, bool bypassBlock);
 	ILExchange BuildExchange(const InterlockSession &session, PlayerObject* viewer, PlayerObject* attacker,
-		PlayerObject* defender, uint16 number, uint32 attackerPreMove, uint32 defenderPreMove, uint32 mainMove);
-	void SendInterlockExchange(InterlockSession &session, PlayerObject* attacker, PlayerObject* defender);
+		PlayerObject* defender, uint16 number, uint32 attackerPreMove, uint32 defenderPreMove, uint32 mainMove,
+		const InterlockAnimPair* animPair = nullptr);
+	void SendInterlockExchange(InterlockSession &session, PlayerObject* attacker, PlayerObject* defender,
+		const AttackResult& res, const CombatMove& move, uint8 attackerTactic, uint8 targetTactic);
 	uint32 SelectInterlockMove(const InterlockSession &session, PlayerObject* attacker, PlayerObject* defender);
 	bool m_ilExchangeActive = false;
 

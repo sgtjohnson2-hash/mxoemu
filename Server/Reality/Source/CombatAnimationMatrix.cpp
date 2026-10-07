@@ -23,7 +23,6 @@ InterlockAnimPair CombatAnimationMatrix::GetAnimationPair(
     uint16 moveId
 )
 {
-    (void)defenderStyle;
     (void)defenderTactic;
 
     InterlockAnimPair pair;
@@ -39,23 +38,19 @@ InterlockAnimPair CombatAnimationMatrix::GetAnimationPair(
         pair.contactDelaySeconds = 0.40f;
         switch (attackerStyle)
         {
-            case FightingStyle::KungFu:
-                pair.attackerAnimId = 0x0D5C; // WP_A_SR_PegAHF_WPLb
-                pair.defenderAnimId = 0x0CDB; // WD_D_SR_BPegHF_WDLb
-                break;
-            case FightingStyle::Karate:
-                pair.attackerAnimId = 0x0567; // KS_A_SRFM_SegA_KSLbPushKick
-                pair.defenderAnimId = 0x058B; // KS_D_SR_BSegA_KSLb
-                break;
-            case FightingStyle::Aikido:
-                pair.attackerAnimId = 0x0072; // AD_A_SR_ADLb_BlockFailedPunch
-                pair.defenderAnimId = 0x00A3; // AD_D_SR_ADLb_FailedPunch_F50
-                break;
+            case FightingStyle::KungFu: pair.attackerAnimId = 0x0D5C; break; // WP_A_SR_PegAHF_WPLb
+            case FightingStyle::Karate: pair.attackerAnimId = 0x0567; break; // KS_A_SRFM_SegA_KSLbPushKick
+            case FightingStyle::Aikido: pair.attackerAnimId = 0x0072; break; // AD_A_SR_ADLb_BlockFailedPunch
             case FightingStyle::None:
-            default:
-                pair.attackerAnimId = 0x09E2; // SS_A_SRFM_SegC_SSHeadButt_B50
-                pair.defenderAnimId = 0x08BE; // SD_D_SR_BPegHF_SDLb
-                break;
+            default:                    pair.attackerAnimId = 0x09E2; break; // SS_A_SRFM_SegC_SSHeadButt_B50
+        }
+        switch (defenderStyle)
+        {
+            case FightingStyle::KungFu: pair.defenderAnimId = 0x0CDB; break; // WD_D_SR_BPegHF_WDLb
+            case FightingStyle::Karate: pair.defenderAnimId = 0x058B; break; // KS_D_SR_BSegA_KSLb
+            case FightingStyle::Aikido: pair.defenderAnimId = 0x00A3; break; // AD_D_SR_ADLb_FailedPunch_F50
+            case FightingStyle::None:
+            default:                    pair.defenderAnimId = 0x08BE; break; // SD_D_SR_BPegHF_SDLb
         }
         return pair;
     }
@@ -68,25 +63,29 @@ InterlockAnimPair CombatAnimationMatrix::GetAnimationPair(
         {
             case FightingStyle::KungFu:
                 pair.attackerAnimId = 0x0D58; // WP_A_SRFM_PegBHR_WPTigerPunch_B50
-                pair.defenderAnimId = 0x0CFC; // WD_D_SR_DPegHF_WDLb
                 pair.contactDelaySeconds = 0.40f;
                 break;
             case FightingStyle::Karate:
                 pair.attackerAnimId = 0x04F0; // KP_A_SRFM_PegAMR_JumpingSpinKick
-                pair.defenderAnimId = 0x0493; // KD_D_SR_DPegHR_KDLb
                 pair.contactDelaySeconds = 0.46f;
                 break;
             case FightingStyle::Aikido:
                 pair.attackerAnimId = 0x00FC; // AP_A_SRFM_PegAMF_APCollarboneBreak
-                pair.defenderAnimId = 0x009D; // AD_D_SR_ADLb_DPegMF
                 pair.contactDelaySeconds = 0.43f;
                 break;
             case FightingStyle::None:
             default:
                 pair.attackerAnimId = 0x09E0; // SS_A_SRFM_SegA_SSHeadGrabKneeFace_F100
-                pair.defenderAnimId = 0x0AF0; // V_D_MR_DASideTackleLF_F50
                 pair.contactDelaySeconds = 0.45f;
                 break;
+        }
+        switch (defenderStyle)
+        {
+            case FightingStyle::KungFu: pair.defenderAnimId = 0x0CFC; break; // WD_D_SR_DPegHF_WDLb
+            case FightingStyle::Karate: pair.defenderAnimId = 0x0493; break; // KD_D_SR_DPegHR_KDLb
+            case FightingStyle::Aikido: pair.defenderAnimId = 0x009D; break; // AD_D_SR_ADLb_DPegMF
+            case FightingStyle::None:
+            default:                    pair.defenderAnimId = 0x0AF0; break; // V_D_MR_DASideTackleLF_F50
         }
         return pair;
     }
@@ -99,25 +98,29 @@ InterlockAnimPair CombatAnimationMatrix::GetAnimationPair(
         {
             case FightingStyle::KungFu:
                 pair.attackerAnimId = 0x0D5C; // WP_A_SR_PegAHF_WPLb
-                pair.defenderAnimId = 0x0CDB; // WD_D_SR_BPegHF_WDLb
                 pair.contactDelaySeconds = 0.46f;
                 break;
             case FightingStyle::Karate:
                 pair.attackerAnimId = 0x04F4; // KP_A_SR_KPLb_PegAMR_F50
-                pair.defenderAnimId = 0x0472; // KD_D_SR_BPegHR_KDLb
                 pair.contactDelaySeconds = 0.53f;
                 break;
             case FightingStyle::Aikido:
                 pair.attackerAnimId = 0x00FC; // AP_A_SRFM_PegAMF_APCollarboneBreak
-                pair.defenderAnimId = 0x0114; // AP_D_SR_APLb_BPegMF
                 pair.contactDelaySeconds = 0.50f;
                 break;
             case FightingStyle::None:
             default:
                 pair.attackerAnimId = 0x08AD; // SD_A_SR_BlockFailedPunch_SDLb
-                pair.defenderAnimId = 0x08BE; // SD_D_SR_BPegHF_SDLb
                 pair.contactDelaySeconds = 0.46f;
                 break;
+        }
+        switch (defenderStyle)
+        {
+            case FightingStyle::KungFu: pair.defenderAnimId = 0x0CDB; break; // WD_D_SR_BPegHF_WDLb
+            case FightingStyle::Karate: pair.defenderAnimId = 0x0472; break; // KD_D_SR_BPegHR_KDLb
+            case FightingStyle::Aikido: pair.defenderAnimId = 0x0114; break; // AP_D_SR_APLb_BPegMF
+            case FightingStyle::None:
+            default:                    pair.defenderAnimId = 0x08BE; break; // SD_D_SR_BPegHF_SDLb
         }
         return pair;
     }
@@ -130,26 +133,30 @@ InterlockAnimPair CombatAnimationMatrix::GetAnimationPair(
         {
             case FightingStyle::KungFu:
                 pair.attackerAnimId = 0x0F99; // WS_A_SRFM_SegB_WSMantisThrow
-                pair.defenderAnimId = 0x0B14; // V_D_SRFM_SegB_WSMantisThrow
                 pair.contactDelaySeconds = 0.80f;
                 break;
             case FightingStyle::Karate:
                 pair.attackerAnimId = 0x04F3; // KP_A_SRSM_FtSwLF_KiPunchMF_F50
-                pair.defenderAnimId = 0x0AE7; // V_D_MRSM_BodyShot_F390
-                pair.hitFxId = 0x2800045A;    // FX_INTERLOCK_KI_AURA_IMPACT
                 pair.contactDelaySeconds = 0.73f;
+                pair.hitFxId = 0x2800045A;    // FX_INTERLOCK_KI_AURA_IMPACT
                 break;
             case FightingStyle::Aikido:
                 pair.attackerAnimId = 0x0068; // AD_A_SRFM_ADLbCartwheelToTomoNage
-                pair.defenderAnimId = 0x0AF2; // V_D_SRFM_FailedPunch_ADLbCartwheelToTomoNage
                 pair.contactDelaySeconds = 0.93f;
                 break;
             case FightingStyle::None:
             default:
                 pair.attackerAnimId = 0x145F; // SD_A_SRFM_SDLbArmComboThrow_F50
-                pair.defenderAnimId = 0x0F4A; // V_D_MR_EntryMoveLegSweepLF
                 pair.contactDelaySeconds = 0.83f;
                 break;
+        }
+        switch (attackerStyle)
+        {
+            case FightingStyle::KungFu: pair.defenderAnimId = 0x0B14; break; // V_D_SRFM_SegB_WSMantisThrow
+            case FightingStyle::Karate: pair.defenderAnimId = 0x0AE7; break; // V_D_MRSM_BodyShot_F390
+            case FightingStyle::Aikido: pair.defenderAnimId = 0x0AF2; break; // V_D_SRFM_FailedPunch_ADLbCartwheelToTomoNage
+            case FightingStyle::None:
+            default:                    pair.defenderAnimId = 0x0F4A; break; // V_D_MR_EntryMoveLegSweepLF
         }
         return pair;
     }
