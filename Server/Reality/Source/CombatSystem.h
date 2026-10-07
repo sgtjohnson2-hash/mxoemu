@@ -1,4 +1,4 @@
-﻿// ***************************************************************************
+// ***************************************************************************
 //
 // Reality - The Matrix Online Server Emulator
 //
@@ -198,6 +198,7 @@ public:
 	ILExchange BuildExchange(const InterlockSession &session, PlayerObject* viewer, PlayerObject* attacker,
 		PlayerObject* defender, uint16 number, uint32 attackerPreMove, uint32 defenderPreMove, uint32 mainMove);
 	void SendInterlockExchange(InterlockSession &session, PlayerObject* attacker, PlayerObject* defender);
+	uint32 SelectInterlockMove(const InterlockSession &session, PlayerObject* attacker, PlayerObject* defender);
 	bool m_ilExchangeActive = false;
 
 	AttackResult ResolveAttack(PlayerObject* attacker, PlayerObject* target,

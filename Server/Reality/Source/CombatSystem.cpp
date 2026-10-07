@@ -1174,14 +1174,50 @@ ILExchange CombatSystem::BuildExchange(const InterlockSession &session, PlayerOb
 	return e;
 }
 
+uint32 CombatSystem::SelectInterlockMove(const InterlockSession &session, PlayerObject* attacker, PlayerObject* defender)
+{
+	if (!attacker || !defender)
+		return IL_MOVE_OPEN_MAIN; // 0x2026
+
+	// Finisher / Takedown: when defender has been reduced to 0 HP
+	if (defender->isDead() || defender->getCurrentHealth() == 0)
+		return 0x4EE5; // Double Overhead Smash / Ground Slam Finisher (retail capture)
+
+	// Power Stance Crush (Power vs Speed frame advantage)
+	if ((session.tacticA == TACTIC_POWER && session.tacticB == TACTIC_SPEED) ||
+	    (session.tacticB == TACTIC_POWER && session.tacticA == TACTIC_SPEED))
+		return 0x2367; // Hyperstrike / Stance Crush (retail capture)
+
+	// Grab / Retaliate against Power or Block
+	if (session.tacticA == TACTIC_RETALIATE || session.tacticB == TACTIC_RETALIATE)
+		return 0x236D; // Aikido Throw / Momentum Reversal (retail capture)
+
+	// Style-specific discipline resolution
+	FightingStyle style = attacker->getFightingStyle();
+	switch (style)
+	{
+		case FightingStyle::Karate:
+			return 0x2388; // Karate High Kick / Thrust (retail capture)
+		case FightingStyle::Aikido:
+			return 0x236D; // Aikido Redirection (retail capture)
+		case FightingStyle::KungFu:
+			return (session.exchangeNum % 2 == 0) ? 0x2026 : 0x2367; // Kung Fu Palm / Dragon Strike
+		case FightingStyle::None:
+		default:
+		{
+			static const uint32 authenticMoves[] = { 0x2026, 0x2388, 0x236D, 0x2367 };
+			return authenticMoves[session.exchangeNum % 4];
+		}
+	}
+}
+
 void CombatSystem::SendInterlockExchange(InterlockSession &session, PlayerObject* attacker, PlayerObject* defender)
 {
 	if (session.ilViewIdA == 0 && session.ilViewIdB == 0)
 		return;
-	//main moves seen in captured live exchanges (interlock database 0x24000B8B)
-	static const uint32 mainMoves[] = { 0x2026, 0x2388, 0x236D, 0x2367, 0x4EE5 };
+
 	session.exchangeNum++;
-	uint32 mainMove = mainMoves[session.exchangeNum % (sizeof(mainMoves)/sizeof(mainMoves[0]))];
+	uint32 mainMove = SelectInterlockMove(session, attacker, defender);
 
 	PlayerObject* pA = getPlayerSafe(session.goIdA);
 	PlayerObject* pB = getPlayerSafe(session.goIdB);

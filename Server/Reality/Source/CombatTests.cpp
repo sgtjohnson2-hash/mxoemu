@@ -924,6 +924,43 @@ int RunCombatTestSuite()
 				check(abilitySys->getAbility(600)->getLastUsedTime() > 0, "onAbilityCast records last used timestamp");
 				check(!abilitySys->canCastAbility(600), "canCastAbility enforces 2000ms ability cooldown lockout");
 			}
+
+			// 11. Authentic Interlock Move Selection (Task 4)
+			InterlockSession testSession;
+			testSession.goIdA = human.go;
+			testSession.goIdB = fallenBot.go;
+			testSession.exchangeNum = 0;
+			testSession.tacticA = TACTIC_POWER;
+			testSession.tacticB = TACTIC_SPEED;
+
+			// Stance crush Power vs Speed
+			uint32 moveCrush = sCombatSys.SelectInterlockMove(testSession, human.po, fallenBot.po);
+			check(moveCrush == 0x2367, "SelectInterlockMove returns 0x2367 (Hyperstrike / Stance Crush) on Power vs Speed");
+
+			// Grab vs Defense
+			testSession.tacticA = TACTIC_RETALIATE;
+			testSession.tacticB = TACTIC_DEFENSE;
+			uint32 moveGrab = sCombatSys.SelectInterlockMove(testSession, human.po, fallenBot.po);
+			check(moveGrab == 0x236D, "SelectInterlockMove returns 0x236D (Aikido Throw / Momentum Reversal) on Grab tactic");
+
+			// Karate discipline
+			human.po->setFightingStyle(FightingStyle::Karate);
+			testSession.tacticA = TACTIC_SPEED;
+			testSession.tacticB = TACTIC_SPEED;
+			uint32 moveKarate = sCombatSys.SelectInterlockMove(testSession, human.po, fallenBot.po);
+			check(moveKarate == 0x2388, "SelectInterlockMove returns 0x2388 (Karate High Kick / Strike) for Karate style");
+
+			// Kung Fu discipline
+			human.po->setFightingStyle(FightingStyle::KungFu);
+			testSession.exchangeNum = 2;
+			uint32 moveKungFu = sCombatSys.SelectInterlockMove(testSession, human.po, fallenBot.po);
+			check(moveKungFu == 0x2026, "SelectInterlockMove returns 0x2026 (Kung Fu Strike) for Kung Fu style");
+
+			// Finisher / Takedown when opponent is dead
+			fallenBot.po->setDead(true);
+			uint32 moveFinisher = sCombatSys.SelectInterlockMove(testSession, human.po, fallenBot.po);
+			check(moveFinisher == 0x4EE5, "SelectInterlockMove returns 0x4EE5 (Finisher / Takedown) when opponent is defeated");
+			fallenBot.po->setDead(false);
 		}
 	}
 	catch (const std::exception& e)

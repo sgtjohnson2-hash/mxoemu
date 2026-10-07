@@ -125,7 +125,7 @@ bool Config::GetInt(const char* name, int *value)
     if(!node || !node->getValue())
         return false;
 
-    *value = atoi(node->getValue());
+    *value = (int)strtoul(node->getValue(), NULL, 0);
 
     return true;
 }
