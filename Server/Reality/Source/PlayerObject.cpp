@@ -754,6 +754,7 @@ void PlayerObject::HandleStateUpdate( ByteBuffer &srcData )
 			break;
 		}
 	}
+	size_t endOfUpdatePos = srcData.rpos();
 	if (validUpdate)
 	{
 		if(movementUpdate)
@@ -769,7 +770,8 @@ void PlayerObject::HandleStateUpdate( ByteBuffer &srcData )
 		//propagate state to all other players
 		srcData.rpos(restOfDataPos);
 		ByteBuffer theStateData;
-		theStateData.append(&srcData.contents()[srcData.rpos()],srcData.remaining());
+		theStateData.append(&srcData.contents()[srcData.rpos()],endOfUpdatePos - restOfDataPos);
+		theStateData << uint16(0); // nomoreattribs
 		//m_parent.QueueState(make_shared<StateUpdateMsg>(m_goId,theStateData));
 		sGame.AnnounceStateUpdate(&m_parent,make_shared<StateUpdateMsg>(m_goId,theStateData),true);
 	}

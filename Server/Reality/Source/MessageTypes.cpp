@@ -790,6 +790,7 @@ const ByteBuffer& PositionStateMsg::toBuf()
 	m_buf << uint8(0x08); //pos update
 
 	m_player->getPosition().toFloatBuf(m_buf);
+	m_buf << uint16(0); // nomoreattribs
 
 	return m_buf;
 }
@@ -829,6 +830,7 @@ const ByteBuffer& RotationStateMsg::toBuf()
 
 	m_buf << uint8(0x04); // change angle
 	m_buf << uint8(m_rot);
+	m_buf << uint16(0); // nomoreattribs
 
 	return m_buf;
 }
@@ -873,6 +875,7 @@ const ByteBuffer& LocomotionStateMsg::toBuf()
 	(void)m_animation;
 	m_buf << uint8(0x04);
 	m_buf << uint8(m_rot);
+	m_buf << uint16(0); // nomoreattribs
 
 	return m_buf;
 }
@@ -1293,6 +1296,7 @@ const ByteBuffer& HealthUpdateMsg::toBuf()
 	m_buf << uint16(viewId);
 	ByteBuffer blockBuf = block.toBuf(true);
 	m_buf.append(blockBuf.contents(),blockBuf.size());
+	m_buf << uint16(0); // nomoreattribs
 	return m_buf;
 }
 
@@ -1341,6 +1345,7 @@ const ByteBuffer& CombatHitFxMsg::toBuf()
 	m_buf << uint16(viewId);
 	ByteBuffer blockBuf = block.toBuf(true);
 	m_buf.append(blockBuf.contents(),blockBuf.size());
+	m_buf << uint16(0); // nomoreattribs
 	return m_buf;
 }
 
@@ -1374,6 +1379,7 @@ const ByteBuffer& CombatantModeMsg::toBuf()
 	m_buf << uint16(viewId);
 	ByteBuffer blockBuf = block.toBuf(true);
 	m_buf.append(blockBuf.contents(),blockBuf.size());
+	m_buf << uint16(0); // nomoreattribs
 	return m_buf;
 }
 
@@ -1400,6 +1406,7 @@ SelfVitalsMsg::SelfVitalsMsg( PlayerObject *thePlayer, bool includeMax, bool inc
 	m_buf << uint8(0x02); //self-view attribute update type (HDS: sendISCurrent, mood, appearance)
 	ByteBuffer blockBuf = block.toBuf(false); //self view updates: type byte 0x02, then groups, no count
 	m_buf.append(blockBuf.contents(),blockBuf.size());
+	m_buf << uint16(0); // nomoreattribs
 }
 
 SelfHitFxMsg::SelfHitFxMsg( PlayerObject *thePlayer, uint32 fxId, uint8 hitCounter )
@@ -1425,6 +1432,7 @@ SelfHitFxMsg::SelfHitFxMsg( PlayerObject *thePlayer, uint32 fxId, uint8 hitCount
 	m_buf << uint8(0x02); //self-view attribute update type (HDS: sendISCurrent, mood, appearance)
 	ByteBuffer blockBuf = block.toBuf(false);
 	m_buf.append(blockBuf.contents(),blockBuf.size());
+	m_buf << uint16(0); // nomoreattribs
 }
 
 SelfCombatantModeMsg::SelfCombatantModeMsg( uint8 mode )
@@ -1439,6 +1447,7 @@ SelfCombatantModeMsg::SelfCombatantModeMsg( uint8 mode )
 	m_buf << uint8(0x02); //self-view attribute update type (HDS: sendISCurrent, mood, appearance)
 	ByteBuffer blockBuf = block.toBuf(false);
 	m_buf.append(blockBuf.contents(),blockBuf.size());
+	m_buf << uint16(0); // nomoreattribs
 }
 
 SpawnILCombatHandlerMsg::SpawnILCombatHandlerMsg( uint16 viewId, uint8 spawnIdCounter, LocationVector pos, float simTime )
@@ -1466,6 +1475,7 @@ SpawnILCombatHandlerMsg::SpawnILCombatHandlerMsg( uint16 viewId, uint8 spawnIdCo
 
 	m_buf << uint16(viewId);
 	m_buf << uint8(0x00);
+	m_buf << uint16(0); // nomoreattribs
 }
 
 ILExchange::ILExchange()
