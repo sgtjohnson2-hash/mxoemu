@@ -1,4 +1,4 @@
-﻿// ***************************************************************************
+// ***************************************************************************
 //
 // Reality - The Matrix Online Server Emulator
 // Copyright (C) 2006-2010 Rajko Stojadinovic
@@ -3604,14 +3604,15 @@ void PlayerObject::RPC_HandleMissionRequest(ByteBuffer& srcCmd)
 		return;
 	}
 
-	uint32 missionId = sMissionSys.GenerateFactionTensionMission(this);
+	uint32 missionId = sMissionSys.GetAvailableStoryMission(this);
 	if (missionId == 0)
 	{
-		missionId = sMissionSys.SynthesizeProceduralMission(this, ProceduralMissionArchetype::DATA_EXTRACTION);
+		missionId = sMissionSys.GenerateFactionTensionMission(this);
 	}
 
 	if (missionId != 0)
 	{
+		sMissionSys.AssignMission(this, missionId);
 		const auto& templates = sMissionSys.GetMissionTemplates();
 		auto it = templates.find(missionId);
 		if (it != templates.end())
@@ -3685,7 +3686,7 @@ void PlayerObject::RPC_HandleItemMountRSI(ByteBuffer& srcCmd)
 
 void PlayerObject::RPC_HandleCallContact( ByteBuffer &srcCmd )
 {
-	uint32 contactId = 1;
+	uint32 contactId = 0;
 	if (srcCmd.remaining() >= 4)
 		contactId = srcCmd.read<uint32>();
 	else if (srcCmd.remaining() >= 2)
@@ -3695,57 +3696,57 @@ void PlayerObject::RPC_HandleCallContact( ByteBuffer &srcCmd )
 
 	DEBUG_LOG(format("(%1%) RPC_HandleCallContact: contactId=%2%") % m_parent.Address() % contactId);
 
-	std::string contactName = "Operator";
-	std::string response = "Operator online. I read you, " + m_handle + ". What are your coordinates?";
-
 	uint32 faction = getFaction();
-	switch (contactId)
+	const SponsorContact* sponsor = sMissionSys.GetSponsor(contactId);
+
+	// If no specific sponsor requested or not found, pick authentic faction sponsor
+	if (!sponsor)
 	{
-		case 1: // Morpheus (Zion)
-			contactName = "Morpheus";
-			response = "I can only show you the door. You're the one that has to walk through it. What do you need, " + m_handle + "?";
-			break;
-		case 2: // Ghost (Zion)
-			contactName = "Ghost";
-			response = "Target verified. We have an operational sweep in this district. Stand by for tactical telemetry.";
-			break;
-		case 3: // Trinity (Zion)
-			contactName = "Trinity";
-			response = "The answer is out there, " + m_handle + ". It's looking for you, and it will find you if you want it to.";
-			break;
-		case 4: // Niobe (Zion)
-			contactName = "Niobe";
-			response = "Keep your eyes open and your engine hot. We're intercepting an enemy convoy in the Barrens.";
-			break;
-		case 5: // The Merovingian (Exile)
-			contactName = "The Merovingian";
-			response = "Nom de dieu... Cause and effect. You want something, you pay the price. Make it quick, " + m_handle + ".";
-			break;
-		case 6: // The Oracle
-			contactName = "The Oracle";
-			response = "You didn't come here to make the choice, darling. You've already made it. You're here to understand why.";
-			break;
-		case 7: // Agent Gray / Machine Handler
-			contactName = "Agent Gray";
-			response = "System anomaly detected. Return to your designated sector or face immediate deletion.";
-			break;
-		default:
-			if (faction == 1) {
-				contactName = "Zion Dispatch";
-				response = "Zion command online. Transmitting local district telemetry to your HUD radar.";
-			} else if (faction == 2) {
-				contactName = "Exile Handler";
-				response = "Club Hel network active. Keep your head down and your code clean.";
-			} else {
-				contactName = "System Administrator";
-				response = "Matrix Architecture Node active. Processing operative status.";
-			}
-			break;
+		uint32 defaultSponsorId = (faction == 1) ? 2000 : // Tyndall (Zion)
+		                          (faction == 2) ? 2001 : // Agent Gray (Machines)
+		                          (faction == 3) ? 2002 : // Flood (Merovingian)
+		                          2007;                   // Operator (General)
+		sponsor = sMissionSys.GetSponsor(defaultSponsorId);
 	}
 
-	m_parent.QueueCommand(make_shared<SystemChatMsg>(
-		(format("{c:00FF00}[%1%] %2%{/c}") % contactName % response).str()
-	));
+	std::string contactName = sponsor ? sponsor->name : "Operator";
+
+	// Check if player has an active mission or needs one
+	if (sMissionSys.HasActiveMission(m_goId))
+	{
+		m_parent.QueueCommand(make_shared<SystemChatMsg>(
+			(format("{c:00FFCC}[%1%] Uplink verified. Proceed with your current mission objectives.{/c}") % contactName).str()
+		));
+		sMissionSys.SendMissionObjectiveDialog(this);
+	}
+	else
+	{
+		uint32 missionId = sMissionSys.GetAvailableStoryMission(this, sponsor ? sponsor->id : 0);
+		if (missionId != 0)
+		{
+			sMissionSys.AssignMission(this, missionId);
+			const auto& templates = sMissionSys.GetMissionTemplates();
+			auto it = templates.find(missionId);
+			if (it != templates.end())
+			{
+				m_parent.QueueCommand(make_shared<SystemChatMsg>(
+					(format("{c:00FF00}[%1%] New Mission Available: %2%{/c}") % contactName % it->second.title).str()
+				));
+				m_parent.QueueCommand(make_shared<SystemChatMsg>(
+					(format("{c:00FFFF}[BRIEFING] %1%{/c}") % it->second.description).str()
+				));
+				m_parent.QueueCommand(make_shared<SystemChatMsg>(
+					(format("{c:FFD700}[REWARDS] %1% Info Bits | %2% XP{/c}") % it->second.infoReward % it->second.expReward).str()
+				));
+			}
+		}
+		else
+		{
+			m_parent.QueueCommand(make_shared<SystemChatMsg>(
+				(format("{c:00FF00}[%1%] Transmission received, %2%. No outstanding contracts in this sector.{/c}") % contactName % m_handle).str()
+			));
+		}
+	}
 }
 
 void PlayerObject::RPC_HandleAbilityHotbarSync(ByteBuffer& srcCmd)

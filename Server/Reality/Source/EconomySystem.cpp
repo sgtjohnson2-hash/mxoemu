@@ -9,6 +9,9 @@
 #include "InventorySystem.h"
 #include "Database/Database.h"
 #include "Database/PreparedStatement.h"
+#include <fstream>
+#include <sstream>
+#include <algorithm>
 
 createFileSingleton(EconomySystem);
 
@@ -487,6 +490,95 @@ void EconomySystem::InitializeHardlineVendors()
     vRichland.name = "Richland Black Market Syndicate";
     vRichland.inventoryTemplates = { ITEM_HEAVY_BERETTAS, ITEM_NANOWEAVE_COAT, ITEM_POLARIZED_SHADES };
     m_hardlineVendors[4] = vRichland;
+}
+
+void EconomySystem::LoadVendorsFromCSV(const std::string& filePath)
+{
+    std::ifstream file(filePath.c_str());
+    if (!file.is_open())
+    {
+        WARNING_LOG(format("EconomySystem: Could not open vendor CSV file %1%") % filePath);
+        return;
+    }
+
+    std::lock_guard<std::recursive_mutex> lock(m_transactionMutex);
+    std::string line;
+    bool isFirstLine = true;
+    int loadedCount = 0;
+
+    while (std::getline(file, line))
+    {
+        if (line.empty()) continue;
+        if (isFirstLine)
+        {
+            isFirstLine = false; // skip header: metr_id;vendor_static_id;items;x;y;z
+            continue;
+        }
+
+        std::stringstream ss(line);
+        std::string token;
+        std::vector<std::string> tokens;
+        while (std::getline(ss, token, ';'))
+        {
+            tokens.push_back(token);
+        }
+
+        if (tokens.size() >= 6)
+        {
+            try
+            {
+                uint32 metrId = std::stoul(tokens[0]);
+                uint32 staticId = std::stoul(tokens[1]);
+
+                HardlineVendor v;
+                v.vendorId = staticId;
+                v.staticId = staticId;
+                v.districtId = metrId;
+                v.hardlineId = metrId * 100 + 1;
+
+                // Parse item templates
+                std::stringstream itemSs(tokens[2]);
+                std::string itemStr;
+                while (std::getline(itemSs, itemStr, ','))
+                {
+                    if (!itemStr.empty())
+                    {
+                        try {
+                            uint32 tplId = static_cast<uint32>(std::stoul(itemStr));
+                            v.inventoryTemplates.push_back(tplId);
+                        } catch(...) {}
+                    }
+                }
+
+                // Parse coordinates with European decimal handling
+                std::string xStr = tokens[3];
+                std::replace(xStr.begin(), xStr.end(), ',', '.');
+                v.x = std::stof(xStr);
+
+                std::string yStr = tokens[4];
+                std::replace(yStr.begin(), yStr.end(), ',', '.');
+                v.y = std::stof(yStr);
+
+                std::string zStr = tokens[5];
+                std::replace(zStr.begin(), zStr.end(), ',', '.');
+                v.z = std::stof(zStr);
+
+                std::string districtName = (metrId == 1) ? "Slums" :
+                                           (metrId == 2) ? "Richland" :
+                                           (metrId == 3) ? "Downtown" : "International";
+                v.name = (format("%1% Merchant (ID %2%)") % districtName % staticId).str();
+
+                m_hardlineVendors[staticId] = v;
+                loadedCount++;
+            }
+            catch (const std::exception& e)
+            {
+                WARNING_LOG(format("EconomySystem: Error parsing vendor line: %1%") % e.what());
+            }
+        }
+    }
+
+    INFO_LOG(format("EconomySystem: Successfully loaded %1% authentic static vendors from %2%.") % loadedCount % filePath);
 }
 
 std::vector<HardlineVendor> EconomySystem::GetVendorsForDistrict(uint32 districtId) const

@@ -34,6 +34,7 @@
 #include "MessageTypes.h"
 #include "InventorySystem.h"
 #include "Item.h"
+#include "StatusEffectManager.h"
 #include "Timer.h"
 #include <iostream>
 #include <vector>
@@ -723,6 +724,17 @@ int RunCombatTestSuite()
 			check(human.po->getFirewall() == curFw - 50, "Firewall absorbed exactly 50 incoming damage points");
 			check(human.po->getCurrentHealth() == preDmgHp, "Health remains unharmed while firewall shield holds");
 			human.po->setFirewall(0); // clear shield
+
+			// 3b. Scheduled Cast Delay Verification
+			bool scheduledExecuted = false;
+			sStatusEffectManager.ScheduleCastDelay(human.go, hackVictim.go, 57, 1.0f, [&scheduledExecuted]() {
+				scheduledExecuted = true;
+			});
+			check(!scheduledExecuted, "ScheduleCastDelay does not fire immediately");
+			sStatusEffectManager.Update(0.5f);
+			check(!scheduledExecuted, "ScheduleCastDelay does not fire before delay expires (0.5s / 1.0s)");
+			sStatusEffectManager.Update(0.6f);
+			check(scheduledExecuted, "ScheduleCastDelay fires payload after cast time expires (1.1s / 1.0s)");
 
 			// 4. Coder Restore Health
 			human.po->setCurrentHealth(40);

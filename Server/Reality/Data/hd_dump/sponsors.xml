@@ -1,0 +1,254 @@
+<!--
+Here lies the mission contacts for each neighborhood and organization
+
+Without further ado - the fields:
+
+id - this is a unique number for each contact. Make it one more than the last one
+org - ID number of the organization to which this contact belongs (see above)
+		OR zero (0) if it's a neighborhood contact
+name - the string that Missile will show in a list of contacts
+name-id - the stringtable id (in stringtable_client.sta) of the localized name of this contact
+code - procedural text stringtable abbreviation
+face - client resource ID of the image to show as their face
+
+Only for org contacts:
+min-rep - The player must have at least this much reputation to get this contact
+max-rep - If the player has more than this reputation, the contact retires, 0 means never.
+-->
+<contacts class="Missile.Model.ContactSetting">
+	
+	<!-- Neighborhood contacts -->
+	<contact id="1" org="0"
+		name="Amber" name-id="0xb4000000"
+		face="0x0A001187" />
+	<contact id="2" org="0"
+		name="Anti M." name-id="0xb400004B"
+		face="0x0A001188" />
+	<contact id="3" org="0"
+		name="Argon" name-id="0xb4000051"
+		face="0x0A001189" />
+	<contact id="4" org="0"
+		name="The Bag Lady" name-id="0xb4000059"
+		face="0x0A0011A1" />
+	<contact id="5" org="0"
+		name="The Bartender" name-id="0xb4000066"
+		face="0x0A0011A2" />
+	<contact id="6" org="0"
+		name="Beryl" name-id="0xb4000068"
+		face="0x0A00118A" />
+	<contact id="7" org="0"
+		name="The Chessman" name-id="0xb400006E"
+		face="0x0A0011B2" />
+	<contact id="8" org="0"
+		name="Digger" name-id="0xb400006F"
+		face="0x0A00118D" />
+	<contact id="9" org="0"
+		name="Ruth" name-id="0xb4000070"
+		face="0x0A0011AC" />
+	<contact id="10" org="0"
+		name="Sister Margaret" name-id="0xb4000071"
+		face="0x0A00119C" />
+	<contact id="11" org="0"
+		name="Cerulean" name-id="0xb40003c3"
+		face="0x0A00118B" />
+	<contact id="12" org="0"
+		name="Yttri" name-id="0xb4000294"
+		face="0x0A0011AF" />
+	<contact id="13" org="0"
+		name="Molly B" name-id="0xb40002c9"
+		face="0x0A001199" />
+	<contact id="14" org="0"
+		name="Silver" name-id="0xb40002de"
+		face="0x0A00119B" />
+	<contact id="15" org="0"
+		name="Mercury" name-id="0xb40002df"
+		face="0x0A001196" />
+	<contact id="16" org="0"
+		name="Rose" name-id="0xb40003c4"
+		face="0x0A0011AB" />
+  	<contact id="17" org="0"
+		name="Grisaille" name-id="0x580014b3"
+		face="0x0A00118F" />
+	<contact id="18" org="0"
+		name="Greene" name-id="0xb40003c6"
+		face="0x0A001190" />
+	<contact id="19" org="0"
+		name="Indigo" name-id="0xb40003c7"
+		face="0x0A001192" />
+	<contact id="20" org="0"
+		name="Mandarin" name-id="0xb40003e5"
+		face="0x0A001195" />
+	<contact id="21" org="0"
+		name="Violet" name-id="0xb40003e6"
+		face="0x0A0011AD" />
+	<contact id="22" org="0"
+		name="Mockingbird" name-id="0xb40003e7"
+		face="0x0A001198" />
+	<contact id="23" org="0"
+		name="Thallia" name-id="0x58000df9"
+		face="0x0A00119F" />
+	<contact id="24" org="0"
+		name="Raini" name-id="0x58000df7"
+		face="0x0A0011A9" />
+	<contact id="25" org="0"
+		name="Operetta" name-id="0x580013E1"
+		face="0x0A0011A7" />		
+	<contact id="26" org="0"
+		name="Grace" name-id="0x580013E3"
+		face="0x0A00118E" />
+	<contact id="27" org="0"
+		name="Rickshaw" name-id="0x580013E5"
+		face="0x0A0011AA" />
+	<contact id="28" org="0"
+		name="Sunshine" name-id="0x580013E7"
+		face="0x0A00119D" />
+	<contact id="29" org="0"
+		name="The Seamstress" name-id="0x580013E9"
+		face="0x0A0011B9" />
+	<contact id="30" org="0"
+		name="Mr. Po" name-id="0x580013Eb"
+		face="0x0A0011A4" />
+	<contact id="31" org="0"
+		name="Lotus" name-id="0x580013ED"
+		face="0x0A001193" />
+	<contact id="32" org="0"
+		name="Dame White" name-id="0x580013EF"
+		face="0x0A00118C" />
+	<contact id="33" org="0"
+		name="Synn" name-id="0x580013F1"
+		face="0x0A00119E" />
+	<contact id="34" org="0"
+		name="Mr. Bishop" name-id="0x580013F3"
+		face="0x0A0011A5" />
+	<contact id="35" org="0"
+		name="Yuusuke Akayama" name-id="0x580013F5"
+		face="0x0A0011B0" />
+	<contact id="36" org="0"
+		name="The Coroner" name-id="0x580013F7"
+		face="0x0A0011B3" />
+	<contact id="37" org="0"
+		name="Hypatia" name-id="0x580014C7"
+		face="0x0A001191" />
+	<contact id="38" org="0"
+		name="The Sculptress" name-id="0x580013FB"
+		face="0x0A0011B8" />
+	<contact id="39" org="0"
+		name="The Landlord" name-id="0x580013FD"
+		face="0x0A0011B5" />
+	<contact id="40" org="0"
+		name="The Bartender" name-id="0xB4000066"
+		face="0x0A0011A2" />
+	<contact id="41" org="0"
+		name="Nicky G." name-id="0x580013FF"
+		face="0x0A0011A6" />
+	<contact id="42" org="0"
+		name="Madame T." name-id="0x58001401"
+		face="0x0A001194" />
+	<contact id="43" org="0"
+		name="The Network" name-id="0x58001403"
+		face="0x0A0011B6" />
+	<contact id="44" org="0"
+		name="Sammy Wien" name-id="0x58001405"
+		face="0x0A00119A" />
+	<contact id="45" org="0"
+		name="Tick Tock" name-id="0x58001407"
+		face="0x0A0011BA" />
+	<contact id="46" org="0"
+		name="The Jeweler" name-id="0x58001409"
+		face="0x0A0011B4" />
+	<contact id="47" org="0"
+		name="The Newsie" name-id="0x5800140B"
+		face="0x0A0011B7" />
+	<contact id="48" org="0"
+		name="The Chef" name-id="0x5800140D"
+		face="0x0A0011B1" />
+	<contact id="49" org="0"
+		name="Weaver" name-id="0x5800140F"
+		face="0x0A0011AE" />
+	<contact id="50" org="0"
+		name="Mr. Black" name-id="0x58001411"
+		face="0x0A001186" />
+	<contact id="51" org="0"
+		name="The Auditor" name-id="0x58001413"
+		face="0x0A0011A0" />
+	<contact id="52" org="0"
+		name="Pepper" name-id="0x58001415"
+		face="0x0A0011A8" />	
+	
+	<contact id="341" org="0"
+		name="The Grey Marshmallow" name-id="0x26000012"
+		face="0x000000" />	
+	
+	<!-- Org contacts -->
+	<contact id="2000" org="1"
+		name="Tyndall" name-id="0xb4000031" code="tyn"
+		face="0x28000CC0"
+		max-rep="0"
+		intro-text-id="0x6000011A" />
+	<contact id="2001" org="2"
+		name="Agent Gray" name-id="0xb4000032" code="gra"
+		face="0x28000DE7"
+		max-rep="0"
+		intro-text-id="0x26000011" />
+	<contact id="2002" org="3"
+		name="Flood" name-id="0xb4000038" code="flo"
+		face="0x28000DE6"
+		max-rep="0"
+		intro-text-id="0x26000010" />
+	<contact id="2003" org="4"
+		name="Anome" name-id="0xb400003A" code="ano"
+		face="0x28000DE4"
+		max-rep="0"
+		intro-text-id="0x6000011B" />
+	<contact id="2004" org="5"
+		name="Shimada" name-id="0xb400003C" code="shi"
+		face="0x28000DE5"
+		max-rep="0"
+		intro-text-id="0x6000011C" />
+	<contact id="2005" org="6"
+		name="Veil" name-id="0xDC0000A8" code="vei"
+		face="0x28001221"
+		max-rep="0"
+		intro-text-id="0x6000011D" />
+	<contact id="2006" org="7"
+		name="Unknown" name-id="0x26000018" code="unk"
+		face="0x28000CC0"
+		max-rep="0"
+		intro-text-id="0" />
+	<contact id="2007" org="8"
+		name="Operator" name-id="0x26000014" code="gen"
+		face="0x28000A70"
+		max-rep="0"
+		intro-text-id="0" />
+	<contact id="2008" org="9"
+		name="Archived Tyndall" name-id="0xDC0000AB" code="aty"
+		face="0x28000CC0"
+		max-rep="0"
+		intro-text-id="0" />
+	<contact id="2009" org="10"
+		name="Archived Agent Gray" name-id="0xDC0000A9" code="agr"
+		face="0x28000DE7"
+		max-rep="0"
+		intro-text-id="0" />
+	<contact id="2010" org="11"
+		name="Archived Flood" name-id="0xDC0000AD" code="afl"
+		face="0x28000DE6"
+		max-rep="0"
+		intro-text-id="0" />
+	<contact id="2011" org="12"
+		name="Archived Anome" name-id="0xDC0000AC" code="aan"
+		face="0x28000DE4"
+		max-rep="0"
+		intro-text-id="0" />
+	<contact id="2012" org="13"
+		name="Archived Shimada" name-id="0xDC0000AE" code="ash"
+		face="0x28000DE5"
+		max-rep="0"
+		intro-text-id="0" />
+	<contact id="2013" org="14"
+		name="Archived Veil" name-id="0xDC0000AF" code="ave"
+		face="0x28001221"
+		max-rep="0"
+		intro-text-id="0" />
+
+</contacts>

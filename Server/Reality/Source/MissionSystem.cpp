@@ -70,11 +70,22 @@ void MissionSystem::LoadMissionsFromXML(const std::string& directoryPath)
                 if (!dataNode) continue;
                 
                 MissionTemplate templ;
-                templ.missionId = static_cast<uint32>(hasher(entry.path().filename().string()) & 0xFFFFFFFF);
-                templ.title = dataNode->get<std::string>("<xmlattr>.title", "Unknown Mission");
+                auto missionIdOpt = pt.get_optional<uint32>("mission.<xmlattr>.id");
+                if (missionIdOpt) {
+                    templ.missionId = *missionIdOpt;
+                } else {
+                    templ.missionId = static_cast<uint32>(hasher(entry.path().filename().string()) & 0xFFFFFFFF);
+                }
+                templ.faction = pt.get<std::string>("mission.<xmlattr>.faction", "None");
+                if (templ.faction == "Zion") templ.factionId = 1;
+                else if (templ.faction == "Machines" || templ.faction == "Machine") templ.factionId = 2;
+                else if (templ.faction == "Merovingian") templ.factionId = 3;
+                else templ.factionId = 0;
+
+                templ.title = dataNode->get<std::string>("<xmlattr>.title", entry.path().stem().string());
                 templ.description = dataNode->get<std::string>("<xmlattr>.description", "");
-                templ.expReward = dataNode->get<uint32>("<xmlattr>.exp", 0);
-                templ.infoReward = dataNode->get<uint32>("<xmlattr>.info", 0);
+                templ.expReward = dataNode->get<uint32>("<xmlattr>.exp", 100);
+                templ.infoReward = dataNode->get<uint32>("<xmlattr>.info", 50);
                 templ.rewardItemTemplateId = 0;
                 templ.rewardFactionRep = 0;
                 templ.requiredFactionRep = 0;
@@ -98,13 +109,26 @@ void MissionSystem::LoadMissionsFromXML(const std::string& directoryPath)
                         obj.isEscort = kv.second.get<bool>("<xmlattr>.isEscort", kv.second.get<bool>("<xmlattr>.escort", false));
                         obj.escortTargetId = kv.second.get<uint32>("<xmlattr>.escortTargetId", kv.second.get<uint32>("<xmlattr>.escortTarget", 0));
                         
-                        auto branchOpt = kv.second.get_child_optional("branch");
-                        if (branchOpt) {
-                            obj.nextMissionSuccessId = branchOpt->get<uint32>("<xmlattr>.success", 0);
-                            obj.nextMissionFailId = branchOpt->get<uint32>("<xmlattr>.fail", 0);
+                        std::string branchStr = kv.second.get<std::string>("<xmlattr>.branch", "");
+                        if (!branchStr.empty()) {
+                            // Format: branch="success:10131,fail:10132"
+                            size_t sPos = branchStr.find("success:");
+                            if (sPos != std::string::npos) {
+                                try { obj.nextMissionSuccessId = std::stoul(branchStr.substr(sPos + 8)); } catch(...) {}
+                            }
+                            size_t fPos = branchStr.find("fail:");
+                            if (fPos != std::string::npos) {
+                                try { obj.nextMissionFailId = std::stoul(branchStr.substr(fPos + 5)); } catch(...) {}
+                            }
                         } else {
-                            obj.nextMissionSuccessId = 0;
-                            obj.nextMissionFailId = 0;
+                            auto branchOpt = kv.second.get_child_optional("branch");
+                            if (branchOpt) {
+                                obj.nextMissionSuccessId = branchOpt->get<uint32>("<xmlattr>.success", 0);
+                                obj.nextMissionFailId = branchOpt->get<uint32>("<xmlattr>.fail", 0);
+                            } else {
+                                obj.nextMissionSuccessId = 0;
+                                obj.nextMissionFailId = 0;
+                            }
                         }
                         
                         templ.objectives.push_back(obj);
@@ -138,6 +162,115 @@ void MissionSystem::LoadMissionsFromXML(const std::string& directoryPath)
     }
     
     INFO_LOG(format("MissionSystem: Successfully loaded %1% missions from XML.") % loadedCount);
+}
+
+void MissionSystem::LoadSponsorsFromXML(const std::string& filePath)
+{
+    if (!std::filesystem::exists(filePath)) {
+        WARNING_LOG(format("MissionSystem: sponsors.xml not found at %1%") % filePath);
+        return;
+    }
+
+    try {
+        boost::property_tree::ptree pt;
+        boost::property_tree::read_xml(filePath, pt);
+
+        auto contactsNode = pt.get_child_optional("contacts");
+        if (!contactsNode) return;
+
+        std::lock_guard<std::recursive_mutex> lock(m_missionMutex);
+        m_sponsors.clear();
+
+        for (const auto& kv : *contactsNode) {
+            if (kv.first == "contact") {
+                SponsorContact sc;
+                sc.id = kv.second.get<uint32>("<xmlattr>.id", 0);
+                sc.org = kv.second.get<uint32>("<xmlattr>.org", 0);
+                sc.name = kv.second.get<std::string>("<xmlattr>.name", "Contact");
+                sc.code = kv.second.get<std::string>("<xmlattr>.code", "");
+                sc.minRep = kv.second.get<int32>("<xmlattr>.min-rep", 0);
+                sc.maxRep = kv.second.get<int32>("<xmlattr>.max-rep", 0);
+
+                std::string nameIdStr = kv.second.get<std::string>("<xmlattr>.name-id", "0");
+                try { sc.nameId = std::stoul(nameIdStr, nullptr, 16); } catch(...) { sc.nameId = 0; }
+
+                std::string faceStr = kv.second.get<std::string>("<xmlattr>.face", "0");
+                try { sc.faceId = std::stoul(faceStr, nullptr, 16); } catch(...) { sc.faceId = 0; }
+
+                std::string introStr = kv.second.get<std::string>("<xmlattr>.intro-text-id", "0");
+                try { sc.introTextId = std::stoul(introStr, nullptr, 16); } catch(...) { sc.introTextId = 0; }
+
+                m_sponsors[sc.id] = sc;
+            }
+        }
+        INFO_LOG(format("MissionSystem: Successfully loaded %1% sponsor contacts from XML.") % m_sponsors.size());
+    } catch (const std::exception& e) {
+        ERROR_LOG(format("MissionSystem: Failed to parse sponsors.xml: %1%") % e.what());
+    }
+}
+
+const SponsorContact* MissionSystem::GetSponsor(uint32 contactId) const
+{
+    auto it = m_sponsors.find(contactId);
+    return (it != m_sponsors.end()) ? &it->second : nullptr;
+}
+
+uint32 MissionSystem::GetAvailableStoryMission(PlayerObject* player, uint32 sponsorId)
+{
+    std::lock_guard<std::recursive_mutex> lock(m_missionMutex);
+    if (!player || m_missions.empty()) return 0;
+
+    uint32 playerGoId = player->getGoId();
+    auto itComp = m_completedStoryMissions.find(playerGoId);
+    if (itComp != m_completedStoryMissions.end() && !itComp->second.empty()) {
+        uint32 lastCompletedId = itComp->second.back();
+        auto itLast = m_missions.find(lastCompletedId);
+        if (itLast != m_missions.end() && itLast->second.nextMissionSuccessId != 0) {
+            uint32 nextId = itLast->second.nextMissionSuccessId;
+            if (m_missions.find(nextId) != m_missions.end() && !HasCompletedMission(playerGoId, nextId)) {
+                return nextId;
+            }
+        }
+    }
+
+    uint32 playerFaction = player->getFaction(); // 1=Zion, 2=Machines, 3=Merovingian
+
+    // Look for matching faction mission or general story mission
+    for (const auto& kv : m_missions) {
+        uint32 mid = kv.first;
+        const auto& templ = kv.second;
+
+        if (HasCompletedMission(playerGoId, mid)) continue;
+
+        if (templ.factionId != 0 && playerFaction != 0 && templ.factionId != playerFaction) {
+            continue; // Mismatched faction
+        }
+
+        return mid;
+    }
+
+    // Fallback: return the first mission in database if none found
+    if (!m_missions.empty()) {
+        return m_missions.begin()->first;
+    }
+
+    return 0;
+}
+
+void MissionSystem::RecordCompletedMission(uint32 playerGoId, uint32 missionId)
+{
+    std::lock_guard<std::recursive_mutex> lock(m_missionMutex);
+    m_completedStoryMissions[playerGoId].push_back(missionId);
+}
+
+bool MissionSystem::HasCompletedMission(uint32 playerGoId, uint32 missionId) const
+{
+    auto it = m_completedStoryMissions.find(playerGoId);
+    if (it == m_completedStoryMissions.end()) return false;
+    for (uint32 id : it->second) {
+        if (id == missionId) return true;
+    }
+    return false;
 }
 
 void MissionSystem::AssignMission(PlayerObject* player, uint32 missionId)
@@ -401,6 +534,7 @@ void MissionSystem::CompleteMission(PlayerObject* player, MissionTemplate& templ
         INFO_LOG(format("Rewarded Item %1% to %2%") % templ.rewardItemTemplateId % player->getHandle());
     }
 
+    RecordCompletedMission(goId, templ.missionId);
     m_activeMissions.erase(goId);
 }
 

@@ -1,6 +1,7 @@
 #include "DataLoader.h"
 #include "Log.h"
 #include "MissionSystem.h"
+#include "EconomySystem.h"
 #include <fstream>
 #include <sstream>
 #include <boost/property_tree/ptree.hpp>
@@ -58,6 +59,32 @@ bool DataLoader::LoadAll(const std::string& directoryPath)
     LoadNPCs(directoryPath + "mob_parsed.csv");
     LoadBlueprints(directoryPath + "blueprints.csv");
     LoadPropheticGlitchNodes(directoryPath + "prophetic_glitch_nodes.csv");
+
+    // Ingest authentic 7.6005 missions, sponsor contacts, and static vendors
+    LoadMissions(directoryPath + "missions/");
+    sMissionSys.LoadSponsorsFromXML(directoryPath + "sponsors.xml");
+    sEconomySys.LoadVendorsFromCSV(directoryPath + "vendor_items.csv");
+
+    // Auto-register item templates for vendor catalog items not yet in clothing/loot tables
+    for (uint32 districtId = 1; districtId <= 16; ++districtId)
+    {
+        auto vendors = sEconomySys.GetVendorsForDistrict(districtId);
+        for (const auto& v : vendors)
+        {
+            for (uint32 tplId : v.inventoryTemplates)
+            {
+                if (m_items.find(tplId) == m_items.end())
+                {
+                    ItemTemplate item;
+                    item.templateId = tplId;
+                    item.name = (format("Catalog Item %1%") % tplId).str();
+                    item.type = (tplId >= 1000 && tplId < 2000) ? ITEM_TYPE_WEAPON : ITEM_TYPE_CLOTHING;
+                    item.value = 50 + (tplId % 450); // Valid non-zero price in Info Bits
+                    m_items[tplId] = item;
+                }
+            }
+        }
+    }
 
     // Flyweight Personality Generation
     for (uint32 i = 0; i < 256; ++i) {

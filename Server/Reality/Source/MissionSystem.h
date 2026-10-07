@@ -73,6 +73,8 @@ struct MissionTemplate
     // Global Template Branching (if objective-level branching isn't used)
     uint32 nextMissionSuccessId;
     uint32 nextMissionFailId;
+    uint32 factionId; // 0=General, 1=Zion, 2=Machines, 3=Merovingian
+    std::string faction;
     
     std::vector<MissionObjective> objectives;
     std::vector<MissionNpc> npcs;
@@ -92,6 +94,20 @@ struct BountyContract
     uint32 targetGoId;
     uint32 infoReward;
     std::string placedBy;
+};
+
+// Authentic 7.6005 Sponsor Contacts from sponsors.xml
+struct SponsorContact
+{
+    uint32 id;
+    uint32 org; // 0=Neighborhood, 1=Zion, 2=Machines, 3=Merovingian, 4=Cypherites, 5=EPN, 8=Operator
+    std::string name;
+    uint32 nameId;
+    std::string code;
+    uint32 faceId;
+    uint32 introTextId;
+    int32 minRep;
+    int32 maxRep;
 };
 
 enum ContactId : uint32
@@ -127,6 +143,12 @@ public:
 
     void AddMissionTemplate(const MissionTemplate& templ);
     void LoadMissionsFromXML(const std::string& directoryPath);
+    void LoadSponsorsFromXML(const std::string& filePath);
+    const SponsorContact* GetSponsor(uint32 contactId) const;
+    const std::map<uint32, SponsorContact>& GetSponsors() const { return m_sponsors; }
+    uint32 GetAvailableStoryMission(PlayerObject* player, uint32 sponsorId = 0);
+    void RecordCompletedMission(uint32 playerGoId, uint32 missionId);
+    bool HasCompletedMission(uint32 playerGoId, uint32 missionId) const;
 
     void AssignMission(PlayerObject* player, uint32 missionId);
     void AdvanceObjective(PlayerObject* player, ObjectiveCommand command, uint32 targetId);
@@ -171,6 +193,8 @@ private:
     std::recursive_mutex m_missionMutex;
     std::map<uint32, MissionTemplate> m_missions;
     std::map<uint32, ActiveMissionState> m_activeMissions; // Keyed by Player GoId
+    std::map<uint32, SponsorContact> m_sponsors;
+    std::map<uint32, std::vector<uint32>> m_completedStoryMissions; // playerGoId -> list of completed mission IDs
     std::vector<BountyContract> m_activeBounties;
     std::vector<ContactQuest> m_contactQuests;
     std::map<uint64, std::map<uint32, uint32>> m_playerContactProgress; // Key: charId -> (questId -> step)

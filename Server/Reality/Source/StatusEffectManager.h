@@ -6,6 +6,7 @@
 #include <vector>
 #include <mutex>
 #include <shared_mutex>
+#include <functional>
 
 class LocationVector;
 
@@ -42,6 +43,14 @@ struct StatusEffect {
     uint32 sourceGoId;
 };
 
+struct ScheduledCast {
+    uint32 casterGoId;
+    uint32 targetGoId;
+    uint16 abilityId;
+    float delayRemaining;
+    std::function<void()> payload;
+};
+
 class StatusEffectManager : public Singleton<StatusEffectManager>{
 public:
     StatusEffectManager();
@@ -55,6 +64,9 @@ public:
     // Applies a new effect to the target
     void ApplyEffect(uint32 targetGoId, EffectType type, float duration, float tickInterval, float value, uint32 sourceGoId = 0);
 
+    // Schedules an ability execution payload after a cast timer delay (runs outside mutex)
+    void ScheduleCastDelay(uint32 casterGoId, uint32 targetGoId, uint16 abilityId, float delaySec, std::function<void()> payload);
+
     // Removes all effects of a specific type from a target (e.g. Cleanses)
     void RemoveEffectType(uint32 targetGoId, EffectType type);
     
@@ -67,6 +79,7 @@ public:
 private:
     // A contiguous vector of active effects for maximum Data-Oriented cache coherency
     std::vector<StatusEffect> m_effects;
+    std::vector<ScheduledCast> m_scheduledCasts;
     mutable std::shared_mutex m_mutex;
 };
 

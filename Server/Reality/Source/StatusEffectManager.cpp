@@ -183,6 +183,30 @@ void StatusEffectManager::Update(float deltaTime)
             ++it;
         }
     }
+
+    // Process Scheduled Ability Cast Delays (runs deferred outside mutex)
+    for (auto it = m_scheduledCasts.begin(); it != m_scheduledCasts.end(); )
+    {
+        it->delayRemaining -= deltaTime;
+        if (it->delayRemaining <= 0.0f)
+        {
+            if (it->payload)
+            {
+                deferred.push_back(std::move(it->payload));
+            }
+            if (std::next(it) == m_scheduledCasts.end()) {
+                m_scheduledCasts.pop_back();
+                break;
+            } else {
+                *it = std::move(m_scheduledCasts.back());
+                m_scheduledCasts.pop_back();
+            }
+        }
+        else
+        {
+            ++it;
+        }
+    }
     
     // Add pending contagion effects (we unlock first to avoid recursive locking issues if we called ApplyEffect)
     lock.unlock();
@@ -192,6 +216,18 @@ void StatusEffectManager::Update(float deltaTime)
     for (const StatusEffect& pe : pendingEffects) {
         ApplyEffect(pe.targetGoId, pe.type, pe.durationRemaining, pe.tickInterval, pe.value, pe.sourceGoId);
     }
+}
+
+void StatusEffectManager::ScheduleCastDelay(uint32 casterGoId, uint32 targetGoId, uint16 abilityId, float delaySec, std::function<void()> payload)
+{
+    std::unique_lock<std::shared_mutex> lock(m_mutex);
+    ScheduledCast sc;
+    sc.casterGoId = casterGoId;
+    sc.targetGoId = targetGoId;
+    sc.abilityId = abilityId;
+    sc.delayRemaining = delaySec;
+    sc.payload = std::move(payload);
+    m_scheduledCasts.push_back(std::move(sc));
 }
 
 void StatusEffectManager::ApplyEffect(uint32 targetGoId, EffectType type, float duration, float tickInterval, float value, uint32 sourceGoId)

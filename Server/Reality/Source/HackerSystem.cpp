@@ -109,94 +109,111 @@ bool HackerSystem::ExecuteHackerAbility(PlayerObject* caster, uint16 abilityId, 
                 % abilName % target->getHandle()).str()));
     }
 
-    // 5. Ability Payload Execution
-    if (abilityId == 57) // LogicBlast1Ability
-    {
-        target->takeDamage(caster->getGoId(), 45, 0x280006DF);
-    }
-    else if (abilityId == 58) // LogicBlast2Ability
-    {
-        target->takeDamage(caster->getGoId(), 75, 0x280006DF);
-    }
-    else if (abilityId == 59) // LogicBlast3Ability
-    {
-        target->takeDamage(caster->getGoId(), 110, 0x280006DF);
-    }
-    else if (abilityId == 60) // LogicBomb1Ability
-    {
-        sStatusEffectManager.ApplyEffect(target->getGoId(), EFFECT_LOGIC_BOMB, 10.0f, 1.0f, 75.0f, caster->getGoId());
-    }
-    else if (abilityId == 359) // CodeNukeAbility
-    {
-        target->takeDamage(caster->getGoId(), 220, 0x28000A11);
-    }
-    else if (abilityId == 53 || abilName.find("Virus") != std::string::npos) // HarmfulCode / TransmitVirus
-    {
-        sStatusEffectManager.ApplyEffect(target->getGoId(), EFFECT_VIRUS_DOT, 15.0f, 1.0f, 15.0f, caster->getGoId());
-    }
-    else if (abilityId == 40 || abilName.find("Freeze") != std::string::npos) // CodeFreeze1
-    {
-        sStatusEffectManager.ApplyEffect(target->getGoId(), EFFECT_CODE_FREEZE, 8.0f, 1.0f, 1.0f, caster->getGoId());
-    }
-    else if (abilityId == 68) // PersonalFirewall1Ability
-    {
-        sStatusEffectManager.ApplyEffect(caster->getGoId(), EFFECT_FIREWALL, 45.0f, 1.0f, 200.0f, caster->getGoId());
-    }
-    else if (abilityId == 63) // NetworkFirewall1Ability
-    {
-        sStatusEffectManager.ApplyEffect(caster->getGoId(), EFFECT_FIREWALL, 60.0f, 1.0f, 150.0f, caster->getGoId());
-        auto nearby = sSpatialGrid.GetClientsInRadius(caster->getPosition().x, caster->getPosition().z, 1500.0f);
-        for (GameClient* client : nearby)
+    // 5. Ability Payload Execution (Scheduled after castSec delay)
+    auto executePayload = [casterId = caster->getGoId(), targetId = target->getGoId(), abilityId, abilName, templ, casterLvl = caster->getLevel()]() {
+        PlayerObject* c = sObjMgr.getGOPtrSafe(casterId);
+        PlayerObject* tgt = sObjMgr.getGOPtrSafe(targetId);
+        if (!c || c->isDead()) return;
+        if (!tgt || tgt->isDead()) return;
+
+        if (abilityId == 57) // LogicBlast1Ability
         {
-            if (client->GetPlayerGoId() != caster->getGoId())
+            tgt->takeDamage(casterId, 45, 0x280006DF);
+        }
+        else if (abilityId == 58) // LogicBlast2Ability
+        {
+            tgt->takeDamage(casterId, 75, 0x280006DF);
+        }
+        else if (abilityId == 59) // LogicBlast3Ability
+        {
+            tgt->takeDamage(casterId, 110, 0x280006DF);
+        }
+        else if (abilityId == 60) // LogicBomb1Ability
+        {
+            sStatusEffectManager.ApplyEffect(targetId, EFFECT_LOGIC_BOMB, 10.0f, 1.0f, 75.0f, casterId);
+        }
+        else if (abilityId == 359) // CodeNukeAbility
+        {
+            tgt->takeDamage(casterId, 220, 0x28000A11);
+        }
+        else if (abilityId == 53 || abilName.find("Virus") != std::string::npos) // HarmfulCode / TransmitVirus
+        {
+            sStatusEffectManager.ApplyEffect(targetId, EFFECT_VIRUS_DOT, 15.0f, 1.0f, 15.0f, casterId);
+        }
+        else if (abilityId == 40 || abilName.find("Freeze") != std::string::npos) // CodeFreeze1
+        {
+            sStatusEffectManager.ApplyEffect(targetId, EFFECT_CODE_FREEZE, 8.0f, 1.0f, 1.0f, casterId);
+        }
+        else if (abilityId == 68) // PersonalFirewall1Ability
+        {
+            sStatusEffectManager.ApplyEffect(casterId, EFFECT_FIREWALL, 45.0f, 1.0f, 200.0f, casterId);
+        }
+        else if (abilityId == 63) // NetworkFirewall1Ability
+        {
+            sStatusEffectManager.ApplyEffect(casterId, EFFECT_FIREWALL, 60.0f, 1.0f, 150.0f, casterId);
+            auto nearby = sSpatialGrid.GetClientsInRadius(c->getPosition().x, c->getPosition().z, 1500.0f);
+            for (GameClient* client : nearby)
             {
-                sStatusEffectManager.ApplyEffect(client->GetPlayerGoId(), EFFECT_FIREWALL, 60.0f, 1.0f, 150.0f, caster->getGoId());
+                if (client->GetPlayerGoId() != casterId)
+                {
+                    sStatusEffectManager.ApplyEffect(client->GetPlayerGoId(), EFFECT_FIREWALL, 60.0f, 1.0f, 150.0f, casterId);
+                }
             }
         }
-    }
-    else if (abilityId == 43) // DisruptInputs1Ability
-    {
-        sStatusEffectManager.ApplyEffect(target->getGoId(), EFFECT_STUN, 2.5f, 0.5f, 1.0f, caster->getGoId());
-    }
-    else if (abilityId == 97) // UILag1Ability
-    {
-        sStatusEffectManager.ApplyEffect(target->getGoId(), EFFECT_UI_LAG, 10.0f, 1.0f, 1.0f, caster->getGoId());
-    }
-    else
-    {
-        uint32 hitFx = (templ && templ->executionFX != 0) ? templ->executionFX : 0x280006DF;
-        if (abilName.find("Bomb") != std::string::npos)
+        else if (abilityId == 43) // DisruptInputs1Ability
         {
-            float bombDmg = (templ && templ->valueFrom > 0) ? float(templ->valueFrom) : (65.0f + caster->getLevel() * 5);
-            sStatusEffectManager.ApplyEffect(target->getGoId(), EFFECT_LOGIC_BOMB, 10.0f, 1.0f, bombDmg, caster->getGoId());
+            sStatusEffectManager.ApplyEffect(targetId, EFFECT_STUN, 2.5f, 0.5f, 1.0f, casterId);
         }
-        else if (abilName.find("Firewall") != std::string::npos)
+        else if (abilityId == 97) // UILag1Ability
         {
-            float shield = (templ && templ->valueFrom > 0) ? float(templ->valueFrom) : 200.0f;
-            sStatusEffectManager.ApplyEffect(caster->getGoId(), EFFECT_FIREWALL, 45.0f, 1.0f, shield, caster->getGoId());
-        }
-        else if (abilName.find("Freeze") != std::string::npos || abilName.find("Crash") != std::string::npos)
-        {
-            sStatusEffectManager.ApplyEffect(target->getGoId(), EFFECT_CODE_FREEZE, 8.0f, 1.0f, 1.0f, caster->getGoId());
-        }
-        else if (abilName.find("Disrupt") != std::string::npos || abilName.find("Stun") != std::string::npos)
-        {
-            sStatusEffectManager.ApplyEffect(target->getGoId(), EFFECT_STUN, 2.5f, 0.5f, 1.0f, caster->getGoId());
-        }
-        else if (abilName.find("Lag") != std::string::npos)
-        {
-            sStatusEffectManager.ApplyEffect(target->getGoId(), EFFECT_UI_LAG, 10.0f, 1.0f, 1.0f, caster->getGoId());
-        }
-        else if (abilName.find("Nuke") != std::string::npos)
-        {
-            uint16 nukeDmg = (templ && templ->valueFrom > 0) ? (templ->valueFrom + caster->getLevel() * 6) : 220;
-            target->takeDamage(caster->getGoId(), nukeDmg, 0x28000A11);
+            sStatusEffectManager.ApplyEffect(targetId, EFFECT_UI_LAG, 10.0f, 1.0f, 1.0f, casterId);
         }
         else
         {
-            uint16 dmg = (templ && templ->valueFrom > 0) ? (templ->valueFrom + caster->getLevel() * 3) : (35 + caster->getLevel() * 5);
-            target->takeDamage(caster->getGoId(), dmg, hitFx);
+            uint32 hitFx = (templ && templ->executionFX != 0) ? templ->executionFX : 0x280006DF;
+            if (abilName.find("Bomb") != std::string::npos)
+            {
+                float bombDmg = (templ && templ->valueFrom > 0) ? float(templ->valueFrom) : (65.0f + casterLvl * 5);
+                sStatusEffectManager.ApplyEffect(targetId, EFFECT_LOGIC_BOMB, 10.0f, 1.0f, bombDmg, casterId);
+            }
+            else if (abilName.find("Firewall") != std::string::npos)
+            {
+                float shield = (templ && templ->valueFrom > 0) ? float(templ->valueFrom) : 200.0f;
+                sStatusEffectManager.ApplyEffect(casterId, EFFECT_FIREWALL, 45.0f, 1.0f, shield, casterId);
+            }
+            else if (abilName.find("Freeze") != std::string::npos || abilName.find("Crash") != std::string::npos)
+            {
+                sStatusEffectManager.ApplyEffect(targetId, EFFECT_CODE_FREEZE, 8.0f, 1.0f, 1.0f, casterId);
+            }
+            else if (abilName.find("Disrupt") != std::string::npos || abilName.find("Stun") != std::string::npos)
+            {
+                sStatusEffectManager.ApplyEffect(targetId, EFFECT_STUN, 2.5f, 0.5f, 1.0f, casterId);
+            }
+            else if (abilName.find("Lag") != std::string::npos)
+            {
+                sStatusEffectManager.ApplyEffect(targetId, EFFECT_UI_LAG, 10.0f, 1.0f, 1.0f, casterId);
+            }
+            else if (abilName.find("Nuke") != std::string::npos)
+            {
+                uint16 nukeDmg = (templ && templ->valueFrom > 0) ? (templ->valueFrom + casterLvl * 6) : 220;
+                tgt->takeDamage(casterId, nukeDmg, 0x28000A11);
+            }
+            else
+            {
+                uint16 dmg = (templ && templ->valueFrom > 0) ? (templ->valueFrom + casterLvl * 3) : (35 + casterLvl * 5);
+                tgt->takeDamage(casterId, dmg, hitFx);
+            }
         }
+    };
+
+    bool isLiveServer = GameServer::getSingletonPtr() && GameServer::getSingleton().isServerUp();
+    if (isLiveServer && castSec > 0.05f)
+    {
+        sStatusEffectManager.ScheduleCastDelay(caster->getGoId(), target->getGoId(), abilityId, castSec, executePayload);
+    }
+    else
+    {
+        executePayload();
     }
 
     return true;

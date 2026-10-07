@@ -63,6 +63,10 @@ struct HardlineVendor
     uint32 districtId;
     std::string name;
     std::vector<uint32> inventoryTemplates;
+    float x;
+    float y;
+    float z;
+    uint32 staticId;
 };
 
 class EconomySystem : public Singleton<EconomySystem>
@@ -96,6 +100,7 @@ public:
 
     // Hardline Vendors Across Districts
     void InitializeHardlineVendors();
+    void LoadVendorsFromCSV(const std::string& filePath);
     std::vector<HardlineVendor> GetVendorsForDistrict(uint32 districtId) const;
     const HardlineVendor* GetHardlineVendor(uint32 vendorId) const;
     bool BuyGearFromVendor(PlayerObject* player, uint32 vendorId, uint32 templateId);

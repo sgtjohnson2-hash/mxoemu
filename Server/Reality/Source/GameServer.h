@@ -53,6 +53,7 @@ public:
 	bool Start();
 	void Stop();
 	void Loop();
+	bool isServerUp() const { return m_serverUp; }
 	ObjectMgr &getObjMgr() { return m_objMgr; }
 	std::shared_ptr<class GameClient> GetClientWithSessionId(uint32 sessionId);
 	vector<std::shared_ptr<class GameClient>> GetClientsWithCharacterId(uint64 charId);
