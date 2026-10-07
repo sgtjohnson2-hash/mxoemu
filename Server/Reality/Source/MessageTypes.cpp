@@ -712,6 +712,15 @@ const ByteBuffer& AnimationStateMsg::toBuf()
 		m_buf.clear();
 		throw PacketNoLongerValid();
 	}
+
+	// Bots never send AnimationStateMsg - NPC models lack operative blend trees
+	// and crash retail 7.6005 matrix.exe in playeranimation.cpp (client.dll+0x5960ee).
+	if (m_player->getClient().isBot())
+	{
+		m_buf.clear();
+		throw PacketNoLongerValid();
+	}
+
 	sampleAnimationBuf[5] = m_player->getCurrentAnimation();
 	sampleAnimationBuf[6] = m_player->getCurrentMood();
 

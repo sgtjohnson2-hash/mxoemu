@@ -900,7 +900,7 @@ vector<msgBaseClassPtr> PlayerObject::getCurrentStatePackets()
 {
 	vector<msgBaseClassPtr> tempVect;
 	tempVect.push_back(make_shared<PlayerSpawnMsg>(m_goId));
-	if (m_currAnimation != 0 || m_currMood != 0)
+	if (!m_parent.isBot() && (m_currAnimation != 0 || m_currMood != 0))
 	{
 		tempVect.push_back(make_shared<AnimationStateMsg>(m_goId));
 	}

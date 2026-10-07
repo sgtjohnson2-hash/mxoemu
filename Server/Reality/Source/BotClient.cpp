@@ -447,7 +447,6 @@ void BotClient::SetLocomotionAnimation(uint8 animId)
     uint8 rotByte = loc.getMxoRot();
     // 0x06: Locomotion state update (animation ID + heading rotation) drives client skeleton walk/run blend trees
     sGame.AnnounceStateUpdateNear(loc.x, loc.z, 20000.0f, std::make_shared<LocomotionStateMsg>(m_playerGoId, animId, rotByte));
-    sGame.AnnounceStateUpdateNear(loc.x, loc.z, 20000.0f, std::make_shared<AnimationStateMsg>(m_playerGoId));
 }
 
 void BotClient::InitializePatrolCircuit()
