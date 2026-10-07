@@ -974,6 +974,7 @@ bool PedestrianEcology::BreachTacticalCordon(uint32 districtId, uint32 rescuerSq
     // Disorient SWAT cordon guards with EMP disruption canisters
     for (uint32 botId : cordon.cordonBotGoIds) {
         PlayerObject* po = BotGetPlayer(botId);
+        if (po && !po->isDead()) {
             po->takeDamage(0, 500, 0); // EMP shock damage
             auto bot = sBotMgr.GetBotByGOID(botId);
             if (bot) {
