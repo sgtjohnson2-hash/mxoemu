@@ -3538,6 +3538,53 @@ void PlayerObject::RPC_HandleVendorBuy(ByteBuffer& srcCmd)
 		(format("{c:00FF00}[VENDOR] Purchased %1% for %2% Information Bits.{/c}") % tpl->name % cost).str()
 	));
 }
+void PlayerObject::RPC_HandleVendorSell(ByteBuffer& srcCmd)
+{
+	if (srcCmd.remaining() < 4) return;
+	uint32 itemId = srcCmd.read<uint32>();
+	uint32 vendorGoId = 0;
+	if (srcCmd.remaining() >= 4)
+		vendorGoId = srcCmd.read<uint32>();
+
+	if (!m_inventorySystem) return;
+
+	// Locate item by GoId first, then by TemplateId
+	auto item = m_inventorySystem->getItemByGoId(itemId);
+	if (!item) item = m_inventorySystem->getItemByTemplate(itemId);
+
+	if (!item)
+	{
+		m_parent.QueueCommand(std::make_shared<SystemChatMsg>("{c:FF4444}[VENDOR] Item not found in your inventory.{/c}"));
+		return;
+	}
+
+	// Verify not selling an equipped weapon
+	if (m_equippedWeaponId != 0 && (item->getGoId() == m_equippedWeaponId || item->getTemplateId() == m_equippedWeaponId))
+	{
+		m_parent.QueueCommand(std::make_shared<SystemChatMsg>("{c:FF4444}[VENDOR] Cannot sell an equipped weapon! Unequip first.{/c}"));
+		return;
+	}
+
+	const ItemTemplate* tpl = sDataLoader.GetItemTemplate(item->getTemplateId());
+	uint32 baseValue = tpl ? tpl->value : 100;
+	uint32 sellValue = std::max<uint32>(1, baseValue / 2);
+
+	// Remove from inventory
+	if (!m_inventorySystem->consumeItemByTemplate(item->getTemplateId()))
+	{
+		m_parent.QueueCommand(std::make_shared<SystemChatMsg>("{c:FF4444}[VENDOR] Failed to remove item from inventory.{/c}"));
+		return;
+	}
+
+	addInfo(sellValue);
+	saveCashToDB();
+	m_parent.QueueCommand(std::make_shared<SetInformationCmd>(m_cash));
+
+	std::string itemName = tpl ? tpl->name : "Item";
+	m_parent.QueueCommand(std::make_shared<SystemChatMsg>(
+		(format("{c:00FF00}[VENDOR] Sold %1% for %2% Information Bits.{/c}") % itemName % sellValue).str()
+	));
+}
 void PlayerObject::RPC_HandleCraftRequest(ByteBuffer& srcCmd)
 {
 	DEBUG_LOG(format("(%1%) %2%:%3% RPC_HandleCraftRequest") % m_parent.Address() % m_handle % m_goId);

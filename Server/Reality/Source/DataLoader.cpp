@@ -503,6 +503,7 @@ void DataLoader::EnsureCoreAbilities()
         dualPistols.attackSpeed = 1.2f;
         dualPistols.maxAmmo = 30;
         dualPistols.range = 2500.0f;
+        dualPistols.value = 1200;
         dualPistols.animAttack = 0x0EDD;
         m_items[1001] = dualPistols;
     }
@@ -518,6 +519,7 @@ void DataLoader::EnsureCoreAbilities()
         pistol.attackSpeed = 1.6f;
         pistol.maxAmmo = 15;
         pistol.range = 2500.0f;
+        pistol.value = 600;
         pistol.animAttack = 0x0EDF;
         m_items[1002] = pistol;
     }
@@ -533,6 +535,7 @@ void DataLoader::EnsureCoreAbilities()
         rifle.attackSpeed = 2.2f;
         rifle.maxAmmo = 30;
         rifle.range = 6000.0f;
+        rifle.value = 1500;
         rifle.animAttack = 0x0EE0;
         m_items[1003] = rifle;
     }
@@ -548,6 +551,7 @@ void DataLoader::EnsureCoreAbilities()
         smg.attackSpeed = 1.0f;
         smg.maxAmmo = 30;
         smg.range = 3000.0f;
+        smg.value = 1000;
         smg.animAttack = 0x0EE1;
         m_items[1004] = smg;
     }
@@ -559,6 +563,7 @@ void DataLoader::EnsureCoreAbilities()
         ammo9mm.type = ITEM_TYPE_CONSUMABLE;
         ammo9mm.maxStack = 20;
         ammo9mm.maxAmmo = 15;
+        ammo9mm.value = 50;
         m_items[1050] = ammo9mm;
     }
     if (m_items.find(1051) == m_items.end())
@@ -569,6 +574,7 @@ void DataLoader::EnsureCoreAbilities()
         ammo556.type = ITEM_TYPE_CONSUMABLE;
         ammo556.maxStack = 20;
         ammo556.maxAmmo = 30;
+        ammo556.value = 100;
         m_items[1051] = ammo556;
     }
 }

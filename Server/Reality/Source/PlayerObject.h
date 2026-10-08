@@ -271,6 +271,7 @@ private:
 	void RPC_HandleJackoutRequest( ByteBuffer &srcCmd );
 	void RPC_HandleJackoutFinished( ByteBuffer &srcCmd );
 	void RPC_HandleVendorBuy( ByteBuffer &srcCmd );
+	void RPC_HandleVendorSell( ByteBuffer &srcCmd );
 	void RPC_HandleCraftRequest( ByteBuffer &srcCmd );
 	void RPC_HandleFactionInfo( ByteBuffer &srcCmd );
 	void RPC_HandleMissionInvite( ByteBuffer &srcCmd );

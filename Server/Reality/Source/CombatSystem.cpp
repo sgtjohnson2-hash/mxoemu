@@ -1174,7 +1174,7 @@ CombatSystem::AttackResult CombatSystem::ResolveAttack(PlayerObject* attacker, P
 		static const uint32 s_cfgHitFx = (uint32)sConfig.GetIntDefault("Combat.HitFx", 0);
 		uint32 hitFx = s_cfgHitFx;
 		if (res.isBlocked) {
-			hitFx = (s_cfgHitFx != 0) ? 0x28000794 : 0; // FX_CHARACTER_BLOCK_INTERLOCK (authentic block spark)
+			hitFx = (s_cfgHitFx != 0) ? ((move.dmgType == DAMAGE_RANGED || move.dmgType == DAMAGE_BALLISTIC) ? 0x2800059c : 0x28000794) : 0; // FX_CHARACTER_DEFLECTION (0x2800059c) for ballistic / FX_CHARACTER_BLOCK_INTERLOCK (0x28000794)
 		} else if (inInterlock) {
 			if (bypassBlock || attackerTactic == TACTIC_RETALIATE) {
 				hitFx = (s_cfgHitFx != 0) ? ((attacker->getFightingStyle() == FightingStyle::Karate) ? 0x2800045A : 0x28000432) : 0;
@@ -1187,6 +1187,8 @@ CombatSystem::AttackResult CombatSystem::ResolveAttack(PlayerObject* attacker, P
 			}
 		} else if (move.hitFxId != 0 && move.hitFxId != 1234) {
 			hitFx = (s_cfgHitFx != 0) ? move.hitFxId : 0;
+		} else if (move.dmgType == DAMAGE_RANGED || move.dmgType == DAMAGE_BALLISTIC) {
+			hitFx = (s_cfgHitFx != 0) ? 0x280006ea : 0; // FX_BULLET_BODY_HITS_BULLETHIT_HF (authentic retail bullet impact)
 		}
 		target->takeDamage(attacker->getGoId(), res.damageTaken, hitFx);
         target->recordIncomingAttack(move.id);
@@ -1705,6 +1707,7 @@ bool CombatSystem::RunFreeFireShot(FreeFireState &state)
 	// Resolve equipped firearm properties
 	float shotRange = moveA->range;
 	uint16 firingAnim = 0x0EDF; // default pistol attack anim
+	bool isDualWield = false;
 	auto weapons = pA->getEquippedWeapons();
 	if (!weapons.empty())
 	{
@@ -1713,15 +1716,17 @@ bool CombatSystem::RunFreeFireShot(FreeFireState &state)
 		{
 			if (wpnTpl->range > 0)
 				shotRange = wpnTpl->range;
+			isDualWield = (wpnTpl->isDualWield || pA->isDualWielding());
 			if (wpnTpl->animAttack != 0)
 				firingAnim = wpnTpl->animAttack;
-			else if (wpnTpl->isDualWield)
+			else if (isDualWield)
 				firingAnim = 0x0EDD;
 
 			// Ammunition tracking: if weapon has ammo tracked
 			if (weapons[0]->getAmmoCount() > 0)
 			{
-				weapons[0]->setAmmoCount(weapons[0]->getAmmoCount() - 1);
+				uint16 roundsToConsume = (isDualWield && weapons[0]->getAmmoCount() >= 2) ? 2 : 1;
+				weapons[0]->setAmmoCount(weapons[0]->getAmmoCount() - roundsToConsume);
 			}
 			else if (wpnTpl->maxAmmo > 0)
 			{
@@ -1731,12 +1736,23 @@ bool CombatSystem::RunFreeFireShot(FreeFireState &state)
 				if (inv && inv->hasItemByTemplate(ammoTplId))
 				{
 					inv->consumeItemByTemplate(ammoTplId);
-					weapons[0]->setAmmoCount(wpnTpl->maxAmmo - 1);
+					uint16 roundsToConsume = (isDualWield ? 2 : 1);
+					weapons[0]->setAmmoCount(wpnTpl->maxAmmo - roundsToConsume);
 					if (!pA->getClient().isBot())
 					{
 						pA->getClient().QueueCommand(std::make_shared<SystemChatMsg>(
 							"{c:00FF00}[RELOAD] Weapon reloaded with fresh ammunition clip.{/c}"));
 					}
+				}
+				else
+				{
+					// Out of ammunition
+					if (!pA->getClient().isBot())
+					{
+						pA->getClient().QueueCommand(std::make_shared<SystemChatMsg>(
+							"{c:FF5555}[OUT OF AMMO] *Click* - Weapon magazine empty! No ammunition clip in inventory.{/c}"));
+					}
+					return false; // Stop free fire
 				}
 			}
 		}
@@ -1765,6 +1781,11 @@ bool CombatSystem::RunFreeFireShot(FreeFireState &state)
 	}
 
 	ResolveAttack(pA, pB, *moveA, pA->getTactic(), pB->getTactic());
+	if (isDualWield && !pB->isDead())
+	{
+		// Second volley for dual-wielding handguns
+		ResolveAttack(pA, pB, *moveA, pA->getTactic(), pB->getTactic());
+	}
 	return !pB->isDead();
 }
 

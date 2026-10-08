@@ -38,26 +38,26 @@ enum ItemRarity
 // Represents a template for an item (data read from CSV/DB)
 struct ItemTemplate
 {
-    uint32 templateId;
+    uint32 templateId{0};
     string name;
     string description;
-    ItemType type;
-    uint32 rsiDataId; // RSI (visual model) identifier
-    uint16 maxStack;
-    uint32 value; // Info (cash) value
+    ItemType type{ITEM_TYPE_GENERIC};
+    uint32 rsiDataId{0}; // RSI (visual model) identifier
+    uint16 maxStack{1};
+    uint32 value{0}; // Info (cash) value
     
     // Weapon specifics (can be refactored into a subclass later if needed)
-    uint16 minDamage;
-    uint16 maxDamage;
-    float attackSpeed;
-    uint16 maxAmmo;
-    bool isDualWield;
-    float range;
-    uint16 animAttack;
+    uint16 minDamage{0};
+    uint16 maxDamage{0};
+    float attackSpeed{1.0f};
+    uint16 maxAmmo{0};
+    bool isDualWield{false};
+    float range{0.0f};
+    uint16 animAttack{0};
 
     // Clothing specifics
-    uint16 bonusHacking;
-    uint16 bonusEvasion;
+    uint16 bonusHacking{0};
+    uint16 bonusEvasion{0};
 };
 
 // Represents an instantiated item in the world or in inventory

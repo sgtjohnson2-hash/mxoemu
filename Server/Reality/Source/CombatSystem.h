@@ -208,12 +208,12 @@ public:
 
 	AttackResult ResolveAttack(PlayerObject* attacker, PlayerObject* target,
 		const CombatMove& move, uint8 attackerTactic, uint8 targetTactic, bool inInterlock = false, bool bypassBlock = false);
+	bool RunFreeFireShot(FreeFireState &state); //false = engagement over, reap it
 
 	static const float INTERLOCK_ROUND_SECONDS;
 	static const float FREEFIRE_SHOT_SECONDS;
 private:
 	bool RunInterlockRound(InterlockSession &session); //false = session over, reap it
-	bool RunFreeFireShot(FreeFireState &state); //false = engagement over, reap it
 	float TacticModifier(uint8 attackerTactic, uint8 targetTactic);
 
 	std::unordered_map<uint16, CombatMove> m_moveTable;

@@ -1328,6 +1328,110 @@ int RunCombatTestSuite()
 			check(!sMissionSys.HasActiveMission(humanOperative.go), "Mission completes and active mission state is cleared");
 			check(humanClient.sawText("[MISSION COMPLETE] Operation White Rabbit!"), "Human operative receives [MISSION COMPLETE] celebration chat notice");
 		}
+
+		// ------------------------------------------------------------------
+		// 16. Firearms Ballistics, Ammo Depletion, Dual-Wield & Static Vendor Economy
+		// ------------------------------------------------------------------
+		std::cout << "\n[16. Firearms Ballistics, Ammo Depletion, Dual-Wield & Static Vendor Economy]" << std::endl;
+		{
+			Actor humanOperative = makeHuman(&humanClient, 9100099, 10000.0, 10000.0);
+			Actor enemyBot = makeBot(9200099, 10050.0, 10000.0, 1, 100);
+
+			// Ensure inventory system initialized
+			check(humanOperative.po->getInventory() != nullptr, "Operative inventory system exists");
+
+			// 1. Single Firearm Ammo Depletion & Empty Chamber Stop
+			humanOperative.po->giveItem(1002); // Beretta 92FS (maxAmmo = 15)
+			humanOperative.po->setEquippedWeaponId(1002);
+			auto wpns = humanOperative.po->getEquippedWeapons();
+			check(!wpns.empty(), "Equipped Beretta 92FS resolved in getEquippedWeapons()");
+			wpns[0]->setAmmoCount(2);
+
+			FreeFireState ffState;
+			ffState.attackerGoId = humanOperative.go;
+			ffState.targetGoId = enemyBot.go;
+			ffState.moveId = 0;
+			ffState.shotCount = 0;
+
+			// Shot 1
+			check(sCombatSys.RunFreeFireShot(ffState), "RunFreeFireShot fires shot 1 successfully");
+			check(wpns[0]->getAmmoCount() == 1, "Ammo count decrements from 2 to 1");
+
+			// Shot 2
+			check(sCombatSys.RunFreeFireShot(ffState), "RunFreeFireShot fires shot 2 successfully");
+			check(wpns[0]->getAmmoCount() == 0, "Ammo count decrements from 1 to 0 (magazine empty)");
+
+			// Shot 3: No ammo clip in inventory -> weapon dry, stops free fire
+			humanClient.captured.clear();
+			check(!sCombatSys.RunFreeFireShot(ffState), "RunFreeFireShot returns false when dry without ammo clip");
+			check(humanClient.sawText("[OUT OF AMMO]"), "Operative receives [OUT OF AMMO] click notice");
+
+			// 2. Ammo Clip Inventory Reload
+			humanOperative.po->giveItem(1050); // 9mm Pistol Ammo Clip
+			humanClient.captured.clear();
+			check(sCombatSys.RunFreeFireShot(ffState), "RunFreeFireShot auto-reloads and fires when ammo clip present");
+			check(humanClient.sawText("[RELOAD]"), "Operative receives [RELOAD] notification");
+			check(wpns[0]->getAmmoCount() == 14, "Weapon reloaded to maxAmmo - 1 (14 rounds remaining)");
+
+			// 3. Dual-Wield Burst Mechanics
+			humanOperative.po->giveItem(1001); // Dual Beretta 92FS (isDualWield = true)
+			humanOperative.po->setEquippedWeaponId(1001);
+			check(humanOperative.po->isDualWielding(), "Operative reports isDualWielding() true with Dual Berettas");
+			auto dualWpns = humanOperative.po->getEquippedWeapons();
+			check(!dualWpns.empty(), "Dual Berettas resolved in getEquippedWeapons()");
+			dualWpns[0]->setAmmoCount(10);
+			check(sCombatSys.RunFreeFireShot(ffState), "RunFreeFireShot executes dual-wield burst");
+			check(dualWpns[0]->getAmmoCount() == 8, "Dual-wield consumes 2 rounds per volley (10 -> 8)");
+
+			// 4. Static Vendor Buying (Opcode 0x810e)
+			humanOperative.po->addInfo(5000);
+			uint64 cashBeforeBuy = humanOperative.po->getInfo();
+			ByteBuffer buyCmd;
+			buyCmd << (uint8)0x81 << (uint8)0x0e << (uint32)1050 << (uint32)33333; // 9mm ammo clip (value = 50), vendor GoId 33333
+
+			humanClient.captured.clear();
+			humanOperative.po->HandleCommand(buyCmd);
+			check(humanClient.sawText("[VENDOR] Purchased 9mm Pistol Ammo Clip for 50 Information Bits."), "HandleCommand(0x810e) executes RPC_HandleVendorBuy with success notice");
+			check(humanOperative.po->getInfo() == cashBeforeBuy - 50, "Operative Info Bits deducted by 50");
+
+			// 5. Static Vendor Selling (Opcode 0x8111)
+			uint64 cashBeforeSell = humanOperative.po->getInfo();
+			ByteBuffer sellCmd;
+			sellCmd << (uint8)0x81 << (uint8)0x11 << (uint32)1050 << (uint32)33333; // sell 9mm ammo clip (value 50 -> 50% sell price = 25)
+
+			humanClient.captured.clear();
+			humanOperative.po->HandleCommand(sellCmd);
+			check(humanClient.sawText("[VENDOR] Sold 9mm Pistol Ammo Clip for 25 Information Bits."), "HandleCommand(0x8111) executes RPC_HandleVendorSell with credit notice");
+			check(humanOperative.po->getInfo() == cashBeforeSell + 25, "Operative Info Bits credited by 25");
+
+			// 6. Vendor Selling Equipped Weapon Protection
+			ByteBuffer sellEquippedCmd;
+			sellEquippedCmd << (uint8)0x81 << (uint8)0x11 << (uint32)1001 << (uint32)33333; // Equipped Dual Berettas
+
+			humanClient.captured.clear();
+			humanOperative.po->HandleCommand(sellEquippedCmd);
+			check(humanClient.sawText("Cannot sell an equipped weapon"), "RPC_HandleVendorSell rejects selling active equipped weapon");
+
+			// 7. Contact Sponsor Mission Faction Alignment
+			sMissionSys.LoadSponsorsFromXML("Data/hd_dump/sponsors.xml");
+
+			MissionTemplate zionMission;
+			zionMission.missionId = 99992;
+			zionMission.factionId = 1; // Zion
+			zionMission.title = "Zion Uplink Defense";
+			MissionObjective zObj;
+			zObj.command = ObjectiveCommand::TALK;
+			zObj.description = "Contact the Zion Controller.";
+			zionMission.objectives.push_back(zObj);
+			sMissionSys.AddMissionTemplate(zionMission);
+
+			// Sponsor 2000 is Tyndall (org 1 = Zion)
+			uint32 chosenFromSponsor = sMissionSys.GetAvailableStoryMission(humanOperative.po, 2000);
+			check(chosenFromSponsor == 99992, "GetAvailableStoryMission correctly aligns with Zion sponsor org faction (99992)");
+
+			uint32 chosenFromOrg = sMissionSys.GetAvailableStoryMission(humanOperative.po, 1);
+			check(chosenFromOrg == 99992, "GetAvailableStoryMission correctly aligns with direct org ID 1 (99992)");
+		}
 	}
 	catch (const std::exception& e)
 	{

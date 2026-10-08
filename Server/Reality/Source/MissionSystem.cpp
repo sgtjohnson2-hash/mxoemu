@@ -241,19 +241,48 @@ uint32 MissionSystem::GetAvailableStoryMission(PlayerObject* player, uint32 spon
     }
 
     uint32 playerFaction = player->getFaction(); // 1=Zion, 2=Machines, 3=Merovingian
+    uint32 targetFaction = playerFaction;
+    if (sponsorId != 0) {
+        auto itSp = m_sponsors.find(sponsorId);
+        if (itSp != m_sponsors.end() && itSp->second.org != 0) {
+            targetFaction = itSp->second.org;
+        } else if (sponsorId <= 15) {
+            // sponsorId is directly an organization ID (1=Zion, 2=Machines, 3=Merovingian, etc.)
+            targetFaction = sponsorId;
+        }
+    }
 
-    // Look for matching faction mission or general story mission
+    // Pass 1: Look for exact faction match if targetFaction is specified
+    if (targetFaction != 0) {
+        for (const auto& kv : m_missions) {
+            uint32 mid = kv.first;
+            const auto& templ = kv.second;
+
+            if (HasCompletedMission(playerGoId, mid)) continue;
+
+            if (templ.factionId == targetFaction) {
+                return mid;
+            }
+        }
+    }
+
+    // Pass 2: Look for neutral/general story missions (factionId == 0)
     for (const auto& kv : m_missions) {
         uint32 mid = kv.first;
         const auto& templ = kv.second;
 
         if (HasCompletedMission(playerGoId, mid)) continue;
 
-        if (templ.factionId != 0 && playerFaction != 0 && templ.factionId != playerFaction) {
-            continue; // Mismatched faction
+        if (templ.factionId == 0) {
+            return mid;
         }
+    }
 
-        return mid;
+    // Pass 3: Fallback to any uncompleted mission
+    for (const auto& kv : m_missions) {
+        if (!HasCompletedMission(playerGoId, kv.first)) {
+            return kv.first;
+        }
     }
 
     // Fallback: return the first mission in database if none found
