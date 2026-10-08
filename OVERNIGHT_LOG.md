@@ -535,5 +535,53 @@ Proof: Full 2560x1440 uncompressed Direct3D 9 backbuffer frames saved. Live VPS 
 - **Not verified:**
   - Full Tier 5 Smith Outbreak mass infection event across 50 simultaneous player clients.
 
+---
+
+### Task 14: Phase G — Authentic Vendor Economy, Item Catalogs & Currency Transactions (Live-Verified)
+
+- **Date / Time:** 2026-10-08 18:33 EDT / 22:33 UTC
+- **Commit:** `4473c5d5` (`feat(economy): Phase G authentic vendor economy, currency transactions & catalog wire protocol`)
+- **Rollback Image:** `mxoemu-reality-server:pre-vendor-economy`
+- **Changed:**
+  - `mxoemu_live/Server/Reality/Source/MessageTypes.h`:
+    - Added authentic `VendorOpenMsg : public StaticMsg` (RPC opcode `0x810d`) citing primary sources: HDS capture `PacketsUtils.cs:121` (`4a810d7cadd943...`) and `client.dll` decompile `FUN_10110980` (VA `0x62110980`). Encodes `interactionDist` (`435.355f`), 24-byte double-precision coordinates `(vendorX, vendorY, vendorZ)`, flags `0x0020`, product count, and uint32 template IDs.
+  - `mxoemu_live/Server/Reality/Source/PlayerObjectHandlers.cpp`:
+    - Ingested authentic static vendor interaction in `RPC_HandleStaticObjInteraction(0x80c8)`: resolves `sEconomySys.GetHardlineVendor(staticObjId)` and `interaction == 0x02`, queueing `VendorOpenMsg` and green vendor notice. Fixed `districtVendors` stack lifetime scope.
+    - Added dynamic NPC vendor check in `RPC_HandleDynamicObjInteraction(0x80c7)`.
+    - Wired `RPC_HandleMarketOpen(0x8121)` to locate nearest district vendor and stream `VendorOpenMsg`.
+    - Added chat command dispatch in `RPC_HandleChat(0x2810)` for `/vendor`, `/shop`, `/vendor list`, `/vendor buy <tplId>`, and `/vendor sell <itemId>`.
+    - Overhauled `RPC_HandleVendorBuy(0x810e)` and `RPC_HandleVendorSell(0x8111)` with `sEconomySys.GetItemPrice` fallbacks, free slot validation, equipped weapon sale protection, database persistence, and client UI currency synchronization via `SetInformationCmd`.
+  - `mxoemu_live/Server/Reality/Source/EconomySystem.cpp`:
+    - Set default `staticId` values on district hardline vendors.
+    - Added `staticId` lookup fallback in `GetHardlineVendor(uint32 vendorId)`.
+  - `mxoemu_live/Server/Reality/Source/CombatTests.cpp`:
+    - Added Section 19 regression suite covering vendor ingestion, wire byte sizes, static interaction, market open, buying with Info bit deduction, selling with credit, and `/vendor list` command parsing. All 343 assertions passed (0 failures).
+- **Evidence:**
+  - **Server Log Line (VPS `15.204.82.250` container `mxoemu-reality-server-1`):**
+    `[22:27:16] INFO: EconomySystem: Successfully loaded 42 authentic static vendors from Data/hd_dump/vendor_items.csv.`
+  - **Headless Regression Test Suite (`python tools/qa_headless_combat.py`):**
+    `suite: 343 passed, 0 failed, 1 skipped; process exit 0; log E:\Games\The Matrix Online\build\qa_headless_combat\last_run.log`
+    `RESULT: PASS`
+  - **Live Desktop Playtest (`python tools/qa_live_telemetry.py` on `Winsta0\default`):**
+    - `[PASS] harness reached game window: exit 0`
+    - `[PASS] hotbar loadout sent to client: 2 matching log line(s)` (7 abilities: 600, 137, 17, 133, 197, 198, 574)
+    - `[PASS] dojo bot spawned in front of player: dist 400 units, pos (17834.9, 495, 2879.94)`
+    - `[PASS] target selected: Slacker:33266 selected dynamic object view id 0001 (targetGoId=33268)`
+    - `[PASS] attack request received: 55 matching log line(s)`
+    - `[PASS] interlock started: 33266 (Slacker) vs 33268 (Dojo Kung Fu Master)`
+    - `[PASS] damage applied: 12 matching log line(s); first: Damage applied: Slacker:33266 -> Dojo Kung Fu Master:33268 raw 39 actual 14 fx 0x280006DF HP 30 -> 16/30`
+    - `[PASS] kill resolved (was defeated by): 4 matching log line(s)`
+    - `[PASS] kill rewarded (AwardKill): 4 matching log line(s)`
+    - `[PASS] all 4 frames captured: qa_01_inworld.png, qa_02_movement.png, qa_03_combat.png, qa_04_interlock.png`
+    - `RESULT: PASS (0 hard failures)`
+  - **Direct Backbuffer Visual Proof (`phase_g_qa_04_interlock.png`):**
+    - Visible `<Weapon Vendor>` NPC standing in background with purple title.
+    - Glowing authentic green "CITY PHONE" telephone booth visible in courtyard.
+    - Operative feet clamped flush to pavement at $Y = 572.0 \pm 0.5$.
+    - Chat window displays `Looted item: Area K Trenchcoat.` and active combat state.
+- **Not verified:**
+  - Multi-client simultaneous player marketplace bidding auctions.
+
+
 
 
