@@ -498,11 +498,11 @@ void TesterBrain::DoCombat(PlayerObject* me, uint32 now)
 uint32 TesterBrain::FindHuntTarget(PlayerObject* me)
 {
     LocationVector p = me->getPosition();
-    std::vector<GameClient*> near = sSpatialGrid.GetClientsInRadius((float)p.x, (float)p.z, 8000.0f, me->getClient().m_instanceId);
+    std::vector<GameClient*> nearbyClients = sSpatialGrid.GetClientsInRadius((float)p.x, (float)p.z, 8000.0f, me->getClient().m_instanceId);
     uint32 best = 0;
     double bestDist = 1e18;
     std::string myFaction = me->getFactionName();
-    for (GameClient* c : near)
+    for (GameClient* c : nearbyClients)
     {
         if (!c || !c->isBot()) continue;               // never pick fights with humans
         BotClient* b = dynamic_cast<BotClient*>(c);

@@ -989,13 +989,14 @@ CombatSystem::AttackResult CombatSystem::ResolveAttack(PlayerObject* attacker, P
 
 				// Authentic deflection FX 0x2800059c (FX_CHARACTER_DEFLECTION)
 				static const uint32 deflectFx = 0x2800059c;
+				// Authentic dodge animation (0x03EC = G_D_XR_DodgeFromHF_GLb)
+				target->setCurrentAnimation(0xEC);
+				target->setCurrentMood(0x03);
+				sGame.AnnounceStateUpdate(&target->getClient(), std::make_shared<AnimationStateMsg>(target->getGoId()));
+
 				if (!target->getClient().isBot())
 				{
 					target->getClient().QueueState(std::make_shared<SelfHitFxMsg>(target, deflectFx, target->getHitCounter()));
-					// Authentic dodge animation (0x03EC = G_D_XR_DodgeFromHF_GLb)
-					target->setCurrentAnimation(0xEC);
-					target->setCurrentMood(0x03);
-					sGame.AnnounceStateUpdate(&target->getClient(), std::make_shared<AnimationStateMsg>(target->getGoId()));
 				}
 				sGame.AnnounceStateUpdate(&target->getClient(), std::make_shared<CombatHitFxMsg>(target->getGoId(), deflectFx, target->nextHitCounter()));
 
