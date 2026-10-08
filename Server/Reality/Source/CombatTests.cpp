@@ -1211,6 +1211,36 @@ int RunCombatTestSuite()
 			int16 wireOffset = *reinterpret_cast<const int16*>(&rawBytes[0x26]);
 			check(wireOffset == 460, "ILExchange wire bytes at 0x26 are 460ms defenderOffsetMs");
 		}
+
+		// ------------------------------------------------------------------
+		// 14. Retail 25,695 Interlock Move Database & Dynamic Animation Query
+		// ------------------------------------------------------------------
+		std::cout << "\n[14. Retail Interlock Move Database & Dynamic Animation Query]" << std::endl;
+		{
+			bool loaded = CombatAnimationMatrix::LoadBinaryDatabase("Data/hd_dump/interlock_moves.bin");
+			check(loaded, "CombatAnimationMatrix::LoadBinaryDatabase loads interlock_moves.bin");
+			check(CombatAnimationMatrix::GetTotalMovesLoaded() >= 25000, "Loaded >= 25,000 authentic retail moves");
+
+			// Query Kung Fu Power vs Speed
+			const ILDBMoveRecord* kfMove = CombatAnimationMatrix::FindMove(
+				FightingStyle::KungFu, TACTIC_POWER, FightingStyle::KungFu, TACTIC_SPEED, InterlockExchangeOutcome::NormalHit
+			);
+			check(kfMove != nullptr, "FindMove returns valid move for Kung Fu Power vs Speed");
+			check(kfMove && kfMove->aggrAnim != 0, "Kung Fu move has valid non-zero aggrAnim");
+
+			// Query Karate Grab vs Block
+			const ILDBMoveRecord* karateMove = CombatAnimationMatrix::FindMove(
+				FightingStyle::Karate, TACTIC_RETALIATE, FightingStyle::Karate, TACTIC_DEFENSE, InterlockExchangeOutcome::NormalHit
+			);
+			check(karateMove != nullptr, "FindMove returns valid move for Karate Grab vs Block");
+
+			// Query Finisher move
+			const ILDBMoveRecord* finisherMove = CombatAnimationMatrix::FindMove(
+				FightingStyle::KungFu, TACTIC_POWER, FightingStyle::KungFu, TACTIC_SPEED, InterlockExchangeOutcome::NormalHit, true
+			);
+			check(finisherMove != nullptr, "FindMove returns valid finisher move");
+			check(finisherMove && (finisherMove->flags & 1), "Finisher move has finisher flag bit 0 set");
+		}
 	}
 	catch (const std::exception& e)
 	{

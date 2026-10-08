@@ -58,6 +58,7 @@ public:
     bool LoadNPCs(const std::string& filePath);
     bool LoadBlueprints(const std::string& filePath);
     bool LoadPropheticGlitchNodes(const std::string& filePath);
+    bool LoadInterlockMoves(const std::string& filePath);
 
     const AbilityTemplate* GetAbilityTemplate(uint16 id) const;
     const std::map<uint16, AbilityTemplate>& GetAllAbilities() const { return m_abilities; }

@@ -13,6 +13,101 @@
 
 #include "CombatAnimationMatrix.h"
 #include "CombatSystem.h"
+#include "Log.h"
+#include <fstream>
+#include <cstring>
+
+std::vector<ILDBMoveRecord> CombatAnimationMatrix::s_ildbMoves;
+std::recursive_mutex CombatAnimationMatrix::s_ildbMutex;
+
+bool CombatAnimationMatrix::LoadBinaryDatabase(const std::string& path)
+{
+    std::lock_guard<std::recursive_mutex> lock(s_ildbMutex);
+    s_ildbMoves.clear();
+
+    std::ifstream f(path.c_str(), std::ios::binary);
+    if (!f.is_open())
+    {
+        DEBUG_LOG(format("CombatAnimationMatrix: Could not open %1% for ILDB binary loading.") % path);
+        return false;
+    }
+
+    char magic[4] = { 0 };
+    uint32 version = 0;
+    uint32 count = 0;
+    f.read(magic, 4);
+    f.read((char*)&version, sizeof(version));
+    f.read((char*)&count, sizeof(count));
+
+    if (std::memcmp(magic, "ILMB", 4) != 0 || count == 0 || count > 100000)
+    {
+        DEBUG_LOG(format("CombatAnimationMatrix: Invalid ILDB binary header in %1%") % path);
+        return false;
+    }
+
+    s_ildbMoves.resize(count);
+    f.read((char*)s_ildbMoves.data(), count * sizeof(ILDBMoveRecord));
+    INFO_LOG(format("CombatAnimationMatrix: Successfully loaded %1% authentic retail ILDB moves from %2%")
+        % s_ildbMoves.size() % path);
+    return true;
+}
+
+size_t CombatAnimationMatrix::GetTotalMovesLoaded()
+{
+    std::lock_guard<std::recursive_mutex> lock(s_ildbMutex);
+    return s_ildbMoves.size();
+}
+
+const ILDBMoveRecord* CombatAnimationMatrix::FindMove(
+    FightingStyle attackerStyle,
+    uint8 attackerTactic,
+    FightingStyle defenderStyle,
+    uint8 defenderTactic,
+    InterlockExchangeOutcome outcome,
+    bool finisher
+)
+{
+    (void)outcome;
+    std::lock_guard<std::recursive_mutex> lock(s_ildbMutex);
+    if (s_ildbMoves.empty())
+        return nullptr;
+
+    uint8 attS = (uint8)attackerStyle;
+    uint8 defS = (uint8)defenderStyle;
+
+    for (const auto& rec : s_ildbMoves)
+    {
+        if (rec.aggrAnim == 0 || rec.defeAnim == 0)
+            continue;
+
+        if (finisher && !(rec.flags & 1))
+            continue;
+
+        if (rec.attStyle == attS && rec.attTactic == attackerTactic)
+        {
+            if (rec.defStyle == defS && (rec.defTactic == defenderTactic || defenderTactic == 8))
+            {
+                return &rec;
+            }
+        }
+    }
+
+    for (const auto& rec : s_ildbMoves)
+    {
+        if (rec.aggrAnim == 0 || rec.defeAnim == 0)
+            continue;
+
+        if (finisher && !(rec.flags & 1))
+            continue;
+
+        if (rec.attStyle == attS && rec.attTactic == attackerTactic)
+        {
+            return &rec;
+        }
+    }
+
+    return nullptr;
+}
 
 InterlockAnimPair CombatAnimationMatrix::GetAnimationPair(
     FightingStyle attackerStyle,

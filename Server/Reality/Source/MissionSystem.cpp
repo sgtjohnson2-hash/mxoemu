@@ -15,6 +15,7 @@
 #include "MessageTypes.h"
 #include "FactionWarManager.h"
 #include "SpatialGrid.h"
+#include "Config.h"
 
 createFileSingleton(MissionSystem);
 
@@ -137,9 +138,14 @@ void MissionSystem::LoadMissionsFromXML(const std::string& directoryPath)
                     else if (kv.first.find("npc") == 0) {
                         MissionNpc npc;
                         npc.type = kv.second.get<std::string>("<xmlattr>.type", "HOSTILE");
-                        npc.x = kv.second.get<float>("<xmlattr>.x", 0.0f);
-                        npc.y = kv.second.get<float>("<xmlattr>.y", 0.0f);
-                        npc.z = kv.second.get<float>("<xmlattr>.z", 0.0f);
+                        // Mission XMLs (and hd_dump/NPC_COLLECTION.xml) store positions in metres
+                        // ("Mission Area: X:296 Y:5 Z:-25"); the world/hardline/mob data uses
+                        // 1/100 m units (hardline floors at Y 95/495). Without this every mission
+                        // NPC spawned ~3 m from the world origin.
+                        static const float coordScale = (float)sConfig.GetFloatDefault("Missions.NpcCoordScale", 100.0f);
+                        npc.x = kv.second.get<float>("<xmlattr>.x", 0.0f) * coordScale;
+                        npc.y = kv.second.get<float>("<xmlattr>.y", 0.0f) * coordScale;
+                        npc.z = kv.second.get<float>("<xmlattr>.z", 0.0f) * coordScale;
                         npc.idNpc = kv.second.get<uint32>("<xmlattr>.idNpc", 0);
                         npc.handle = kv.second.get<std::string>("<xmlattr>.handle", "Unknown");
                         npc.rsi = kv.second.get<uint32>("<xmlattr>.rsi", 0);

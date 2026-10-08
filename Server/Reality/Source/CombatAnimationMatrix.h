@@ -15,6 +15,9 @@
 #define MXOEMU_COMBATANIMATIONMATRIX_H
 
 #include "Common.h"
+#include <vector>
+#include <mutex>
+#include <string>
 
 // Retail launch martial arts fighting styles (CombatEnums.cs / Client.dll)
 enum class FightingStyle : uint8
@@ -46,9 +49,37 @@ struct InterlockAnimPair
     float contactDelaySeconds;
 };
 
+#pragma pack(push, 1)
+struct ILDBMoveRecord
+{
+    uint32 moveId;
+    uint16 aggrAnim;
+    uint16 defeAnim;
+    uint16 aggrDur;
+    uint16 defeDur;
+    uint8 attStyle;
+    uint8 attTactic;
+    uint8 defStyle;
+    uint8 defTactic;
+    uint8 flags; // bit 0: finisher, bit 1: hit, bit 2: block, bit 3: draw
+    uint8 pad[7];
+};
+#pragma pack(pop)
+
 class CombatAnimationMatrix
 {
 public:
+    static bool LoadBinaryDatabase(const std::string& path);
+    static size_t GetTotalMovesLoaded();
+    static const ILDBMoveRecord* FindMove(
+        FightingStyle attackerStyle,
+        uint8 attackerTactic,
+        FightingStyle defenderStyle,
+        uint8 defenderTactic,
+        InterlockExchangeOutcome outcome,
+        bool finisher = false
+    );
+
     static InterlockAnimPair GetAnimationPair(
         FightingStyle attackerStyle,
         uint8 attackerTactic,
@@ -59,6 +90,10 @@ public:
     );
 
     static uint16 GetDisarmAnimation(FightingStyle attackerStyle, uint32 weaponType);
+
+private:
+    static std::vector<ILDBMoveRecord> s_ildbMoves;
+    static std::recursive_mutex s_ildbMutex;
 };
 
 #endif // MXOEMU_COMBATANIMATIONMATRIX_H

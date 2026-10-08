@@ -58,15 +58,15 @@ struct LockerItem
 
 struct HardlineVendor
 {
-    uint32 vendorId;
-    uint32 hardlineId;
-    uint32 districtId;
+    uint32 vendorId = 0;
+    uint32 hardlineId = 0;
+    uint32 districtId = 0;
     std::string name;
     std::vector<uint32> inventoryTemplates;
-    float x;
-    float y;
-    float z;
-    uint32 staticId;
+    float x = 0.0f;   // the built-in district vendors never set position/staticId: these were garbage
+    float y = 0.0f;
+    float z = 0.0f;
+    uint32 staticId = 0;
 };
 
 class EconomySystem : public Singleton<EconomySystem>

@@ -385,6 +385,17 @@ bool TesterBrain::EngageTarget(PlayerObject* me, uint32 targetGoId, uint32 now, 
         m_status = "closing on " + t->getHandle();
         return true;
     }
+    // Interlock range is checked in 3D (1500 units). Bots walk on a 2D path, so a target on a
+    // different floor/roof stayed out of range forever. Take the stairs: match its height.
+    {
+        LocationVector mp = me->getPosition();
+        if (std::fabs(mp.y - tp.y) > 300.0)
+        {
+            mp.y = tp.y;
+            me->setPosition(mp);
+            sGame.AnnounceStateUpdateNear(mp.x, mp.z, 20000.0f, std::make_shared<PositionStateMsg>(me->getGoId()));
+        }
+    }
 
     if (now - m_lastEngageMs < 2500)
         return true;
@@ -515,6 +526,7 @@ uint32 TesterBrain::FindHuntTarget(PlayerObject* me)
         if (t->getLevel() > me->getLevel() + 3) continue;
         if (t->getInterlockPartner() != 0) continue;
         if (uint16(t->getGoId()) != t->getGoId()) continue;
+        if (std::fabs(t->getPosition().y - p.y) > 1500.0) continue; // other floor / rooftop
         double d = Dist2D(p, t->getPosition().x, t->getPosition().z);
         if (d < bestDist) { bestDist = d; best = t->getGoId(); }
     }
@@ -776,7 +788,8 @@ void TesterBrain::DoShop(PlayerObject* me, uint32 now, float dt)
         {
             for (const HardlineVendor& v : sEconomySys.GetVendorsForDistrict(d))
             {
-                if (v.staticId < 1000 || v.inventoryTemplates.empty()) continue; // only the real (CSV) vendors
+                // only the real (CSV) vendors: keyed by their static id, with a position
+                if (v.staticId < 1000 || v.vendorId != v.staticId || v.inventoryTemplates.empty()) continue;
                 double dist = Dist2D(p, v.x, v.z);
                 if (dist < best) { best = dist; m_shopVendorId = v.staticId; m_shopX = v.x; m_shopY = v.y; m_shopZ = v.z; }
             }

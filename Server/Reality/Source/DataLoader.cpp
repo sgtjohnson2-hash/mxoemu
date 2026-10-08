@@ -2,6 +2,7 @@
 #include "Log.h"
 #include "MissionSystem.h"
 #include "EconomySystem.h"
+#include "CombatAnimationMatrix.h"
 #include <fstream>
 #include <sstream>
 #include <boost/property_tree/ptree.hpp>
@@ -64,6 +65,7 @@ bool DataLoader::LoadAll(const std::string& directoryPath)
     LoadMissions(directoryPath + "missions/");
     sMissionSys.LoadSponsorsFromXML(directoryPath + "sponsors.xml");
     sEconomySys.LoadVendorsFromCSV(directoryPath + "vendor_items.csv");
+    LoadInterlockMoves(directoryPath + "interlock_moves.bin");
 
     // Auto-register item templates for vendor catalog items not yet in clothing/loot tables
     for (uint32 districtId = 1; districtId <= 16; ++districtId)
@@ -816,3 +818,9 @@ bool DataLoader::LoadPropheticGlitchNodes(const std::string& filePath)
     INFO_LOG(format("DataLoader: Loaded %1% Prophetic Glitch Nodes from CSV.") % m_glitchNodes.size());
     return true;
 }
+
+bool DataLoader::LoadInterlockMoves(const std::string& filePath)
+{
+    return CombatAnimationMatrix::LoadBinaryDatabase(filePath);
+}
+
