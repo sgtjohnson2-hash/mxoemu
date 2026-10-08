@@ -3,6 +3,7 @@
 **/bin/
 **/obj/
 Server/Reality/Archive/
+Server/Reality/Binaries/Data/hd_dump/
 **/Debug/
 **/Release/
 **/x64/
