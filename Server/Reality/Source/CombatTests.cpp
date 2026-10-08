@@ -38,6 +38,7 @@
 #include "MissionSystem.h"
 #include "CraftingSystem.h"
 #include "LootManager.h"
+#include "AI/MatrixThreatHeatmap.h"
 #include "Timer.h"
 #include <iostream>
 #include <vector>
@@ -1618,6 +1619,45 @@ int RunCombatTestSuite()
 
 			const SponsorContact* argon = sMissionSys.GetSponsor(3);
 			check(argon != nullptr && argon->name == "Argon", "Sponsor Contact #3 resolved to Argon");
+		}
+
+		// ------------------------------------------------------------
+		// 18. Phase F: Matrix Threat Heatmap & Escalation Response
+		// ------------------------------------------------------------
+		{
+			// 1. Threat disruption recording with 3D elevation tracking
+			float testX = 18115.6f;
+			float testY = 572.0f;
+			float testZ = 3610.0f;
+
+			sMatrixThreatHeatmap.RecordDisruption(testX, testY, testZ, 30.0f, "Test Ballistic Combat");
+			float heatLvl = sMatrixThreatHeatmap.GetHeat(testX, testZ);
+			check(heatLvl >= 30.0f, "Heatmap recorded +30.0 threat at test coordinates");
+
+			EscalationTier tier1 = sMatrixThreatHeatmap.GetTier(testX, testZ);
+			check(tier1 == ESCALATION_TIER_1_POLICE, "Threat >= 25 resolves to ESCALATION_TIER_1_POLICE");
+
+			// 2. High disruption escalates to SWAT (>= 60) and Agent Overwrite (>= 110)
+			sMatrixThreatHeatmap.RecordDisruption(testX, testY, testZ, 40.0f, "Heavy Melee Interlock");
+			EscalationTier tier2 = sMatrixThreatHeatmap.GetTier(testX, testZ);
+			check(tier2 == ESCALATION_TIER_2_SWAT, "Threat >= 60 resolves to ESCALATION_TIER_2_SWAT");
+
+			sMatrixThreatHeatmap.RecordDisruption(testX, testY, testZ, 60.0f, "Agent Wire-Fu Breach");
+			EscalationTier tier3 = sMatrixThreatHeatmap.GetTier(testX, testZ);
+			check(tier3 == ESCALATION_TIER_3_AGENT_TAKEOVER, "Threat >= 110 resolves to ESCALATION_TIER_3_AGENT_TAKEOVER");
+
+			// 3. Escalation response simulation tick
+			uint32 curMs = getMSTime();
+			sMatrixThreatHeatmap.Update(0.5f, curMs);
+			float decayedHeat = sMatrixThreatHeatmap.GetHeat(testX, testZ);
+			check(decayedHeat > 0.0f && decayedHeat <= 130.0f, "Heatmap updates with exponential decay and diffusion");
+
+			// 4. District sabotage modification
+			uint32 distId = sMatrixThreatHeatmap.GetDistrictAt(testX, testZ);
+			check(!sMatrixThreatHeatmap.IsDistrictSabotaged(distId), "District initially not sabotaged");
+			sMatrixThreatHeatmap.SetDistrictSabotaged(distId, true);
+			check(sMatrixThreatHeatmap.IsDistrictSabotaged(distId), "District marked sabotaged (surveillance offline)");
+			sMatrixThreatHeatmap.SetDistrictSabotaged(distId, false);
 		}
 	}
 	catch (const std::exception& e)

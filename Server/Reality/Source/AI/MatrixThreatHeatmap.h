@@ -22,6 +22,7 @@ struct DisruptionCell {
     uint32 lastIncidentMs = 0;
     uint8 escalationTier = 0;
     uint32 lastSpawnMs = 0;
+    float lastY = 572.0f;
 };
 
 class MatrixThreatHeatmap : public Singleton<MatrixThreatHeatmap> {
@@ -33,10 +34,12 @@ public:
 
     // Record combat disruption events (wire-fu, gunfire, virus, kills)
     void RecordDisruption(float worldX, float worldZ, float amount, const std::string& cause);
+    void RecordDisruption(float worldX, float worldY, float worldZ, float amount, const std::string& cause);
 
     // Queries
     float GetHeat(float worldX, float worldZ) const;
     EscalationTier GetTier(float worldX, float worldZ) const;
+    EscalationTier GetActiveTier(float worldX, float worldZ) const;
 
     // Simulation tick (diffusion, exponential decay, escalation dispatch)
     void Update(float dtSeconds, uint32 currentMs);

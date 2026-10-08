@@ -192,9 +192,12 @@ bool RadioDispatchSystem::Report911Call(uint32 districtId, float x, float z, con
     // Check if any police bot is within 3000 units; if not, spawn a responding beat cop
     auto nearbyClients = sSpatialGrid.GetClientsInRadius(x, z);
     bool policePresent = false;
+    float y = 572.0f;
     for (GameClient* gc : nearbyClients) {
-        if (!gc->isBot()) continue;
         PlayerObject* po = BotGetPlayer(gc->GetPlayerGoId());
+        if (po && po->getY() > 200.0f) {
+            y = (float)po->getY();
+        }
         if (po && !po->isDead() && (po->getHandle().find("Police") != std::string::npos || po->getHandle().find("SWAT") != std::string::npos)) {
             policePresent = true;
             break;
@@ -202,12 +205,13 @@ bool RadioDispatchSystem::Report911Call(uint32 districtId, float x, float z, con
     }
 
     if (!policePresent) {
-        auto bot = sBotMgr.SpawnSingleBot(x + 120.0f, 95.0f, z + 120.0f, FACTION_MACHINES);
+        auto bot = sBotMgr.SpawnSingleBot(x + 120.0f, y, z + 120.0f, FACTION_MACHINES);
         if (bot) {
             PlayerObject* po = BotGetPlayer(bot->GetPlayerGoId());
             if (po) {
                 po->setHandle("Transit_Police_Officer");
                 po->setLevel(25);
+                po->setLootTableId(2); // Midtown / Police Table
                 bot->Say((format("Unit 4-Adam responding to 10-31 disturbance on %1%. Approaching scene.") % rec.streetAddress).str());
             }
         }

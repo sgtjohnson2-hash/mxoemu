@@ -34,6 +34,9 @@ public:
     void setGoId(uint32 goId) { std::unique_lock<std::shared_mutex> lock(m_igoMutex); m_goId = goId; }
 
     LocationVector getPosition() const { std::shared_lock<std::shared_mutex> lock(m_igoMutex); return m_pos; }
+    double getX() const { std::shared_lock<std::shared_mutex> lock(m_igoMutex); return m_pos.x; }
+    double getY() const { std::shared_lock<std::shared_mutex> lock(m_igoMutex); return m_pos.y; }
+    double getZ() const { std::shared_lock<std::shared_mutex> lock(m_igoMutex); return m_pos.z; }
     virtual void setPosition(const LocationVector& pos) { std::unique_lock<std::shared_mutex> lock(m_igoMutex); m_pos = pos; }
 
     // Combat interface
