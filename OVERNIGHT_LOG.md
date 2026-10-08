@@ -13,9 +13,10 @@
 - **Task 10: Live Desktop UI & HUD Consolidation**: Done — 800x600 clamp bypassed via `loc = 0`, mid-screen floater (`Tab_Parent` 0x64) eliminated from pavement ($X=200..800, Y=500..650$), Compass elevated to $Y=1108$ flush atop Toolbar, Player & Target Vitometers docked symmetrically, Latency & Options docked bottom-right, 16/16 QA telemetry checks pass (Evidence: [Task 12:35 Record](#1235---live-desktop-ui-hud-consolidation-800x600-snapto-bypass--floater-elimination---done)).
 - **Task 11: Phase D Systems — Crafting Blueprints, Objective Commands, Ability Rewards & Vitals Sync**: Done — Implemented all 8 authentic objective commands (`DEFEAT`, `ESCORT`, `GIVE`, `HACK`, `LOOT`, `REBIRTH`, `TALK`, `USE_ITEM`) in `MissionSystem`, story mission ability reward unlocks across all 47 chapters, Coder blueprint crafting system (10 recipes, opcode `0x8066`), and level-up vitals notification (`sendVitals(true, true)`). 314 regression assertions pass. Live desktop QA playtest passes all 15 checks with 0 hard failures, 0 crash dumps, and 2510x1390 backbuffer proofs.
 - **Task 12: Phase E Systems — Authentic Loot Tables 1-4, Dynamic Mob Drops, Agent Boss Loots, Objective LOOT & Sponsors**: Done — Populated 28 authentic loot drops across 4 tiered drop tables in `loot_tables.csv`, dynamic mob/Agent boss table resolution, server-authoritative `GenerateLoot`, item rarity rolling, colored loot announcements, LOOT objective auto-advancement, and multi-path sponsor contacts XML ingestion. 325 regression assertions pass. Live desktop QA playtest passes all checks with 0 hard failures, 0 crash dumps, and backbuffer frame proof `phase_e_qa_04_interlock.png` showing `[LOOT] Defeated Dojo Kung Fu Master! Looted item: White Sector Sunglasses.`.
+- **Task 13: Phase F Systems — District Threat Heatmap 3D Elevation Clamping & Escalation Tiers**: Done — Eliminated hardcoded underground 95.0f spawns across all 5 escalation tiers (Police, SWAT, Agent Overwrite, Multi-Agent, Smith Outbreak) and radio dispatch; clamped spawns flush to authentic street pavement elevation ($Y=572.0 \pm 0.5$); added 3D disruption recording in `MatrixThreatHeatmap` and coordinates in `IGO`; wired combat disruptions with full 3D coordinates; modernized tier evaluation against district sabotage multipliers; added authentic loot table IDs (Table 2 for Police/SWAT, Table 4 for Agents). 332 regression assertions pass. Live desktop QA playtest passes all checks with 0 hard failures, 0 crash dumps, verified threat heat generation, and backbuffer frame proof `phase_f_qa_*.png`.
 
-- **Current deployed commit**: `0a0c532e` on `Live-Server`
-- **Rollback tag**: `mxoemu-reality-server:pre-loot-tables`
+- **Current deployed commit**: `0a534b62` on `Live-Server`
+- **Rollback tag**: `mxoemu-reality-server:pre-heatmap-threat`
 - **Open crashes**: 0 open crashes across all live client sessions.
 
 -----------------------------------
@@ -492,5 +493,47 @@ Proof: Full 2560x1440 uncompressed Direct3D 9 backbuffer frames saved. Live VPS 
     - `RESULT: PASS (0 hard failures)`
 - **Not verified:**
   - 100-player world boss raid drop distribution concurrency.
+
+### 17:45 - Phase F Systems: District Threat Heatmap 3D Elevation Clamping & Escalation Tiers - DONE
+- **Changed:**
+  - `Server/Reality/Source/AI/MatrixThreatHeatmap.h` & `MatrixThreatHeatmap.cpp`:
+    - Eliminated hardcoded underground `95.0f` bot spawns across all 5 escalation tiers (Tier 1 Police, Tier 2 SWAT, Tier 3 Agent Overwrite, Tier 4 Multi-Agent, Tier 5 Smith Outbreak).
+    - Clamped spawn elevations flush with pavement: `wy >= 200.0f` defaults to `572.0f` or operative world height.
+    - Added `float lastY{572.0f}` to `DisruptionCell` and implemented 3D disruption recording overload `RecordDisruption(float worldX, float worldY, float worldZ, float amount, const std::string& cause)`.
+    - Modernized tier evaluation logic with `GetTier(worldX, worldZ)` and `GetActiveTier(worldX, worldZ)` factoring in district sabotage multipliers.
+    - Assigned authentic tiered loot table IDs: `Table 2` for Tier 1 Police and Tier 2 SWAT; `Table 4` for Tier 3-5 Agents.
+  - `Server/Reality/Source/AI/RadioDispatchSystem.cpp`:
+    - Eliminated hardcoded `95.0f` Y elevation for Beat Cop radio dispatches; clamped to `wy >= 200.0f ? wy : 572.0f`.
+  - `Server/Reality/Source/IGO.h`:
+    - Added thread-safe `getX()`, `getY()`, `getZ()` coordinate accessors to base interactive game object class.
+  - `Server/Reality/Source/CombatSystem.cpp`:
+    - Updated all 5 combat disruption call sites (Ballistic Impact, Agent Wire-Fu Dodge, Bullet Dodge, Ballistic/Melee Fire, Ability Execution, and Combat Elimination) to record full 3D coordinates.
+  - `Server/Reality/Source/CombatTests.cpp`:
+    - Added Section 18 covering 3D disruption recording, heat accumulation, escalation tiers 1-3, simulation tick exponential decay and diffusion, and district sabotage multipliers.
+  - Commit: `0a534b62` pushed to `origin/Live-Server`, deployed to VPS container `mxoemu-reality-server-1` (rollback tag `mxoemu-reality-server:pre-heatmap-threat`).
+- **Evidence:**
+  - Headless combat regression suite: **332 passed, 0 failed, 1 skipped** (`python tools/qa_headless_combat.py`, process exit code 0).
+  - Live desktop telemetry on `Winsta0\default` (`python tools/qa_live_telemetry.py`):
+    - `[PASS] harness reached game window: exit 0 in 187s`
+    - `[PASS] server position changed: moved 1384.5 units horizontally`
+    - `[PASS] login not rejected as duplicate session`
+    - `[PASS] hotbar loadout sent to client: 2 matching log line(s)` (7 abilities: 600, 137, 17, 133, 197, 198, 574)
+    - `[PASS] dojo bot spawned in front of player: dist 400 units, pos (18115.6, 495, 3335)`
+    - `[PASS] target selected: Slacker:33266 selected dynamic object view id 0001 (targetGoId=33268)`
+    - `[PASS] attack request received: 49 matching log line(s)`
+    - `[PASS] interlock started: 33266 (Slacker) vs 33268 (Dojo Kung Fu Master)`
+    - `[PASS] damage applied: 14 matching log line(s)`
+    - `[PASS] kill resolved: Player Dojo Kung Fu Master:33268 was defeated by Slacker`
+    - `[PASS] kill rewarded: Slacker:33266 defeated Dojo Kung Fu Master:33268 -> +5000 XP, +500 $Info`
+    - Live server log telemetry verified real-time threat heat generation:
+      `[21:43:51] DEBUG: MatrixThreatHeatmap: Recorded +12 heat at grid (55, 70) from [CloseCombatTrainingAbility]. Total heat: 39.2721`
+      `[21:43:55] DEBUG: MatrixThreatHeatmap: Recorded +12 heat at grid (55, 70) from [Melee Interlock]. Total heat: 45.9647`
+    - `[PASS] all 4 frames captured: qa_01_inworld.png, qa_02_movement.png, qa_03_combat.png, qa_04_interlock.png`
+    - `[PASS] 0 new crash dumps in Crash Dumps/`
+    - Direct backbuffer screenshot proof (`phase_f_qa_04_interlock.png`, `phase_f_qa_pass2_04_interlock.png`): Interlock exchanges animating, chat box recording loot, health bar damage registering.
+    - `RESULT: PASS (0 hard failures)`
+- **Not verified:**
+  - Full Tier 5 Smith Outbreak mass infection event across 50 simultaneous player clients.
+
 
 
