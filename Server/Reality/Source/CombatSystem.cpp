@@ -572,6 +572,12 @@ bool CombatSystem::RequestInterlock(uint32 attackerGoId, uint32 targetGoId, uint
 		session.ilPos = ilPos;
 		session.nextRoundTime = getMSTime() + 2500; //first resolved round right after the opening
 
+		// CombatantMode (Component 0x11) must be active on both combatants BEFORE
+		// ILCombatStateMsg is queued, satisfying the client-side exchange player gating check.
+		pA->enterInterlock(targetGoId);
+		pB->enterInterlock(attackerGoId);
+		INFO_LOG(format("Interlock started: %1% (%2%) vs %3% (%4%)") % attackerGoId % pA->getHandle() % targetGoId % pB->getHandle());
+
 		struct SideSetup { PlayerObject* self; PlayerObject* other; uint16* viewSlot; };
 		SideSetup sides[2] =
 		{
@@ -633,10 +639,6 @@ bool CombatSystem::RequestInterlock(uint32 attackerGoId, uint32 targetGoId, uint
 	}
 
 	m_interlocks.push_back(session);
-
-	pA->enterInterlock(targetGoId);
-	pB->enterInterlock(attackerGoId);
-	INFO_LOG(format("Interlock started: %1% (%2%) vs %3% (%4%)") % attackerGoId % pA->getHandle() % targetGoId % pB->getHandle());
 	return true;
 }
 
