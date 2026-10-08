@@ -25,6 +25,7 @@
 #include <deque>
 #include <map>
 #include <mutex>
+#include <set>
 
 class BotClient;
 class PlayerObject;
@@ -105,6 +106,7 @@ private:
     uint32 m_lastInteractMs = 0;
     int m_interactAttempts = 0;
     int m_missionDeaths = 0;
+    std::set<uint32> m_triedMissions; // missions this tester already had to abort
 
     // shop / rest / explore
     uint32 m_nextShopMs = 0;

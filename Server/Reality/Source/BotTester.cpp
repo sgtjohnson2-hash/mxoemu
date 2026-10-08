@@ -552,6 +552,21 @@ void TesterBrain::ChooseGoal(PlayerObject* me, uint32 now)
         m_stats.missionsRequested++;
         uint32 asked = now;
         SendRpc(Rpc16(RPC_MISSION_REQ), "0x8094 mission request");
+        if (sMissionSys.GetActiveObjectiveInfo(me->getGoId(), info) && m_triedMissions.count(info.missionId))
+        {
+            // MissionSystem::GetAvailableStoryMission falls back to the first mission once every
+            // mission is done/aborted, so a tester that has exhausted the playable list kept being
+            // handed the same broken mission every 20 s. Hand it back and stop asking for a while.
+            SendRpc(Rpc16(RPC_MISSION_ABORT), "0x80a6 mission abort");
+            if (sMissionSys.HasActiveMission(me->getGoId()))
+                sMissionSys.AbortMission(me, "tester: mission list exhausted");
+            AddFinding("mission list exhausted: no playable mission left for this faction (server re-offers an already failed one)",
+                (format("%1% (%2%) re-offered %3% '%4%' after trying %5% missions") % me->getHandle()
+                    % me->getFactionName() % info.missionId % info.title % m_triedMissions.size()).str());
+            m_nextMissionRequestMs = now + 30 * 60 * 1000;
+            m_goal = Goal::HUNT;
+            return;
+        }
         if (sMissionSys.GetActiveObjectiveInfo(me->getGoId(), info))
         {
             m_stats.missionsAssigned++;
@@ -591,7 +606,10 @@ void TesterBrain::AbortMission(PlayerObject* me, const std::string& why)
     // Test harness only: mark the broken mission done for THIS tester so its next request
     // covers a different mission instead of looping on the same broken one.
     if (m_trackedMissionId)
+    {
         sMissionSys.RecordCompletedMission(me->getGoId(), m_trackedMissionId);
+        m_triedMissions.insert(m_trackedMissionId);
+    }
     m_stats.missionsAborted++;
     m_trackedMissionId = 0;
     m_combatTarget = 0;
