@@ -34,6 +34,19 @@
 #include <atomic>
 #include <unordered_set>
 
+struct HardlineNode
+{
+	uint32 id = 0;
+	uint32 districtId = 0;
+	uint32 hardlineId = 0;
+	std::string name;
+	double x = 0.0;
+	double y = 0.0;
+	double z = 0.0;
+	double rot = 0.0;
+	int factionTag = 0;
+};
+
 class PlayerObject : public IGO
 {
 public:
@@ -234,6 +247,11 @@ public:
     void saveDataToDB();
     uint64 getCharacterUID() const { return m_characterUID; }
     static void LoadHardlines();
+    static void LoadHardlinesFromCSV(const std::string& filePath);
+    static const HardlineNode* GetHardline(uint32 districtId, uint32 hardlineId);
+    static const HardlineNode* GetNearestHardline(uint32 districtId, double x, double z);
+    static const std::map<std::pair<uint32, uint32>, HardlineNode>& GetHardlineDirectory() { return s_hardlineDirectory; }
+    static size_t GetTotalHardlines() { return s_hardlineDirectory.size(); }
 
     // LootManager
     void addInformation(uint32 amount) { m_cash += amount; }
@@ -332,6 +350,7 @@ public:
     float m_damageScale = 1.0f;
     std::shared_ptr<class AbilitySystem> m_abilitySystem;
     static std::map<uint32, std::vector<LocationVector>> s_hardlineCache;
+    static std::map<std::pair<uint32, uint32>, HardlineNode> s_hardlineDirectory;
     uint32 m_lootTableId = 0;
     void respawn();
 

@@ -2836,10 +2836,15 @@ void PlayerObject::RPC_HandleChat( ByteBuffer &srcCmd )
         LocationVector pos = getPosition();
         uint32 dId = sMatrixThreatHeatmap.GetDistrictAt(pos.x, pos.z);
         std::string dName = (dId == 1) ? "Richland" : ((dId == 2) ? "Downtown" : ((dId == 3) ? "International" : "The Slums"));
-        m_parent.QueueCommand(make_shared<SystemChatMsg>(
-            (format("{c:00FFFF}[Operator Stats] Handle: %1% | Level: %2% | HP: %3%/%4% | IS: %5%/%6% | District: %7% | Pos: (%.0f, %.0f, %.0f){/c}")
-             % m_handle % (int)getLevel() % (int)getCurrentHealth() % (int)getMaximumHealth() % (int)getCurrentIS() % (int)getMaximumIS() % dName % pos.x % pos.y % pos.z).str()
-        ));
+        std::ostringstream ss;
+        ss << std::fixed << std::setprecision(0);
+        ss << "{c:00FFFF}[Operator Stats] Handle: " << m_handle 
+           << " | Level: " << (int)getLevel() 
+           << " | HP: " << (int)getCurrentHealth() << "/" << (int)getMaximumHealth() 
+           << " | IS: " << (int)getCurrentIS() << "/" << (int)getMaximumIS() 
+           << " | District: " << dName 
+           << " | Pos: (" << pos.x << ", " << pos.y << ", " << pos.z << "){/c}";
+        m_parent.QueueCommand(make_shared<SystemChatMsg>(ss.str()));
         return;
     }
 
@@ -2923,6 +2928,66 @@ void PlayerObject::RPC_HandleChat( ByteBuffer &srcCmd )
             m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FF4444}Usage: /vendor sell <itemId>{/c}"));
         }
         return;
+    }
+
+    if (boost::iequals(theMessage, "/jackout") || boost::iequals(theMessage, "/exit")) {
+        ByteBuffer dummy;
+        RPC_HandleJackoutRequest(dummy);
+        return;
+    }
+
+    if (boost::iequals(theMessage, "/hardline") || boost::iequals(theMessage, "/hardlines")) {
+        const HardlineNode* nearest = GetNearestHardline(m_district, getPosition().x, getPosition().z);
+        size_t total = GetTotalHardlines();
+        if (nearest) {
+            double dist = sqrt((nearest->x - getPosition().x)*(nearest->x - getPosition().x) + (nearest->z - getPosition().z)*(nearest->z - getPosition().z));
+            std::ostringstream ss;
+            ss << std::fixed << std::setprecision(1);
+            ss << "{c:00FFCC}[HARDLINE] Nearest: " << nearest->name 
+               << " (District " << (int)nearest->districtId << ", #" << (int)nearest->hardlineId << ")"
+               << " | Distance: " << (dist / 100.0) << "m"
+               << " | Total Matrix Hardlines: " << total << "{/c}";
+            m_parent.QueueCommand(make_shared<SystemChatMsg>(ss.str()));
+        } else {
+            std::ostringstream ss;
+            ss << "{c:00FFCC}[HARDLINE] Total Matrix Hardlines: " << total << "{/c}";
+            m_parent.QueueCommand(make_shared<SystemChatMsg>(ss.str()));
+        }
+        return;
+    }
+
+    if (boost::iequals(theMessage, "/hardline list")) {
+        m_parent.QueueCommand(make_shared<SystemChatMsg>((format("{c:00FFCC}--- HARDLINES IN DISTRICT %1% ---{/c}") % (int)m_district).str()));
+        int count = 0;
+        for (const auto& kv : GetHardlineDirectory()) {
+            if (kv.first.first == m_district && count < 8) {
+                std::ostringstream ss;
+                ss << std::fixed << std::setprecision(0);
+                ss << "  Node #" << (int)kv.second.hardlineId << ": " << kv.second.name
+                   << " at (" << kv.second.x << ", " << kv.second.y << ", " << kv.second.z << ")";
+                m_parent.QueueCommand(make_shared<SystemChatMsg>(ss.str()));
+                count++;
+            }
+        }
+        return;
+    }
+
+    if (boost::istarts_with(theMessage, "/teleport ") || boost::istarts_with(theMessage, "/tp ")) {
+        std::stringstream ss(theMessage.substr(theMessage.find(' ') + 1));
+        uint32 destDistrict = 0;
+        uint32 destHL = 0;
+        if (ss >> destDistrict >> destHL) {
+            ByteBuffer tpCmd;
+            tpCmd << (uint8)1; // source HL
+            while (tpCmd.size() < 6) tpCmd << (uint8)0;
+            tpCmd << (uint8)m_district;
+            while (tpCmd.size() < 10) tpCmd << (uint8)0;
+            tpCmd << (uint8)destHL;
+            while (tpCmd.size() < 14) tpCmd << (uint8)0;
+            tpCmd << (uint8)destDistrict;
+            RPC_HandleHardlineTeleport(tpCmd);
+            return;
+        }
     }
 
     if (boost::iequals(theMessage, "/slmstats")) {
@@ -3475,80 +3540,82 @@ void PlayerObject::RPC_HandleHardlineTeleport( ByteBuffer &srcCmd )
 
 	m_parent.QueueCommand(make_shared<SystemChatMsg>(debugMsg.str()));
 
-	//See if we need to add this HL to the DB
-	LocationVector loc = this->getPosition();
+	double newX = 0.0, newY = 0.0, newZ = 0.0, newRot = 0.0;
+	string newlocationName = "";
+	int factionTag = 0;
+	bool found = false;
 
-	format sqlHLExists = 
-		format("SELECT * FROM `hardlines` WHERE `DistrictId`='%1%' AND `HardlineId`='%2%' LIMIT 1")
-		% (int)districtYouAreIn 
-		% (int)hardlineYouAreUsing;
-
-	scoped_ptr<QueryResult> resultHLExists(sDatabase.Query(sqlHLExists));
-	if (resultHLExists == NULL)
+	if (Database_Main != nullptr)
 	{
-		m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FFFF00}You are at a hardline not in the database yet, lets add it so all can use it :){/c}"));	
-		format sqlHLInsert = 
-			format("INSERT INTO `hardlines` SET `DistrictId` = '%1%', `HardlineId` = '%2%', X = '%3%', Y = '%4%', Z = '%5%', ROT = '%6%', HardlineName = 'Tagged By %7%'")
-			% (int)districtYouAreIn 
-			% (int)hardlineYouAreUsing 
-			% loc.x % loc.y % loc.z % loc.rot
-			% this->getHandle();
+		format sql = 
+			format("SELECT `X`,`Y`,`Z`, `ROT`, `HardlineName`, `FactionTag` FROM `hardlines` Where `DistrictId` = '%1%' And `HardlineId` = '%2%' LIMIT 1")
+			% (int)hardlineDistrict 
+			% (int)hardlineLocation;
 
-		if (sDatabase.Execute(sqlHLInsert))
+		try
 		{
-			format msg1 = 
-				format("{c:00FF00}HardlineId:%1% in District %7% Set to Tagged By %2% at X:%3% Y:%4% Z:%5% O:%6%{/c}")
-				% (int)hardlineYouAreUsing 
-				% this->getHandle() 
-				% loc.x % loc.y % loc.z % loc.rot
-				% (int)districtYouAreIn;
-
-			m_parent.QueueCommand(make_shared<SystemChatMsg>(msg1.str()));
+			scoped_ptr<QueryResult> result(sDatabase.Query(sql));
+			if (result != NULL)
+			{
+				Field *field = result->Fetch();
+				newX = field[0].GetDouble();
+				newY = field[1].GetDouble();
+				newZ = field[2].GetDouble();
+				newRot = field[3].GetDouble();
+				newlocationName = field[4].GetString();
+				factionTag = field[5].GetInt32();
+				found = true;
+			}
 		}
-		else
+		catch (...) {}
+	}
+
+	// Fallback to static hardline directory (e.g. headless tests or offline DB)
+	if (!found)
+	{
+		const HardlineNode* node = GetHardline(hardlineDistrict, hardlineLocation);
+		if (node)
 		{
-			m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FF00FF}New hardline set, FAILED On INSERT.{/c}"));
+			newX = node->x;
+			newY = node->y;
+			newZ = node->z;
+			newRot = node->rot;
+			newlocationName = node->name;
+			factionTag = node->factionTag;
+			found = true;
 		}
-
 	}
 
-	format sql = 
-		format("SELECT `X`,`Y`,`Z`, `ROT`, `HardlineName`, `FactionTag` FROM `hardlines` Where `DistrictId` = '%1%' And `HardlineId` = '%2%' LIMIT 1")
-		% (int)hardlineDistrict 
-		% (int)hardlineLocation;
-
-	scoped_ptr<QueryResult> result(sDatabase.Query(sql));
-	if (result == NULL)
+	if (!found)
 	{
-		m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FF0000}The hardline you selected is not in the database yet, go tag it...{/c}"));	
+		m_parent.QueueCommand(make_shared<SystemChatMsg>(
+			(format("{c:FF0000}[HARDLINE] Selected Hardline #%1% in District %2% not found in directory.{/c}")
+				% (int)hardlineLocation % (int)hardlineDistrict).str()));
+		return;
 	}
-	else
+
+	// Faction Warfare - Hardline Access restriction
+	if (factionTag != 0 && factionTag != getFaction())
 	{
-		Field *field = result->Fetch();
-		double newX = field[0].GetDouble();
-		double newY = field[1].GetDouble();
-		double newZ = field[2].GetDouble();
-		double newRot = field[3].GetDouble();
-		string newlocationName = field[4].GetString();
-        int factionTag = field[5].GetInt32();
-
-        // Item 30: Faction Warfare - Hardline Access restriction
-        if (factionTag != 0 && factionTag != getFaction()) {
-            m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FF0000}Access Denied. This Hardline is controlled by a hostile Faction.{/c}"));
-            return;
-        }
-
-		format message1 = format("{c:00FFFF}Welcome to %1%.{/c}") % newlocationName;
-		m_parent.QueueCommand(make_shared<SystemChatMsg>(message1.str()));
-
-		LocationVector newLoc(newX, newY, newZ);
-		newLoc.rot = newRot;
-		this->setPosition(newLoc);
-		sGame.AnnounceStateUpdate(NULL,make_shared<PositionStateMsg>(m_goId));
-		
-		// Item 43: Link Hardlines properly to spatial network
-		sSpatialGrid.UpdateClientPosition(&m_parent, newLoc.x, newLoc.z);
+		m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FF0000}Access Denied. This Hardline is controlled by a hostile Faction.{/c}"));
+		return;
 	}
+
+	format message1 = format("{c:00FFFF}[HARDLINE] Transferred to %1% (District %2%, Node #%3%).{/c}") 
+		% newlocationName % (int)hardlineDistrict % (int)hardlineLocation;
+	m_parent.QueueCommand(make_shared<SystemChatMsg>(message1.str()));
+
+	LocationVector newLoc(newX, newY, newZ);
+	newLoc.rot = newRot;
+	this->setPosition(newLoc);
+	this->setDistrict(hardlineDistrict);
+	sGame.AnnounceStateUpdate(NULL, make_shared<PositionStateMsg>(m_goId));
+	
+	// Link Hardlines properly to spatial network
+	sSpatialGrid.UpdateClientPosition(&m_parent, newLoc.x, newLoc.z);
+
+	// Authentic retail hardline ring & transmission audio FX via JackoutEffectMsg materialization
+	m_parent.QueueState(make_shared<JackoutEffectMsg>(m_goId, false));
 }
 
 void PlayerObject::RPC_HandleObjectSelected( ByteBuffer &srcCmd )
@@ -3577,33 +3644,27 @@ void PlayerObject::RPC_HandleObjectSelected( ByteBuffer &srcCmd )
 
 void PlayerObject::RPC_HandleJackoutRequest( ByteBuffer &srcCmd )
 {
-	ByteBuffer extraData = ByteBuffer(&srcCmd.contents()[srcCmd.rpos()],srcCmd.remaining());
-	format msg = 
-		format("(%s) %s:%d wants to jackout with extra data %s")
-		% m_parent.Address()
-		% m_handle
-		% m_goId
-		% Bin2Hex(extraData,0);
-
-	DEBUG_LOG(msg);
+	DEBUG_LOG(format("(%s) %s:%d requested Jackout escape sequence") % m_parent.Address() % m_handle % m_goId);
 	
-	// Item 43: Add exit confirmation message
-	m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:00FF00}Jackout sequence confirmed. Escaping the Matrix in 10 seconds...{/c}"));
+	// Cancel existing Jackout if already ticking
+	cancelEvents(EVENT_JACKOUT);
 
-	//effect
+	m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:00FF00}[JACKOUT] Jackout sequence confirmed. Escaping the Matrix in 10 seconds...{/c}"));
+
+	// Authentic retail telephone booth / mirror dissolve effect
 	m_parent.QueueState(make_shared<JackoutEffectMsg>(m_goId));
-	//chat msg
+	// Authentic retail carrier packet
 	m_parent.QueueCommand(make_shared<HexGenericMsg>("2E0700000000000000000000002300002E00000000000000000000000000000000000000"));
-	this->addEvent(EVENT_JACKOUT,boost::bind(&PlayerObject::jackoutEvent,this),10.0f); //schedule jackout in 10 seconds
+	this->addEvent(EVENT_JACKOUT, boost::bind(&PlayerObject::jackoutEvent, this), 10.0f); // Schedule jackout in 10 seconds
 }
-
 
 void PlayerObject::jackoutEvent()
 {
 	m_parent.QueueCommand(make_shared<HexGenericMsg>("80fd000000000000"));
 	m_parent.FlushQueue();
-	//hack, should see why client doesnt send jackout complete msg, instead of invalidating here
-	//m_parent.Invalidate();
+	saveDataToDB();
+	INFO_LOG(format("Player %1% successfully jacked out of the Matrix.") % m_handle);
+	m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:00FF00}[JACKOUT] Carrier signal terminated. Jackout complete.{/c}"));
 }
 
 void PlayerObject::RPC_HandleJackoutFinished( ByteBuffer &srcCmd )

@@ -375,7 +375,7 @@ void PlayerObject::checkAndStore()
 
 void PlayerObject::saveDataToDB()
 {
-	if (m_characterUID >= 9000000) //virtual bots are memory-only
+	if (Database_Main == nullptr || m_characterUID >= 9000000) //virtual bots or offline test mode are memory-only
 		return;
 
 	if (m_savedPos == m_pos)

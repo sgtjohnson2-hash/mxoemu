@@ -37,27 +37,170 @@
 #include "InventorySystem.h"
 #include "SpatialGrid.h"
 #include "LootManager.h"
+#include <fstream>
+#include <sstream>
 
 std::map<uint32, std::vector<LocationVector>> PlayerObject::s_hardlineCache;
+std::map<std::pair<uint32, uint32>, HardlineNode> PlayerObject::s_hardlineDirectory;
+
+void PlayerObject::LoadHardlinesFromCSV(const std::string& filePath)
+{
+    std::ifstream file(filePath.c_str());
+    if (!file.is_open())
+    {
+        WARNING_LOG(format("PlayerObject: Could not open hardlines CSV: %1%") % filePath);
+        return;
+    }
+
+    s_hardlineDirectory.clear();
+    s_hardlineCache.clear();
+
+    std::string line;
+    bool isFirstLine = true;
+    size_t count = 0;
+
+    while (std::getline(file, line))
+    {
+        if (line.empty()) continue;
+        if (isFirstLine)
+        {
+            isFirstLine = false; // skip header: id;districtId;hardlineId;name;x;y;z;rot;factionTag
+            continue;
+        }
+
+        std::stringstream ss(line);
+        std::string token;
+        std::vector<std::string> tokens;
+        while (std::getline(ss, token, ';'))
+        {
+            tokens.push_back(token);
+        }
+
+        if (tokens.size() >= 8)
+        {
+            try
+            {
+                HardlineNode node;
+                node.id = static_cast<uint32>(std::stoul(tokens[0]));
+                node.districtId = static_cast<uint32>(std::stoul(tokens[1]));
+                node.hardlineId = static_cast<uint32>(std::stoul(tokens[2]));
+                node.name = tokens[3];
+
+                std::string xStr = tokens[4];
+                std::replace(xStr.begin(), xStr.end(), ',', '.');
+                node.x = std::stod(xStr);
+
+                std::string yStr = tokens[5];
+                std::replace(yStr.begin(), yStr.end(), ',', '.');
+                node.y = std::stod(yStr);
+
+                std::string zStr = tokens[6];
+                std::replace(zStr.begin(), zStr.end(), ',', '.');
+                node.z = std::stod(zStr);
+
+                std::string rotStr = tokens[7];
+                std::replace(rotStr.begin(), rotStr.end(), ',', '.');
+                node.rot = std::stod(rotStr);
+
+                if (tokens.size() >= 9)
+                {
+                    node.factionTag = std::stoi(tokens[8]);
+                }
+
+                s_hardlineDirectory[std::make_pair(node.districtId, node.hardlineId)] = node;
+
+                LocationVector hlPos(node.x, node.y, node.z);
+                hlPos.rot = node.rot;
+                s_hardlineCache[node.districtId].push_back(hlPos);
+                count++;
+            }
+            catch (...) {}
+        }
+    }
+    INFO_LOG(format("PlayerObject: Successfully loaded %1% authentic hardlines across %2% districts from %3%.")
+        % count % s_hardlineCache.size() % filePath);
+}
 
 void PlayerObject::LoadHardlines()
 {
     INFO_LOG("Loading Hardlines into cache...");
     s_hardlineCache.clear();
-    PreparedStatement stmt("SELECT `DistrictId`,`X`,`Y`,`Z`,`ROT` FROM `hardlines`");
-    scoped_ptr<QueryResult> result(sDatabase.QueryPrepared(&stmt));
-    if (result)
+    s_hardlineDirectory.clear();
+
+    if (Database_Main != nullptr)
     {
-        do
+        try
         {
-            Field *field = result->Fetch();
-            uint32 districtId = field[0].GetUInt32();
-            LocationVector hlPos(field[1].GetDouble(), field[2].GetDouble(), field[3].GetDouble());
-            hlPos.rot = field[4].GetDouble();
-            s_hardlineCache[districtId].push_back(hlPos);
-        } while (result->NextRow());
+            PreparedStatement stmt("SELECT `DistrictId`,`X`,`Y`,`Z`,`ROT`,`HardLineId`,`HardlineName`,`FactionTag` FROM `hardlines`");
+            scoped_ptr<QueryResult> result(sDatabase.QueryPrepared(&stmt));
+            if (result)
+            {
+            do
+            {
+                Field *field = result->Fetch();
+                HardlineNode node;
+                node.districtId = field[0].GetUInt32();
+                node.x = field[1].GetDouble();
+                node.y = field[2].GetDouble();
+                node.z = field[3].GetDouble();
+                node.rot = field[4].GetDouble();
+                node.hardlineId = field[5].GetUInt32();
+                node.name = field[6].GetString();
+                node.factionTag = field[7].GetInt32();
+
+                s_hardlineDirectory[std::make_pair(node.districtId, node.hardlineId)] = node;
+
+                LocationVector hlPos(node.x, node.y, node.z);
+                hlPos.rot = node.rot;
+                s_hardlineCache[node.districtId].push_back(hlPos);
+            } while (result->NextRow());
+        }
     }
-    INFO_LOG(format("Loaded %1% hardline districts.") % s_hardlineCache.size());
+    catch (...) {}
+}
+
+    // Fallback if DB was unavailable or yielded 0 records (e.g. headless tests)
+    if (s_hardlineDirectory.empty())
+    {
+        LoadHardlinesFromCSV("Data/hd_dump/hardlines.csv");
+    }
+    else
+    {
+        INFO_LOG(format("Loaded %1% hardlines across %2% districts from DB.") % s_hardlineDirectory.size() % s_hardlineCache.size());
+    }
+}
+
+const HardlineNode* PlayerObject::GetHardline(uint32 districtId, uint32 hardlineId)
+{
+    auto it = s_hardlineDirectory.find(std::make_pair(districtId, hardlineId));
+    if (it != s_hardlineDirectory.end()) return &(it->second);
+
+    // Fallback: check across all districts if districtId was omitted or unknown
+    for (const auto& pair : s_hardlineDirectory)
+    {
+        if (pair.second.hardlineId == hardlineId) return &(pair.second);
+    }
+    return nullptr;
+}
+
+const HardlineNode* PlayerObject::GetNearestHardline(uint32 districtId, double x, double z)
+{
+    const HardlineNode* nearest = nullptr;
+    double bestDistSq = 1e18;
+
+    for (const auto& pair : s_hardlineDirectory)
+    {
+        if (districtId != 0 && pair.first.first != districtId) continue;
+        double dx = pair.second.x - x;
+        double dz = pair.second.z - z;
+        double dSq = dx * dx + dz * dz;
+        if (dSq < bestDistSq)
+        {
+            bestDistSq = dSq;
+            nearest = &(pair.second);
+        }
+    }
+    return nearest;
 }
 
 // ---------------------------------------------------------------------------
@@ -66,6 +209,11 @@ void PlayerObject::LoadHardlines()
 
 void PlayerObject::enterInterlock( uint32 partnerGoId )
 {
+	if (cancelEvents(EVENT_JACKOUT) > 0)
+	{
+		m_parent.QueueCommand(shared_ptr<SystemChatMsg>(new SystemChatMsg(
+			"{c:FF0000}[JACKOUT] Jackout sequence interrupted by close combat interlock!{/c}")));
+	}
 	m_ilPartner = partnerGoId;
 	m_inCombat = true;
 	setCombatStance(true);
@@ -106,6 +254,12 @@ void PlayerObject::takeDamage( uint32 attackerGoId, uint16 damage, uint32 fxId )
 	if (m_isDead)
 		return;
 	m_lastDamageTakenMs = getMSTime();
+
+	if (cancelEvents(EVENT_JACKOUT) > 0)
+	{
+		m_parent.QueueCommand(shared_ptr<SystemChatMsg>(new SystemChatMsg(
+			"{c:FF0000}[JACKOUT] Jackout sequence interrupted by incoming damage!{/c}")));
+	}
 
 	// Configurable retail hit FX (Task 3): 0x280006DF was a misidentified weapon skeleton model
 	// (resource/GameObjects/weapons/program_launcher2/skeleton/skeleton.ska) that crashed retail 7.6005

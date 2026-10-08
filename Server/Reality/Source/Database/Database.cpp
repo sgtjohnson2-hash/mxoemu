@@ -203,7 +203,10 @@ bool Database::Initialize(const char* Hostname, unsigned int port, const char* U
 
 DatabaseConnection &Database::GetFreeConnection()
 {
+	static DatabaseConnection s_dummyConn(nullptr);
 	std::unique_lock<std::mutex> lock(m_poolMutex);
+	if (m_connections.empty())
+		return s_dummyConn;
 	m_poolCond.wait(lock, [this]() { return !m_freeConnections.empty(); });
 	DatabaseConnection* con = m_freeConnections.front();
 	m_freeConnections.pop();
@@ -213,12 +216,17 @@ DatabaseConnection &Database::GetFreeConnection()
 void Database::ReleaseConnection(DatabaseConnection &con)
 {
 	std::lock_guard<std::mutex> lock(m_poolMutex);
+	if (m_connections.empty() || con.conn == nullptr)
+		return;
 	m_freeConnections.push(&con);
 	m_poolCond.notify_one();
 }
 
 QueryResult *Database::Query( string QueryString )
 {
+	if (m_connections.empty() || m_isMockMode)
+		return NULL;
+
 	// Send the query
 	QueryResult * qResult = NULL;
 	DatabaseConnection &con = GetFreeConnection();
@@ -308,6 +316,9 @@ void Database::PerformQueryBuffer(QueryBuffer * b)
 
 bool Database::Execute( string QueryString)
 {
+	if (m_connections.empty() || m_isMockMode)
+		return false;
+
 	if(!ThreadRunning)
 		return WaitExecute(QueryString);
 
@@ -318,6 +329,9 @@ bool Database::Execute( string QueryString)
 //this will wait for completion
 bool Database::WaitExecute( string QueryString)
 {
+	if (m_connections.empty() || m_isMockMode)
+		return false;
+
 	DatabaseConnection &con = GetFreeConnection();
 	bool Result = _SendQuery(con, QueryString.c_str(), false);
 	if (Result && con.conn) {
@@ -565,6 +579,7 @@ string Database::EscapeString(const char * esc, DatabaseConnection * con)
 bool Database::_SendQuery(DatabaseConnection &con, const char* Sql, bool Self)
 {
 	if (m_isMockMode) return true;
+	if (!con.conn) return false;
 	mysql_thread_init();
 
 	if (con.conn) {
@@ -640,7 +655,7 @@ bool QueryResult::NextRow()
 
 QueryResult * Database::_StoreQueryResult(DatabaseConnection &con)
 {
-	if (m_isMockMode) return NULL;
+	if (m_isMockMode || !con.conn) return NULL;
 	QueryResult *res;
 	MYSQL_RES * pRes = mysql_store_result( con.conn );
 	uint32 uFields = (uint32)mysql_field_count( con.conn );

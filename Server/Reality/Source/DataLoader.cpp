@@ -3,6 +3,7 @@
 #include "MissionSystem.h"
 #include "EconomySystem.h"
 #include "CombatAnimationMatrix.h"
+#include "PlayerObject.h"
 #include <fstream>
 #include <sstream>
 #include <boost/property_tree/ptree.hpp>
@@ -66,6 +67,7 @@ bool DataLoader::LoadAll(const std::string& directoryPath)
     sMissionSys.LoadSponsorsFromXML(directoryPath + "sponsors.xml");
     sEconomySys.LoadVendorsFromCSV(directoryPath + "vendor_items.csv");
     LoadInterlockMoves(directoryPath + "interlock_moves.bin");
+    PlayerObject::LoadHardlinesFromCSV(directoryPath + "hardlines.csv");
 
     // Auto-register item templates for vendor catalog items not yet in clothing/loot tables
     for (uint32 districtId = 1; districtId <= 16; ++districtId)

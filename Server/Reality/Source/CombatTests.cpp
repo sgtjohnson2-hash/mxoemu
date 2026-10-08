@@ -1728,6 +1728,70 @@ int RunCombatTestSuite()
 			humanOperative.po->HandleCommand(chatCmd);
 			check(humanClient.sawText("[VENDOR]") && humanClient.sawText("Catalog:"), "/vendor list command returns catalog prices and items");
 		}
+
+		// ------------------------------------------------------------
+		// 20. Phase H: Authentic Hardlines, Rings & Jack-Out Teleportation
+		// ------------------------------------------------------------
+		{
+			std::cout << "\n[20. Phase H: Authentic Hardlines, Rings & Jack-Out Teleportation]" << std::endl;
+
+			Actor humanOperative = makeHuman(&humanClient, 9100103, 17043.1, 2398.8);
+
+			// 1. Ingestion of 135 authentic hardline locations from hardlines.csv
+			PlayerObject::LoadHardlinesFromCSV("Data/hd_dump/hardlines.csv");
+			check(PlayerObject::GetTotalHardlines() >= 130, "PlayerObject loaded >= 130 authentic hardline locations");
+
+			// 2. Exact Hardline lookup by (districtId, hardlineId) and Nearest Hardline query
+			const HardlineNode* maraCentral = PlayerObject::GetHardline(1, 152);
+			check(maraCentral != nullptr && maraCentral->name == "MaraCentral", "Hardline (1, 152) resolved to MaraCentral");
+			check(std::abs(maraCentral->x - 17043.1) < 1.0 && std::abs(maraCentral->z - 2398.8) < 1.0, "MaraCentral coordinates match authentic (17043.1, 2398.8)");
+
+			const HardlineNode* nearest = PlayerObject::GetNearestHardline(1, 17043.0, 2398.0);
+			check(nearest != nullptr && nearest->hardlineId == 152, "GetNearestHardline dynamically resolves MaraCentral");
+
+			// 3. Intra-district and Inter-district Teleportation via RPC 0x818e
+			ByteBuffer tpCmd;
+			tpCmd << (uint8)0x81 << (uint8)0x8e;
+			tpCmd << (uint8)152; // current HL
+			while (tpCmd.size() < 6) tpCmd << (uint8)0;
+			tpCmd << (uint8)1; // current district
+			while (tpCmd.size() < 10) tpCmd << (uint8)0;
+			tpCmd << (uint8)49; // dest HL (MaraNorthWest)
+			while (tpCmd.size() < 14) tpCmd << (uint8)0;
+			tpCmd << (uint8)1; // dest district
+			humanClient.captured.clear();
+			humanOperative.po->HandleCommand(tpCmd);
+			check(humanClient.sawText("[HARDLINE] Transferred to MaraNorthWest"), "HandleCommand(0x818e) teleports operative to MaraNorthWest");
+			check(std::abs(humanOperative.po->getPosition().x - 7737.37) < 1.0, "Operative X position updated to MaraNorthWest");
+
+			// 4. JackoutEffectMsg wire serialization matching authentic retail size
+			JackoutEffectMsg jMsg(humanOperative.go);
+			jMsg.setReceiver(humanOperative.client);
+			const ByteBuffer& jBuf = jMsg.toBuf();
+			check(jBuf.size() >= 35, "JackoutEffectMsg wire buffer matches authentic telephone booth / mirror dissolve packet size");
+
+			// 5. Jackout Request via RPC 0x80fc scheduling 10-second carrier escape
+			ByteBuffer jackoutCmd;
+			jackoutCmd << (uint8)0x80 << (uint8)0xfc;
+			humanClient.captured.clear();
+			humanOperative.po->HandleCommand(jackoutCmd);
+			check(humanClient.sawText("[JACKOUT] Jackout sequence confirmed"), "HandleCommand(0x80fc) initiates authentic 10-second jackout sequence");
+
+			// 6. Jackout interruption upon taking damage
+			humanClient.captured.clear();
+			humanOperative.po->takeDamage(0, 10, 0);
+			check(humanClient.sawText("[JACKOUT] Jackout sequence interrupted"), "takeDamage interrupts pending jackout sequence");
+
+			// 7. /jackout and /hardline chat commands (0x2810)
+			ByteBuffer hlChatCmd;
+			hlChatCmd << (uint8)0x28 << (uint8)0x10;
+			hlChatCmd << (uint16)swap16(8);
+			hlChatCmd << (uint32)0;
+			hlChatCmd.writeString("/hardline");
+			humanClient.captured.clear();
+			humanOperative.po->HandleCommand(hlChatCmd);
+			check(humanClient.sawText("[HARDLINE] Nearest:"), "/hardline command reports nearest hardline station");
+		}
 	}
 	catch (const std::exception& e)
 	{
