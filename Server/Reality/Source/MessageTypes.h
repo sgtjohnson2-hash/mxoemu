@@ -940,4 +940,37 @@ public:
 	~ILCombatStateMsg() {}
 };
 
+// Vendor shop catalog open response (RPC 0x810d)
+// Primary source citations:
+// 1. hd_reference/hds/servertype/CR2/NetworkProtocolHeaders.cs:161 (SERVER_VENDOR_OPEN = 0x810d)
+// 2. hd_reference/hds/world/ServerPackets/VendorPackets.cs:15
+// 3. hd_reference/hds/utils/PacketUtils/PacketsUtils.cs:121 ("4a810d7cadd943...")
+// 4. client.dll decompile: FUN_10110980 (VA 0x62110980):
+//    - InteractionDistanceXZ: float (4 bytes)
+//    - VendorPosition: double X, double Y, double Z (24 bytes)
+//    - Flags / offset: uint16 (0x0020)
+//    - Products count: uint16
+//    - Products array: uint32[]
+class VendorOpenMsg : public StaticMsg
+{
+public:
+	VendorOpenMsg(float interactionDist, double x, double y, double z, const std::vector<uint32>& items)
+	{
+		m_buf.clear();
+		m_buf << uint16(swap16(0x810d));
+		m_buf << float(interactionDist);
+		m_buf << double(x);
+		m_buf << double(y);
+		m_buf << double(z);
+		m_buf << uint16(0x0020);
+		m_buf << uint16(items.size());
+		for (uint32 tplId : items)
+		{
+			m_buf << uint32(tplId);
+		}
+	}
+	~VendorOpenMsg() {}
+};
+
 #endif
+

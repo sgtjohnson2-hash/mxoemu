@@ -458,6 +458,7 @@ void EconomySystem::InitializeHardlineVendors()
     // 1. Slums District Vendor: Morrell Station Hardline
     HardlineVendor vSlums;
     vSlums.vendorId = 1;
+    vSlums.staticId = 1;
     vSlums.hardlineId = 101;
     vSlums.districtId = DISTRICT_SLUMS;
     vSlums.name = "Slums Barrens Arms & Apparel";
@@ -467,6 +468,7 @@ void EconomySystem::InitializeHardlineVendors()
     // 2. Downtown District Vendor: Mara Central Hardline
     HardlineVendor vDT;
     vDT.vendorId = 2;
+    vDT.staticId = 2;
     vDT.hardlineId = 201;
     vDT.districtId = DISTRICT_DOWNTOWN;
     vDT.name = "Downtown Mara High-End Depot";
@@ -476,6 +478,7 @@ void EconomySystem::InitializeHardlineVendors()
     // 3. International District Vendor: Creston Hardline
     HardlineVendor vIT;
     vIT.vendorId = 3;
+    vIT.staticId = 3;
     vIT.hardlineId = 301;
     vIT.districtId = DISTRICT_INTL;
     vIT.name = "Creston Tactical Cybernetics";
@@ -485,6 +488,7 @@ void EconomySystem::InitializeHardlineVendors()
     // 4. Richland District Vendor: Richland Center Hardline
     HardlineVendor vRichland;
     vRichland.vendorId = 4;
+    vRichland.staticId = 4;
     vRichland.hardlineId = 401;
     vRichland.districtId = DISTRICT_RICHLAND;
     vRichland.name = "Richland Black Market Syndicate";
@@ -597,6 +601,10 @@ const HardlineVendor* EconomySystem::GetHardlineVendor(uint32 vendorId) const
     std::lock_guard<std::recursive_mutex> lock(m_transactionMutex);
     auto it = m_hardlineVendors.find(vendorId);
     if (it != m_hardlineVendors.end()) return &(it->second);
+    for (const auto& kv : m_hardlineVendors)
+    {
+        if (kv.second.staticId == vendorId) return &(kv.second);
+    }
     return nullptr;
 }
 

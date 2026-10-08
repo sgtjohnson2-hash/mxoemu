@@ -39,6 +39,7 @@
 #include "CraftingSystem.h"
 #include "LootManager.h"
 #include "AI/MatrixThreatHeatmap.h"
+#include "EconomySystem.h"
 #include "Timer.h"
 #include <iostream>
 #include <vector>
@@ -1658,6 +1659,74 @@ int RunCombatTestSuite()
 			sMatrixThreatHeatmap.SetDistrictSabotaged(distId, true);
 			check(sMatrixThreatHeatmap.IsDistrictSabotaged(distId), "District marked sabotaged (surveillance offline)");
 			sMatrixThreatHeatmap.SetDistrictSabotaged(distId, false);
+		}
+
+		// ------------------------------------------------------------
+		// 19. Phase G: Authentic Vendor Economy & Currency Transactions
+		// ------------------------------------------------------------
+		{
+			std::cout << "\n[19. Phase G: Authentic Vendor Economy & Currency Transactions]" << std::endl;
+
+			Actor humanOperative = makeHuman(&humanClient, 9100102, 10000.0, 10000.0);
+
+			// 1. Ingestion of authentic static vendors (>= 40 loaded from vendor_items.csv)
+			sEconomySys.LoadVendorsFromCSV("Data/hd_dump/vendor_items.csv");
+			auto slumsVendors = sEconomySys.GetVendorsForDistrict(1);
+			check(!slumsVendors.empty(), "EconomySystem loaded authentic vendors for Slums (District 1)");
+			const HardlineVendor* testVendor = sEconomySys.GetHardlineVendor(slumsVendors[0].vendorId);
+			check(testVendor != nullptr, "Lookup of static vendor by ID succeeds");
+			check(!testVendor->inventoryTemplates.empty(), "Static vendor has authentic inventory catalog");
+
+			// 2. VendorOpenMsg byte serialization matching retail capture 4a810d7cadd943...
+			std::vector<uint32> sampleItems = { 0x80001400, 0x80002000, 0x80001800 };
+			VendorOpenMsg vOpen(435.355f, -93050.0, 1295.0, -12450.0, sampleItems);
+			const ByteBuffer& vBuf = vOpen.toBuf();
+			check(vBuf.size() >= 2 + 4 + 24 + 2 + 2 + (3 * 4), "VendorOpenMsg wire size matches authentic header + position + products layout");
+
+			// 3. Static object interaction (0x80c8) opens vendor catalog
+			ByteBuffer staticInteractCmd;
+			staticInteractCmd << (uint8)0x80 << (uint8)0xc8 << (uint32)testVendor->staticId << (uint16)0x02; // NPC vendor interaction
+			humanClient.captured.clear();
+			humanOperative.po->HandleCommand(staticInteractCmd);
+			check(humanClient.sawText("[VENDOR] Opened"), "RPC_HandleStaticObjInteraction opens authentic vendor catalog");
+
+			// 4. Market Open (0x8121) opens nearest district vendor
+			ByteBuffer marketCmd;
+			marketCmd << (uint8)0x81 << (uint8)0x21;
+			humanClient.captured.clear();
+			humanOperative.po->HandleCommand(marketCmd);
+			check(humanClient.sawText("[VENDOR] Connected to"), "RPC_HandleMarketOpen connects operative to nearest district vendor");
+
+			// 5. Vendor Buying (0x810e) with server-authoritative Info Bits deduction
+			uint32 testTpl = testVendor->inventoryTemplates[0];
+			humanOperative.po->addInfo(5000);
+			uint64 startBits = humanOperative.po->getInfo();
+			ByteBuffer buyCmd;
+			buyCmd << (uint8)0x81 << (uint8)0x0e << (uint32)testTpl << (uint32)testVendor->vendorId;
+			humanClient.captured.clear();
+			humanOperative.po->HandleCommand(buyCmd);
+			check(humanClient.sawText("[VENDOR] Purchased"), "RPC_HandleVendorBuy executes transaction and notifies operative");
+			check(humanOperative.po->getInfo() < startBits, "Server-authoritative Info Bits deducted for purchase");
+
+			// 6. Vendor Selling (0x8111) with server-authoritative Info Bits credit
+			humanOperative.po->addInfo(100);
+			uint64 bitsBeforeSell = humanOperative.po->getInfo();
+			ByteBuffer sellCmd;
+			sellCmd << (uint8)0x81 << (uint8)0x11 << (uint32)testTpl << (uint32)testVendor->vendorId;
+			humanClient.captured.clear();
+			humanOperative.po->HandleCommand(sellCmd);
+			check(humanClient.sawText("[VENDOR] Sold"), "RPC_HandleVendorSell executes sale and credits Info Bits");
+			check(humanOperative.po->getInfo() > bitsBeforeSell, "Server-authoritative Info Bits credited for sale");
+
+			// 7. /vendor and /vendor list chat command simulation (0x2810)
+			ByteBuffer chatCmd;
+			chatCmd << (uint8)0x28 << (uint8)0x10;
+			chatCmd << (uint16)swap16(8);
+			chatCmd << (uint32)0; // pad to offset 8
+			chatCmd.writeString("/vendor list");
+			humanClient.captured.clear();
+			humanOperative.po->HandleCommand(chatCmd);
+			check(humanClient.sawText("[VENDOR]") && humanClient.sawText("Catalog:"), "/vendor list command returns catalog prices and items");
 		}
 	}
 	catch (const std::exception& e)

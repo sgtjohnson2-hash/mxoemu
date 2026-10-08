@@ -31,6 +31,7 @@
 #include "BotManager.h"
 #include "SocketSystem.h"
 #include "CraftingSystem.h"
+#include "EconomySystem.h"
 #include "PlayerObject.h"
 #include "Log.h"
 #include "Database/Database.h"
@@ -2861,6 +2862,69 @@ void PlayerObject::RPC_HandleChat( ByteBuffer &srcCmd )
         return;
     }
 
+    // Authentic Vendor & Economy Chat Commands
+    if (boost::iequals(theMessage, "/vendor") || boost::iequals(theMessage, "/shop") || boost::iequals(theMessage, "/vendor list")) {
+        auto vendors = sEconomySys.GetVendorsForDistrict(m_district);
+        if (vendors.empty()) vendors = sEconomySys.GetVendorsForDistrict(1);
+        if (!vendors.empty()) {
+            const HardlineVendor* nearest = &vendors[0];
+            double bestDist = 1e9;
+            for (const auto& v : vendors) {
+                double d = (m_pos.x - v.x)*(m_pos.x - v.x) + (m_pos.z - v.z)*(m_pos.z - v.z);
+                if (d < bestDist) {
+                    bestDist = d;
+                    nearest = &v;
+                }
+            }
+            m_parent.QueueCommand(std::make_shared<VendorOpenMsg>(
+                500.0f, nearest->x, nearest->y, nearest->z, nearest->inventoryTemplates
+            ));
+            std::stringstream ss;
+            ss << "{c:00FFCC}[VENDOR] " << nearest->name << " (ID: " << nearest->staticId << ") Catalog:\n";
+            size_t count = 0;
+            for (uint32 tplId : nearest->inventoryTemplates) {
+                if (++count > 8) { ss << "... and " << (nearest->inventoryTemplates.size() - 8) << " more items."; break; }
+                const ItemTemplate* tpl = sDataLoader.GetItemTemplate(tplId);
+                std::string name = tpl ? tpl->name : (format("Item %1%") % tplId).str();
+                uint32 price = tpl && tpl->value > 0 ? tpl->value : sEconomySys.GetItemPrice(tplId);
+                ss << " - " << name << " (ID " << tplId << "): " << price << " $Info\n";
+            }
+            ss << "{/c}";
+            m_parent.QueueCommand(make_shared<SystemChatMsg>(ss.str()));
+        } else {
+            m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FF4444}[VENDOR] No active district vendors found.{/c}"));
+        }
+        return;
+    }
+
+    if (boost::istarts_with(theMessage, "/vendor buy ") || boost::istarts_with(theMessage, "/shop buy ")) {
+        std::string arg = theMessage.substr(theMessage.find("buy ") + 4);
+        boost::trim(arg);
+        try {
+            uint32 tplId = std::stoul(arg);
+            ByteBuffer buyCmd;
+            buyCmd << uint32(tplId) << uint32(0);
+            RPC_HandleVendorBuy(buyCmd);
+        } catch (...) {
+            m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FF4444}Usage: /vendor buy <itemTemplateId>{/c}"));
+        }
+        return;
+    }
+
+    if (boost::istarts_with(theMessage, "/vendor sell ") || boost::istarts_with(theMessage, "/shop sell ")) {
+        std::string arg = theMessage.substr(theMessage.find("sell ") + 5);
+        boost::trim(arg);
+        try {
+            uint32 itemId = std::stoul(arg);
+            ByteBuffer sellCmd;
+            sellCmd << uint32(itemId) << uint32(0);
+            RPC_HandleVendorSell(sellCmd);
+        } catch (...) {
+            m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FF4444}Usage: /vendor sell <itemId>{/c}"));
+        }
+        return;
+    }
+
     if (boost::iequals(theMessage, "/slmstats")) {
         m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:00FFCC}[SLM Dialogue Engine] Subsystem offline.{/c}"));
         return;
@@ -3014,6 +3078,33 @@ void PlayerObject::RPC_HandleDynamicObjInteraction( ByteBuffer &srcCmd )
             m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FFFF00}You are too far away.{/c}"));
             return;
         }
+
+        // Check if target is a Vendor NPC
+        const HardlineVendor* vendor = sEconomySys.GetHardlineVendor(targetGoId);
+        if (!vendor && npc && (npc->getHandle().find("Merchant") != std::string::npos ||
+                               npc->getHandle().find("Vendor") != std::string::npos ||
+                               npc->getHandle().find("Trader") != std::string::npos))
+        {
+            auto districtVendors = sEconomySys.GetVendorsForDistrict(m_district);
+            if (districtVendors.empty()) districtVendors = sEconomySys.GetVendorsForDistrict(1);
+            if (!districtVendors.empty()) vendor = &districtVendors[0];
+        }
+        if (vendor && !vendor->inventoryTemplates.empty())
+        {
+            m_parent.QueueCommand(std::make_shared<VendorOpenMsg>(
+                500.0f,
+                vendor->x,
+                vendor->y,
+                vendor->z,
+                vendor->inventoryTemplates
+            ));
+            m_parent.QueueCommand(std::make_shared<SystemChatMsg>(
+                (format("{c:00FFCC}[VENDOR] Opened %1% (Vendor ID: %2%, Items: %3%){/c}")
+                    % vendor->name % vendor->staticId % vendor->inventoryTemplates.size()).str()
+            ));
+            return;
+        }
+
         // Handing a mission item over is the same client interaction as talking (no other RPC
         // reaches GIVE objectives), so dispatch on what the current objective expects.
         ActiveObjectiveInfo info;
@@ -3075,6 +3166,44 @@ void PlayerObject::RPC_HandleStaticObjInteraction( ByteBuffer &srcCmd )
 	INFO_LOG( debugStr );
 
 	m_parent.QueueCommand(make_shared<SystemChatMsg>(debugStr.str()));
+
+	// Check if this static object is an authentic vendor (or NPC vendor interaction)
+	const HardlineVendor* vendor = sEconomySys.GetHardlineVendor(staticObjId);
+	std::vector<HardlineVendor> districtVendors;
+	if (!vendor && interaction == 0x02) // 0x02 = HUMAN_NPC / Vendor in HDS ObjectInteractionHandler
+	{
+		districtVendors = sEconomySys.GetVendorsForDistrict(m_district);
+		if (districtVendors.empty()) districtVendors = sEconomySys.GetVendorsForDistrict(1);
+		if (!districtVendors.empty())
+		{
+			vendor = &districtVendors[0];
+			double bestDist = 1e9;
+			for (const auto& v : districtVendors)
+			{
+				double d = (m_pos.x - v.x)*(m_pos.x - v.x) + (m_pos.z - v.z)*(m_pos.z - v.z);
+				if (d < bestDist)
+				{
+					bestDist = d;
+					vendor = &v;
+				}
+			}
+		}
+	}
+	if (vendor && !vendor->inventoryTemplates.empty())
+	{
+		m_parent.QueueCommand(std::make_shared<VendorOpenMsg>(
+			500.0f,
+			vendor->x,
+			vendor->y,
+			vendor->z,
+			vendor->inventoryTemplates
+		));
+		m_parent.QueueCommand(std::make_shared<SystemChatMsg>(
+			(format("{c:00FFCC}[VENDOR] Opened %1% (Vendor ID: %2%, Items: %3%){/c}")
+				% vendor->name % vendor->staticId % vendor->inventoryTemplates.size()).str()
+		));
+		return;
+	}
 
 	if (interaction == 0x03) //open door
 	{
@@ -3500,6 +3629,33 @@ void PlayerObject::RPC_HandleMarketListItems(ByteBuffer& srcCmd)
 void PlayerObject::RPC_HandleMarketOpen(ByteBuffer& srcCmd)
 {
 	DEBUG_LOG(format("(%1%) %2%:%3% RPC_HandleMarketOpen") % m_parent.Address() % m_handle % m_goId);
+	auto vendors = sEconomySys.GetVendorsForDistrict(m_district);
+	if (vendors.empty()) vendors = sEconomySys.GetVendorsForDistrict(1);
+	if (!vendors.empty())
+	{
+		const HardlineVendor* nearest = &vendors[0];
+		double bestDist = 1e9;
+		for (const auto& v : vendors)
+		{
+			double d = (m_pos.x - v.x)*(m_pos.x - v.x) + (m_pos.z - v.z)*(m_pos.z - v.z);
+			if (d < bestDist)
+			{
+				bestDist = d;
+				nearest = &v;
+			}
+		}
+		m_parent.QueueCommand(std::make_shared<VendorOpenMsg>(
+			500.0f,
+			nearest->x,
+			nearest->y,
+			nearest->z,
+			nearest->inventoryTemplates
+		));
+		m_parent.QueueCommand(std::make_shared<SystemChatMsg>(
+			(format("{c:00FFCC}[VENDOR] Connected to %1% (Vendor ID: %2%, Items: %3%){/c}")
+				% nearest->name % nearest->staticId % nearest->inventoryTemplates.size()).str()
+		));
+	}
 }
 void PlayerObject::RPC_HandleVendorBuy(ByteBuffer& srcCmd)
 {
@@ -3510,13 +3666,10 @@ void PlayerObject::RPC_HandleVendorBuy(ByteBuffer& srcCmd)
 		vendorGoId = srcCmd.read<uint32>();
 
 	const ItemTemplate* tpl = sDataLoader.GetItemTemplate(itemTemplateId);
-	if (!tpl)
-	{
-		m_parent.QueueCommand(std::make_shared<SystemChatMsg>("{c:FF4444}[VENDOR] Item not cataloged in current vendor database.{/c}"));
-		return;
-	}
+	uint32 cost = tpl && tpl->value > 0 ? tpl->value : sEconomySys.GetItemPrice(itemTemplateId);
+	if (cost == 0) cost = 100;
+	std::string itemName = tpl ? tpl->name : (format("Catalog Item %1%") % itemTemplateId).str();
 
-	uint32 cost = tpl->value;
 	if (m_cash < cost)
 	{
 		m_parent.QueueCommand(std::make_shared<SystemChatMsg>(
@@ -3544,7 +3697,7 @@ void PlayerObject::RPC_HandleVendorBuy(ByteBuffer& srcCmd)
 	m_parent.QueueCommand(std::make_shared<SetInformationCmd>(m_cash));
 
 	m_parent.QueueCommand(std::make_shared<SystemChatMsg>(
-		(format("{c:00FF00}[VENDOR] Purchased %1% for %2% Information Bits.{/c}") % tpl->name % cost).str()
+		(format("{c:00FF00}[VENDOR] Purchased %1% for %2% Information Bits.{/c}") % itemName % cost).str()
 	));
 }
 void PlayerObject::RPC_HandleVendorSell(ByteBuffer& srcCmd)
@@ -3575,7 +3728,8 @@ void PlayerObject::RPC_HandleVendorSell(ByteBuffer& srcCmd)
 	}
 
 	const ItemTemplate* tpl = sDataLoader.GetItemTemplate(item->getTemplateId());
-	uint32 baseValue = tpl ? tpl->value : 100;
+	uint32 baseValue = tpl && tpl->value > 0 ? tpl->value : sEconomySys.GetItemPrice(item->getTemplateId());
+	if (baseValue == 0) baseValue = 100;
 	uint32 sellValue = std::max<uint32>(1, baseValue / 2);
 
 	// Remove from inventory
