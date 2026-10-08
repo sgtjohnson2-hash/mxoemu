@@ -1032,6 +1032,9 @@ void PlayerObject::ParsePlayerCommand( string theCmd )
 			if (!botPo)
 				return false;
 
+			// Put dojo bot into the same instance as the summoning player
+			bot->m_instanceId = m_parent.m_instanceId;
+
 			// SpawnSingleBot swaps the requested faction for the controlling one at that
 			// location - the dojo dummy must always be hostile, so force Machines.
 			bot->SetFaction(FACTION_MACHINES);
