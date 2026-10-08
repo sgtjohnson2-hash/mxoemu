@@ -614,12 +614,12 @@ bool CombatSystem::RequestInterlock(uint32 attackerGoId, uint32 targetGoId, uint
 					uint32 otherViewWithSpawnId = uint32(otherViewId) | (uint32(PLAYER_SPAWN_COUNTER) << 16);
 					if (i == 0 && clientTargetRef != 0)
 						otherViewWithSpawnId = clientTargetRef;
-					//slot 1 = opponent, slot 2 = self (view 2, spawn counter 0 as in HDS).
-					//The opening exchange mirrors the captured interlock start: the initiator
-					//steps in with move 0x2026 after the 0x523C/0x5214 lead-ins.
+					// On every client: slot 1 = that client's own character (VIEWID_SELF), slot 2 = the opponent.
+					// client.dll FUN_104fd140 explicitly checks: if (DAT_108a4378 == param_1[10]), where param_1[10]
+					// is slot 1. Only when the local player is in slot 1 does the client spawn Window 0x0E (Tactic Wheel).
 					std::vector<uint32> slots;
-					slots.push_back(otherViewWithSpawnId);
 					slots.push_back(uint32(VIEWID_SELF));
+					slots.push_back(otherViewWithSpawnId);
 					std::vector<ILExchange> opening;
 					opening.push_back(BuildExchange(session, sides[i].self, pA, pB, 1,
 						IL_MOVE_OPEN_ATTACKER_PRE, IL_MOVE_PRE, IL_MOVE_OPEN_MAIN));
@@ -1230,9 +1230,9 @@ ILExchange CombatSystem::BuildExchange(const InterlockSession &session, PlayerOb
 	const InterlockAnimPair* animPair)
 {
 	ILExchange e;
-	//on every client: slot 2 = that client's own character, slot 1 = the opponent
-	e.attackerSlot = (attacker == viewer) ? 2 : 1;
-	e.defenderSlot = (defender == viewer) ? 2 : 1;
+	// On every client: slot 1 = that client's own character (VIEWID_SELF), slot 2 = the opponent
+	e.attackerSlot = (attacker == viewer) ? 1 : 2;
+	e.defenderSlot = (defender == viewer) ? 1 : 2;
 	LocationVector a = attacker->getPosition();
 	LocationVector d = defender->getPosition();
 	e.attackerPos[0] = float(a.x - session.ilPos.x);
