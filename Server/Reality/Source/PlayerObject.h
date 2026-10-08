@@ -108,6 +108,9 @@ public:
 	void addExp(uint64 amount);
 	std::shared_ptr<class InventorySystem> getInventory();
 	
+	uint32 getLootTableId() const { return m_lootTableId; }
+	void setLootTableId(uint32 id) { m_lootTableId = id; }
+	
 	virtual void takeDamage(uint32 attackerGoId, uint16 damage, uint32 fxId = 0);
 	virtual void applyHeal(uint32 healerGoId, uint16 amount, uint32 fxId = 0x01000060);
 	virtual void revive(uint32 reviverGoId, float healthPct = 0.5f);
@@ -329,6 +332,7 @@ public:
     float m_damageScale = 1.0f;
     std::shared_ptr<class AbilitySystem> m_abilitySystem;
     static std::map<uint32, std::vector<LocationVector>> s_hardlineCache;
+    uint32 m_lootTableId = 0;
     void respawn();
 
 	//RPC Handler maps

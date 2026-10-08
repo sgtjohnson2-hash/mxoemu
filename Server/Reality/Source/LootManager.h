@@ -18,7 +18,11 @@ public:
     ~LootManager() {}
 
     void GenerateLoot(PlayerObject* killer, PlayerObject* victim);
-    bool LoadLootTables(const std::string& filename);
+    bool LoadLootTables(const std::string& filename = "");
+
+    uint32 GetTotalLootEntries() const;
+    uint32 GetTotalLootTables() const { return (uint32)m_lootTables.size(); }
+    const std::vector<LootEntry>* GetLootTable(uint32 tableId) const;
 
 private:
     std::unordered_map<uint32, std::vector<LootEntry>> m_lootTables;

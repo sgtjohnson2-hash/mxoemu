@@ -199,14 +199,22 @@ void MissionSystem::LoadMissionsFromXML(const std::string& directoryPath)
 
 void MissionSystem::LoadSponsorsFromXML(const std::string& filePath)
 {
-    if (!std::filesystem::exists(filePath)) {
+    std::string path = filePath;
+    if (path.empty() || !std::filesystem::exists(path)) path = "Data/hd_dump/sponsors.xml";
+    if (!std::filesystem::exists(path)) path = "mxoemu_live/Server/Reality/Data/hd_dump/sponsors.xml";
+    if (!std::filesystem::exists(path)) path = "../../mxoemu_live/Server/Reality/Data/hd_dump/sponsors.xml";
+    if (!std::filesystem::exists(path)) path = "../../Data/hd_dump/sponsors.xml";
+    if (!std::filesystem::exists(path)) path = "../Data/hd_dump/sponsors.xml";
+    if (!std::filesystem::exists(path)) path = "Client/resource/missions/definitions/sponsors.xml";
+    if (!std::filesystem::exists(path)) path = "../../Client/resource/missions/definitions/sponsors.xml";
+    if (!std::filesystem::exists(path)) {
         WARNING_LOG(format("MissionSystem: sponsors.xml not found at %1%") % filePath);
         return;
     }
 
     try {
         boost::property_tree::ptree pt;
-        boost::property_tree::read_xml(filePath, pt);
+        boost::property_tree::read_xml(path, pt);
 
         auto contactsNode = pt.get_child_optional("contacts");
         if (!contactsNode) return;

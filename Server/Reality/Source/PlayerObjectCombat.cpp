@@ -36,6 +36,7 @@
 #include "Config.h"
 #include "InventorySystem.h"
 #include "SpatialGrid.h"
+#include "LootManager.h"
 
 std::map<uint32, std::vector<LocationVector>> PlayerObject::s_hardlineCache;
 
@@ -386,27 +387,14 @@ void PlayerObject::die( uint32 killerGoId )
 		try { sMissionSys.AdvanceObjective(killer, ObjectiveCommand::DEFEAT, m_goId); } catch (...) {}
 	}
     
-    // V17: The Loot Engine (Only bots drop loot)
+    // Authentic Loot Engine (Only bots drop loot)
     if (m_parent.isBot())
     {
         try {
-            PlayerObject *killer = sObjMgr.getGOPtr(killerGoId);
+            PlayerObject *killer = sObjMgr.getGOPtrSafe(killerGoId);
             if (killer && !killer->isDead())
             {
-                // Advance mission objective
-                sMissionSys.AdvanceObjective(killer, ObjectiveCommand::LOOT, m_goId);
-                
-                // Random item drop
-                const auto& allItems = sDataLoader.GetAllItems();
-                if (!allItems.empty() && killer->getInventory()) {
-                    auto it = allItems.begin();
-                    std::advance(it, rand() % allItems.size());
-                    killer->getInventory()->addItem(make_shared<Item>(sObjMgr.getNewItemId(), it->second.templateId), 1);
-                    if (!killer->getClient().isBot()) {
-                        killer->getClient().QueueCommand(make_shared<SystemChatMsg>(
-                            (format("{c:00FF00}Loot Received: %1%{/c}") % it->second.name).str()));
-                    }
-                }
+                sLootMgr.GenerateLoot(killer, this);
             }
         } catch (...) {}
     }

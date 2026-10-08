@@ -37,6 +37,7 @@
 #include "StatusEffectManager.h"
 #include "MissionSystem.h"
 #include "CraftingSystem.h"
+#include "LootManager.h"
 #include "Timer.h"
 #include <iostream>
 #include <vector>
@@ -1552,6 +1553,71 @@ int RunCombatTestSuite()
 			check(humanOperative.po->getLevel() > prevLevel, "Operative level increased on awardCombatExperience");
 			check(humanOperative.po->getMaximumHealth() > prevMaxHealth, "Operative max health increased on level up");
 			check(humanClient.sawText("Congratulations! You are now level"), "Level up sends congratulations chat notice and vitals sync");
+		}
+
+		// ====================================================================
+		// Section 17: Phase E — Authentic Loot Tables, Dynamic Mob Drops & Sponsor Contacts
+		// ====================================================================
+		{
+			std::cout << "\n--- Section 17: Phase E Systems (Loot Tables, Mob Harvesting, Sponsors) ---" << std::endl;
+
+			Actor humanOperative = makeHuman(&humanClient, 9100101, 10000.0, 10000.0);
+			Actor enemyBot = makeBot(9200101, 10050.0, 10000.0, 5, 50);
+
+			// 1. Ingest Authentic Loot Tables
+			sLootMgr.LoadLootTables("Data/Loot/loot_tables.csv");
+			check(sLootMgr.GetTotalLootTables() >= 4, "LootManager loaded >= 4 authentic loot tables");
+			check(sLootMgr.GetTotalLootEntries() >= 25, "LootManager loaded >= 25 authentic loot entries");
+
+			const auto* t1 = sLootMgr.GetLootTable(1);
+			check(t1 != nullptr && !t1->empty(), "Loot Table 1 (Slums Thugs) exists and has entries");
+
+			const auto* t4 = sLootMgr.GetLootTable(4);
+			check(t4 != nullptr && !t4->empty(), "Loot Table 4 (Agent Boss) exists and has entries");
+
+			// 2. Mob Kill Loot Generation with real item inventory injection
+			enemyBot.po->setLootTableId(1);
+			enemyBot.po->setHandle("Slums Ganger");
+			
+			// Mission objective LOOT tracking
+			MissionTemplate lootMission;
+			lootMission.missionId = 99995;
+			lootMission.title = "Data Extraction";
+			MissionObjective lootObj;
+			lootObj.command = ObjectiveCommand::LOOT;
+			lootObj.targetNpcId = enemyBot.go;
+			lootObj.description = "Loot encrypted drive from Slums Ganger.";
+			lootMission.objectives.push_back(lootObj);
+			sMissionSys.AddMissionTemplate(lootMission);
+			sMissionSys.AssignMission(humanOperative.po, 99995);
+
+			check(sMissionSys.HasActiveMission(humanOperative.go), "Operative has active LOOT mission assigned");
+
+			humanClient.captured.clear();
+			sLootMgr.GenerateLoot(humanOperative.po, enemyBot.po);
+
+			// Verify LOOT mission objective advanced
+			check(!sMissionSys.HasActiveMission(humanOperative.go), "GenerateLoot advances ObjectiveCommand::LOOT and completes mission");
+
+			// 3. Agent Boss Loot Table Dynamic Resolution
+			Actor agentBot = makeBot(9200102, 10050.0, 10000.0, 50, 1000);
+			agentBot.po->setHandle("Agent Perry"); // Name contains "Agent", dynamically resolves to Table 4
+			check(agentBot.po->getLootTableId() == 0, "Agent initially has lootTableId 0 (dynamic resolution)");
+
+			humanClient.captured.clear();
+			sLootMgr.GenerateLoot(humanOperative.po, agentBot.po);
+			check(humanOperative.po->getInventory() != nullptr, "Operative inventory preserved after Agent loot generation");
+
+			// 4. Sponsor Contacts XML Ingestion & Fallback Resolution
+			sMissionSys.LoadSponsorsFromXML("Data/hd_dump/sponsors.xml");
+			const SponsorContact* amber = sMissionSys.GetSponsor(1);
+			check(amber != nullptr && amber->name == "Amber", "Sponsor Contact #1 resolved to Amber (org 0)");
+
+			const SponsorContact* antiM = sMissionSys.GetSponsor(2);
+			check(antiM != nullptr && antiM->name == "Anti M.", "Sponsor Contact #2 resolved to Anti M.");
+
+			const SponsorContact* argon = sMissionSys.GetSponsor(3);
+			check(argon != nullptr && argon->name == "Argon", "Sponsor Contact #3 resolved to Argon");
 		}
 	}
 	catch (const std::exception& e)
