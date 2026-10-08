@@ -1280,10 +1280,25 @@ ILExchange CombatSystem::BuildExchange(const InterlockSession &session, PlayerOb
 	return e;
 }
 
-uint32 CombatSystem::SelectInterlockMove(const InterlockSession &session, PlayerObject* attacker, PlayerObject* defender)
+uint32 CombatSystem::SelectInterlockMove(const InterlockSession &session, PlayerObject* attacker, PlayerObject* defender, InterlockExchangeOutcome outcome)
 {
 	if (!attacker || !defender)
 		return IL_MOVE_OPEN_MAIN; // 0x2026
+
+	static const bool useDynamicILDB = sConfig.GetBoolDefault("Interlock.UseDynamicILDB", false);
+	if (useDynamicILDB)
+	{
+		bool isFinisher = (defender->isDead() || defender->getCurrentHealth() == 0);
+		uint8 attT = (attacker->getGoId() == session.goIdA) ? session.tacticA : session.tacticB;
+		uint8 defT = (defender->getGoId() == session.goIdA) ? session.tacticA : session.tacticB;
+		const ILDBMoveRecord* rec = CombatAnimationMatrix::FindMove(
+			attacker->getFightingStyle(), attT,
+			defender->getFightingStyle(), defT,
+			outcome, isFinisher
+		);
+		if (rec && rec->moveId != 0)
+			return rec->moveId;
+	}
 
 	// Finisher / Takedown: when defender has been reduced to 0 HP
 	if (defender->isDead() || defender->getCurrentHealth() == 0)
@@ -1311,6 +1326,16 @@ uint32 CombatSystem::SelectInterlockMove(const InterlockSession &session, Player
 		case FightingStyle::None:
 		default:
 		{
+			uint8 attT = (attacker->getGoId() == session.goIdA) ? session.tacticA : session.tacticB;
+			uint8 defT = (defender->getGoId() == session.goIdA) ? session.tacticA : session.tacticB;
+			const ILDBMoveRecord* rec = CombatAnimationMatrix::FindMove(
+				attacker->getFightingStyle(), attT,
+				defender->getFightingStyle(), defT,
+				outcome, false
+			);
+			if (rec && rec->moveId != 0)
+				return rec->moveId;
+
 			static const uint32 authenticMoves[] = { 0x2026, 0x2388, 0x236D, 0x2367 };
 			return authenticMoves[session.exchangeNum % 4];
 		}
@@ -1324,7 +1349,6 @@ void CombatSystem::SendInterlockExchange(InterlockSession &session, PlayerObject
 		return;
 
 	session.exchangeNum++;
-	uint32 mainMove = SelectInterlockMove(session, attacker, defender);
 
 	// Determine exchange outcome for fluid contact synchronization
 	InterlockExchangeOutcome outcome = InterlockExchangeOutcome::NormalHit;
@@ -1357,11 +1381,27 @@ void CombatSystem::SendInterlockExchange(InterlockSession &session, PlayerObject
 		outcome = InterlockExchangeOutcome::SpecialHit;
 	}
 
-	InterlockAnimPair pair = CombatAnimationMatrix::GetAnimationPair(
-		attacker->getFightingStyle(), attackerTactic,
-		defender->getFightingStyle(), defenderTactic,
-		outcome, move.id
-	);
+	uint32 mainMove = SelectInterlockMove(session, attacker, defender, outcome);
+
+	static const bool useDynamicILDB = sConfig.GetBoolDefault("Interlock.UseDynamicILDB", false);
+	InterlockAnimPair pair;
+	if (useDynamicILDB)
+	{
+		bool isFinisher = (defender->isDead() || defender->getCurrentHealth() == 0);
+		pair = CombatAnimationMatrix::GetDynamicAnimationPair(
+			attacker->getFightingStyle(), attackerTactic,
+			defender->getFightingStyle(), defenderTactic,
+			outcome, isFinisher
+		);
+	}
+	else
+	{
+		pair = CombatAnimationMatrix::GetAnimationPair(
+			attacker->getFightingStyle(), attackerTactic,
+			defender->getFightingStyle(), defenderTactic,
+			outcome, move.id
+		);
+	}
 
 	PlayerObject* pA = getPlayerSafe(session.goIdA);
 	PlayerObject* pB = getPlayerSafe(session.goIdB);

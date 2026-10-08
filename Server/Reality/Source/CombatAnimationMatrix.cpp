@@ -28,8 +28,28 @@ bool CombatAnimationMatrix::LoadBinaryDatabase(const std::string& path)
     std::ifstream f(path.c_str(), std::ios::binary);
     if (!f.is_open())
     {
-        DEBUG_LOG(format("CombatAnimationMatrix: Could not open %1% for ILDB binary loading.") % path);
-        return false;
+        // Try fallback locations
+        static const char* fallbacks[] = {
+            "Data/hd_dump/interlock_moves.bin",
+            "Data/interlock_moves.bin",
+            "../Data/hd_dump/interlock_moves.bin",
+            "../Data/interlock_moves.bin"
+        };
+        for (const char* alt : fallbacks)
+        {
+            if (path != alt)
+            {
+                f.clear();
+                f.open(alt, std::ios::binary);
+                if (f.is_open())
+                    break;
+            }
+        }
+        if (!f.is_open())
+        {
+            DEBUG_LOG(format("CombatAnimationMatrix: Could not open %1% for ILDB binary loading.") % path);
+            return false;
+        }
     }
 
     char magic[4] = { 0 };
@@ -67,7 +87,6 @@ const ILDBMoveRecord* CombatAnimationMatrix::FindMove(
     bool finisher
 )
 {
-    (void)outcome;
     std::lock_guard<std::recursive_mutex> lock(s_ildbMutex);
     if (s_ildbMoves.empty())
         return nullptr;
@@ -75,38 +94,112 @@ const ILDBMoveRecord* CombatAnimationMatrix::FindMove(
     uint8 attS = (uint8)attackerStyle;
     uint8 defS = (uint8)defenderStyle;
 
+    uint8 requiredFlag = 0;
+    if (finisher)
+    {
+        requiredFlag = 1; // bit 0: finisher
+    }
+    else if (outcome == InterlockExchangeOutcome::Blocked)
+    {
+        requiredFlag = 4; // bit 2: block
+    }
+    else if (outcome == InterlockExchangeOutcome::Clash)
+    {
+        requiredFlag = 8; // bit 3: draw
+    }
+    else
+    {
+        // NormalHit, StanceCrush, FastInterrupt, GuardBreak, SpecialHit
+        requiredFlag = 2; // bit 1: hit
+    }
+
+    // Pass 1: exact style + tactic match with required outcome flag
     for (const auto& rec : s_ildbMoves)
     {
         if (rec.aggrAnim == 0 || rec.defeAnim == 0)
             continue;
 
-        if (finisher && !(rec.flags & 1))
+        if ((rec.flags & requiredFlag) != 0 &&
+            rec.attStyle == attS && rec.attTactic == attackerTactic &&
+            rec.defStyle == defS && (rec.defTactic == defenderTactic || defenderTactic == 8))
+        {
+            return &rec;
+        }
+    }
+
+    // Pass 2: attacker style + tactic match with required outcome flag (flexible defender)
+    for (const auto& rec : s_ildbMoves)
+    {
+        if (rec.aggrAnim == 0 || rec.defeAnim == 0)
             continue;
 
-        if (rec.attStyle == attS && rec.attTactic == attackerTactic)
+        if ((rec.flags & requiredFlag) != 0 &&
+            rec.attStyle == attS && rec.attTactic == attackerTactic)
         {
-            if (rec.defStyle == defS && (rec.defTactic == defenderTactic || defenderTactic == 8))
+            return &rec;
+        }
+    }
+
+    // Fallback: If strict outcome flag yielded no match (and not finisher), relax flag requirement
+    if (!finisher)
+    {
+        for (const auto& rec : s_ildbMoves)
+        {
+            if (rec.aggrAnim == 0 || rec.defeAnim == 0)
+                continue;
+
+            if (rec.attStyle == attS && rec.attTactic == attackerTactic &&
+                rec.defStyle == defS && (rec.defTactic == defenderTactic || defenderTactic == 8))
+            {
+                return &rec;
+            }
+        }
+
+        for (const auto& rec : s_ildbMoves)
+        {
+            if (rec.aggrAnim == 0 || rec.defeAnim == 0)
+                continue;
+
+            if (rec.attStyle == attS && rec.attTactic == attackerTactic)
             {
                 return &rec;
             }
         }
     }
 
-    for (const auto& rec : s_ildbMoves)
+    return nullptr;
+}
+
+InterlockAnimPair CombatAnimationMatrix::GetDynamicAnimationPair(
+    FightingStyle attackerStyle,
+    uint8 attackerTactic,
+    FightingStyle defenderStyle,
+    uint8 defenderTactic,
+    InterlockExchangeOutcome outcome,
+    bool finisher
+)
+{
+    const ILDBMoveRecord* rec = FindMove(attackerStyle, attackerTactic, defenderStyle, defenderTactic, outcome, finisher);
+    if (rec && rec->aggrAnim != 0 && rec->defeAnim != 0)
     {
-        if (rec.aggrAnim == 0 || rec.defeAnim == 0)
-            continue;
+        InterlockAnimPair pair;
+        pair.attackerAnimId = rec->aggrAnim;
+        pair.defenderAnimId = rec->defeAnim;
+        pair.contactDelaySeconds = (rec->aggrDur > 0) ? ((float)rec->aggrDur / 1000.0f) : 0.50f;
 
-        if (finisher && !(rec.flags & 1))
-            continue;
+        if (outcome == InterlockExchangeOutcome::Clash || outcome == InterlockExchangeOutcome::Blocked)
+            pair.hitFxId = 0x28000794; // FX_CHARACTER_BLOCK_INTERLOCK
+        else if (outcome == InterlockExchangeOutcome::Dodged)
+            pair.hitFxId = 0;
+        else if (outcome == InterlockExchangeOutcome::GuardBreak)
+            pair.hitFxId = 0x28000432; // FX_INTERLOCK_IMPACTS_IMPACT_FALLING
+        else
+            pair.hitFxId = 0x280006DF; // FX_CHARACTER_TEXT_DAMAGE
 
-        if (rec.attStyle == attS && rec.attTactic == attackerTactic)
-        {
-            return &rec;
-        }
+        return pair;
     }
 
-    return nullptr;
+    return GetAnimationPair(attackerStyle, attackerTactic, defenderStyle, defenderTactic, outcome);
 }
 
 InterlockAnimPair CombatAnimationMatrix::GetAnimationPair(

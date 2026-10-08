@@ -89,6 +89,15 @@ public:
         uint16 moveId = 0
     );
 
+    static InterlockAnimPair GetDynamicAnimationPair(
+        FightingStyle attackerStyle,
+        uint8 attackerTactic,
+        FightingStyle defenderStyle,
+        uint8 defenderTactic,
+        InterlockExchangeOutcome outcome,
+        bool finisher = false
+    );
+
     static uint16 GetDisarmAnimation(FightingStyle attackerStyle, uint32 weaponType);
 
 private:

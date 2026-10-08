@@ -35,6 +35,7 @@
 #include "InventorySystem.h"
 #include "Item.h"
 #include "StatusEffectManager.h"
+#include "MissionSystem.h"
 #include "Timer.h"
 #include <iostream>
 #include <vector>
@@ -1227,12 +1228,28 @@ int RunCombatTestSuite()
 			);
 			check(kfMove != nullptr, "FindMove returns valid move for Kung Fu Power vs Speed");
 			check(kfMove && kfMove->aggrAnim != 0, "Kung Fu move has valid non-zero aggrAnim");
+			check(kfMove && (kfMove->flags & 2), "Kung Fu move has hit flag bit 1 set for NormalHit outcome");
 
 			// Query Karate Grab vs Block
 			const ILDBMoveRecord* karateMove = CombatAnimationMatrix::FindMove(
 				FightingStyle::Karate, TACTIC_RETALIATE, FightingStyle::Karate, TACTIC_DEFENSE, InterlockExchangeOutcome::NormalHit
 			);
 			check(karateMove != nullptr, "FindMove returns valid move for Karate Grab vs Block");
+			check(karateMove && (karateMove->flags & 2), "Karate move has hit flag bit 1 set for NormalHit outcome");
+
+			// Query Blocked outcome
+			const ILDBMoveRecord* blockMove = CombatAnimationMatrix::FindMove(
+				FightingStyle::KungFu, TACTIC_POWER, FightingStyle::KungFu, TACTIC_DEFENSE, InterlockExchangeOutcome::Blocked
+			);
+			check(blockMove != nullptr, "FindMove returns valid move for Kung Fu Blocked outcome");
+			check(blockMove && (blockMove->flags & 4), "Kung Fu Blocked move has block flag bit 2 set");
+
+			// Query Clash outcome
+			const ILDBMoveRecord* clashMove = CombatAnimationMatrix::FindMove(
+				FightingStyle::KungFu, TACTIC_DEFENSE, FightingStyle::KungFu, TACTIC_DEFENSE, InterlockExchangeOutcome::Clash
+			);
+			check(clashMove != nullptr, "FindMove returns valid move for Kung Fu Clash outcome");
+			check(clashMove && (clashMove->flags & 8), "Kung Fu Clash move has draw flag bit 3 set");
 
 			// Query Finisher move
 			const ILDBMoveRecord* finisherMove = CombatAnimationMatrix::FindMove(
@@ -1240,6 +1257,76 @@ int RunCombatTestSuite()
 			);
 			check(finisherMove != nullptr, "FindMove returns valid finisher move");
 			check(finisherMove && (finisherMove->flags & 1), "Finisher move has finisher flag bit 0 set");
+
+			// Query GetDynamicAnimationPair
+			InterlockAnimPair dynPair = CombatAnimationMatrix::GetDynamicAnimationPair(
+				FightingStyle::KungFu, TACTIC_POWER, FightingStyle::KungFu, TACTIC_SPEED, InterlockExchangeOutcome::NormalHit
+			);
+			check(dynPair.attackerAnimId != 0 && dynPair.defenderAnimId != 0, "GetDynamicAnimationPair resolves non-zero paired animations from ILDB");
+			check(dynPair.hitFxId == 0x280006DF, "GetDynamicAnimationPair sets hitFxId 0x280006DF for NormalHit");
+
+			InterlockAnimPair blockPair = CombatAnimationMatrix::GetDynamicAnimationPair(
+				FightingStyle::KungFu, TACTIC_POWER, FightingStyle::KungFu, TACTIC_DEFENSE, InterlockExchangeOutcome::Blocked
+			);
+			check(blockPair.hitFxId == 0x28000794, "GetDynamicAnimationPair sets hitFxId 0x28000794 for Blocked");
+		}
+
+		// ------------------------------------------------------------------
+		// 15. Dynamic ILDB Combat Move Query & Mission Live Feedback
+		// ------------------------------------------------------------------
+		std::cout << "\n[15. Dynamic ILDB Combat Move Query & Mission Live Feedback]" << std::endl;
+		{
+			// 1. Dynamic ILDB Move Selection in SelectInterlockMove
+			Actor humanOperative = makeHuman(&humanClient, 9100088, 10000.0, 10000.0);
+			Actor enemyBot = makeBot(9200088, 10050.0, 10000.0, 1, 100);
+			InterlockSession dynSession;
+			dynSession.goIdA = humanOperative.go;
+			dynSession.goIdB = enemyBot.go;
+			dynSession.exchangeNum = 1;
+			dynSession.tacticA = TACTIC_POWER;
+			dynSession.tacticB = TACTIC_SPEED;
+
+			humanOperative.po->setFightingStyle(FightingStyle::None);
+			uint32 moveDyn = sCombatSys.SelectInterlockMove(dynSession, humanOperative.po, enemyBot.po);
+			check(moveDyn != 0, "SelectInterlockMove dynamically resolves non-zero move ID for FightingStyle::None");
+
+			// 2. Mission Assignment & Live Chat Objective Routing
+			humanClient.captured.clear();
+			MissionTemplate testMission;
+			testMission.missionId = 99991;
+			testMission.title = "Operation White Rabbit";
+			testMission.description = "Locate the exiled operative in Downtown Mara.";
+			testMission.expReward = 500;
+			testMission.infoReward = 250;
+			testMission.rewardFactionRep = 10;
+			testMission.requiredFactionRep = 0;
+			MissionObjective obj1;
+			obj1.command = ObjectiveCommand::TALK;
+			obj1.targetNpcId = 1800001;
+			obj1.description = "Meet the Contact at Mara Central.";
+			testMission.objectives.push_back(obj1);
+			MissionObjective obj2;
+			obj2.command = ObjectiveCommand::DEFEAT;
+			obj2.targetNpcId = 1800002;
+			obj2.description = "Defeat the corrupt Machine courier.";
+			testMission.objectives.push_back(obj2);
+
+			sMissionSys.AddMissionTemplate(testMission);
+			sMissionSys.AssignMission(humanOperative.po, 99991);
+			check(sMissionSys.HasActiveMission(humanOperative.go), "Player has active mission 99991 assigned");
+			check(humanClient.sawText("[MISSION ASSIGNED] Operation White Rabbit"), "Human operative receives [MISSION ASSIGNED] chat notice");
+			check(humanClient.sawText("[OBJECTIVE 1/2] Meet the Contact at Mara Central."), "Human operative receives initial [OBJECTIVE 1/2] notice");
+
+			// Advance Objective 1 -> 2
+			humanClient.captured.clear();
+			sMissionSys.AdvanceObjective(humanOperative.po, ObjectiveCommand::TALK, 1800001);
+			check(humanClient.sawText("[OBJECTIVE 2/2] Defeat the corrupt Machine courier."), "Human operative receives [OBJECTIVE 2/2] advancement notice");
+
+			// Complete Objective 2 -> Mission Complete
+			humanClient.captured.clear();
+			sMissionSys.AdvanceObjective(humanOperative.po, ObjectiveCommand::DEFEAT, 1800002);
+			check(!sMissionSys.HasActiveMission(humanOperative.go), "Mission completes and active mission state is cleared");
+			check(humanClient.sawText("[MISSION COMPLETE] Operation White Rabbit!"), "Human operative receives [MISSION COMPLETE] celebration chat notice");
 		}
 	}
 	catch (const std::exception& e)

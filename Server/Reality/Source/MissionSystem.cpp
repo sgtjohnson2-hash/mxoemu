@@ -332,8 +332,24 @@ void MissionSystem::AssignMission(PlayerObject* player, uint32 missionId)
     m_activeMissions[player->getGoId()] = state;
     
     // Notify player
-    std::string msg = "MISSION ASSIGNED: " + m_missions[missionId].title;
-    // Assuming there's a way to send sys messages to player, we can log it for now
+    if (!player->getClient().isBot())
+    {
+        player->getClient().QueueCommand(std::make_shared<SystemChatMsg>(
+            (format("{c:00FF00}[MISSION ASSIGNED] %1%{/c}") % templ.title).str()
+        ));
+        if (!templ.description.empty())
+        {
+            player->getClient().QueueCommand(std::make_shared<SystemChatMsg>(
+                (format("{c:FFFFFF}%1%{/c}") % templ.description).str()
+            ));
+        }
+        if (!templ.objectives.empty())
+        {
+            player->getClient().QueueCommand(std::make_shared<SystemChatMsg>(
+                (format("{c:00FFFF}[OBJECTIVE 1/%1%] %2%{/c}") % templ.objectives.size() % templ.objectives[0].description).str()
+            ));
+        }
+    }
     INFO_LOG(format("Player %1% assigned mission %2%, moved to instance %3%") % player->getHandle() % missionId % newInstanceId);
 }
 
@@ -456,10 +472,24 @@ void MissionSystem::AdvanceObjective(PlayerObject* player, ObjectiveCommand comm
                     sBotMgr.SpawnBot(nextObj.escortTargetId, pos.x + 2.0f, pos.y, pos.z + 2.0f, player->getFaction());
                     INFO_LOG(format("MissionSystem: Spawning Escort Target %1% for Player %2%") % nextObj.escortTargetId % player->getHandle());
                 }
+                if (!player->getClient().isBot())
+                {
+                    player->getClient().QueueCommand(std::make_shared<SystemChatMsg>(
+                        (format("{c:00FFFF}[OBJECTIVE %1%/%2%] %3%{/c}")
+                            % (state.currentObjectiveIndex + 1) % templ.objectives.size() % nextObj.description).str()
+                    ));
+                }
             }
             else
             {
                 INFO_LOG(format("Player %1% completed mission: %2%!") % player->getHandle() % templ.title);
+                if (!player->getClient().isBot())
+                {
+                    player->getClient().QueueCommand(std::make_shared<SystemChatMsg>(
+                        (format("{c:00FF00}[MISSION COMPLETE] %1%! +%2% XP, +%3% Info Bits.{/c}")
+                            % templ.title % templ.expReward % templ.infoReward).str()
+                    ));
+                }
                 
                 // Item 38: Mission Rewards
                 if (templ.infoReward > 0)

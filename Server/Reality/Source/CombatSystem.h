@@ -202,7 +202,8 @@ public:
 		const InterlockAnimPair* animPair = nullptr);
 	void SendInterlockExchange(InterlockSession &session, PlayerObject* attacker, PlayerObject* defender,
 		const AttackResult& res, const CombatMove& move, uint8 attackerTactic, uint8 targetTactic);
-	uint32 SelectInterlockMove(const InterlockSession &session, PlayerObject* attacker, PlayerObject* defender);
+	uint32 SelectInterlockMove(const InterlockSession &session, PlayerObject* attacker, PlayerObject* defender,
+		InterlockExchangeOutcome outcome = InterlockExchangeOutcome::NormalHit);
 	bool m_ilExchangeActive = false;
 
 	AttackResult ResolveAttack(PlayerObject* attacker, PlayerObject* target,

@@ -821,6 +821,12 @@ bool DataLoader::LoadPropheticGlitchNodes(const std::string& filePath)
 
 bool DataLoader::LoadInterlockMoves(const std::string& filePath)
 {
-    return CombatAnimationMatrix::LoadBinaryDatabase(filePath);
+    if (CombatAnimationMatrix::LoadBinaryDatabase(filePath))
+        return true;
+    if (CombatAnimationMatrix::LoadBinaryDatabase("Data/hd_dump/interlock_moves.bin"))
+        return true;
+    if (CombatAnimationMatrix::LoadBinaryDatabase("Data/interlock_moves.bin"))
+        return true;
+    return false;
 }
 

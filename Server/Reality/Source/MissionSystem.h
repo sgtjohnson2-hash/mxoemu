@@ -31,49 +31,49 @@ enum class ProceduralMissionArchetype
 
 struct MissionObjective
 {
-    ObjectiveCommand command;
-    uint32 targetNpcId;
+    ObjectiveCommand command{ObjectiveCommand::TALK};
+    uint32 targetNpcId{0};
     std::string description;
     std::string dialog;
     std::string requiredItem;
-    uint64 targetCharUID; // Item 37: Assassination Target
-    bool spawnAmbush; // Item 40: Dynamic Spawns
-    bool isTimed; // Item 108: Timed Events
-    uint32 timeLimitSeconds;
-    bool isEscort; // Item 107: Escort Logic
-    uint32 escortTargetId;
+    uint64 targetCharUID{0}; // Item 37: Assassination Target
+    bool spawnAmbush{false}; // Item 40: Dynamic Spawns
+    bool isTimed{false}; // Item 108: Timed Events
+    uint32 timeLimitSeconds{0};
+    bool isEscort{false}; // Item 107: Escort Logic
+    uint32 escortTargetId{0};
     
     // Branching paths
-    uint32 nextMissionSuccessId;
-    uint32 nextMissionFailId;
+    uint32 nextMissionSuccessId{0};
+    uint32 nextMissionFailId{0};
 };
 
 struct MissionNpc
 {
     std::string type; // "FRIENDLY", "HOSTILE"
-    float x, y, z;
-    uint32 idNpc;
+    float x{0.0f}, y{0.0f}, z{0.0f};
+    uint32 idNpc{0};
     std::string handle;
-    uint32 rsi;
-    uint32 level;
-    uint32 maxHP;
+    uint32 rsi{0};
+    uint32 level{1};
+    uint32 maxHP{100};
 };
 
 struct MissionTemplate
 {
-    uint32 missionId;
+    uint32 missionId{0};
     std::string title;
     std::string description;
-    uint32 expReward;
-    uint32 infoReward;
-    uint32 rewardItemTemplateId; // Item 38: Mission Rewards
-    uint32 rewardFactionRep; // Item 38
-    uint32 requiredFactionRep; // Item 39: Reputation Gates
+    uint32 expReward{0};
+    uint32 infoReward{0};
+    uint32 rewardItemTemplateId{0}; // Item 38: Mission Rewards
+    uint32 rewardFactionRep{0}; // Item 38
+    uint32 requiredFactionRep{0}; // Item 39: Reputation Gates
     
     // Global Template Branching (if objective-level branching isn't used)
-    uint32 nextMissionSuccessId;
-    uint32 nextMissionFailId;
-    uint32 factionId; // 0=General, 1=Zion, 2=Machines, 3=Merovingian
+    uint32 nextMissionSuccessId{0};
+    uint32 nextMissionFailId{0};
+    uint32 factionId{0}; // 0=General, 1=Zion, 2=Machines, 3=Merovingian
     std::string faction;
     
     std::vector<MissionObjective> objectives;
