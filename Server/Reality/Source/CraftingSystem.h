@@ -25,6 +25,9 @@ public:
 
     void LoadBlueprints();
     bool HandleCraftRequest(PlayerObject* player, uint32 blueprintId);
+    uint32 GetTotalBlueprintsLoaded() const { return (uint32)m_blueprints.size(); }
+    const CraftingBlueprint* GetBlueprint(uint32 blueprintId) const;
+    const std::map<uint32, CraftingBlueprint>& GetAllBlueprints() const { return m_blueprints; }
 
 private:
     std::map<uint32, CraftingBlueprint> m_blueprints;

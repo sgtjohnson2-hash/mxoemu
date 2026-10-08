@@ -317,6 +317,8 @@ void PlayerObject::awardCombatExperience( uint32 amount )
 		INFO_LOG(format("Character %1% leveled up to %2%!") % m_handle % (uint32)m_lvl);
 		m_parent.QueueCommand(shared_ptr<SystemChatMsg>(new SystemChatMsg(
 			(format("{c:00FF00}Congratulations! You are now level %1%.{/c}") % (uint32)m_lvl).str() )));
+		sendVitals(true, true);
+		sGame.AnnounceStateUpdate(&m_parent, shared_ptr<HealthUpdateMsg>(new HealthUpdateMsg(m_goId)));
 	} else {
 		m_parent.QueueCommand(shared_ptr<SystemChatMsg>(new SystemChatMsg(
 			(format("{c:00FFFF}You gained %1% experience.{/c}") % amount).str() )));

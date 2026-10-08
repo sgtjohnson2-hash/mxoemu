@@ -16,6 +16,8 @@
 #include "FactionWarManager.h"
 #include "SpatialGrid.h"
 #include "Config.h"
+#include "AbilitySystem.h"
+#include "DataLoader.h"
 
 createFileSingleton(MissionSystem);
 
@@ -88,9 +90,33 @@ void MissionSystem::LoadMissionsFromXML(const std::string& directoryPath)
                 templ.description = dataNode->get<std::string>("<xmlattr>.description", "");
                 templ.expReward = dataNode->get<uint32>("<xmlattr>.exp", 100);
                 templ.infoReward = dataNode->get<uint32>("<xmlattr>.info", 50);
-                templ.rewardItemTemplateId = 0;
+                templ.rewardItemTemplateId = dataNode->get<uint32>("<xmlattr>.rewardItem", 0);
                 templ.rewardFactionRep = 0;
                 templ.requiredFactionRep = 0;
+                std::string rewAbIdStr = dataNode->get<std::string>("<xmlattr>.rewardAbility", "0");
+                templ.rewardAbilityName = dataNode->get<std::string>("<xmlattr>.rewardAbilityName", "");
+                try {
+                    long long rawAb = std::stoll(rewAbIdStr);
+                    if (rawAb > 0 && rawAb < 65536) {
+                        templ.rewardAbilityId = (uint32)rawAb;
+                    } else if (rawAb != 0) {
+                        for (const auto& pair : sDataLoader.GetAllAbilities()) {
+                            if (pair.second.goId == (int32)rawAb) {
+                                templ.rewardAbilityId = pair.second.abilityId;
+                                if (templ.rewardAbilityName.empty()) templ.rewardAbilityName = pair.second.name;
+                                break;
+                            }
+                        }
+                    }
+                } catch (...) {}
+                if (templ.rewardAbilityId == 0 && !templ.rewardAbilityName.empty()) {
+                    for (const auto& pair : sDataLoader.GetAllAbilities()) {
+                        if (pair.second.name == templ.rewardAbilityName) {
+                            templ.rewardAbilityId = pair.second.abilityId;
+                            break;
+                        }
+                    }
+                }
                 templ.nextMissionSuccessId = dataNode->get<uint32>("<xmlattr>.nextSuccess", 0);
                 templ.nextMissionFailId = dataNode->get<uint32>("<xmlattr>.nextFail", 0);
                 
@@ -458,6 +484,36 @@ void MissionSystem::AdvanceObjective(PlayerObject* player, ObjectiveCommand comm
         objectiveMet = true;
     }
 
+    // ESCORT objective
+    if (currentObj.command == ObjectiveCommand::ESCORT) {
+        if (command == ObjectiveCommand::ESCORT || (command == ObjectiveCommand::TALK && (expectedTargetGoId == targetId || targetId == 0))) {
+            objectiveMet = true;
+            if (!player->getClient().isBot()) {
+                player->getClient().QueueCommand(std::make_shared<SystemChatMsg>("{c:00FFCC}[ESCORT] Asset secured and reached evacuation coordinates.{/c}"));
+            }
+        }
+    }
+
+    // HACK objective
+    if (currentObj.command == ObjectiveCommand::HACK) {
+        if (command == ObjectiveCommand::HACK || (command == ObjectiveCommand::TALK && (expectedTargetGoId == targetId || targetId == 0))) {
+            objectiveMet = true;
+            if (!player->getClient().isBot()) {
+                player->getClient().QueueCommand(std::make_shared<SystemChatMsg>("{c:00FFCC}[HACK] Security bypass successful. Terminal decrypted.{/c}"));
+            }
+        }
+    }
+
+    // USE_ITEM objective
+    if (currentObj.command == ObjectiveCommand::USE_ITEM) {
+        if (command == ObjectiveCommand::USE_ITEM || (command == ObjectiveCommand::TALK && (expectedTargetGoId == targetId || targetId == 0)) || (command == ObjectiveCommand::GIVE && expectedTargetGoId == targetId)) {
+            objectiveMet = true;
+            if (!player->getClient().isBot()) {
+                player->getClient().QueueCommand(std::make_shared<SystemChatMsg>("{c:00FF00}[MISSION] Mission equipment deployed successfully.{/c}"));
+            }
+        }
+    }
+
     if (objectiveMet)
     {
         // Objective met!
@@ -536,6 +592,21 @@ void MissionSystem::AdvanceObjective(PlayerObject* player, ObjectiveCommand comm
                     auto item = std::make_shared<Item>(rand(), templ.rewardItemTemplateId);
                     player->getInventory()->addItemAuto(item);
                     INFO_LOG(format("Rewarded Item %1% to %2%") % templ.rewardItemTemplateId % player->getHandle());
+                }
+
+                // Authentic story mission ability reward
+                if (templ.rewardAbilityId > 0 && player->getAbilitySystem())
+                {
+                    uint16 nextSlot = (uint16)player->getAbilitySystem()->getLoadedAbilities().size();
+                    if (player->getAbilitySystem()->loadAbility((uint16)templ.rewardAbilityId, 1, nextSlot))
+                    {
+                        player->getAbilitySystem()->saveToDB();
+                        player->getClient().QueueCommand(std::make_shared<AbilityLoadRspMsg>(
+                            (uint16)templ.rewardAbilityId, 1, AbilitySystem::LOAD_RSP_TRAILER));
+                        std::string abName = !templ.rewardAbilityName.empty() ? templ.rewardAbilityName : "New Ability";
+                        player->getClient().QueueCommand(std::make_shared<SystemChatMsg>(
+                            (format("{c:00FFCC}[ABILITY UNLOCKED] You learned %1%!{/c}") % abName).str()));
+                    }
                 }
 
                 if (templ.nextMissionSuccessId > 0) {
@@ -661,6 +732,20 @@ void MissionSystem::CompleteMission(PlayerObject* player, MissionTemplate& templ
         auto item = std::make_shared<Item>(rand(), templ.rewardItemTemplateId);
         player->getInventory()->addItemAuto(item);
         INFO_LOG(format("Rewarded Item %1% to %2%") % templ.rewardItemTemplateId % player->getHandle());
+    }
+
+    if (templ.rewardAbilityId > 0 && player->getAbilitySystem())
+    {
+        uint16 nextSlot = (uint16)player->getAbilitySystem()->getLoadedAbilities().size();
+        if (player->getAbilitySystem()->loadAbility((uint16)templ.rewardAbilityId, 1, nextSlot))
+        {
+            player->getAbilitySystem()->saveToDB();
+            player->getClient().QueueCommand(std::make_shared<AbilityLoadRspMsg>(
+                (uint16)templ.rewardAbilityId, 1, AbilitySystem::LOAD_RSP_TRAILER));
+            std::string abName = !templ.rewardAbilityName.empty() ? templ.rewardAbilityName : "New Ability";
+            player->getClient().QueueCommand(std::make_shared<SystemChatMsg>(
+                (format("{c:00FFCC}[ABILITY UNLOCKED] You learned %1%!{/c}") % abName).str()));
+        }
     }
 
     RecordCompletedMission(goId, templ.missionId);

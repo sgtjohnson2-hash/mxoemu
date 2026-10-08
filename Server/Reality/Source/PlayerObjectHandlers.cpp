@@ -30,6 +30,7 @@
 #include "WeatherSystem.h"
 #include "BotManager.h"
 #include "SocketSystem.h"
+#include "CraftingSystem.h"
 #include "PlayerObject.h"
 #include "Log.h"
 #include "Database/Database.h"
@@ -3017,8 +3018,13 @@ void PlayerObject::RPC_HandleDynamicObjInteraction( ByteBuffer &srcCmd )
         // reaches GIVE objectives), so dispatch on what the current objective expects.
         ActiveObjectiveInfo info;
         ObjectiveCommand cmd = ObjectiveCommand::TALK;
-        if (sMissionSys.GetActiveObjectiveInfo(m_goId, info) && info.command == ObjectiveCommand::GIVE)
-            cmd = ObjectiveCommand::GIVE;
+        if (sMissionSys.GetActiveObjectiveInfo(m_goId, info))
+        {
+            if (info.command == ObjectiveCommand::GIVE) cmd = ObjectiveCommand::GIVE;
+            else if (info.command == ObjectiveCommand::HACK) cmd = ObjectiveCommand::HACK;
+            else if (info.command == ObjectiveCommand::USE_ITEM) cmd = ObjectiveCommand::USE_ITEM;
+            else if (info.command == ObjectiveCommand::ESCORT) cmd = ObjectiveCommand::ESCORT;
+        }
         sMissionSys.AdvanceObjective(this, cmd, targetGoId);
     }
     else
@@ -3590,7 +3596,11 @@ void PlayerObject::RPC_HandleVendorSell(ByteBuffer& srcCmd)
 }
 void PlayerObject::RPC_HandleCraftRequest(ByteBuffer& srcCmd)
 {
-	DEBUG_LOG(format("(%1%) %2%:%3% RPC_HandleCraftRequest") % m_parent.Address() % m_handle % m_goId);
+	if (srcCmd.remaining() < 4) return;
+	uint32 blueprintId = srcCmd.read<uint32>();
+	DEBUG_LOG(format("(%1%) %2%:%3% RPC_HandleCraftRequest: blueprintId=%4%")
+		% m_parent.Address() % m_handle % m_goId % blueprintId);
+	sCraftSys.HandleCraftRequest(this, blueprintId);
 }
 
 void PlayerObject::RPC_HandleFactionInfo(ByteBuffer& srcCmd)

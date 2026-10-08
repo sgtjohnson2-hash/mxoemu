@@ -69,6 +69,8 @@ struct MissionTemplate
     uint32 rewardItemTemplateId{0}; // Item 38: Mission Rewards
     uint32 rewardFactionRep{0}; // Item 38
     uint32 requiredFactionRep{0}; // Item 39: Reputation Gates
+    uint32 rewardAbilityId{0};
+    std::string rewardAbilityName;
     
     // Global Template Branching (if objective-level branching isn't used)
     uint32 nextMissionSuccessId{0};

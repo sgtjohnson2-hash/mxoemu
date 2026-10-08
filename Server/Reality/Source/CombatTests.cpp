@@ -36,6 +36,7 @@
 #include "Item.h"
 #include "StatusEffectManager.h"
 #include "MissionSystem.h"
+#include "CraftingSystem.h"
 #include "Timer.h"
 #include <iostream>
 #include <vector>
@@ -1431,6 +1432,126 @@ int RunCombatTestSuite()
 
 			uint32 chosenFromOrg = sMissionSys.GetAvailableStoryMission(humanOperative.po, 1);
 			check(chosenFromOrg == 99992, "GetAvailableStoryMission correctly aligns with direct org ID 1 (99992)");
+		}
+
+		// ====================================================================
+		// Section 16: Phase D Systems — Crafting Blueprints, Objective Commands & Story Rewards
+		// ====================================================================
+		{
+			std::cout << "\n--- Section 16: Phase D Systems (Crafting, Objectives, Ability Rewards, Vitals) ---" << std::endl;
+
+			Actor humanOperative = makeHuman(&humanClient, 9100100, 10000.0, 10000.0);
+			check(humanOperative.po != nullptr && humanOperative.po->getInventory() != nullptr, "Phase D operative initialized with inventory");
+
+			// 1. Coder Crafting Blueprints Database Loading
+			sDataLoader.LoadBlueprints("Data/hd_dump/blueprints.csv");
+			sCraftSys.LoadBlueprints();
+			check(sCraftSys.GetTotalBlueprintsLoaded() >= 10, "CraftingSystem loaded >= 10 authentic Coder blueprints");
+
+			const CraftingBlueprint* bpStim = sCraftSys.GetBlueprint(101);
+			check(bpStim != nullptr && bpStim->resultingName == "Health Stim Patch" && bpStim->infoCost == 100,
+				"Blueprint 101 resolves to Health Stim Patch (cost: 100 bits)");
+
+			const CraftingBlueprint* bpAmmo = sCraftSys.GetBlueprint(102);
+			check(bpAmmo != nullptr && bpAmmo->resultingName == "Standard 9mm Ammo Clip" && bpAmmo->infoCost == 75,
+				"Blueprint 102 resolves to Standard 9mm Ammo Clip (cost: 75 bits)");
+
+			// 2. Coder Synthesis execution via RPC_HandleCraftRequest (Opcode 0x8066)
+			humanOperative.po->addInfo(2000);
+			uint64 cashBeforeCraft = humanOperative.po->getInfo();
+
+			ByteBuffer craftCmd;
+			craftCmd << (uint8)0x80 << (uint8)0x66 << (uint32)102; // Craft blueprint 102
+			humanClient.captured.clear();
+			humanOperative.po->HandleCommand(craftCmd);
+
+			check(humanClient.sawText("[CRAFTING] Compilation complete! Synthesized: Standard 9mm Ammo Clip"),
+				"HandleCommand(0x8066) executes RPC_HandleCraftRequest with synthesis confirmation");
+			check(humanOperative.po->getInfo() == cashBeforeCraft - 75, "Operative Info Bits deducted by 75 for crafting cost");
+			check(humanOperative.po->getInventory()->hasItemByTemplate(1050), "Operative inventory received item template 1050 (9mm ammo clip)");
+
+			// 3. Mission Objectives: HACK, USE_ITEM, ESCORT
+			MissionTemplate phaseDMission;
+			phaseDMission.missionId = 99993;
+			phaseDMission.title = "Phase D Multi-Objective Infiltration";
+			phaseDMission.factionId = 1; // Zion
+
+			MissionObjective objHack;
+			objHack.command = ObjectiveCommand::HACK;
+			objHack.targetNpcId = 7701;
+			objHack.description = "Hack the mainframe terminal.";
+			phaseDMission.objectives.push_back(objHack);
+
+			MissionObjective objUse;
+			objUse.command = ObjectiveCommand::USE_ITEM;
+			objUse.targetNpcId = 7702;
+			objUse.description = "Deploy tracking beacon on console.";
+			phaseDMission.objectives.push_back(objUse);
+
+			MissionObjective objEscort;
+			objEscort.command = ObjectiveCommand::ESCORT;
+			objEscort.targetNpcId = 7703;
+			objEscort.description = "Escort defecting operative to extraction.";
+			phaseDMission.objectives.push_back(objEscort);
+
+			sMissionSys.AddMissionTemplate(phaseDMission);
+			sMissionSys.AssignMission(humanOperative.po, 99993);
+
+			ActiveObjectiveInfo objInfo;
+			check(sMissionSys.GetActiveObjectiveInfo(humanOperative.go, objInfo) && objInfo.command == ObjectiveCommand::HACK, "Active objective #1 is HACK");
+
+			// Advance HACK
+			humanClient.captured.clear();
+			sMissionSys.AdvanceObjective(humanOperative.po, ObjectiveCommand::HACK, 7701);
+			check(humanClient.sawText("[HACK] Security bypass successful"), "AdvanceObjective(HACK) advances and notifies operative");
+			check(sMissionSys.GetActiveObjectiveInfo(humanOperative.go, objInfo) && objInfo.command == ObjectiveCommand::USE_ITEM,
+				"Active objective advances to #2 (USE_ITEM)");
+
+			// Advance USE_ITEM
+			humanClient.captured.clear();
+			sMissionSys.AdvanceObjective(humanOperative.po, ObjectiveCommand::USE_ITEM, 7702);
+			check(humanClient.sawText("[MISSION] Mission equipment deployed successfully"), "AdvanceObjective(USE_ITEM) advances and notifies operative");
+			check(sMissionSys.GetActiveObjectiveInfo(humanOperative.go, objInfo) && objInfo.command == ObjectiveCommand::ESCORT,
+				"Active objective advances to #3 (ESCORT)");
+
+			// Advance ESCORT (completes mission)
+			humanClient.captured.clear();
+			sMissionSys.AdvanceObjective(humanOperative.po, ObjectiveCommand::ESCORT, 7703);
+			check(humanClient.sawText("[ESCORT] Asset secured"), "AdvanceObjective(ESCORT) completes objective");
+			check(!sMissionSys.HasActiveMission(humanOperative.go), "Mission completes and is cleared from active missions");
+
+			// 4. Story Mission Ability Reward Unlocking
+			MissionTemplate abilityRewardMission;
+			abilityRewardMission.missionId = 99994;
+			abilityRewardMission.title = "Seraphic Awakening";
+			abilityRewardMission.rewardAbilityId = 57; // LogicBlast1Ability
+			abilityRewardMission.rewardAbilityName = "LogicBlast1Ability";
+
+			MissionObjective talkObj;
+			talkObj.command = ObjectiveCommand::TALK;
+			talkObj.targetNpcId = 8805;
+			talkObj.description = "Speak with Seraph.";
+			abilityRewardMission.objectives.push_back(talkObj);
+
+			sMissionSys.AddMissionTemplate(abilityRewardMission);
+			sMissionSys.AssignMission(humanOperative.po, 99994);
+
+			humanClient.captured.clear();
+			sMissionSys.AdvanceObjective(humanOperative.po, ObjectiveCommand::TALK, 8805);
+			check(humanClient.sawText("[ABILITY UNLOCKED] You learned LogicBlast1Ability!"),
+				"Mission completion unlocks rewardAbility (LogicBlast1Ability)");
+			check(humanOperative.po->getAbilitySystem()->getAbility(57) != nullptr,
+				"Operative AbilitySystem contains unlocked ability 57");
+
+			// 5. Level-Up Vitometer & Health Announcement Synchronization
+			uint32 prevMaxHealth = humanOperative.po->getMaximumHealth();
+			uint8 prevLevel = humanOperative.po->getLevel();
+			humanClient.captured.clear();
+			humanOperative.po->awardCombatExperience(50000); // Trigger level up
+
+			check(humanOperative.po->getLevel() > prevLevel, "Operative level increased on awardCombatExperience");
+			check(humanOperative.po->getMaximumHealth() > prevMaxHealth, "Operative max health increased on level up");
+			check(humanClient.sawText("Congratulations! You are now level"), "Level up sends congratulations chat notice and vitals sync");
 		}
 	}
 	catch (const std::exception& e)

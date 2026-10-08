@@ -842,6 +842,7 @@ void PlayerObject::HandleCommand( ByteBuffer &srcCmd )
 		m_RPCshort[0x8063] = &PlayerObject::RPC_HandleItemMountRSI;
 		m_RPCshort[0x8064] = &PlayerObject::RPC_HandleItemUnmountRSI;
 		m_RPCshort[0x8065] = &PlayerObject::RPC_HandleItemMoveSlot;
+		m_RPCshort[0x8066] = &PlayerObject::RPC_HandleCraftRequest;
 		m_RPCshort[0x80be] = &PlayerObject::RPC_HandleAbilityHotbarSync;
 		m_RPCshort[0x8148] = &PlayerObject::RPC_HandleStatusQuery;
 		m_RPCshort[0x80f4] = &PlayerObject::RPC_HandleInteractionTrigger;
