@@ -14,6 +14,7 @@
 #include "GameClient.h"
 #include "MessageTypes.h"
 #include "FactionWarManager.h"
+#include "SpatialGrid.h"
 
 createFileSingleton(MissionSystem);
 
@@ -289,12 +290,15 @@ void MissionSystem::AssignMission(PlayerObject* player, uint32 missionId)
     ActiveMissionState state;
     state.missionId = missionId;
     state.currentObjectiveIndex = 0;
-    
-    m_activeMissions[player->getGoId()] = state;
+    state.objectiveStartTimeMs = getMSTime();
     
     // Item 104: Assign a unique instance ID to the player for this mission
     uint32 newInstanceId = missionId + player->getGoId();
     player->getClient().m_instanceId = newInstanceId;
+    {
+        LocationVector p = player->getPosition();
+        sSpatialGrid.UpdateClientPosition(&player->getClient(), (float)p.x, (float)p.z);
+    }
 
     // Phase 7: Spawn Mission NPCs
     for (const auto& npc : templ.npcs) {
@@ -317,6 +321,9 @@ void MissionSystem::AssignMission(PlayerObject* player, uint32 missionId)
         }
     }
 
+    // Stored only now: the copy used to be taken before spawnedNpcs was filled, so mission
+    // NPC goIds were never recorded and TALK/DEFEAT objectives could never match.
+    m_activeMissions[player->getGoId()] = state;
     
     // Notify player
     std::string msg = "MISSION ASSIGNED: " + m_missions[missionId].title;
@@ -363,7 +370,7 @@ void MissionSystem::AdvanceObjective(PlayerObject* player, ObjectiveCommand comm
     if (command == ObjectiveCommand::GIVE && expectedTargetGoId == targetId) {
         if (!currentObj.requiredItem.empty() && player->getInventory()) {
             uint32 reqItemId = 0;
-            try { reqItemId = std::stoul(currentObj.requiredItem); } catch(...) {}
+            try { reqItemId = std::stoul(currentObj.requiredItem, nullptr, 16); } catch(...) {}
             
             if (player->getInventory()->consumeItemByTemplate(reqItemId)) {
                 objectiveMet = true;
@@ -425,7 +432,10 @@ void MissionSystem::AdvanceObjective(PlayerObject* player, ObjectiveCommand comm
             // Objective-level branching: completes immediately and jumps
             jumpMissionId = currentObj.nextMissionSuccessId;
             INFO_LOG(format("Objective completed with branch! Jumping to mission %1%") % jumpMissionId);
+            RecordCompletedMission(goId, state.missionId);
+            for (const auto& npc : state.spawnedNpcs) sBotMgr.DespawnBot(npc.second);
             m_activeMissions.erase(goId);
+            player->getClient().m_instanceId = 0;
         }
         else {
             state.currentObjectiveIndex++;
@@ -468,8 +478,15 @@ void MissionSystem::AdvanceObjective(PlayerObject* player, ObjectiveCommand comm
                     INFO_LOG(format("Mission completed with branch! Jumping to mission %1%") % jumpMissionId);
                 }
 
-                // clear active mission
+                // clear active mission, remember it, clean up its NPCs and leave the instance
+                RecordCompletedMission(goId, state.missionId);
+                for (const auto& npc : state.spawnedNpcs) sBotMgr.DespawnBot(npc.second);
                 m_activeMissions.erase(goId);
+                player->getClient().m_instanceId = 0;
+                {
+                    LocationVector p = player->getPosition();
+                    sSpatialGrid.UpdateClientPosition(&player->getClient(), (float)p.x, (float)p.z);
+                }
             }
         }
         
@@ -479,6 +496,53 @@ void MissionSystem::AdvanceObjective(PlayerObject* player, ObjectiveCommand comm
             AssignMission(player, jumpMissionId);
         }
     }
+}
+
+bool MissionSystem::GetActiveObjectiveInfo(uint32 playerGoId, ActiveObjectiveInfo& out)
+{
+    std::lock_guard<std::recursive_mutex> lock(m_missionMutex);
+    auto it = m_activeMissions.find(playerGoId);
+    if (it == m_activeMissions.end()) return false;
+    const ActiveMissionState& state = it->second;
+    auto tIt = m_missions.find(state.missionId);
+    if (tIt == m_missions.end()) return false;
+    const MissionTemplate& templ = tIt->second;
+
+    out = ActiveObjectiveInfo();
+    out.missionId = state.missionId;
+    out.title = templ.title;
+    out.objectiveIndex = state.currentObjectiveIndex;
+    out.objectiveCount = (uint32)templ.objectives.size();
+    out.objectiveStartTimeMs = state.objectiveStartTimeMs;
+    if (state.currentObjectiveIndex < templ.objectives.size())
+    {
+        const MissionObjective& obj = templ.objectives[state.currentObjectiveIndex];
+        out.command = obj.command;
+        out.targetNpcId = obj.targetNpcId;
+        out.description = obj.description;
+        out.requiredItem = obj.requiredItem;
+        auto sIt = state.spawnedNpcs.find(obj.targetNpcId);
+        if (sIt != state.spawnedNpcs.end())
+            out.targetGoId = sIt->second;
+    }
+    return true;
+}
+
+bool MissionSystem::AbortMission(PlayerObject* player, const std::string& reason)
+{
+    if (!player) return false;
+    std::lock_guard<std::recursive_mutex> lock(m_missionMutex);
+    uint32 goId = player->getGoId();
+    auto it = m_activeMissions.find(goId);
+    if (it == m_activeMissions.end()) return false;
+
+    INFO_LOG(format("MissionSystem: %1% aborted mission %2% (%3%)") % player->getHandle() % it->second.missionId % reason);
+    for (const auto& npc : it->second.spawnedNpcs) sBotMgr.DespawnBot(npc.second);
+    m_activeMissions.erase(it);
+    player->getClient().m_instanceId = 0;
+    LocationVector p = player->getPosition();
+    sSpatialGrid.UpdateClientPosition(&player->getClient(), (float)p.x, (float)p.z);
+    return true;
 }
 
 void MissionSystem::SendMissionObjectiveDialog(PlayerObject* player)
@@ -668,6 +732,8 @@ void MissionSystem::Update(uint32 deltaMs)
                             deferredAssignments.push_back({player, failJumpId});
                         }
                         
+                        for (const auto& npc : state.spawnedNpcs) sBotMgr.DespawnBot(npc.second);
+                        player->getClient().m_instanceId = 0;
                         it = m_activeMissions.erase(it);
                         continue;
                     }

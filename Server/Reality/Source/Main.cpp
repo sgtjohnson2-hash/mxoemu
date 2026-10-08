@@ -87,6 +87,8 @@ void RunNeuralAudioTestSuite();
 void RunAdaptiveMusicTestSuite();
 void RunMachineCityTestSuite();
 int RunCombatTestSuite(); // CombatTests.cpp - returns number of failed assertions
+int RunBotTesterSuite(int seconds); // BotTesterTests.cpp - tester bot plays a real mission headless
+static int g_testBots = 0;
 static bool g_testCombat = false;
 
 static bool g_testUnderworld = false;
@@ -159,6 +161,9 @@ int main(int argc, char* argv[])
             g_sniffPackets = true;
         } else if (arg == "--test-combat") {
             g_testCombat = true;
+        } else if (arg == "--test-bots") {
+            g_testBots = 120;
+            if (i + 1 < argc && atoi(argv[i + 1]) > 0) g_testBots = atoi(argv[++i]);
         } else if (arg == "--test-protocol") {
             g_testProtocol = true;
         } else if (arg == "--test-frank") {
@@ -334,6 +339,12 @@ int main(int argc, char* argv[])
     }
 
 #ifndef UNITTEST
+    if (g_testBots > 0) {
+        int failures = RunBotTesterSuite(g_testBots);
+        std::cout << std::flush;
+        fflush(NULL);
+        _exit(failures);
+    }
     if (g_testCombat) {
         int failures = RunCombatTestSuite();
         std::cout << std::flush;

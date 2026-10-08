@@ -18,6 +18,8 @@
 #include "MissionSystem.h"
 #include "Threading/TaskScheduler.h"
 #include "Config.h"
+#include "BotTester.h"
+#include "CombatSystem.h"
 #include <fstream>
 #include <memory>
 
@@ -113,6 +115,7 @@ std::shared_ptr<BotClient> BotManager::SpawnSingleBot(float x, float y, float z,
         if (m_bots.size() >= activeBotLimit && !m_bots.empty()) {
             size_t idx = (m_recycleBotIndex++) % m_bots.size();
             auto recycledBot = m_bots[idx];
+            if (recycledBot && recycledBot->IsTester()) recycledBot.reset();
             if (recycledBot) {
                 recycledBot->SetFaction((mxoFaction)faction);
                 recycledBot->MoveTo(x, y, z);
@@ -199,11 +202,24 @@ uint32 BotManager::SpawnMissionBot(const MissionNpc& npcInfo, uint32 instanceId)
     bot->SetFaction((mxoFaction)faction);
     bot->MoveTo(npcInfo.x, npcInfo.y, npcInfo.z);
     
+    bot->SetSpawnLocation(npcInfo.x, npcInfo.y, npcInfo.z);
+    if (npcInfo.type == "FRIENDLY")
+        bot->SetPassive(true); // quest givers stand still and never pick fights
+
     PlayerObject* po = sObjMgr.getGOPtr(bot->GetPlayerGoId());
     if (po) {
         po->setHandle(npcInfo.handle);
         po->getClient().m_instanceId = instanceId;
         po->setFactionName(npcInfo.type);
+        // a fresh bot sits at the origin until positioned (MoveTo only plans a path)
+        po->setPosition(LocationVector(npcInfo.x, npcInfo.y, npcInfo.z));
+        sSpatialGrid.UpdateClientPosition(bot.get(), npcInfo.x, npcInfo.z);
+        if (npcInfo.level > 0 && npcInfo.level <= 255) po->setLevel((uint8)npcInfo.level);
+        if (npcInfo.maxHP > 0) {
+            uint16 hp = (uint16)std::min<uint32>(npcInfo.maxHP, 65000);
+            po->setMaximumHealth(hp);
+            po->setCurrentHealth(hp);
+        }
         // npcInfo.idNpc could be stored if we added an idNpc field to PlayerObject, but for now we rely on the handle or instanceId
     }
 
@@ -286,6 +302,8 @@ void BotManager::Update()
     if (m_lastAiTickMS == 0) deltaSeconds = 0.0f;
     m_lastAiTickMS = now;
 
+    ProcessPendingDespawns();
+
 
 
     // Spawn ambient pedestrian traffic every 30 seconds (capped at 100 bots)
@@ -320,7 +338,7 @@ void BotManager::Update()
             size_t removed = 0;
             for (auto it = m_bots.begin(); it != m_bots.end() && removed < toRemove;)
             {
-                if (*it && !(*it)->IsInCombat() && (*it)->GetFaction() != FACTION_ZION)
+                if (*it && !(*it)->IsInCombat() && (*it)->GetFaction() != FACTION_ZION && !(*it)->IsTester())
                 {
                     uint32 goId = (*it)->GetPlayerGoId();
                     if (goId != 0) {
@@ -357,6 +375,36 @@ void BotManager::Update()
 
     if (!botsSnapshot || botsSnapshot->empty()) {
         return;
+    }
+
+    // Tester bots always play, even with nobody online. Ticked serially here (simulation
+    // thread) because they drive the same RPC handlers human packets do.
+    {
+        std::vector<std::shared_ptr<BotClient>> testers;
+        {
+            std::lock_guard<std::recursive_mutex> lock(m_botMutex);
+            testers = m_testers;
+        }
+        for (auto& t : testers)
+        {
+            if (!t || t->GetPlayerGoId() == 0) continue;
+            float dt = 0.2f;
+            if (t->GetLastLodTick() != 0) dt = std::min(3.5f, (now - t->GetLastLodTick()) / 1000.0f);
+            t->SetLastLodTick(now);
+            try { t->UpdateBotAI(dt); }
+            catch (const std::exception& e) { ERROR_LOG(format("BOTTEST tick exception: %1%") % e.what()); }
+            catch (...) { ERROR_LOG("BOTTEST tick exception (unknown)"); }
+        }
+        if (!testers.empty())
+        {
+            static const uint32 reportMs = (uint32)sConfig.GetIntDefault("Bots.TesterReportSeconds", 300) * 1000;
+            if (m_lastTesterReportMs == 0) m_lastTesterReportMs = now;
+            if (now - m_lastTesterReportMs >= reportMs)
+            {
+                m_lastTesterReportMs = now;
+                WriteTesterReport();
+            }
+        }
     }
 
     // Fast-path: When no human players are connected, assign background LOD without thread pool overhead
@@ -461,7 +509,7 @@ void BotManager::Update()
     activeBots.reserve(64);
     for (const auto& bot : *botsSnapshot)
     {
-        if (bot && bot->GetLOD() != ExecutionLOD::BACKGROUND_AREA)
+        if (bot && !bot->IsTester() && bot->GetLOD() != ExecutionLOD::BACKGROUND_AREA)
         {
             activeBots.push_back(bot);
         }
@@ -718,6 +766,137 @@ void BotManager::HandleCleanseAwakening(uint32 entityGoId)
             bot->SetEvacTarget(hl);
         }
     }
+}
+
+void BotManager::DespawnBot(uint32 goId)
+{
+    if (goId == 0) return;
+    std::lock_guard<std::recursive_mutex> lock(m_botMutex);
+    m_pendingDespawn.push_back(goId);
+}
+
+void BotManager::ProcessPendingDespawns()
+{
+    std::vector<uint32> pending;
+    {
+        std::lock_guard<std::recursive_mutex> lock(m_botMutex);
+        pending.swap(m_pendingDespawn);
+    }
+    for (uint32 goId : pending)
+    {
+        std::shared_ptr<BotClient> victim;
+        {
+            std::lock_guard<std::recursive_mutex> lock(m_botMutex);
+            for (auto it = m_bots.begin(); it != m_bots.end(); ++it)
+            {
+                if (*it && (*it)->GetPlayerGoId() == goId && !(*it)->IsTester())
+                {
+                    victim = *it;
+                    m_bots.erase(it);
+                    m_botsDirty = true;
+                    break;
+                }
+            }
+        }
+        if (victim)
+        {
+            sCombatSys.RemoveCombatant(goId);
+            sObjMgr.destroyObject(goId);
+        }
+    }
+}
+
+void BotManager::SpawnTesters()
+{
+    int count = sConfig.GetIntDefault("Bots.Testers", 6);
+    if (count <= 0)
+    {
+        INFO_LOG("BOTTEST: tester bots disabled (Bots.Testers = 0)");
+        return;
+    }
+    count = std::min(count, 50);
+    for (int i = 0; i < count; i++)
+    {
+        LocationVector start = m_hardlines.empty() ? LocationVector(0.0f, 0.0f, 0.0f)
+                                                   : m_hardlines[(i * 7) % m_hardlines.size()];
+        SpawnTester(i + 1, start);
+    }
+}
+
+std::shared_ptr<BotClient> BotManager::SpawnTester(int index, const LocationVector& start)
+{
+    static const char* factions[] = { "Zion", "Machines", "Merovingian" };
+    static const mxoFaction factionIds[] = { FACTION_ZION, FACTION_MACHINES, FACTION_MEROVINGIAN };
+    uint32 startCash = (uint32)sConfig.GetIntDefault("Bots.TesterStartInfo", 500);
+    int i = index - 1;
+    {
+        uint64 uid = findOrCreateBotCharacter(int(++m_nextBotId), start.x, start.y, start.z, factionIds[i % 3]);
+        std::shared_ptr<BotClient> bot = std::make_shared<BotClient>(uid);
+        PlayerObject* po = sObjMgr.getGOPtr(bot->GetPlayerGoId());
+        if (!po)
+        {
+            ERROR_LOG(format("BOTTEST: could not construct tester %1%") % (i + 1));
+            return nullptr;
+        }
+        char handle[32];
+        snprintf(handle, sizeof(handle), "Tester_%02d", i + 1);
+        bot->SetFaction(factionIds[i % 3]);
+        bot->SetSpawnLocation(start.x, start.y, start.z);
+        po->setHandle(handle);
+        po->setFactionName(factions[i % 3]);
+        po->setLevel(1);
+        po->setPosition(start);
+        po->addInformation(startCash);
+        po->ensureAbilitySystem();
+        sSpatialGrid.UpdateClientPosition(bot.get(), start.x, start.z);
+        bot->MakeTester(i + 1);
+        {
+            std::lock_guard<std::recursive_mutex> lock(m_botMutex);
+            m_bots.push_back(bot);
+            m_testers.push_back(bot);
+            m_botsDirty = true;
+        }
+        INFO_LOG(format("BOTTEST: spawned %1% (%2%) goId %3% at %4%,%5%,%6%")
+            % handle % factions[i % 3] % bot->GetPlayerGoId() % start.x % start.y % start.z);
+        return bot;
+    }
+}
+
+std::string BotManager::GetTesterSummary()
+{
+    std::vector<std::shared_ptr<BotClient>> testers;
+    {
+        std::lock_guard<std::recursive_mutex> lock(m_botMutex);
+        testers = m_testers;
+    }
+    std::string out;
+    for (auto& t : testers)
+        if (t && t->GetTester())
+            out += t->GetTester()->ReportLine() + "\n";
+    if (out.empty()) out = "no tester bots running (Bots.Testers = 0?)\n";
+    return out;
+}
+
+void BotManager::WriteTesterReport()
+{
+    std::vector<std::shared_ptr<BotClient>> testers;
+    {
+        std::lock_guard<std::recursive_mutex> lock(m_botMutex);
+        testers = m_testers;
+    }
+    std::string json = "{\n  \"generatedMs\": " + std::to_string(getMSTime()) + ",\n  \"testers\": [\n";
+    bool first = true;
+    for (auto& t : testers)
+    {
+        if (!t || !t->GetTester()) continue;
+        INFO_LOG("BOTTEST " + t->GetTester()->ReportLine());
+        if (!first) json += ",\n";
+        json += t->GetTester()->ReportJson();
+        first = false;
+    }
+    json += "\n  ],\n  \"findings\": " + TesterBrain::FindingsJson() + "\n}\n";
+    std::ofstream f("bot_test_report.json", std::ios::trunc);
+    if (f.is_open()) f << json;
 }
 
 void BotManager::PruneDeadBots()

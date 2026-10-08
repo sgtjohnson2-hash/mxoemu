@@ -192,6 +192,9 @@ public:
     void setFightingStyle(FightingStyle style) { m_fightingStyle = style; }
     
     std::shared_ptr<class AbilitySystem> getAbilitySystem() { return m_abilitySystem; }
+    // Bots never go through the human spawn path that creates the AbilitySystem; tester bots
+    // need one to load/use abilities through the real RPCs. Memory-only, no DB.
+    void ensureAbilitySystem();
     
     void setCurrentHealth(uint16 hp) { m_healthC = hp; }
     void setMaximumHealth(uint16 hp) { m_healthM = hp; }
@@ -211,6 +214,7 @@ public:
     void setEvadeShield(uint8 shield);
     void consumeEvadeShield(uint8 amount);
     void regenerateEvadeShield(uint32 deltaMs);
+    void regenerateVitals();          // out-of-combat Health / Inner Strength recovery
     uint32 getLastBallisticFireTime() const { return m_lastBallisticFireTime; }
     void setLastBallisticFireTime(uint32 t) { m_lastBallisticFireTime = t; }
 
@@ -412,6 +416,8 @@ private:
 
     uint8 m_evadeShield = 100;
     uint32 m_lastBallisticFireTime = 0;
+    uint32 m_lastDamageTakenMs = 0;   // out-of-combat regen waits for this to age
+    uint32 m_lastRegenTickMs = 0;
     uint32 m_equippedWeaponId = 0;
 
     std::unordered_set<uint32> m_knownEntities;

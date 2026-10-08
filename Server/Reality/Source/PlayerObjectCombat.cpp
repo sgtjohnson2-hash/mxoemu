@@ -104,6 +104,7 @@ void PlayerObject::takeDamage( uint32 attackerGoId, uint16 damage, uint32 fxId )
 {
 	if (m_isDead)
 		return;
+	m_lastDamageTakenMs = getMSTime();
 
 	// Configurable retail hit FX (Task 3): 0x280006DF was a misidentified weapon skeleton model
 	// (resource/GameObjects/weapons/program_launcher2/skeleton/skeleton.ska) that crashed retail 7.6005
@@ -377,7 +378,11 @@ void PlayerObject::die( uint32 killerGoId )
 	// H1: every death pays out here (it used to live in ResolveAttack and only ran for
 	// zero-delay deaths, which never happen because takedowns always delay death 3 s)
 	if (killer && killerGoId != m_goId)
+	{
 		sCombatSys.AwardKill(killer, this);
+		// DEFEAT objectives were never advanced by anything (only LOOT was, below)
+		try { sMissionSys.AdvanceObjective(killer, ObjectiveCommand::DEFEAT, m_goId); } catch (...) {}
+	}
     
     // V17: The Loot Engine (Only bots drop loot)
     if (m_parent.isBot())

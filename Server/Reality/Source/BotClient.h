@@ -13,6 +13,7 @@
 #include "AI/MemoryStreamCuller.h"
 #include "AI/GOAPPlanner.h"
 class BehaviorNode;
+class TesterBrain;
 
 struct BotVector2D {
     float x;
@@ -60,6 +61,16 @@ public:
     void RoamAndSwarm(float deltaSeconds = -1.0f);
     void AttackTarget(uint32 targetGoId);
     void MoveTo(float x, float y, float z);
+    // Walks the current NavMesh path (planned by MoveTo). Returns true once the final
+    // waypoint is reached or there is no path. Used by tester bots.
+    bool StepAlongPath(float deltaSeconds, float speed, uint8 locomotionAnim);
+    bool HasPath() const { return !m_pathWaypoints.empty() && m_currentWaypointIndex < (int)m_pathWaypoints.size(); }
+    void ClearPath() { m_pathWaypoints.clear(); m_currentWaypointIndex = 0; }
+
+    // Tester bots ("PlayerSim"): play the game through the real client RPC handlers.
+    bool IsTester() const { return m_tester != nullptr; }
+    TesterBrain* GetTester() const { return m_tester.get(); }
+    void MakeTester(int index);
 
     void Say(const std::string& msg);
     void Emote(uint32 emoteId);
@@ -186,6 +197,7 @@ private:
     uint32 m_infectChannelDurationMs{2500};
     bool m_isEvacuating{false};
     LocationVector m_evacTarget;
+    std::shared_ptr<TesterBrain> m_tester;
 };
 
 #endif

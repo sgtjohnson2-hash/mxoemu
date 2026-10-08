@@ -49,6 +49,17 @@ public:
 
     void PopulateWorld();
     void PruneDeadBots();
+
+    // Removes one bot (mission NPC cleanup). Deferred to the next BotManager::Update because
+    // it is called from inside die()/AdvanceObjective of the very object being removed.
+    void DespawnBot(uint32 goId);
+
+    // Tester bots ("PlayerSim", BotTester.cpp): spawn Bots.Testers players that level,
+    // run missions, fight and shop through the real client RPC handlers, and report.
+    void SpawnTesters();
+    std::shared_ptr<BotClient> SpawnTester(int index, const LocationVector& start);
+    std::string GetTesterSummary();
+    void WriteTesterReport();
     static constexpr size_t MAX_BOT_POPULATION_CEILING = 12000;
     size_t GetBotCount() const {
         std::lock_guard<std::recursive_mutex> lock(m_botMutex);
@@ -82,6 +93,10 @@ private:
     std::vector<uint32> m_activePlayerIds;
     bool m_aggroEnabled;
     bool m_combatLogging;
+    std::vector<std::shared_ptr<BotClient>> m_testers;
+    std::vector<uint32> m_pendingDespawn;
+    void ProcessPendingDespawns();
+    uint32 m_lastTesterReportMs{0};
     mutable std::recursive_mutex m_botMutex;
 };
 

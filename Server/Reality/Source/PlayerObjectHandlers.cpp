@@ -742,7 +742,7 @@ void PlayerObject::ParsePlayerCommand( string theCmd )
 			"discipline", "class", "loadability", "learn", "dojo", "loadout", "botdebug",
 			"claimhl", "send", "sendCmd", "socket", "bullettime", "gotoPos", "incX", "incY", "incZ",
 			"goThru", "random", "update", "gotoPlayer", "go", "frank", "punisher", "underworld",
-			"syndicate", "police", "swat", "citylife", "simulation", "emergent", NULL };
+			"syndicate", "police", "swat", "citylife", "simulation", "emergent", "bottest", NULL };
 		for (int i = 0; devCommands[i] != NULL; i++)
 		{
 			if (iequals(command, devCommands[i]) && !m_isAdmin)
@@ -754,6 +754,22 @@ void PlayerObject::ParsePlayerCommand( string theCmd )
 	}
 
 	using boost::erase_all;
+	if (iequals(command, "bottest"))
+	{
+		// &bottest - status of the tester bots (BotTester.cpp) and refresh bot_test_report.json
+		std::string summary = sBotMgr.GetTesterSummary();
+		size_t start = 0;
+		while (start < summary.size())
+		{
+			size_t end = summary.find('\n', start);
+			if (end == std::string::npos) end = summary.size();
+			if (end > start)
+				m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:00FFFF}[BOTTEST] " + summary.substr(start, end - start) + "{/c}"));
+			start = end + 1;
+		}
+		sBotMgr.WriteTesterReport();
+		return;
+	}
 	if (iequals(command, "attack") || iequals(command, "interlock"))
 	{
 		if (m_targetGoId == 0)
@@ -1002,7 +1018,7 @@ void PlayerObject::ParsePlayerCommand( string theCmd )
 		// Spawns one passive, scaled training bot distM metres from the player along
 		// (facing + angleOffsetRad), turned to face the player. World units are 100/m and
 		// "forward" is (-sin(rot), -cos(rot)) - the same convention GoAhead() walks with.
-		auto spawnDojoBot = [&](float distM, float angleOffsetRad, FightingStyle botStyle = FightingStyle::None, const std::string& botName = "") -> bool
+		auto spawnDojoBot = [&](float distM, float angleOffsetRad, FightingStyle botStyle = FightingStyle::None, const std::string& botName = "", float customHp = 0.0f) -> bool
 		{
 			const LocationVector botPos = DojoPlaceInFront(pos, distM, angleOffsetRad);
 			const double bx = botPos.x;
@@ -1035,7 +1051,7 @@ void PlayerObject::ParsePlayerCommand( string theCmd )
 			// reasonable number of 4 s interlock rounds); damage scales with the player's HP pool
 			// so the dummy stays a threat for characters that have levelled up (+50 HP/level).
 			const uint8 botLvl = std::max<uint8>(1, getLevel());
-			const float hpF = std::max(350.0f, std::min(800.0f, 150.0f + 10.0f * botLvl));
+			const float hpF = (customHp > 0.0f) ? customHp : std::max(350.0f, std::min(800.0f, 150.0f + 10.0f * botLvl));
 			const float dmgScale = std::max(1.0f, std::min(20.0f, float(getMaximumHealth()) / 150.0f));
 			botPo->setLevel(botLvl);
 			botPo->setMaximumHealth((uint16)hpF);
@@ -1062,23 +1078,28 @@ void PlayerObject::ParsePlayerCommand( string theCmd )
 		FightingStyle targetStyle = FightingStyle::None;
 		std::string styleLabel = "Street Brawler";
 		bool is1v1 = false;
+		float optHp = 0.0f;
 
 		if (iequals(subCommand, "kungfu") || iequals(subCommand, "wushu")) {
 			targetStyle = FightingStyle::KungFu;
 			styleLabel = "Kung Fu Master";
 			is1v1 = true;
+			cmdStream >> optHp;
 		} else if (iequals(subCommand, "karate")) {
 			targetStyle = FightingStyle::Karate;
 			styleLabel = "Karate Master";
 			is1v1 = true;
+			cmdStream >> optHp;
 		} else if (iequals(subCommand, "aikido")) {
 			targetStyle = FightingStyle::Aikido;
 			styleLabel = "Aikido Sensei";
 			is1v1 = true;
+			cmdStream >> optHp;
 		} else if (iequals(subCommand, "brawl") || iequals(subCommand, "street")) {
 			targetStyle = FightingStyle::None;
 			styleLabel = "Street Brawler";
 			is1v1 = true;
+			cmdStream >> optHp;
 		} else if (iequals(subCommand, "1v1")) {
 			is1v1 = true;
 			string optStyle;
@@ -1095,6 +1116,11 @@ void PlayerObject::ParsePlayerCommand( string theCmd )
 				} else if (iequals(optStyle, "brawl") || iequals(optStyle, "street")) {
 					targetStyle = FightingStyle::None;
 					styleLabel = "Street Brawler";
+				} else {
+					try { optHp = (float)std::stof(optStyle); } catch (...) {}
+				}
+				if (optHp <= 0.0f) {
+					cmdStream >> optHp;
 				}
 			} else {
 				static int s_cycleStyle = 0;
@@ -1108,7 +1134,7 @@ void PlayerObject::ParsePlayerCommand( string theCmd )
 
 		if (is1v1)
 		{
-			bool ok = spawnDojoBot(4.0f, 0.0f, targetStyle, "Dojo " + styleLabel);
+			bool ok = spawnDojoBot(4.0f, 0.0f, targetStyle, "Dojo " + styleLabel, optHp);
 			if (ok && m_lastDojoBotGoId) {
 				sCombatSys.RequestInterlock(m_goId, m_lastDojoBotGoId);
 			}
@@ -2972,12 +2998,25 @@ void PlayerObject::RPC_HandleDynamicObjInteraction( ByteBuffer &srcCmd )
 
 	INFO_LOG( debugStr );
 	
-    // V17: The Mission Interaction (NPC TALK)
+    // V17: The Mission Interaction (NPC TALK / GIVE)
     uint32 targetGoId = sObjMgr.getGOForView(&m_parent, viewId);
     if (targetGoId > 0)
     {
-        // Advance mission objective for TALK command
-        sMissionSys.AdvanceObjective(this, ObjectiveCommand::TALK, targetGoId);
+        // Must actually be next to the NPC (this used to complete from anywhere in the world)
+        PlayerObject* npc = sObjMgr.getGOPtrSafe(targetGoId);
+        if (npc && npc != this && m_pos.Distance(npc->getPosition()) > 2000.0)
+        {
+            INFO_LOG(format("%1%: interaction with %2% refused, %3% units away") % m_handle % targetGoId % m_pos.Distance(npc->getPosition()));
+            m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FFFF00}You are too far away.{/c}"));
+            return;
+        }
+        // Handing a mission item over is the same client interaction as talking (no other RPC
+        // reaches GIVE objectives), so dispatch on what the current objective expects.
+        ActiveObjectiveInfo info;
+        ObjectiveCommand cmd = ObjectiveCommand::TALK;
+        if (sMissionSys.GetActiveObjectiveInfo(m_goId, info) && info.command == ObjectiveCommand::GIVE)
+            cmd = ObjectiveCommand::GIVE;
+        sMissionSys.AdvanceObjective(this, cmd, targetGoId);
     }
     else
     {
@@ -3559,7 +3598,7 @@ void PlayerObject::RPC_HandleUpgradeAbility(ByteBuffer& srcCmd)
 void PlayerObject::RPC_HandleMissionAbort(ByteBuffer& srcCmd)
 {
 	DEBUG_LOG(format("(%1%) %2%:%3% RPC_HandleMissionAbort") % m_parent.Address() % m_handle % m_goId);
-	if (sMissionSys.HasActiveMission(m_goId))
+	if (sMissionSys.AbortMission(this, "player abort (0x80a6)"))
 	{
 		m_parent.QueueCommand(std::make_shared<SystemChatMsg>("{c:FF4444}[OPERATOR] Contract aborted. Uplink severed.{/c}"));
 	}

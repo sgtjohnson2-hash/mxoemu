@@ -80,6 +80,21 @@ struct MissionTemplate
     std::vector<MissionNpc> npcs;
 };
 
+// Read-only snapshot of a player's current objective (used by tester bots and diagnostics)
+struct ActiveObjectiveInfo
+{
+    uint32 missionId = 0;
+    std::string title;
+    uint32 objectiveIndex = 0;
+    uint32 objectiveCount = 0;
+    ObjectiveCommand command = ObjectiveCommand::TALK;
+    uint32 targetNpcId = 0;   // idNpc from the mission XML
+    uint32 targetGoId = 0;    // resolved goId of the spawned mission NPC, 0 = never spawned
+    std::string description;
+    std::string requiredItem;
+    uint64 objectiveStartTimeMs = 0;
+};
+
 struct ActiveMissionState
 {
     uint32 missionId;
@@ -178,6 +193,11 @@ public:
     // Epoch II: Procedural Mission Synthesis Engine (Faction Tension Driven)
     uint32 SynthesizeProceduralMission(PlayerObject* player, ProceduralMissionArchetype archetype);
     uint32 GenerateFactionTensionMission(PlayerObject* player);
+
+    // Snapshot of the current objective; false when the player has no active mission.
+    bool GetActiveObjectiveInfo(uint32 playerGoId, ActiveObjectiveInfo& out);
+    // Really abort the active mission: despawn its NPCs, leave the mission instance.
+    bool AbortMission(PlayerObject* player, const std::string& reason);
 
     bool HasActiveMission(uint32 playerGoId) {
         std::lock_guard<std::recursive_mutex> lock(m_missionMutex);

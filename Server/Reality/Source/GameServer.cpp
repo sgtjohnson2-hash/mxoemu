@@ -96,6 +96,7 @@ bool GameServer::Start()
     sCombatSys.LoadAbilities(); // Synthesize moves for all retail abilities loaded by DataLoader
 
     sBotMgr.PopulateWorld();
+    sBotMgr.SpawnTesters(); // Bots.Testers player-simulating QA bots (BotTester.cpp)
     if (sConfig.GetBoolDefault("GameServer.EnableStartupStressTest", false)) {
         sBotMgr.BotStressTest(500); // Only spawn stress test bots if explicitly enabled
     }

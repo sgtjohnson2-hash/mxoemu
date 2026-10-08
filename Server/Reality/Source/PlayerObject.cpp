@@ -38,6 +38,7 @@
 #include "ObjectMgr.h"
 #include "SpatialGrid.h"
 #include "MissionSystem.h"
+#include "Config.h"
 #include "AbilitySystem.h"
 #include <set>
 #include <mutex>
@@ -976,6 +977,9 @@ void PlayerObject::Update()
 		// Natural Evade Shield regeneration (after 4s out of ballistic fire)
 		regenerateEvadeShield(1000);
 
+		// Out-of-combat Health / IS recovery (there was none: a hurt character stayed hurt forever)
+		regenerateVitals();
+
 		checkAndStore();
 
 		//fire events that occurred safely with local buffer under m_eventMutex
@@ -1154,6 +1158,41 @@ void PlayerObject::consumeEvadeShield(uint8 amount)
         m_parent.QueueState(std::make_shared<SelfEvadeShieldMsg>(m_evadeShield));
     }
     sGame.AnnounceStateUpdate(&m_parent, std::make_shared<EvadeShieldUpdateMsg>(m_goId, m_evadeShield));
+}
+
+void PlayerObject::ensureAbilitySystem()
+{
+    if (!m_abilitySystem)
+        m_abilitySystem = std::make_shared<AbilitySystem>(this);
+}
+
+void PlayerObject::regenerateVitals()
+{
+    static const bool enabled = sConfig.GetBoolDefault("Combat.OutOfCombatRegen", true);
+    static const uint32 tickMs = (uint32)sConfig.GetIntDefault("Combat.RegenTickMs", 3000);
+    static const uint32 calmMs = (uint32)sConfig.GetIntDefault("Combat.RegenDelayMs", 8000);
+    static const uint32 hpPct = (uint32)sConfig.GetIntDefault("Combat.RegenHealthPct", 4);
+    static const uint32 isPct = (uint32)sConfig.GetIntDefault("Combat.RegenISPct", 6);
+    if (!enabled)
+        return;
+
+    uint32 now = getMSTime();
+    if (now - m_lastRegenTickMs < tickMs)
+        return;
+    m_lastRegenTickMs = now;
+
+    if (m_isDead || m_healthC == 0 || m_inCombat || m_ilPartner != 0 || m_deathDelayMS > 0)
+        return;
+    if (now - m_lastDamageTakenMs < calmMs)
+        return;
+    if (m_healthC >= m_healthM && m_innerStrC >= m_innerStrM)
+        return;
+
+    uint32 hp = uint32(m_healthC) + std::max<uint32>(1, uint32(m_healthM) * hpPct / 100);
+    uint32 is = uint32(m_innerStrC) + std::max<uint32>(1, uint32(m_innerStrM) * isPct / 100);
+    m_healthC = uint16(std::min<uint32>(hp, m_healthM));
+    m_innerStrC = uint16(std::min<uint32>(is, m_innerStrM));
+    sendHealthUpdate();
 }
 
 void PlayerObject::regenerateEvadeShield(uint32 deltaMs)

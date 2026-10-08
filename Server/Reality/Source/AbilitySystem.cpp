@@ -105,6 +105,9 @@ void AbilitySystem::saveToDB()
 {
     if (!m_owner)
         return;
+    // bots are memory-only (virtual charIds >= 9000000): never write their loadouts
+    if (m_owner->getClient().isBot() || m_owner->getCharacterUID() >= 9000000)
+        return;
 
     PreparedStatement delStmt("DELETE FROM `abilities` WHERE `charId` = ?0");
     delStmt.SetUInt64(0, m_owner->getCharacterUID());

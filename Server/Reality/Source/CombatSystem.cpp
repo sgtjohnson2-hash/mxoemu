@@ -1394,6 +1394,15 @@ CombatSystem::AttackResult CombatSystem::StrikeInterlock(InterlockSession &sessi
 	return res;
 }
 
+// Tester bots (BotTester.cpp) choose their own tactics/moves through the client RPCs like a
+// human does; the server-side bot AI below must not overwrite them.
+static bool IsServerDrivenBot(PlayerObject* p)
+{
+	if (!p || !p->getClient().isBot()) return false;
+	BotClient* b = dynamic_cast<BotClient*>(&p->getClient());
+	return !(b && b->IsTester());
+}
+
 bool CombatSystem::RunInterlockRound(InterlockSession &session)
 {
 	PlayerObject* pA = getPlayerSafe(session.goIdA);
@@ -1412,7 +1421,7 @@ bool CombatSystem::RunInterlockRound(InterlockSession &session)
 	const CombatMove* moveB = (session.queuedMoveB != 0 && session.queuedMoveB != 1) ? GetMove(session.queuedMoveB) : GetDefaultStyleMove(pB);
 
 	// Bot combat AI: update round tactics and discipline moves
-	if (pA->getClient().isBot()) {
+	if (IsServerDrivenBot(pA)) {
 		uint8 newTac = TACTIC_POWER;
 		bool isElite = (pA->getHandle().find("Agent") != std::string::npos || (pA->getLevel() >= 30 && pA->getHandle().find("Dojo") == std::string::npos));
 		if (isElite) {
@@ -1450,7 +1459,7 @@ bool CombatSystem::RunInterlockRound(InterlockSession &session)
 			}
 		}
 	}
-	if (pB->getClient().isBot()) {
+	if (IsServerDrivenBot(pB)) {
 		uint8 newTac = TACTIC_POWER;
 		bool isElite = (pB->getHandle().find("Agent") != std::string::npos || (pB->getLevel() >= 30 && pB->getHandle().find("Dojo") == std::string::npos));
 		if (isElite) {
@@ -1492,7 +1501,7 @@ bool CombatSystem::RunInterlockRound(InterlockSession &session)
 	uint8 tacA = session.tacticA;
 	uint8 tacB = session.tacticB;
 
-	const bool humanRound = !pA->getClient().isBot() || !pB->getClient().isBot();
+	const bool humanRound = !IsServerDrivenBot(pA) || !IsServerDrivenBot(pB);
 	if (humanRound)
 	{
 		INFO_LOG(format("Interlock round %1% start: %2%:%3% (tactic %4%, move %5%, HP %6%/%7%) vs %8%:%9% (tactic %10%, move %11%, HP %12%/%13%)")

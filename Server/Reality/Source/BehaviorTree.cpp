@@ -2,6 +2,7 @@
 #include "BehaviorTree.h"
 #include "BotClient.h"
 #include "BotManager.h"
+#include "Config.h"
 #include "ObjectMgr.h"
 #include "Timer.h"
 #include "Log.h"
@@ -123,10 +124,24 @@ NodeStatus ActionFindTarget::Tick(BotClient* bot)
     {
         if (client == bot || client->GetPlayerGoId() == bot->GetPlayerGoId()) continue;
         
+        // Street NPCs hunt players (humans and tester bots), not each other. NPC-vs-NPC fights
+        // locked both sides in invisible interlocks and left everyone else standing around
+        // retrying refused interlocks. Bots.NpcVsNpc = 1 restores the old behaviour.
+        static const bool s_npcVsNpc = sConfig.GetBoolDefault("Bots.NpcVsNpc", false);
+        if (!s_npcVsNpc && client->isBot())
+        {
+            BotClient* otherBot = dynamic_cast<BotClient*>(client);
+            if (!otherBot || !otherBot->IsTester()) continue;
+        }
+
         PlayerObject* potentialTarget = client->getPlayer();
         if (!potentialTarget) potentialTarget = BotGetPlayer(client->GetPlayerGoId());
         if (potentialTarget && !potentialTarget->isDead())
         {
+            // already locked in an interlock with someone else: not available
+            uint32 partner = potentialTarget->getInterlockPartner();
+            if (partner != 0 && partner != bot->GetPlayerGoId()) continue;
+
             if (sStatusEffectManager.HasEffect(potentialTarget->getGoId(), EFFECT_FACTION_MASK)) continue; // Item 25: Simulacra Masking
             
             std::string fName = potentialTarget->getFactionName();

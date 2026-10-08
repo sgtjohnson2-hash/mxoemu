@@ -25,6 +25,7 @@
 #include "AI/CoverSystem.h"
 #include "AI/SensoryPerceptionSystem.h"
 #include "BackdoorNetwork.h"
+#include "BotTester.h"
 #include <cmath>
 #include <fstream>
 #include <typeinfo>
@@ -159,6 +160,13 @@ void BotClient::UpdateBotAI(float deltaSeconds)
     
 
     ClearQueues();
+
+    // Tester bots run their own player-like brain (BotTester.cpp), including while dead.
+    if (m_tester)
+    {
+        m_tester->Tick(deltaSeconds);
+        return;
+    }
 
     if (me->isDead())
     {
@@ -620,7 +628,13 @@ void BotClient::AttackTarget(uint32 targetGoId)
     
     if (dist <= meleeRange) {
         SetLocomotionAnimation(0);
-        sCombatSys.RequestInterlock(m_playerGoId, targetGoId);
+        if (!sCombatSys.RequestInterlock(m_playerGoId, targetGoId))
+        {
+            // Refused (usually: the target is already interlocked with someone else). Standing
+            // next to it retrying every 2 s is what made street bots look frozen - give up.
+            m_targetGoId = 0;
+            m_nextActionTime = getMSTime() + 4000 + (rand() % 4000);
+        }
     }
     else
     {
@@ -661,6 +675,56 @@ void BotClient::AttackTarget(uint32 targetGoId)
             }
         }
     }
+}
+
+void BotClient::MakeTester(int index)
+{
+    m_tester = std::make_shared<TesterBrain>(this, index);
+}
+
+bool BotClient::StepAlongPath(float deltaSeconds, float speed, uint8 locomotionAnim)
+{
+    PlayerObject* me = BotGetPlayer(m_playerGoId);
+    if (!me || me->isDead()) return false;
+    if (!HasPath()) return true;
+
+    auto wp = m_pathWaypoints[m_currentWaypointIndex];
+    LocationVector loc = me->getPosition();
+    float dx = wp.first - (float)loc.x;
+    float dz = wp.second - (float)loc.z;
+    float dist = std::sqrt(dx*dx + dz*dz);
+    float step = speed * std::max(0.01f, deltaSeconds);
+
+    if (dist <= std::max(50.0f, step))
+    {
+        loc.x = wp.first;
+        loc.z = wp.second;
+        m_currentWaypointIndex++;
+    }
+    else
+    {
+        loc.x += (dx / dist) * step;
+        loc.z += (dz / dist) * step;
+        loc.rot = std::atan2(dz, dx);
+    }
+    me->setPosition(loc);
+    sSpatialGrid.UpdateClientPosition(this, (float)loc.x, (float)loc.z);
+
+    bool arrived = !HasPath();
+    uint32 nowMs = getMSTime();
+    if (arrived || nowMs - m_lastRoamBroadcastMs >= 150)
+    {
+        m_lastRoamBroadcastMs = nowMs;
+        uint8 anim = arrived ? 0 : locomotionAnim;
+        sGame.AnnounceStateUpdateNear(loc.x, loc.z, 15000.0f, std::make_shared<PositionStateMsg>(m_playerGoId));
+        sGame.AnnounceStateUpdateNear(loc.x, loc.z, 15000.0f, std::make_shared<LocomotionStateMsg>(m_playerGoId, anim, loc.getMxoRot()));
+    }
+    if (arrived)
+    {
+        m_pathWaypoints.clear();
+        m_currentWaypointIndex = 0;
+    }
+    return arrived;
 }
 
 void BotClient::MoveTo(float x, float y, float z)
