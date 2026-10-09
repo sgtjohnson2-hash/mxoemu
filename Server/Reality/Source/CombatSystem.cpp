@@ -622,13 +622,17 @@ bool CombatSystem::RequestInterlock(uint32 attackerGoId, uint32 targetGoId, uint
 							clientTargetRef |= (uint32(PLAYER_SPAWN_COUNTER) << 16);
 						otherViewWithSpawnId = clientTargetRef;
 					}
-					// On every client: slot 1 = that client's own character (VIEWID_SELF | (PLAYER_SPAWN_COUNTER << 16)), slot 2 = the opponent.
-					// client.dll FUN_104fd140 explicitly checks: if (DAT_108a4378 == param_1[10]), where param_1[10]
-					// is slot 1. DAT_108a4378 holds (VIEWID_SELF | (PLAYER_SPAWN_COUNTER << 16)) = 0x002F0002.
-					// Only when the local player is in slot 1 does the client spawn Window 0x0E (Tactic Wheel)
-					// and enter the interlock camera and animation loop (FUN_1051e180).
+					// On every client: slot 1 = that client's own character, slot 2 = the opponent.
+					// ILTCommHandleMgr::ResolveHandle (client.dll 0x622ceda0) resolves slot handles by unpacking
+					// the low word as viewId and calling ObjectManager::FindObjectByViewId(viewId).
+					// The local player entity has viewId = sObjMgr.getViewForGO(&client, selfGoId).
+					// Only when slot 1 resolves to the local player entity does client.dll FUN_104fd060
+					// (0x624fd270) pass the check (DAT_108a4378 == param_1[10]), unlocking the interlock camera,
+					// spawning the tactic HUD buttons, and driving the martial arts animation blend trees.
+					uint16 selfViewId = sObjMgr.getViewForGO(&sides[i].self->getClient(), sides[i].self->getGoId());
+					uint32 selfViewWithSpawnId = uint32(selfViewId) | (uint32(PLAYER_SPAWN_COUNTER) << 16);
 					std::vector<uint32> slots;
-					slots.push_back(uint32(VIEWID_SELF) | (uint32(PLAYER_SPAWN_COUNTER) << 16));
+					slots.push_back(selfViewWithSpawnId);
 					slots.push_back(otherViewWithSpawnId);
 					uint32 openMove = SelectInterlockMove(session, pA, pB, InterlockExchangeOutcome::NormalHit);
 					InterlockAnimPair openPair = CombatAnimationMatrix::GetDynamicAnimationPair(
@@ -1450,7 +1454,9 @@ void CombatSystem::SendInterlockExchange(InterlockSession &session, PlayerObject
 
 		PlayerObject* opponent = (sides[i].p == pA) ? pB : pA;
 		std::vector<uint32> slots;
-		slots.push_back(uint32(VIEWID_SELF) | (uint32(PLAYER_SPAWN_COUNTER) << 16));
+		uint16 selfViewId = sObjMgr.getViewForGO(&sides[i].p->getClient(), sides[i].p->getGoId());
+		uint32 selfViewWithSpawnId = uint32(selfViewId) | (uint32(PLAYER_SPAWN_COUNTER) << 16);
+		slots.push_back(selfViewWithSpawnId);
 		if (opponent)
 		{
 			uint16 otherViewId = sObjMgr.getViewForGO(&sides[i].p->getClient(), opponent->getGoId());
