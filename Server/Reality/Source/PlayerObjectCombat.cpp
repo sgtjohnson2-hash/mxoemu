@@ -629,6 +629,9 @@ void PlayerObject::RPC_HandleCloseCombatRequest( ByteBuffer &srcCmd )
 		return;
 	}
 
+	if (spawnCounter == 0)
+		spawnCounter = PLAYER_SPAWN_COUNTER;
+
 	//echo the client's own u32 (view | spawn<<16) back in the interlock pairing, as HDS does
 	uint32 clientTargetRef = uint32(targetViewId) | (uint32(spawnCounter) << 16);
 	if (sCombatSys.RequestInterlock(m_goId,targetGoId,clientTargetRef) == false)

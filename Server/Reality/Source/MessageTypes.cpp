@@ -868,13 +868,24 @@ const ByteBuffer& LocomotionStateMsg::toBuf()
 	m_buf << uint16(viewId);
 	m_buf << uint8(1);
 
-	//The 0x06 form (animation byte + rotation) is what real clients send, but the animation
-	//values the client uses are not known - the 10/30 "WalkF/RunF" values were guesses, and a
-	//bad animation id is the kind of input that crashes the client in playeranimation.cpp.
-	//Until real values are captured (PlayerObject logs them), send rotation only (0x04).
-	(void)m_animation;
-	m_buf << uint8(0x04);
-	m_buf << uint8(m_rot);
+	// Authentic retail client locomotion animation values: 0 = Idle, 3 = Walk, 4 = Run.
+	// Opcode 0x06 (animation byte + rotation) is sent when moving (anim != 0).
+	// Opcode 0x04 (rotation only) is sent when stationary (anim == 0).
+	uint8 anim = m_animation;
+	if (anim == 10) anim = 3;
+	else if (anim == 30) anim = 4;
+
+	if (anim != 0)
+	{
+		m_buf << uint8(0x06);
+		m_buf << uint8(anim);
+		m_buf << uint8(m_rot);
+	}
+	else
+	{
+		m_buf << uint8(0x04);
+		m_buf << uint8(m_rot);
+	}
 	m_buf << uint16(0); // nomoreattribs
 
 	return m_buf;

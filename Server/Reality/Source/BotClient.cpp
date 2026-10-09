@@ -567,7 +567,7 @@ void BotClient::RoamAndSwarm(float deltaSeconds)
             dist = std::max(0.01f, dist); // Prevent division by zero
 
             // Base Pathfinding velocity: 180.0f cm/s = 1.8 m/s walking stride
-            SetLocomotionAnimation(10); // 10 = DetectDiff_WalkF
+            SetLocomotionAnimation(3); // 3 = WalkF
             float speed = 180.0f;
             BotVector2D pathVel((dx / dist) * speed, (dz / dist) * speed);
 
@@ -596,8 +596,8 @@ void BotClient::RoamAndSwarm(float deltaSeconds)
                 if (nowMs - m_lastRoamBroadcastMs >= 150) {
                     m_lastRoamBroadcastMs = nowMs;
                     sGame.AnnounceStateUpdateNear(loc.x, loc.z, 15000.0f, std::make_shared<PositionStateMsg>(m_playerGoId));
-                    // Broadcast 0x06 locomotion animation (10 = DetectDiff_WalkF) + heading rotation
-                    sGame.AnnounceStateUpdateNear(loc.x, loc.z, 15000.0f, std::make_shared<LocomotionStateMsg>(m_playerGoId, 10, newRot));
+                    // Broadcast 0x06 locomotion animation (3 = WalkF) + heading rotation
+                    sGame.AnnounceStateUpdateNear(loc.x, loc.z, 15000.0f, std::make_shared<LocomotionStateMsg>(m_playerGoId, 3, newRot));
                 }
             } else {
                 m_currentWaypointIndex++;
@@ -642,7 +642,7 @@ void BotClient::AttackTarget(uint32 targetGoId)
         sCombatSys.RequestRangedCombat(m_playerGoId, targetGoId, 0);
         
         // Approach target with combat sprint animation
-        SetLocomotionAnimation(30); // 30 = DetectDiff_RunF
+        SetLocomotionAnimation(4); // 4 = DetectDiff_RunF
         float dirX = target->getPosition().x - me->getPosition().x;
         float dirZ = target->getPosition().z - me->getPosition().z;
         float lenSq = dirX*dirX + dirZ*dirZ;
@@ -670,8 +670,8 @@ void BotClient::AttackTarget(uint32 targetGoId)
             if (nowMs - m_lastRoamBroadcastMs >= 150) {
                 m_lastRoamBroadcastMs = nowMs;
                 sGame.AnnounceStateUpdateNear(newX, newZ, 20000.0f, std::make_shared<PositionStateMsg>(m_playerGoId));
-                // Broadcast 0x06 locomotion animation (30 = DetectDiff_RunF combat sprint) + heading rotation
-                sGame.AnnounceStateUpdateNear(newX, newZ, 20000.0f, std::make_shared<LocomotionStateMsg>(m_playerGoId, 30, newRot));
+                // Broadcast 0x06 locomotion animation (4 = DetectDiff_RunF combat sprint) + heading rotation
+                sGame.AnnounceStateUpdateNear(newX, newZ, 20000.0f, std::make_shared<LocomotionStateMsg>(m_playerGoId, 4, newRot));
             }
         }
     }

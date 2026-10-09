@@ -801,9 +801,11 @@ void PlayerObject::ParsePlayerCommand( string theCmd )
 			m_tactic = TACTIC_POWER;
 			sCombatSys.SetTactic(m_goId, TACTIC_POWER);
 		}
-		INFO_LOG(format("(%1%) %2%:%3% close combat request view 0 spawn 0 -> target go %4%")
-			% m_parent.Address() % m_handle % m_goId % m_targetGoId);
-		if (!sCombatSys.RequestInterlock(m_goId, m_targetGoId))
+		uint16 targetViewId = sObjMgr.getViewForGO(&m_parent, m_targetGoId);
+		uint32 clientTargetRef = uint32(targetViewId) | (uint32(PLAYER_SPAWN_COUNTER) << 16);
+		INFO_LOG(format("(%1%) %2%:%3% close combat request view %4% spawn %5% -> target go %6%")
+			% m_parent.Address() % m_handle % m_goId % targetViewId % uint32(PLAYER_SPAWN_COUNTER) % m_targetGoId);
+		if (!sCombatSys.RequestInterlock(m_goId, m_targetGoId, clientTargetRef))
 		{
 			m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FF0000}Interlock request failed (out of range or already in combat).{/c}"));
 		}
@@ -1141,7 +1143,9 @@ void PlayerObject::ParsePlayerCommand( string theCmd )
 		{
 			bool ok = spawnDojoBot(4.0f, 0.0f, targetStyle, "Dojo " + styleLabel, optHp);
 			if (ok && m_lastDojoBotGoId) {
-				sCombatSys.RequestInterlock(m_goId, m_lastDojoBotGoId);
+				uint16 targetViewId = sObjMgr.getViewForGO(&m_parent, m_lastDojoBotGoId);
+				uint32 clientTargetRef = uint32(targetViewId) | (uint32(PLAYER_SPAWN_COUNTER) << 16);
+				sCombatSys.RequestInterlock(m_goId, m_lastDojoBotGoId, clientTargetRef);
 			}
 			m_parent.QueueCommand(make_shared<SystemChatMsg>(ok
 				? (format("{c:00FF00}Dojo: 1v1 %1% spawned and engaged in close combat interlock!{/c}") % styleLabel).str()

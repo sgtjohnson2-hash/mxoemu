@@ -576,6 +576,10 @@ bool CombatSystem::RequestInterlock(uint32 attackerGoId, uint32 targetGoId, uint
 		// ILCombatStateMsg is queued, satisfying the client-side exchange player gating check.
 		pA->enterInterlock(targetGoId);
 		pB->enterInterlock(attackerGoId);
+		pA->getClient().QueueState(std::make_shared<CombatantModeMsg>(pB->getGoId(), 1));
+		pB->getClient().QueueState(std::make_shared<CombatantModeMsg>(pA->getGoId(), 1));
+		sGame.AnnounceStateUpdateNear(posA.x, posA.z, 20000.0f, std::make_shared<CombatantModeMsg>(pA->getGoId(), 1));
+		sGame.AnnounceStateUpdateNear(posB.x, posB.z, 20000.0f, std::make_shared<CombatantModeMsg>(pB->getGoId(), 1));
 		INFO_LOG(format("Interlock started: %1% (%2%) vs %3% (%4%)") % attackerGoId % pA->getHandle() % targetGoId % pB->getHandle());
 
 		struct SideSetup { PlayerObject* self; PlayerObject* other; uint16* viewSlot; };
@@ -613,14 +617,18 @@ bool CombatSystem::RequestInterlock(uint32 attackerGoId, uint32 targetGoId, uint
 					//opponent's view id and the spawn counter byte our PlayerSpawnMsg uses.
 					uint32 otherViewWithSpawnId = uint32(otherViewId) | (uint32(PLAYER_SPAWN_COUNTER) << 16);
 					if (i == 0 && clientTargetRef != 0)
+					{
+						if ((clientTargetRef >> 16) == 0)
+							clientTargetRef |= (uint32(PLAYER_SPAWN_COUNTER) << 16);
 						otherViewWithSpawnId = clientTargetRef;
-					// On every client: slot 1 = that client's own character (VIEWID_SELF | (1 << 16)), slot 2 = the opponent.
+					}
+					// On every client: slot 1 = that client's own character (VIEWID_SELF | (PLAYER_SPAWN_COUNTER << 16)), slot 2 = the opponent.
 					// client.dll FUN_104fd140 explicitly checks: if (DAT_108a4378 == param_1[10]), where param_1[10]
-					// is slot 1. DAT_108a4378 holds (VIEWID_SELF | (selfSpawnIdCounter << 16)) = 0x00010002.
+					// is slot 1. DAT_108a4378 holds (VIEWID_SELF | (PLAYER_SPAWN_COUNTER << 16)) = 0x002F0002.
 					// Only when the local player is in slot 1 does the client spawn Window 0x0E (Tactic Wheel)
 					// and enter the interlock camera and animation loop (FUN_1051e180).
 					std::vector<uint32> slots;
-					slots.push_back(uint32(VIEWID_SELF) | (uint32(1) << 16));
+					slots.push_back(uint32(VIEWID_SELF) | (uint32(PLAYER_SPAWN_COUNTER) << 16));
 					slots.push_back(otherViewWithSpawnId);
 					std::vector<ILExchange> opening;
 					opening.push_back(BuildExchange(session, sides[i].self, pA, pB, 1,
