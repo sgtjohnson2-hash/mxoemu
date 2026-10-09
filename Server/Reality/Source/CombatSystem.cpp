@@ -630,9 +630,15 @@ bool CombatSystem::RequestInterlock(uint32 attackerGoId, uint32 targetGoId, uint
 					std::vector<uint32> slots;
 					slots.push_back(uint32(VIEWID_SELF) | (uint32(PLAYER_SPAWN_COUNTER) << 16));
 					slots.push_back(otherViewWithSpawnId);
+					uint32 openMove = SelectInterlockMove(session, pA, pB, InterlockExchangeOutcome::NormalHit);
+					InterlockAnimPair openPair = CombatAnimationMatrix::GetDynamicAnimationPair(
+						pA->getFightingStyle(), session.tacticA,
+						pB->getFightingStyle(), session.tacticB,
+						InterlockExchangeOutcome::NormalHit, false
+					);
 					std::vector<ILExchange> opening;
 					opening.push_back(BuildExchange(session, sides[i].self, pA, pB, 1,
-						IL_MOVE_OPEN_ATTACKER_PRE, IL_MOVE_PRE, IL_MOVE_OPEN_MAIN));
+						0, 0, openMove, &openPair));
 					sides[i].self->getClient().QueueState(std::make_shared<ILCombatStateMsg>(
 						ilViewId, ilPos, 1, slots, opening));
 				}
@@ -1280,8 +1286,8 @@ ILExchange CombatSystem::BuildExchange(const InterlockSession &session, PlayerOb
 
 	if (animPair)
 	{
-		if (animPair->attackerAnimId) { e.moves[3][0] = animPair->attackerAnimId; e.moves[3][1] = IL_MOVE_DATABASE; }
-		if (animPair->defenderAnimId) { e.moves[4][0] = animPair->defenderAnimId; e.moves[4][1] = IL_MOVE_DATABASE; }
+		if (animPair->attackerAnimId) { e.moves[3][0] = animPair->attackerAnimId; e.moves[3][1] = 0; }
+		if (animPair->defenderAnimId) { e.moves[4][0] = animPair->defenderAnimId; e.moves[4][1] = 0; }
 	}
 
 	e.attackerHealth = attacker->getCurrentHealth();
@@ -1292,9 +1298,9 @@ ILExchange CombatSystem::BuildExchange(const InterlockSession &session, PlayerOb
 uint32 CombatSystem::SelectInterlockMove(const InterlockSession &session, PlayerObject* attacker, PlayerObject* defender, InterlockExchangeOutcome outcome)
 {
 	if (!attacker || !defender)
-		return IL_MOVE_OPEN_MAIN; // 0x2026
+		return 12559; // Authentic unarmed fallback (Brawl vs Brawl)
 
-	static const bool useDynamicILDB = sConfig.GetBoolDefault("Interlock.UseDynamicILDB", false);
+	static const bool useDynamicILDB = sConfig.GetBoolDefault("Interlock.UseDynamicILDB", true);
 	if (useDynamicILDB)
 	{
 		bool isFinisher = (defender->isDead() || defender->getCurrentHealth() == 0);
@@ -1305,7 +1311,7 @@ uint32 CombatSystem::SelectInterlockMove(const InterlockSession &session, Player
 			defender->getFightingStyle(), defT,
 			outcome, isFinisher
 		);
-		if (rec && rec->moveId != 0)
+		if (rec && (rec->aggrAnim != 0 || rec->defeAnim != 0))
 			return rec->moveId;
 	}
 
@@ -1392,7 +1398,7 @@ void CombatSystem::SendInterlockExchange(InterlockSession &session, PlayerObject
 
 	uint32 mainMove = SelectInterlockMove(session, attacker, defender, outcome);
 
-	static const bool useDynamicILDB = sConfig.GetBoolDefault("Interlock.UseDynamicILDB", false);
+	static const bool useDynamicILDB = sConfig.GetBoolDefault("Interlock.UseDynamicILDB", true);
 	InterlockAnimPair pair;
 	if (useDynamicILDB)
 	{
@@ -1421,7 +1427,7 @@ void CombatSystem::SendInterlockExchange(InterlockSession &session, PlayerObject
 			continue;
 		std::vector<ILExchange> ex;
 		ex.push_back(BuildExchange(session, sides[i].p, attacker, defender, session.exchangeNum,
-			IL_MOVE_PRE, IL_MOVE_PRE, mainMove, &pair));
+			0, 0, mainMove, &pair));
 		sides[i].p->getClient().QueueState(std::make_shared<ILCombatStateMsg>(
 			sides[i].view, session.ilPos, session.exchangeNum, std::vector<uint32>(), ex));
 	}

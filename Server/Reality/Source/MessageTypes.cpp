@@ -1665,14 +1665,8 @@ ILCombatStateMsg::ILCombatStateMsg( uint16 ilViewId, LocationVector pos, uint32 
 		m_buf << uint8(exchanges.size());
 		for (size_t i=0;i<exchanges.size();i++)
 			exchanges[i].write(m_buf);
-		// 27-byte tail from HDS UpdateCloseCombat capture (bytes 25-26: 0x00, 0x00 nomoreattribs)
-		static const uint8 hdsTail[27] = {
-			0x01, 0x00, 0x00, 0x00, 0x58, 0x64, 0xEB, 0xD9,
-			0xC0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x44, 0x91,
-			0xC0, 0x00, 0x00, 0x00, 0x40, 0xAF, 0x08, 0xEA,
-			0x40, 0x00, 0x00
-		};
-		m_buf.append(hdsTail, sizeof(hdsTail));
+		// Direct ilViewId framing ends cleanly with 0x0000 (nomoreattribs)
+		m_buf << uint16(0);
 		return;
 	}
 
