@@ -1600,8 +1600,11 @@ SpawnILCombatHandlerMsg::SpawnILCombatHandlerMsg( uint16 viewId, uint8 spawnIdCo
 ILExchange::ILExchange()
 {
 	memset(this, 0, sizeof(*this));
-	unk5d = 0x1000;
-	unk5f = 0x1000;
+	flags = 0x03;
+	unk58 = 0x1000;
+	unk5a = 0x1000;
+	unk5c = 0x1000;
+	unk5e = 0x1000;
 }
 
 void ILExchange::write( ByteBuffer &buf ) const
@@ -1609,18 +1612,20 @@ void ILExchange::write( ByteBuffer &buf ) const
 	const size_t startPos = buf.size();
 	buf << uint8(attackerSlot) << uint8(defenderSlot);
 	buf << uint16(attackerAdjustMs) << uint16(defenderAdjustMs);
-	for (int i=0;i<3;i++) buf << float(attackerPos[i]);
-	for (int i=0;i<3;i++) buf << float(defenderPos[i]);
-	buf << uint8(defenderStyle) << uint8(attackerStyle);
+	for (int i = 0; i < 3; i++) buf << float(attackerPos[i]);
+	for (int i = 0; i < 3; i++) buf << float(defenderPos[i]);
+	buf << uint8(style);
 	buf << uint16(number);
-	buf << int32(startMs);
+	buf << uint32(startMs);
 	buf << int16(defenderOffsetMs);
-	buf << uint16(attackerExtraMs) << uint16(defenderExtraMs);
 	buf << uint8(flags);
-	for (int i=0;i<5;i++) buf << uint32(moves[i][0]) << uint32(moves[i][1]);
+	for (int i = 0; i < 5; i++) buf << uint32(moves[i][0]) << uint32(moves[i][1]);
+	buf << uint32(unk50) << uint32(unk54);
+	buf << uint16(unk58) << uint16(unk5a) << uint16(unk5c) << uint16(unk5e);
+	buf << uint32(unk60) << uint32(unk64) << uint32(unk68) << uint32(unk6c);
 	buf << uint32(attackerHealth) << uint32(defenderHealth);
-	buf << uint16(unk5d) << uint16(unk5f);
-	while (buf.size() - startPos < 0x79)
+	buf << uint8(flags78) << uint8(pad79);
+	while (buf.size() - startPos < 0x7A)
 		buf << uint8(0);
 }
 

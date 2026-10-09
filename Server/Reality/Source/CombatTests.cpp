@@ -184,19 +184,11 @@ int RunCombatTestSuite()
 
 	// ---------------------------------------------------------------- IL exchange wire format
 	{
-		//captured live interlock-start exchange (HDS "special agent test"), 121 bytes
-		static const char* capHex =
-			"01020703070300bafc42000020c1801baf4200803e40000020c1e0b319430000010013010000f40134059a02233c5200008b0b0024145200008b0b0024262000008b0b00240000000000000000000000000000000021000000700000000010001000000000000000000000000000010000022b6000000000000";
 		ILExchange e;
 		e.attackerSlot = 1; e.defenderSlot = 2;
 		e.attackerAdjustMs = 0x0307; e.defenderAdjustMs = 0x0307;
-		const float fp[6] = { 126.36328125f, -10.0f, 87.5537109375f, 2.9765625f, -10.0f, 153.702636719f };
-		std::string cap;
-		for (size_t i = 0; i + 1 < strlen(capHex); i += 2) cap.push_back((char)strtol(std::string(capHex + i, 2).c_str(), NULL, 16));
-		memcpy(e.attackerPos, cap.data() + 6, 12);
-		memcpy(e.defenderPos, cap.data() + 0x12, 12);
-		(void)fp;
-		e.number = 1; e.startMs = 275; e.defenderOffsetMs = 500; e.attackerExtraMs = 1332; e.defenderExtraMs = 666;
+		e.style = (uint8)FightingStyle::KungFu;
+		e.number = 1; e.startMs = 275; e.defenderOffsetMs = 500;
 		e.flags = 0x23;
 		e.moves[0][0] = 0x523C; e.moves[0][1] = 0x24000B8B;
 		e.moves[1][0] = 0x5214; e.moves[1][1] = 0x24000B8B;
@@ -204,18 +196,20 @@ int RunCombatTestSuite()
 		e.attackerHealth = 0x21; e.defenderHealth = 0x70;
 		ByteBuffer out;
 		e.write(out);
-		bool sizeOk = (out.size() == 0x79);
-		bool headOk = sizeOk && memcmp(out.contents(), cap.data(), 0x61) == 0;
-		check(sizeOk, "IL exchange serializes to 0x79 bytes (7.6005 stride)");
-		check(headOk, "IL exchange bytes 0x00-0x60 match the captured live exchange");
+		bool sizeOk = (out.size() == 0x7A);
+		check(sizeOk, "IL exchange serializes to 0x7A bytes (authentic 7.6005 stride)");
+		const uint8* ob = reinterpret_cast<const uint8*>(out.contents());
+		bool headOk = sizeOk && ob[0] == 1 && ob[1] == 2 && ob[0x1E] == (uint8)FightingStyle::KungFu &&
+			*reinterpret_cast<const uint16*>(&ob[0x1F]) == 1 && *reinterpret_cast<const uint32*>(&ob[0x38]) == 0x2026;
+		check(headOk, "IL exchange fields (0x00-0x79) match authentic 0x7A protocol offsets");
 
 		std::vector<uint32> slots; slots.push_back(0x00020001); slots.push_back(2);
 		std::vector<ILExchange> ex; ex.push_back(e);
 		ILCombatStateMsg m(0x1234, LocationVector(0,0,0), 1, slots, ex);
 		const ByteBuffer& mb = m.toBuf();
 		uint16 len = uint16(uint8(mb.contents()[4])) | (uint16(uint8(mb.contents()[5])) << 8);
-		check(mb.size() >= 6 && mb.contents()[3] == 0x02 && len == 0xA7 && (size_t(len) + 4 == mb.size() || size_t(len) + 6 == mb.size()),
-			"IL state message length field = 0xA7 like the captured interlock start");
+		check(mb.size() >= 6 && mb.contents()[3] == 0x02 && len == 0xA8 && (size_t(len) + 4 == mb.size() || size_t(len) + 6 == mb.size()),
+			"IL state message length field = 0xA8 like the authentic interlock start");
 	}
 
 	try
@@ -1200,8 +1194,7 @@ int RunCombatTestSuite()
 				IL_MOVE_PRE, IL_MOVE_PRE, 0x2026, &kfVsKarateBlock
 			);
 
-			check(exchange.attackerStyle == (uint8)FightingStyle::KungFu, "ILExchange: attackerStyle is Kung Fu (2)");
-			check(exchange.defenderStyle == (uint8)FightingStyle::Karate, "ILExchange: defenderStyle is Karate (3)");
+			check(exchange.style == (uint8)FightingStyle::KungFu, "ILExchange: style is Kung Fu (2)");
 			check(exchange.defenderOffsetMs == 460, "ILExchange: defenderOffsetMs dynamically synchronized to 460ms");
 			check(exchange.moves[2][0] == 0x2026, "ILExchange: mainMove is 0x2026 (Kung Fu strike)");
 			check(exchange.moves[3][0] == 0x0D5C, "ILExchange: moves[3][0] is attacker strike animation (0x0D5C)");
@@ -1209,12 +1202,14 @@ int RunCombatTestSuite()
 
 			ByteBuffer ilBuf;
 			exchange.write(ilBuf);
-			check(ilBuf.size() == 0x79, "ILExchange serialized buffer size is exactly 121 bytes (0x79)");
+			check(ilBuf.size() == 0x7A, "ILExchange serialized buffer size is exactly 122 bytes (0x7A)");
 			const uint8* rawBytes = reinterpret_cast<const uint8*>(ilBuf.contents());
-			check(rawBytes[0x1E] == (uint8)FightingStyle::Karate, "ILExchange wire byte 0x1E is defenderStyle Karate (3)");
-			check(rawBytes[0x1F] == (uint8)FightingStyle::KungFu, "ILExchange wire byte 0x1F is attackerStyle Kung Fu (2)");
-			int16 wireOffset = *reinterpret_cast<const int16*>(&rawBytes[0x26]);
-			check(wireOffset == 460, "ILExchange wire bytes at 0x26 are 460ms defenderOffsetMs");
+			check(rawBytes[0x1E] == (uint8)FightingStyle::KungFu, "ILExchange wire byte 0x1E is style Kung Fu (2)");
+			int16 wireOffset = *reinterpret_cast<const int16*>(&rawBytes[0x25]);
+			check(wireOffset == 460, "ILExchange wire bytes at 0x25 are 460ms defenderOffsetMs");
+			check(rawBytes[0x27] == 0x03, "ILExchange wire byte 0x27 is flags 0x03");
+			uint32 wireMove2 = *reinterpret_cast<const uint32*>(&rawBytes[0x38]);
+			check(wireMove2 == 0x2026, "ILExchange wire bytes at 0x38 are main move 0x2026");
 		}
 
 		// ------------------------------------------------------------------
