@@ -5,17 +5,16 @@
 #include <cmath>
 
 // Training-dojo bot placement. World units are 100 per metre and "forward" for a
-// player at heading rot is (-sin(rot), -cos(rot)) - the convention
-// PlayerObject::GoAhead() walks with. The returned position is distM metres from the
-// player along (heading + angleOffsetRad), and its rot turns it to face the player
-// (so forward points back at the player).
+// player at heading rot is (+sin(rot), +cos(rot)) in the authentic client world space (+Z forward).
+// The returned position is distM metres from the player along (heading + angleOffsetRad),
+// and its rot turns it to face the player squarely.
 inline LocationVector DojoPlaceInFront(const LocationVector& player, float distM, float angleOffsetRad)
 {
 	const double heading = player.rot + angleOffsetRad;
-	const double bx = player.x - std::sin(heading) * distM * 100.0;
-	const double bz = player.z - std::cos(heading) * distM * 100.0;
+	const double bx = player.x + std::sin(heading) * distM * 100.0;
+	const double bz = player.z + std::cos(heading) * distM * 100.0;
 	LocationVector out(bx, player.y, bz);
-	out.rot = std::atan2(-(player.x - bx), -(player.z - bz));
+	out.rot = std::atan2(player.x - bx, player.z - bz);
 	return out;
 }
 

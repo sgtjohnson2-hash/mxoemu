@@ -1021,7 +1021,7 @@ void PlayerObject::ParsePlayerCommand( string theCmd )
 
 		// Spawns one passive, scaled training bot distM metres from the player along
 		// (facing + angleOffsetRad), turned to face the player. World units are 100/m and
-		// "forward" is (-sin(rot), -cos(rot)) - the same convention GoAhead() walks with.
+		// "forward" is (+sin(rot), +cos(rot)) in the authentic client world space (+Z forward).
 		auto spawnDojoBot = [&](float distM, float angleOffsetRad, FightingStyle botStyle = FightingStyle::None, const std::string& botName = "", float customHp = 0.0f) -> bool
 		{
 			const LocationVector botPos = DojoPlaceInFront(pos, distM, angleOffsetRad);

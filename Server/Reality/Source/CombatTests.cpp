@@ -374,10 +374,10 @@ int RunCombatTestSuite()
 			check(stepStarted && std::fabs(stepDist - 150.0) < 1.0, "interlock participants step into 1.5m melee range (got " + std::to_string(stepDist) + " units)");
 			LocationVector finalPosA = stepA.po->getPosition();
 			LocationVector finalPosB = stepB.po->getPosition();
-			double fxA = -std::sin(finalPosA.rot), fzA = -std::cos(finalPosA.rot);
+			double fxA = std::sin(finalPosA.rot), fzA = std::cos(finalPosA.rot);
 			double txA = (finalPosB.x - finalPosA.x) / stepDist, tzA = (finalPosB.z - finalPosA.z) / stepDist;
 			double dotA = fxA * txA + fzA * tzA;
-			double fxB = -std::sin(finalPosB.rot), fzB = -std::cos(finalPosB.rot);
+			double fxB = std::sin(finalPosB.rot), fzB = std::cos(finalPosB.rot);
 			double txB = (finalPosA.x - finalPosB.x) / stepDist, tzB = (finalPosA.z - finalPosB.z) / stepDist;
 			double dotB = fxB * txB + fzB * tzB;
 			check(dotA >= 0.999 && dotB >= 0.999, "interlock participants face each other squarely (dotA=" + std::to_string(dotA) + ", dotB=" + std::to_string(dotB) + ")");
@@ -493,16 +493,10 @@ int RunCombatTestSuite()
 				LocationVector player(50000.0, 572.0, 50000.0);
 				player.rot = rot;
 				walker.po->setPosition(player);
-				// ground truth for "in front": exact arithmetic of PlayerObject::GoAhead(4.0)
-				// (private, so replicated here - keep in sync with PlayerObject.cpp)
+				// ground truth for "in front": exact arithmetic of DojoPlaceInFront(4.0) (+Z forward)
 				LocationVector ahead = player;
-				{
-					double xInc = 4.0 * std::sin(player.rot);
-					double zInc = std::sqrt(4.0 * 4.0 - xInc * xInc);
-					xInc *= 100; zInc *= 100;
-					ahead.x -= xInc;
-					if (std::fabs(player.rot) > 3.14159265358979323846 / 2) ahead.z += zInc; else ahead.z -= zInc;
-				}
+				ahead.x += std::sin(player.rot) * 400.0;
+				ahead.z += std::cos(player.rot) * 400.0;
 
 				LocationVector spawn = DojoPlaceInFront(player, 4.0f, 0.0f);
 				double d = dist2D(player, spawn);
@@ -512,7 +506,7 @@ int RunCombatTestSuite()
 					geomWhy += " rot " + std::to_string(rot) + ": dist " + std::to_string(d) + ", off-ahead " + std::to_string(dist2D(ahead, spawn));
 				}
 				// the spawned bot must face the player: its own forward vector points at the player
-				double fx = -std::sin(spawn.rot), fz = -std::cos(spawn.rot);
+				double fx = std::sin(spawn.rot), fz = std::cos(spawn.rot);
 				double tx = (player.x - spawn.x) / d, tz = (player.z - spawn.z) / d;
 				if (fx * tx + fz * tz < 0.999)
 				{
@@ -527,7 +521,7 @@ int RunCombatTestSuite()
 					if (d2 < 300.0 || d2 > 500.0) { geomOk = false; geomWhy += " arc dist " + std::to_string(d2); }
 				}
 			}
-			check(geomOk, "dojo placement = 3-5 m in front (GoAhead convention) and facing the player at 9 headings" + geomWhy);
+			check(geomOk, "dojo placement = 3-5 m in front and facing the player at 9 headings" + geomWhy);
 		}
 
 		// ---------------------------------------------------------------- passive bots (no auto-aggro)

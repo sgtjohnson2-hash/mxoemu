@@ -547,8 +547,8 @@ bool CombatSystem::RequestInterlock(uint32 attackerGoId, uint32 targetGoId, uint
 		posB.x = midX + (targetMeleeDist * 0.5);
 	}
 
-	posA.rot = std::atan2(-(posB.x - posA.x), -(posB.z - posA.z));
-	posB.rot = std::atan2(-(posA.x - posB.x), -(posA.z - posB.z));
+	posA.rot = std::atan2(posB.x - posA.x, posB.z - posA.z);
+	posB.rot = std::atan2(posA.x - posB.x, posA.z - posB.z);
 	pA->setPosition(posA);
 	pB->setPosition(posB);
 
