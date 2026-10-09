@@ -1601,10 +1601,8 @@ ILExchange::ILExchange()
 {
 	memset(this, 0, sizeof(*this));
 	flags = 0x03;
-	unk58 = 0x1000;
-	unk5a = 0x1000;
-	unk5c = 0x1000;
-	unk5e = 0x1000;
+	unk5D = 0x1000;
+	unk5F = 0x1000;
 }
 
 void ILExchange::write( ByteBuffer &buf ) const
@@ -1615,17 +1613,19 @@ void ILExchange::write( ByteBuffer &buf ) const
 	for (int i = 0; i < 3; i++) buf << float(attackerPos[i]);
 	for (int i = 0; i < 3; i++) buf << float(defenderPos[i]);
 	buf << uint8(style);
+	buf << uint8(unk1F);
 	buf << uint16(number);
 	buf << uint32(startMs);
 	buf << int16(defenderOffsetMs);
+	buf << uint16(unk28);
+	buf << uint16(unk2A);
 	buf << uint8(flags);
 	for (int i = 0; i < 5; i++) buf << uint32(moves[i][0]) << uint32(moves[i][1]);
-	buf << uint32(unk50) << uint32(unk54);
-	buf << uint16(unk58) << uint16(unk5a) << uint16(unk5c) << uint16(unk5e);
-	buf << uint32(unk60) << uint32(unk64) << uint32(unk68) << uint32(unk6c);
+	buf << uint32(unk55) << uint32(unk59);
+	buf << uint16(unk5D) << uint16(unk5F);
+	buf << uint32(unk61) << uint32(unk65) << uint32(unk69) << uint32(unk6D);
 	buf << uint32(attackerHealth) << uint32(defenderHealth);
-	buf << uint8(flags78) << uint8(pad79);
-	while (buf.size() - startPos < 0x7A)
+	while (buf.size() - startPos < 0x79)
 		buf << uint8(0);
 }
 
