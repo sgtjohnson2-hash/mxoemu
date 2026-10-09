@@ -1887,6 +1887,7 @@ void PlayerObject::RPC_HandleChat( ByteBuffer &srcCmd )
 									  boost::istarts_with(theMessage, "/withdraw") ||
 									  boost::istarts_with(theMessage, "/escape") ||
 									  boost::istarts_with(theMessage, "/target") ||
+									  boost::istarts_with(theMessage, "/loadout") ||
 									  boost::istarts_with(theMessage, "/dojo"))))
 	{
 		ParsePlayerCommand(theMessage.substr(1));
