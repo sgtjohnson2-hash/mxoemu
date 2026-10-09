@@ -1447,11 +1447,22 @@ void CombatSystem::SendInterlockExchange(InterlockSession &session, PlayerObject
 	{
 		if (!sides[i].p || sides[i].view == 0 || sides[i].p->getClient().isBot())
 			continue;
+
+		PlayerObject* opponent = (sides[i].p == pA) ? pB : pA;
+		std::vector<uint32> slots;
+		slots.push_back(uint32(VIEWID_SELF) | (uint32(PLAYER_SPAWN_COUNTER) << 16));
+		if (opponent)
+		{
+			uint16 otherViewId = sObjMgr.getViewForGO(&sides[i].p->getClient(), opponent->getGoId());
+			uint32 otherViewWithSpawnId = uint32(otherViewId) | (uint32(PLAYER_SPAWN_COUNTER) << 16);
+			slots.push_back(otherViewWithSpawnId);
+		}
+
 		std::vector<ILExchange> ex;
 		ex.push_back(BuildExchange(session, sides[i].p, attacker, defender, session.exchangeNum,
 			0, 0, mainMove, &pair));
 		sides[i].p->getClient().QueueState(std::make_shared<ILCombatStateMsg>(
-			sides[i].view, session.ilPos, session.exchangeNum, std::vector<uint32>(), ex));
+			sides[i].view, session.ilPos, session.exchangeNum, slots, ex));
 	}
 	INFO_LOG(format("Interlock exchange %1%: %2% (style %3%) -> %4% (style %5%) move 0x%6$04X (contact %7%ms, outcome %8%, HP %9% / %10%)")
 		% session.exchangeNum % attacker->getHandle() % (uint32)attacker->getFightingStyle()
