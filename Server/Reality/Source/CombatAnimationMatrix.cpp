@@ -120,7 +120,7 @@ const ILDBMoveRecord* CombatAnimationMatrix::FindMove(
             continue;
 
         if ((rec.flags & requiredFlag) != 0 &&
-            rec.attStyle == attS && rec.attTactic == attackerTactic &&
+            rec.attStyle == attS && (rec.attTactic == attackerTactic || attackerTactic == 8) &&
             rec.defStyle == defS && (rec.defTactic == defenderTactic || defenderTactic == 8))
         {
             return &rec;
@@ -134,7 +134,7 @@ const ILDBMoveRecord* CombatAnimationMatrix::FindMove(
             continue;
 
         if ((rec.flags & requiredFlag) != 0 &&
-            rec.attStyle == attS && rec.attTactic == attackerTactic)
+            rec.attStyle == attS && (rec.attTactic == attackerTactic || attackerTactic == 8))
         {
             return &rec;
         }
@@ -148,7 +148,7 @@ const ILDBMoveRecord* CombatAnimationMatrix::FindMove(
             if (rec.aggrAnim == 0 || rec.defeAnim == 0)
                 continue;
 
-            if (rec.attStyle == attS && rec.attTactic == attackerTactic &&
+            if (rec.attStyle == attS && (rec.attTactic == attackerTactic || attackerTactic == 8) &&
                 rec.defStyle == defS && (rec.defTactic == defenderTactic || defenderTactic == 8))
             {
                 return &rec;
@@ -160,7 +160,7 @@ const ILDBMoveRecord* CombatAnimationMatrix::FindMove(
             if (rec.aggrAnim == 0 || rec.defeAnim == 0)
                 continue;
 
-            if (rec.attStyle == attS && rec.attTactic == attackerTactic)
+            if (rec.attStyle == attS && (rec.attTactic == attackerTactic || attackerTactic == 8))
             {
                 return &rec;
             }
