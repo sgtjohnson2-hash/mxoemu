@@ -1207,9 +1207,27 @@ int RunCombatTestSuite()
 			check(rawBytes[0x1E] == (uint8)FightingStyle::KungFu, "ILExchange wire byte 0x1E is style Kung Fu (2)");
 			int16 wireOffset = *reinterpret_cast<const int16*>(&rawBytes[0x26]);
 			check(wireOffset == 460, "ILExchange wire bytes at 0x26 are 460ms defenderOffsetMs");
-			check(rawBytes[0x2C] == 0x03, "ILExchange wire byte 0x2C is flags 0x03");
+			check(rawBytes[0x2C] == 0x23, "ILExchange wire byte 0x2C is flags 0x23");
+			uint16 attAdjust = *reinterpret_cast<const uint16*>(&rawBytes[0x02]);
+			check(attAdjust == 775, "ILExchange wire bytes at 0x02 are attackerAdjustMs 775");
+			uint16 defAdjust = *reinterpret_cast<const uint16*>(&rawBytes[0x04]);
+			check(defAdjust == 775, "ILExchange wire bytes at 0x04 are defenderAdjustMs 775");
+			uint16 unk28Wire = *reinterpret_cast<const uint16*>(&rawBytes[0x28]);
+			check(unk28Wire == 1332, "ILExchange wire bytes at 0x28 are unk28 1332");
+			uint16 unk2AWire = *reinterpret_cast<const uint16*>(&rawBytes[0x2A]);
+			check(unk2AWire == 666, "ILExchange wire bytes at 0x2A are unk2A 666");
 			uint32 wireMove2 = *reinterpret_cast<const uint32*>(&rawBytes[0x3D]);
 			check(wireMove2 == 0x2026, "ILExchange wire bytes at 0x3D are main move 0x2026");
+			uint32 attHp = *reinterpret_cast<const uint32*>(&rawBytes[0x55]);
+			uint32 defHp = *reinterpret_cast<const uint32*>(&rawBytes[0x59]);
+			check(attHp == exchange.attackerHealth && defHp == exchange.defenderHealth,
+				"ILExchange wire bytes at 0x55/0x59 are authentic attacker/defender health");
+			uint16 u5D = *reinterpret_cast<const uint16*>(&rawBytes[0x5D]);
+			uint16 u5F = *reinterpret_cast<const uint16*>(&rawBytes[0x5F]);
+			check(u5D == 0x1000 && u5F == 0x1000, "ILExchange wire bytes at 0x5D/0x5F are authentic 0x1000");
+			uint32 u6D = *reinterpret_cast<const uint32*>(&rawBytes[0x6D]);
+			uint32 u71 = *reinterpret_cast<const uint32*>(&rawBytes[0x71]);
+			check(u6D == 0x00000100 && u71 == 0x00602b02, "ILExchange wire bytes at 0x6D/0x71 match retail capture");
 		}
 
 		// ------------------------------------------------------------------

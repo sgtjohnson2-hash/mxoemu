@@ -905,34 +905,34 @@ struct ILExchange
 {
 	uint8 attackerSlot;			// 0x00 participant slot (1..6)
 	uint8 defenderSlot;			// 0x01
-	uint16 attackerAdjustMs;	// 0x02 time to slide attacker to attackerPos
-	uint16 defenderAdjustMs;	// 0x04 time to slide defender to defenderPos
+	uint16 attackerAdjustMs;	// 0x02 time to slide attacker to attackerPos (775)
+	uint16 defenderAdjustMs;	// 0x04 time to slide defender to defenderPos (775)
 	float attackerPos[3];		// 0x06..0x11 relative to IL handler position (12 bytes)
 	float defenderPos[3];		// 0x12..0x1D relative to IL handler position (12 bytes)
 	uint8 style;				// 0x1E martial arts fighting style (Kung Fu=2, Karate=3, etc.)
 	uint8 unk1F;				// 0x1F (0)
 	uint16 number;				// 0x20..0x21 sequence number (client only plays newer numbers)
 	uint32 startMs;				// 0x22..0x25 start time (bit0 in flags makes client clamp to now+5ms)
-	int16 defenderOffsetMs;		// 0x26..0x27 defender contact delay from startMs
-	uint16 unk28;				// 0x28..0x29 (0)
-	uint16 unk2A;				// 0x2A..0x2B (0)
-	uint8 flags;				// 0x2C bit0 relative start, bit1 dilation/camera update (0x03)
+	int16 defenderOffsetMs;		// 0x26..0x27 defender contact delay from startMs (500)
+	uint16 unk28;				// 0x28..0x29 attacker extra timing (1332)
+	uint16 unk2A;				// 0x2A..0x2B defender extra timing (666)
+	uint8 flags;				// 0x2C bit0 relative start, bit1 dilation/camera update, bit5 (0x23)
 	uint32 moves[5][2];			// 0x2D..0x54 (40 bytes): 5 moves (moveId, rezId 0x24000B8B)
 								//   moves[0]: Attacker lead-in (0x523C)
 								//   moves[1]: Defender lead-in (0x5214)
 								//   moves[2]: Main attack (0x2026, 0x2388, 0x236D, 0x2367, 0x4EE5, etc.)
 								//   moves[3]: Attacker lead-out / strike anim
 								//   moves[4]: Defender lead-out / reaction anim
-	uint32 unk55;				// 0x55..0x58 (0)
-	uint32 unk59;				// 0x59..0x5C (0)
+	uint32 attackerHealth;		// 0x55..0x58 attacker remaining health (authentic retail capture)
+	uint32 defenderHealth;		// 0x59..0x5C defender remaining health (authentic retail capture)
 	uint16 unk5D;				// 0x5D..0x5E (0x1000)
 	uint16 unk5F;				// 0x5F..0x60 (0x1000)
 	uint32 unk61;				// 0x61..0x64 (0)
 	uint32 unk65;				// 0x65..0x68 (0)
 	uint32 unk69;				// 0x69..0x6C (0)
-	uint32 unk6D;				// 0x6D..0x70 (0)
-	uint32 attackerHealth;		// 0x71..0x74 attacker remaining health
-	uint32 defenderHealth;		// 0x75..0x78 defender remaining health
+	uint32 unk6D;				// 0x6D..0x70 (0x00000100)
+	uint32 unk71;				// 0x71..0x74 (0x00602b02)
+	uint32 unk75;				// 0x75..0x78 (0)
 
 	ILExchange();
 	void write(ByteBuffer &buf) const;

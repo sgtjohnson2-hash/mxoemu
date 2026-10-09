@@ -1059,7 +1059,7 @@ void PlayerObject::ParsePlayerCommand( string theCmd )
 			// so the dummy stays a threat for characters that have levelled up (+50 HP/level).
 			const uint8 botLvl = std::max<uint8>(1, getLevel());
 			const float hpF = (customHp > 0.0f) ? customHp : std::max(350.0f, std::min(800.0f, 150.0f + 10.0f * botLvl));
-			const float dmgScale = std::max(1.0f, std::min(20.0f, float(getMaximumHealth()) / 150.0f));
+			const float dmgScale = 0.05f; // Sparring dummy deals non-lethal chip damage so operatives can spar safely across many rounds
 			botPo->setLevel(botLvl);
 			botPo->setMaximumHealth((uint16)hpF);
 			botPo->setCurrentHealth((uint16)hpF);

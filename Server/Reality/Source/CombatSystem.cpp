@@ -1269,7 +1269,7 @@ ILExchange CombatSystem::BuildExchange(const InterlockSession &session, PlayerOb
 		e.defenderOffsetMs = 666; // authentic default opening timing from captured exchanges
 	}
 
-	e.flags = 0x03;
+	e.flags = 0x23;
 
 	// Propagate authentic martial arts fighting style (attacker's discipline)
 	e.style = (uint8)attacker->getFightingStyle();
