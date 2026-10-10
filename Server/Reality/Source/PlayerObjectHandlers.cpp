@@ -2282,16 +2282,15 @@ void PlayerObject::ParsePlayerCommand( string theCmd )
             cmdStream >> tplId >> price;
             if (tplId > 0 && price > 0)
             {
-                uint32 charId = static_cast<uint32>(this->getCharId());
-                auto listing = sEconomySys.CreateMarketListing(charId, m_handle, tplId, price, 1);
-                if (listing)
+                uint64 listingId = sEconomySys.ListVendorItem(this, tplId, price);
+                if (listingId > 0)
                 {
                     m_parent.QueueCommand(make_shared<SystemChatMsg>(
                         (format("{c:00FFCC}[MARKETPLACE] Listed item %1% on Exchange for %2% $Info (Listing ID: %3%){/c}")
-                         % tplId % price % listing->listingId).str()
+                         % tplId % price % listingId).str()
                     ));
                     INFO_LOG(format("Marketplace: Player %1% listed item %2% for %3% $Info (Listing %4%)")
-                             % m_handle % tplId % price % listing->listingId);
+                             % m_handle % tplId % price % listingId);
                 }
                 else
                 {
@@ -2310,8 +2309,7 @@ void PlayerObject::ParsePlayerCommand( string theCmd )
             cmdStream >> listingId;
             if (listingId > 0)
             {
-                uint32 charId = static_cast<uint32>(this->getCharId());
-                bool ok = sEconomySys.PurchaseVendorItem(this, charId, listingId);
+                bool ok = sEconomySys.PurchaseVendorItem(this, listingId);
                 if (ok)
                 {
                     m_parent.QueueCommand(make_shared<SystemChatMsg>(
