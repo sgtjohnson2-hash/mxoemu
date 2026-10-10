@@ -382,10 +382,11 @@ int RunCombatTestSuite()
 			check(stepStarted && std::fabs(stepDist - 150.0) < 1.0, "interlock participants step into 1.5m melee range (got " + std::to_string(stepDist) + " units)");
 			LocationVector finalPosA = stepA.po->getPosition();
 			LocationVector finalPosB = stepB.po->getPosition();
-			double fxA = std::sin(finalPosA.rot), fzA = std::cos(finalPosA.rot);
+			// Retail Matrix Online client convention: forward is (-sin(rot), -cos(rot))
+			double fxA = -std::sin(finalPosA.rot), fzA = -std::cos(finalPosA.rot);
 			double txA = (finalPosB.x - finalPosA.x) / stepDist, tzA = (finalPosB.z - finalPosA.z) / stepDist;
 			double dotA = fxA * txA + fzA * tzA;
-			double fxB = std::sin(finalPosB.rot), fzB = std::cos(finalPosB.rot);
+			double fxB = -std::sin(finalPosB.rot), fzB = -std::cos(finalPosB.rot);
 			double txB = (finalPosA.x - finalPosB.x) / stepDist, tzB = (finalPosA.z - finalPosB.z) / stepDist;
 			double dotB = fxB * txB + fzB * tzB;
 			check(dotA >= 0.999 && dotB >= 0.999, "interlock participants face each other squarely (dotA=" + std::to_string(dotA) + ", dotB=" + std::to_string(dotB) + ")");
@@ -1199,8 +1200,8 @@ int RunCombatTestSuite()
 			check(exchange.style == (uint8)FightingStyle::KungFu, "ILExchange: style is Kung Fu (2)");
 			check(exchange.defenderOffsetMs == 460, "ILExchange: defenderOffsetMs dynamically synchronized to 460ms");
 			check(exchange.moves[2][0] == 0x2026, "ILExchange: mainMove is 0x2026 (Kung Fu strike)");
-			check(exchange.moves[3][0] == 0x0D5C, "ILExchange: moves[3][0] is attacker strike animation (0x0D5C)");
-			check(exchange.moves[4][0] == 0x0472, "ILExchange: moves[4][0] is defender Karate block animation (0x0472)");
+			check(exchange.moves[3][0] == 0, "ILExchange: moves[3][0] is zeroed (ILDB moves only in slots 0-2)");
+			check(exchange.moves[4][0] == 0, "ILExchange: moves[4][0] is zeroed (ILDB moves only in slots 0-2)");
 
 			ByteBuffer ilBuf;
 			exchange.write(ilBuf);

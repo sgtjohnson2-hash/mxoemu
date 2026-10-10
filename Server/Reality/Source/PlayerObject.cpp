@@ -341,6 +341,12 @@ void PlayerObject::setRsiHex(const std::string& hexStr)
 	else
 		m_rsi.reset(new RsiDataFemale);
 
+	if (nameLower.find("agent") != std::string::npos)
+	{
+		setAgentAppearance();
+		return;
+	}
+
 	RsiData& rsi = *m_rsi;
 	rsi["Sex"] = sex;
 	rsi["Body"] = (bytes[0] >> 1) & 0x03;
@@ -351,12 +357,12 @@ void PlayerObject::setRsiHex(const std::string& hexStr)
 	rsi["Pants"] = ((bytes.size() > 1 ? bytes[1] : 3) % 20);
 	rsi["Shoes"] = ((bytes.size() > 2 ? bytes[2] : 5) % 15);
 	rsi["Gloves"] = (bytes[0] % 10);
-	rsi["Glasses"] = (nameLower.find("agent") != std::string::npos) ? 1 : ((bytes[0] % 8));
+	rsi["Glasses"] = ((bytes[0] % 8));
 	rsi["Hair"] = (bytes.size() > 1 ? (bytes[1] >> 2) % 20 : 2);
 	rsi["FacialDetail"] = (bytes[0] % 10);
-	rsi["ShirtColor"] = (nameLower.find("agent") != std::string::npos) ? 1 : ((bytes[0] * 3) % 40);
-	rsi["PantsColor"] = (nameLower.find("agent") != std::string::npos) ? 1 : ((bytes[0] * 5) % 30);
-	rsi["CoatColor"] = (nameLower.find("agent") != std::string::npos) ? 1 : ((bytes[0] * 2) % 30);
+	rsi["ShirtColor"] = ((bytes[0] * 3) % 40);
+	rsi["PantsColor"] = ((bytes[0] * 5) % 30);
+	rsi["CoatColor"] = ((bytes[0] * 2) % 30);
 	rsi["ShoeColor"] = 1;
 	rsi["GlassesColor"] = 1;
 	rsi["HairColor"] = (bytes.size() > 2 ? (bytes[2] % 12) : 1);
@@ -470,17 +476,17 @@ void PlayerObject::setAgentAppearance()
 	ref["Body"] = 0;
 	ref["Hat"] = 0;
 	ref["Face"] = 0;
-	ref["Shirt"] = 10;            // white dress shirt with dark necktie
-	ref["Coat"] = 5;              // Black Avero business suit coat
+	ref["Shirt"] = 10;            // Archive5MachMSuit (System Suit: single-breasted suit jacket, white shirt, black necktie)
+	ref["Coat"] = 0;              // 0 = no separate coat (prevents clipping & vest exposure)
 	ref["Pants"] = 1;             // tailored black suit slacks
 	ref["Shoes"] = 1;             // formal black leather dress shoes
 	ref["Gloves"] = 0;            // clean bare hands
-	ref["Glasses"] = 4;           // authentic Agent rectangular shades
-	ref["Hair"] = 1;              // authentic Agent combed-back crew cut
+	ref["Glasses"] = 17;          // ArchiveMachMGlasses (System Sunglasses)
+	ref["Hair"] = 0;              // RSIMHair001 (authentic clean crew cut / buzz cut, NO BANGS)
 	ref["FacialDetail"] = 0;      // clean shaven
-	ref["ShirtColor"] = 15;       // crisp formal white
+	ref["ShirtColor"] = 32;       // authentic System Suit palette color 32
 	ref["PantsColor"] = 9;        // authentic pitch black
-	ref["CoatColor"] = 9;         // authentic pitch black
+	ref["CoatColor"] = 0;         // no separate coat
 	ref["ShoeColor"] = 0;         // polished black leather
 	ref["GlassesColor"] = 0;      // dark black tint
 	ref["HairColor"] = 1;         // dark brown/black hair

@@ -1659,7 +1659,7 @@ ILCombatStateMsg::ILCombatStateMsg( uint16 ilViewId, LocationVector pos, uint32 
 	// per HDS capture 010002A700; periodic round updates use direct ilViewId framing per HDS UpdateCloseCombat).
 	// Mode 2: Direct ilViewId framing for both opening and rounds.
 	// Mode 0: ObjectManager framing for both opening and rounds.
-	if ((updateMode == 1 && slotHandles.empty()) || updateMode == 2)
+	if ((updateMode == 1 && (slotHandles.empty() || seq > 1)) || updateMode == 2)
 	{
 		// HDS direct-view update framing from UpdateCloseCombat capture:
 		// Leading opcode 0x03, direct ilViewId, group flags 0x0003, pos, seq, mask, slots, count, exchanges, 27-byte tail
