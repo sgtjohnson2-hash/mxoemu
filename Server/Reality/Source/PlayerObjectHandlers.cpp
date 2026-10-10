@@ -2601,11 +2601,13 @@ void PlayerObject::ParsePlayerCommand( string theCmd )
                 double dx = getPosition().x - nearest->x;
                 double dz = getPosition().z - nearest->z;
                 double range = sqrt(dx*dx + dz*dz) / 100.0;
+                INFO_LOG(format("HardlineDirectory: Player %1% queried nearest hardline %2%") % m_handle % nearest->name);
                 m_parent.QueueCommand(make_shared<SystemChatMsg>(
                     (format("{c:00FFCC}[HARDLINE] Nearest: %1% (District %2%, #%3%) - Range: %4$.1fm | Total Matrix Hardlines: %5%{/c}")
                      % nearest->name % (int)nearest->districtId % (int)nearest->hardlineId % range % total).str()
                 ));
             } else {
+                INFO_LOG(format("HardlineDirectory: Player %1% queried total hardlines (%2%)") % m_handle % total);
                 m_parent.QueueCommand(make_shared<SystemChatMsg>((format("{c:00FFCC}[HARDLINE] Total Matrix Hardlines: %1%{/c}") % total).str()));
             }
             return;
@@ -5036,6 +5038,7 @@ void PlayerObject::RPC_HandleMissionRequest(ByteBuffer& srcCmd)
 
 	if (sMissionSys.HasActiveMission(m_goId))
 	{
+		INFO_LOG(format("MissionSystem: Player %1% active contract in progress") % m_handle);
 		m_parent.QueueCommand(std::make_shared<SystemChatMsg>("{c:FFFF00}[OPERATOR] Active contract in progress. Complete or abort current parameters before requesting new orders.{/c}"));
 		sMissionSys.SendMissionObjectiveDialog(this);
 		return;
