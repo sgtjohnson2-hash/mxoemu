@@ -176,6 +176,13 @@ public:
         if (m_alignment == 0 && m_factionName.empty()) return FACTION_ZION;
         return FACTION_NONE;
     }
+    void setFaction(int f) {
+        if (f == FACTION_ZION) { m_factionName = "Zion"; m_alignment = 0; }
+        else if (f == FACTION_MACHINES) { m_factionName = "Machines"; m_alignment = 1; }
+        else if (f == FACTION_MEROVINGIAN) { m_factionName = "Merovingian"; m_alignment = 2; }
+        else if (f == FACTION_EXILE) { m_factionName = "Exile"; }
+        else { m_factionName = "Civilian"; }
+    }
     void setFactionName(const std::string& name) { m_factionName = name; }
     std::string getFactionName() const { return m_factionName; }
     void setCrewName(const std::string& name) { m_crewName = name; }

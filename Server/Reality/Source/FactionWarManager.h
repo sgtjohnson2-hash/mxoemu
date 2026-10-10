@@ -8,6 +8,8 @@
 #include <vector>
 #include <string>
 
+class PlayerObject;
+
 struct ControlNode {
     uint32 id;
     uint32 districtId;
@@ -104,6 +106,7 @@ public:
     void registerControlNode(uint32 id, float x, float y, float z) { registerControlNode(id, 1, x, y, z); }
     void registerControlNode(uint32 id, uint32 districtId, float x, float y, float z);
     void captureNode(uint32 id, uint32 newFaction);
+    bool AdvanceNodeCapture(uint32 nodeId, uint32 faction, float deltaProgress, PlayerObject* player = nullptr);
     uint32 getControllingFaction(uint32 nodeId);
     uint32 getControllingFactionByLocation(float x, float y, float z);
     bool getClosestEnemyNode(uint32 myFaction, float x, float y, float z, float& outX, float& outY, float& outZ);

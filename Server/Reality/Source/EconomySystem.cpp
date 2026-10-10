@@ -30,6 +30,7 @@ void EconomySystem::Initialize()
     InitializeHardlineVendors();
 
     std::lock_guard<std::recursive_mutex> lock(m_transactionMutex);
+    if (Database_Main == nullptr) return;
     try
     {
         scoped_ptr<QueryResult> lockRes(sDatabase.Query("SELECT `lockerId`, `charId`, `hardlineId`, `slot`, `templateId`, `quantity`, `item_metadata` FROM `hardline_lockers`"));
@@ -159,16 +160,19 @@ uint64 EconomySystem::ListVendorItem(PlayerObject* seller, uint32 templateId, ui
 
     m_activeListings[id] = listing;
 
-    try
+    if (Database_Main != nullptr)
     {
-        PreparedStatement* stmt = new PreparedStatement("INSERT INTO `trade_listings` (`listingId`, `sellerId`, `templateId`, `infoPrice`, `isActive`) VALUES (?0, ?1, ?2, ?3, 1)");
-        stmt->SetUInt64(0, id);
-        stmt->SetUInt64(1, seller->getCharacterUID());
-        stmt->SetUInt32(2, templateId);
-        stmt->SetUInt32(3, price);
-        sDatabase.ExecutePrepared(stmt);
+        try
+        {
+            PreparedStatement stmt("INSERT INTO `trade_listings` (`listingId`, `sellerId`, `templateId`, `infoPrice`, `isActive`) VALUES (?0, ?1, ?2, ?3, 1)");
+            stmt.SetUInt64(0, id);
+            stmt.SetUInt64(1, seller->getCharacterUID());
+            stmt.SetUInt32(2, templateId);
+            stmt.SetUInt32(3, price);
+            sDatabase.ExecutePrepared(&stmt);
+        }
+        catch (...) {}
     }
-    catch (...) {}
 
     INFO_LOG(format("Player %1% listed item %2% for %3% Info") % seller->getHandle() % templateId % price);
     return id;
@@ -215,13 +219,16 @@ bool EconomySystem::PurchaseVendorItem(PlayerObject* buyer, uint64 listingId)
         sellerObj->saveCashToDB();
     }
 
-    try
+    if (Database_Main != nullptr)
     {
-        PreparedStatement* stmt = new PreparedStatement("UPDATE `trade_listings` SET `isActive` = 0 WHERE `listingId` = ?0");
-        stmt->SetUInt64(0, listingId);
-        sDatabase.ExecutePrepared(stmt);
+        try
+        {
+            PreparedStatement stmt("UPDATE `trade_listings` SET `isActive` = 0 WHERE `listingId` = ?0");
+            stmt.SetUInt64(0, listingId);
+            sDatabase.ExecutePrepared(&stmt);
+        }
+        catch (...) {}
     }
-    catch (...) {}
 
     INFO_LOG(format("Player %1% purchased listing %2% (Item %3%)") % buyer->getHandle() % listingId % listing.templateId);
     return true;
@@ -255,13 +262,16 @@ bool EconomySystem::CancelListing(PlayerObject* seller, uint64 listingId)
         seller->getInventory()->saveToDB();
     }
 
-    try
+    if (Database_Main != nullptr)
     {
-        PreparedStatement* stmt = new PreparedStatement("UPDATE `trade_listings` SET `isActive` = 0 WHERE `listingId` = ?0");
-        stmt->SetUInt64(0, listingId);
-        sDatabase.ExecutePrepared(stmt);
+        try
+        {
+            PreparedStatement stmt("UPDATE `trade_listings` SET `isActive` = 0 WHERE `listingId` = ?0");
+            stmt.SetUInt64(0, listingId);
+            sDatabase.ExecutePrepared(&stmt);
+        }
+        catch (...) {}
     }
-    catch (...) {}
 
     INFO_LOG(format("Player %1% cancelled listing %2%") % seller->getHandle() % listingId);
     return true;
@@ -367,18 +377,21 @@ bool EconomySystem::DepositToLocker(PlayerObject* player, uint32 hardlineId, uin
 
     locker.push_back(item);
 
-    try
+    if (Database_Main != nullptr)
     {
-        PreparedStatement* stmt = new PreparedStatement("INSERT INTO `hardline_lockers` (`lockerId`, `charId`, `hardlineId`, `slot`, `templateId`, `quantity`, `item_metadata`) VALUES (?0, ?1, ?2, ?3, ?4, 1, ?5)");
-        stmt->SetUInt64(0, item.entryId);
-        stmt->SetUInt64(1, player->getCharacterUID());
-        stmt->SetUInt32(2, hardlineId);
-        stmt->SetUInt32(3, slot);
-        stmt->SetUInt32(4, templateId);
-        stmt->SetString(5, item.metadata);
-        sDatabase.ExecutePrepared(stmt);
+        try
+        {
+            PreparedStatement stmt("INSERT INTO `hardline_lockers` (`lockerId`, `charId`, `hardlineId`, `slot`, `templateId`, `quantity`, `item_metadata`) VALUES (?0, ?1, ?2, ?3, ?4, 1, ?5)");
+            stmt.SetUInt64(0, item.entryId);
+            stmt.SetUInt64(1, player->getCharacterUID());
+            stmt.SetUInt32(2, hardlineId);
+            stmt.SetUInt32(3, slot);
+            stmt.SetUInt32(4, templateId);
+            stmt.SetString(5, item.metadata);
+            sDatabase.ExecutePrepared(&stmt);
+        }
+        catch (...) {}
     }
-    catch (...) {}
 
     INFO_LOG(format("Player %1% deposited item %2% into Hardline %3% locker.")
              % player->getHandle() % templateId % hardlineId);
@@ -413,13 +426,16 @@ bool EconomySystem::WithdrawFromLocker(PlayerObject* player, uint32 hardlineId, 
                 player->getInventory()->saveToDB();
             }
 
-            try
+            if (Database_Main != nullptr)
             {
-                PreparedStatement* stmt = new PreparedStatement("DELETE FROM `hardline_lockers` WHERE `lockerId` = ?0");
-                stmt->SetUInt64(0, entryId);
-                sDatabase.ExecutePrepared(stmt);
+                try
+                {
+                    PreparedStatement stmt("DELETE FROM `hardline_lockers` WHERE `lockerId` = ?0");
+                    stmt.SetUInt64(0, entryId);
+                    sDatabase.ExecutePrepared(&stmt);
+                }
+                catch (...) {}
             }
-            catch (...) {}
 
             INFO_LOG(format("Player %1% withdrew item %2% from Hardline %3% locker.")
                      % player->getHandle() % templateId % hardlineId);

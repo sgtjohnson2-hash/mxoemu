@@ -40,6 +40,8 @@
 #include "LootManager.h"
 #include "AI/MatrixThreatHeatmap.h"
 #include "EconomySystem.h"
+#include "FactionWarManager.h"
+#include "VehicleSystem.h"
 #include "Timer.h"
 #include <iostream>
 #include <vector>
@@ -1798,6 +1800,84 @@ int RunCombatTestSuite()
 			humanClient.captured.clear();
 			humanOperative.po->HandleCommand(hlChatCmd);
 			check(humanClient.sawText("[HARDLINE] Nearest:"), "/hardline command reports nearest hardline station");
+		}
+
+		// ============================================================
+		// Remaster Completion Subsystems: Lockers, Tailors, Faction Warfare & City Traffic
+		// ============================================================
+		{
+			std::cout << "\n[21. Remaster Completion Subsystems: Lockers, Tailors, Faction Warfare & City Traffic]" << std::endl;
+			Actor humanOperative = makeHuman(&humanClient, 9100104, 17043.1, 2398.8);
+			humanOperative.po->setDistrict(1);
+
+			// 1. Hardline Locker & Vault Storage
+			humanClient.captured.clear();
+			humanOperative.po->giveItem(10102); // Trenchcoat
+			uint8 invSlot = humanOperative.po->getInventory()->getFirstFreeSlot() - 1;
+			// Player at MaraCentral (17043.1, 572.0, 2398.8) is right at Hardline #152
+			humanOperative.po->setPosition(LocationVector(17043.1, 572.0, 2398.8));
+
+			ByteBuffer lockerListCmd;
+			lockerListCmd << (uint8)0x28 << (uint8)0x10 << (uint16)swap16(8) << (uint32)0;
+			lockerListCmd.writeString("/locker list");
+			humanOperative.po->HandleCommand(lockerListCmd);
+			check(humanClient.sawText("[LOCKER] Hardline #152 vault is empty"), "/locker list identifies empty Hardline vault");
+
+			ByteBuffer lockerStoreCmd;
+			lockerStoreCmd << (uint8)0x28 << (uint8)0x10 << (uint16)swap16(8) << (uint32)0;
+			lockerStoreCmd.writeString((format("/locker store %1%") % (int)invSlot).str());
+			humanClient.captured.clear();
+			humanOperative.po->HandleCommand(lockerStoreCmd);
+			check(humanClient.sawText("[LOCKER] Deposited item"), "/locker store deposits item into Hardline vault");
+			check(sEconomySys.GetLockerItemCount(humanOperative.po->getCharacterUID(), 152) == 1, "EconomySystem confirms 1 item in Hardline 152 locker");
+
+			// Retrieve item from locker
+			auto items = sEconomySys.GetLockerItems(humanOperative.po->getCharacterUID(), 152);
+			check(!items.empty(), "GetLockerItems returns deposited item");
+			if (!items.empty()) {
+				ByteBuffer lockerWithdrawCmd;
+				lockerWithdrawCmd << (uint8)0x28 << (uint8)0x10 << (uint16)swap16(8) << (uint32)0;
+				lockerWithdrawCmd.writeString((format("/locker withdraw %1%") % items[0].entryId).str());
+				humanClient.captured.clear();
+				humanOperative.po->HandleCommand(lockerWithdrawCmd);
+				check(humanClient.sawText("[LOCKER] Withdrew item"), "/locker withdraw returns item to operative inventory");
+			}
+
+			// 2. Tailor Wardrobe & RSI Palette Dyeing
+			ByteBuffer dyeCmd;
+			dyeCmd << (uint8)0x28 << (uint8)0x10 << (uint16)swap16(8) << (uint32)0;
+			dyeCmd.writeString("/dye coat 7");
+			humanClient.captured.clear();
+			humanOperative.po->HandleCommand(dyeCmd);
+			check(humanClient.sawText("[TAILOR] Your coat has been dyed to palette color #7"), "/dye coat 7 customizes wardrobe coat color");
+
+			// 3. Faction War Contested Node Alert & Viral Capture
+			// Register a control node in District 1 at (17043.1, 572.0, 2398.8)
+			sFactionWarMgr.registerControlNode(152, 1, 17043.1f, 572.0f, 2398.8f);
+			check(sFactionWarMgr.getControllingFaction(152) == FACTION_MACHINES, "Hardline 152 default faction is Machines");
+
+			// Operative initiates capture
+			humanOperative.po->setFaction(FACTION_ZION);
+			ByteBuffer captureCmd;
+			captureCmd << (uint8)0x28 << (uint8)0x10 << (uint16)swap16(8) << (uint32)0;
+			captureCmd.writeString("/capture 152");
+			humanClient.captured.clear();
+			humanOperative.po->HandleCommand(captureCmd);
+			check(humanClient.sawText("[VIRUS UPLOAD] Hardline #152 capture progress:"), "/capture initiates viral upload to Hardline node");
+			check(humanClient.sawText("[FACTION ALERT] Hardline Broadcast Node #152"), "/capture triggers district-wide contested broadcast alert");
+
+			// Advance to full capture
+			sFactionWarMgr.AdvanceNodeCapture(152, FACTION_ZION, 0.70f, humanOperative.po);
+			check(sFactionWarMgr.getControllingFaction(152) == FACTION_ZION, "Hardline 152 captured by Zion operative");
+
+			// 4. City Traffic Simulation & Active Vehicles
+			sVehicleSys.Initialize();
+			check(sVehicleSys.GetActiveVehicleCount() > 0, "VehicleSystem initialized active city vehicular fleet");
+			size_t initialVehicles = sVehicleSys.GetActiveVehicleCount();
+			sVehicleSys.Tick(1000);
+			check(sVehicleSys.GetActiveVehicleCount() == initialVehicles, "VehicleSystem maintains active fleet consistency during simulation tick");
+			const auto& vehicles = sVehicleSys.GetVehicles();
+			check(!vehicles.empty() && vehicles[0].y == 572.0f, "Simulated vehicle clamped flush to authentic street pavement (572.0f)");
 		}
 	}
 	catch (const std::exception& e)

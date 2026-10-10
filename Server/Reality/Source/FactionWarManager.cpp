@@ -115,37 +115,40 @@ void FactionWarManager::initialize()
     m_districtStatus[4] = {4, "Richland", 0, 0, 0, 0, 0.0f, 0.0f, 0.0f, FACTION_MACHINES, {}};
     
     // Attempt to load current standings from DB
-    scoped_ptr<QueryResult> result(sDatabase.Query("SELECT `faction`, SUM(`control_points`) FROM `territory_map` GROUP BY `faction`"));
-    if (result)
+    if (Database_Main != nullptr)
     {
-        do
+        scoped_ptr<QueryResult> result(sDatabase.Query("SELECT `faction`, SUM(`control_points`) FROM `territory_map` GROUP BY `faction`"));
+        if (result)
         {
-            Field *field = result->Fetch();
-            uint32 faction = field[0].GetUInt32();
-            uint32 score = field[1].GetUInt32();
-            m_factionScores[faction] = score;
-        } while (result->NextRow());
-    }
-    
-    // Load Hardlines as Control Nodes with DistrictId
-    scoped_ptr<QueryResult> hlResult(sDatabase.Query("SELECT `HardlineId`, `DistrictId`, `X`, `Y`, `Z`, `FactionTag` FROM `hardlines`"));
-    if (hlResult)
-    {
-        do
+            do
+            {
+                Field *field = result->Fetch();
+                uint32 faction = field[0].GetUInt32();
+                uint32 score = field[1].GetUInt32();
+                m_factionScores[faction] = score;
+            } while (result->NextRow());
+        }
+        
+        // Load Hardlines as Control Nodes with DistrictId
+        scoped_ptr<QueryResult> hlResult(sDatabase.Query("SELECT `HardlineId`, `DistrictId`, `X`, `Y`, `Z`, `FactionTag` FROM `hardlines`"));
+        if (hlResult)
         {
-            Field *field = hlResult->Fetch();
-            uint32 id = field[0].GetUInt32();
-            uint32 distId = field[1].GetUInt32();
-            float x = field[2].GetFloat();
-            float y = field[3].GetFloat();
-            float z = field[4].GetFloat();
-            uint32 faction = field[5].GetUInt32();
-            
-            registerControlNode(id, distId, x, y, z);
-            if (faction != 0) {
-                m_controlNodes[id].controllingFaction = faction;
-            }
-        } while (hlResult->NextRow());
+            do
+            {
+                Field *field = hlResult->Fetch();
+                uint32 id = field[0].GetUInt32();
+                uint32 distId = field[1].GetUInt32();
+                float x = field[2].GetFloat();
+                float y = field[3].GetFloat();
+                float z = field[4].GetFloat();
+                uint32 faction = field[5].GetUInt32();
+                
+                registerControlNode(id, distId, x, y, z);
+                if (faction != 0) {
+                    m_controlNodes[id].controllingFaction = faction;
+                }
+            } while (hlResult->NextRow());
+        }
     }
     
     INFO_LOG(format("FactionWarManager Initialized with %1% Control Nodes across %2% Strategic Districts.") 
@@ -622,12 +625,15 @@ void FactionWarManager::registerPvPKill(uint32 killerFaction, uint32 victimFacti
 void FactionWarManager::syncToDatabase()
 {
     INFO_LOG("FactionWarManager: Syncing territory map to database...");
-    for (auto it = m_factionScores.begin(); it != m_factionScores.end(); ++it)
+    if (Database_Main != nullptr)
     {
-        PreparedStatement stmt("REPLACE INTO `territory_map` (`territory_id`, `faction`, `control_points`) VALUES (1, ?0, ?1)");
-        stmt.SetUInt32(0, it->first);
-        stmt.SetUInt32(1, it->second);
-        sDatabase.ExecutePrepared(&stmt);
+        for (auto it = m_factionScores.begin(); it != m_factionScores.end(); ++it)
+        {
+            PreparedStatement stmt("REPLACE INTO `territory_map` (`territory_id`, `faction`, `control_points`) VALUES (1, ?0, ?1)");
+            stmt.SetUInt32(0, it->first);
+            stmt.SetUInt32(1, it->second);
+            sDatabase.ExecutePrepared(&stmt);
+        }
     }
 }
 
@@ -669,20 +675,23 @@ void FactionWarManager::captureNode(uint32 id, uint32 newFaction)
         m_controlNodes[id].controllingFaction = newFaction;
         m_controlNodes[id].captureProgress = 0.0f;
 
-        // Persist Hardline FactionTag into MariaDB hardlines table
-        PreparedStatement hlStmt("UPDATE `hardlines` SET `FactionTag` = ?0 WHERE `HardlineId` = ?1");
-        hlStmt.SetUInt32(0, newFaction);
-        hlStmt.SetUInt32(1, id);
-        sDatabase.ExecutePrepared(&hlStmt);
+        if (Database_Main != nullptr)
+        {
+            // Persist Hardline FactionTag into MariaDB hardlines table
+            PreparedStatement hlStmt("UPDATE `hardlines` SET `FactionTag` = ?0 WHERE `HardlineId` = ?1");
+            hlStmt.SetUInt32(0, newFaction);
+            hlStmt.SetUInt32(1, id);
+            sDatabase.ExecutePrepared(&hlStmt);
 
-        // Update district frontlines and score
+            // Update district frontlines and score
+            PreparedStatement scoreStmt("REPLACE INTO `territory_map` (`territory_id`, `faction`, `control_points`) VALUES (?0, ?1, ?2)");
+            scoreStmt.SetUInt32(0, m_controlNodes[id].districtId);
+            scoreStmt.SetUInt32(1, newFaction);
+            scoreStmt.SetUInt32(2, m_factionScores[newFaction] + 25);
+            sDatabase.ExecutePrepared(&scoreStmt);
+        }
+
         m_factionScores[newFaction] += 25;
-        PreparedStatement scoreStmt("REPLACE INTO `territory_map` (`territory_id`, `faction`, `control_points`) VALUES (?0, ?1, ?2)");
-        scoreStmt.SetUInt32(0, m_controlNodes[id].districtId);
-        scoreStmt.SetUInt32(1, newFaction);
-        scoreStmt.SetUInt32(2, m_factionScores[newFaction]);
-        sDatabase.ExecutePrepared(&scoreStmt);
-
         updateDistrictFrontlines(0);
         
         string factionStr = "Machines";
@@ -701,6 +710,61 @@ void FactionWarManager::captureNode(uint32 id, uint32 newFaction)
         }
         INFO_LOG(format("FactionWarManager: Node %1% captured by %2% (District buff: %3%)") % id % factionStr % districtBuff);
     }
+}
+
+bool FactionWarManager::AdvanceNodeCapture(uint32 nodeId, uint32 faction, float deltaProgress, PlayerObject* player)
+{
+    auto it = m_controlNodes.find(nodeId);
+    if (it == m_controlNodes.end()) return false;
+
+    ControlNode& node = it->second;
+    if (node.controllingFaction == faction) return false;
+
+    if (node.capturingFaction != faction) {
+        node.capturingFaction = faction;
+        node.captureProgress = 0.0f;
+    }
+
+    node.captureProgress += deltaProgress;
+    node.isContested = true;
+
+    uint32 now = getMSTime();
+    if (node.lastContestedMs == 0 || (now - node.lastContestedMs > 15000)) {
+        node.lastContestedMs = now;
+        string attackerStr = "Machines";
+        if (faction == FACTION_ZION) attackerStr = "Zion";
+        else if (faction == FACTION_MEROVINGIAN) attackerStr = "Merovingian";
+
+        string alertMsg = (format("{c:FF3300}[FACTION ALERT] Hardline Broadcast Node #%1% (District %2%) is UNDER VIRAL ASSAULT by %3%! Defense requested immediately!{/c}")
+            % node.id % node.districtId % attackerStr).str();
+
+        auto players = sObjMgr.getAllGOIds();
+        for (auto goId : players) {
+            PlayerObject* p = sObjMgr.getGOPtrSafe(goId);
+            if (p && !p->getClient().isBot() && p->getDistrict() == node.districtId) {
+                p->getClient().QueueCommand(std::make_shared<SystemChatMsg>(alertMsg));
+            }
+        }
+    }
+
+    if (player) {
+        player->getClient().QueueCommand(std::make_shared<SystemChatMsg>(
+            (format("{c:00FFCC}[VIRUS UPLOAD] Hardline #%1% capture progress: %2%%%{/c}")
+                % nodeId % int(node.captureProgress * 100.0f)).str()
+        ));
+    }
+
+    if (node.captureProgress >= 1.0f) {
+        captureNode(nodeId, faction);
+        sBotMgr.SpawnFactionDefenders(1, nodeId, (uint8)faction, LocationVector(node.x, node.y, node.z));
+        if (player) {
+            player->getClient().QueueCommand(std::make_shared<SystemChatMsg>(
+                (format("{c:00FF00}[FACTION WAR] You successfully captured Hardline Node #%1%!{/c}") % nodeId).str()
+            ));
+        }
+    }
+
+    return true;
 }
 
 uint32 FactionWarManager::getControllingFaction(uint32 nodeId)
@@ -777,6 +841,26 @@ void FactionWarManager::updateControlNodes(uint32 deltaMs)
                 node.captureProgress = 0.0f;
             }
             node.captureProgress += 0.05f * dtSeconds * float(maxPresence);
+
+            uint32 now = getMSTime();
+            if (node.captureProgress > 0.10f && (now - node.lastContestedMs > 30000)) {
+                node.lastContestedMs = now;
+                string attackerStr = "Machines";
+                if (node.capturingFaction == FACTION_ZION) attackerStr = "Zion";
+                else if (node.capturingFaction == FACTION_MEROVINGIAN) attackerStr = "Merovingian";
+
+                string alertMsg = (format("{c:FF3300}[FACTION ALERT] Hardline Node #%1% (District %2%) is UNDER VIRAL ASSAULT by %3%! Defense requested immediately!{/c}")
+                    % node.id % node.districtId % attackerStr).str();
+
+                auto players = sObjMgr.getAllGOIds();
+                for (auto goId : players) {
+                    PlayerObject* p = sObjMgr.getGOPtrSafe(goId);
+                    if (p && !p->getClient().isBot() && p->getDistrict() == node.districtId) {
+                        p->getClient().QueueCommand(std::make_shared<SystemChatMsg>(alertMsg));
+                    }
+                }
+            }
+
             if (node.captureProgress >= 1.0f) {
                 captureNode(node.id, node.capturingFaction);
                 sBotMgr.SpawnFactionDefenders(1, node.id, (uint8)node.capturingFaction, LocationVector(node.x, node.y, node.z));

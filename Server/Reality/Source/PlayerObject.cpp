@@ -455,7 +455,10 @@ void PlayerObject::InitializeWorld()
 
 void PlayerObject::UpdateAppearance()
 {
-	loadFromDB(false);
+	if (Database_Main != nullptr && m_characterUID < 9000000)
+	{
+		loadFromDB(false);
+	}
 	sGame.AnnounceStateUpdate(NULL,make_shared<PlayerAppearanceMsg>(m_goId));
 }
 

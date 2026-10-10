@@ -529,11 +529,12 @@ void Database::FreeQueryResult(QueryResult * p)
 
 string Database::EscapeString(std::string Escape)
 {
-	if (m_isMockMode) return Escape;
+	if (m_isMockMode || m_connections.empty()) return Escape;
 
 	char a2[16384] = {0};
 
 	DatabaseConnection &con = GetFreeConnection();
+	if (!con.conn) return Escape;
 	const char * ret;
 	if(mysql_real_escape_string(con.conn, a2, Escape.c_str(), (unsigned long)Escape.length()) == 0)
 		ret = Escape.c_str();
@@ -546,13 +547,17 @@ string Database::EscapeString(std::string Escape)
 
 void Database::EscapeLongString(const char * str, uint32 len, stringstream& out)
 {
-	if (m_isMockMode) {
+	if (m_isMockMode || m_connections.empty()) {
 		out.write(str, len);
 		return;
 	}
 	char a2[65536*3] = {0};
 
 	DatabaseConnection &con = GetFreeConnection();
+	if (!con.conn) {
+		out.write(str, len);
+		return;
+	}
 	const char * ret;
 	if(mysql_real_escape_string(con.conn, a2, str, (unsigned long)len) == 0)
 		ret = str;
