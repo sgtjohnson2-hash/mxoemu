@@ -549,8 +549,8 @@ bool CombatSystem::RequestInterlock(uint32 attackerGoId, uint32 targetGoId, uint
 		posB.x = midX + (targetMeleeDist * 0.5);
 	}
 
-	posA.rot = std::atan2(-(posB.x - posA.x), -(posB.z - posA.z));
-	posB.rot = std::atan2(-(posA.x - posB.x), -(posA.z - posB.z));
+	posA.rot = std::atan2(posB.x - posA.x, posB.z - posA.z);
+	posB.rot = std::atan2(posA.x - posB.x, posA.z - posB.z);
 	pA->setPosition(posA);
 	pB->setPosition(posB);
 
@@ -1307,11 +1307,18 @@ ILExchange CombatSystem::BuildExchange(const InterlockSession &session, PlayerOb
 	// Propagate authentic martial arts fighting style (attacker's discipline)
 	e.style = (uint8)attacker->getFightingStyle();
 
-	uint32 attMove = attackerPreMove ? attackerPreMove : (mainMove ? mainMove : IL_MOVE_OPEN_ATTACKER_PRE);
-	uint32 defMove = defenderPreMove ? defenderPreMove : IL_MOVE_PRE;
+	uint32 moveResolved = mainMove ? mainMove : IL_MOVE_OPEN_MAIN;
+	uint32 attMove = attackerPreMove ? attackerPreMove : moveResolved;
+	uint32 defMove = defenderPreMove ? defenderPreMove : moveResolved;
 	e.moves[0][0] = attMove; e.moves[0][1] = IL_MOVE_DATABASE;
 	e.moves[1][0] = defMove; e.moves[1][1] = IL_MOVE_DATABASE;
-	e.moves[2][0] = mainMove ? mainMove : IL_MOVE_OPEN_MAIN; e.moves[2][1] = IL_MOVE_DATABASE;
+	e.moves[2][0] = moveResolved; e.moves[2][1] = IL_MOVE_DATABASE;
+
+	if (animPair)
+	{
+		if (animPair->attackerAnimId) { e.moves[3][0] = animPair->attackerAnimId; e.moves[3][1] = IL_MOVE_DATABASE; }
+		if (animPair->defenderAnimId) { e.moves[4][0] = animPair->defenderAnimId; e.moves[4][1] = IL_MOVE_DATABASE; }
+	}
 
 	e.attackerHealth = attacker->getCurrentHealth();
 	e.defenderHealth = defender->getCurrentHealth();
