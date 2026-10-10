@@ -482,7 +482,7 @@ void PlayerObject::setAgentAppearance()
 	ref["Shoes"] = 1;             // formal black leather dress shoes
 	ref["Gloves"] = 0;            // clean bare hands
 	ref["Glasses"] = 17;          // ArchiveMachMGlasses (System Sunglasses)
-	ref["Hair"] = 0;              // RSIMHair001 (authentic clean crew cut / buzz cut, NO BANGS)
+	ref["Hair"] = 2;              // RSIMHair003 (authentic clean crew cut / business cut, NO BANGS, not bald)
 	ref["FacialDetail"] = 0;      // clean shaven
 	ref["ShirtColor"] = 32;       // authentic System Suit palette color 32
 	ref["PantsColor"] = 9;        // authentic pitch black

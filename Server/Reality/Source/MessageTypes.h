@@ -898,41 +898,42 @@ public:
 };
 
 // One interlock exchange as the retail 7.6005 client stores and executes it (0x79 = 121 bytes, packed).
-// Proven by client.dll: 0x6263ac00 (unmarshaler stride 0x79), 0x6263ae30 (exchange locator stride 0x79),
-// 0x6263af20 (121-byte exchange field comparator), 0x625f7350 (exchange queue runner stride 0x79),
-// and 0x625f44f0 (121-byte copy constructor) & 0x625f6580 (interlock animation player & scheduler).
+// Proven by client.dll: FUN_1051e180 (anim execution & timing), FUN_1051cb20 (packet copy constructor),
+// 0x6263ac00 (unmarshaler stride 0x79), 0x6263ae30 (exchange locator stride 0x79),
+// and 0x625f6580 (interlock animation player & scheduler).
 struct ILExchange
 {
 	uint8 attackerSlot;			// 0x00 participant slot (1..6)
 	uint8 defenderSlot;			// 0x01
-	uint16 attackerAdjustMs;	// 0x02 time to slide attacker to attackerPos (775)
-	uint16 defenderAdjustMs;	// 0x04 time to slide defender to defenderPos (775)
+	uint16 attackerAdjustMs;	// 0x02..0x03 time to slide attacker to attackerPos (775)
+	uint16 defenderAdjustMs;	// 0x04..0x05 time to slide defender to defenderPos (775)
 	float attackerPos[3];		// 0x06..0x11 relative to IL handler position (12 bytes)
 	float defenderPos[3];		// 0x12..0x1D relative to IL handler position (12 bytes)
 	uint8 style;				// 0x1E martial arts fighting style (Kung Fu=2, Karate=3, etc.)
-	uint8 unk1F;				// 0x1F (0)
-	uint16 number;				// 0x20..0x21 sequence number (client only plays newer numbers)
-	uint32 startMs;				// 0x22..0x25 start time (bit0 in flags makes client clamp to now+5ms)
-	int16 defenderOffsetMs;		// 0x26..0x27 defender contact delay from startMs (500)
-	uint16 unk28;				// 0x28..0x29 attacker extra timing (1332)
-	uint16 unk2A;				// 0x2A..0x2B defender extra timing (666)
-	uint8 flags;				// 0x2C bit0 relative start, bit1 dilation/camera update, bit5 (0x23)
-	uint32 moves[5][2];			// 0x2D..0x54 (40 bytes): 5 moves (moveId, rezId 0x24000B8B)
+	uint16 number;				// 0x1F..0x20 sequence number (client only plays newer numbers)
+	uint32 startMs;				// 0x21..0x24 start time (bit0 in flags makes client clamp to now+5ms)
+	int16 defenderOffsetMs;		// 0x25..0x26 defender contact delay from startMs (500)
+	uint8 flags;				// 0x27 bit0 relative start, bit1 dilation/camera update, bit5 (0x23)
+	uint32 moves[5][2];			// 0x28..0x4F (40 bytes): 5 moves (moveId, rezId 0x24000B8B)
 								//   moves[0]: Attacker lead-in (0x523C)
 								//   moves[1]: Defender lead-in (0x5214)
 								//   moves[2]: Main attack (0x2026, 0x2388, 0x236D, 0x2367, 0x4EE5, etc.)
 								//   moves[3]: Attacker lead-out / strike anim
 								//   moves[4]: Defender lead-out / reaction anim
-	uint32 attackerHealth;		// 0x55..0x58 attacker remaining health (authentic retail capture)
-	uint32 defenderHealth;		// 0x59..0x5C defender remaining health (authentic retail capture)
-	uint16 unk5D;				// 0x5D..0x5E (0x1000)
-	uint16 unk5F;				// 0x5F..0x60 (0x1000)
-	uint32 unk61;				// 0x61..0x64 (0)
-	uint32 unk65;				// 0x65..0x68 (0)
-	uint32 unk69;				// 0x69..0x6C (0)
-	uint32 unk6D;				// 0x6D..0x70 (0x00000100)
-	uint32 unk71;				// 0x71..0x74 (0x00602b02)
-	uint32 unk75;				// 0x75..0x78 (0)
+	uint32 attackerHealth;		// 0x50..0x53 attacker remaining health (authentic retail capture)
+	uint32 defenderHealth;		// 0x54..0x57 defender remaining health (authentic retail capture)
+	uint16 unk58;				// 0x58..0x59 (0x1000)
+	uint16 unk5A;				// 0x5A..0x5B (0x1000)
+	uint16 unk5C;				// 0x5C..0x5D (0)
+	uint16 unk5E;				// 0x5E..0x5F (0)
+	uint16 unk60;				// 0x60..0x61 (0)
+	uint16 unk62;				// 0x62..0x63 (0)
+	uint32 unk64;				// 0x64..0x67 (0)
+	uint32 unk68;				// 0x68..0x6B (0)
+	uint32 unk6C;				// 0x6C..0x6F (0)
+	uint32 unk70;				// 0x70..0x73 (0x00000100)
+	uint32 unk74;				// 0x74..0x77 (0x00602b02)
+	uint8 unk78;				// 0x78 (0)
 
 	ILExchange();
 	void write(ByteBuffer &buf) const;
