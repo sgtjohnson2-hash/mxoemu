@@ -1,5 +1,6 @@
 #include "SocketSystem.h"
 #include "Item.h"
+#include "InventorySystem.h"
 #include "PlayerObject.h"
 #include "Log.h"
 #include "Database/Database.h"
@@ -68,6 +69,18 @@ bool SocketSystem::ApplySocket(PlayerObject* player, uint64 gearUid, const Socke
         updateStmt.SetString(0, updatedJson);
         updateStmt.SetUInt32(1, targetInvId);
         sDatabase.ExecutePrepared(&updateStmt);
+    }
+
+    if (player->getInventory()) {
+        shared_ptr<Item> inMemoryItem = nullptr;
+        if (gearUid <= 30) {
+            inMemoryItem = player->getInventory()->getItemBySlot((uint8)gearUid);
+        } else {
+            inMemoryItem = player->getInventory()->getItemByGoId((uint32)gearUid);
+        }
+        if (inMemoryItem) {
+            inMemoryItem->setMetadata(updatedJson);
+        }
     }
 
     INFO_LOG(format("SocketSystem: Player %1% socketed %2% (+%3%) into Item (invId %4%)") 

@@ -16,6 +16,19 @@ std::string ItemSerializer::Serialize(std::shared_ptr<Item> item)
     ss << "\"durability\":" << item->getDurability() << ",";
     ss << "\"rarity\":" << (int)item->getRarity() << ",";
     ss << "\"isCorrupted\":" << (item->isCorrupted() ? "true" : "false");
+
+    // Preserve custom metadata fields (like sockets) from m_metadataJSON
+    const std::string& existing = item->getMetadata();
+    size_t sockPos = existing.find("\"sockets\"");
+    if (sockPos != std::string::npos) {
+        size_t bStart = existing.find('[', sockPos);
+        size_t bEnd = existing.find(']', bStart);
+        if (bStart != std::string::npos && bEnd != std::string::npos) {
+            std::string sockArr = existing.substr(bStart, bEnd - bStart + 1);
+            ss << ",\"sockets\":" << sockArr;
+        }
+    }
+
     ss << "}";
     
     return ss.str();
