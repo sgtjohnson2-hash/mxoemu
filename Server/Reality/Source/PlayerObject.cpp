@@ -476,15 +476,15 @@ void PlayerObject::setAgentAppearance()
 	ref["Shoes"] = 6;             // dress shoes
 	ref["Gloves"] = 6;            // dress cuffs / hands
 	ref["Glasses"] = 4;           // Agent sunglasses
-	ref["Hair"] = 0;              // neat short hair / crew cut
+	ref["Hair"] = 1;              // authentic Agent combed-back crew cut
 	ref["FacialDetail"] = 0;
 	ref["ShirtColor"] = 41;       // crisp white
 	ref["PantsColor"] = 16;       // authentic black
 	ref["CoatColor"] = 0;         // authentic black
 	ref["ShoeColor"] = 0;         // black
 	ref["GlassesColor"] = 15;     // dark black shades
-	ref["HairColor"] = 0;         // black hair
-	ref["SkinTone"] = 0;
+	ref["HairColor"] = 1;         // dark brown/black hair
+	ref["SkinTone"] = 1;          // authentic Caucasian/Agent skin tone
 	ref["Tattoo"] = 0;
 	ref["FacialDetailColor"] = 0;
 
@@ -1002,6 +1002,7 @@ vector<msgBaseClassPtr> PlayerObject::getCurrentStatePackets()
 {
 	vector<msgBaseClassPtr> tempVect;
 	tempVect.push_back(make_shared<PlayerSpawnMsg>(m_goId));
+	tempVect.push_back(make_shared<PlayerAppearanceMsg>(m_goId));
 	if (!m_parent.isBot() && (m_currAnimation != 0 || m_currMood != 0))
 	{
 		tempVect.push_back(make_shared<AnimationStateMsg>(m_goId));

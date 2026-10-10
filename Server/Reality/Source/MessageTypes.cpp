@@ -279,7 +279,6 @@ PlayerAppearanceMsg::~PlayerAppearanceMsg()
 const ByteBuffer& PlayerAppearanceMsg::toBuf()
 {
 	m_buf.clear();
-	m_buf << uint8(0x03);
 	
 	uint16 viewId = 0;
 	try
@@ -292,12 +291,6 @@ const ByteBuffer& PlayerAppearanceMsg::toBuf()
 		throw PacketNoLongerValid();		
 	}
 
-	m_buf << uint16(viewId);
-	m_buf << uint8(0x02);
-	m_buf << uint8(0x80);
-	m_buf << uint8(0x81);
-	vector<byte> rsiBuf(15,0);
-
 	PlayerObject *player = NULL;
 	player = sObjMgr.getGOPtr(m_objectId);
 	if (player == NULL)
@@ -306,8 +299,29 @@ const ByteBuffer& PlayerAppearanceMsg::toBuf()
 		throw PacketNoLongerValid();
 	}
 
+	bool isSelf = (m_toWho && m_toWho->getControlledGOPtr() == player);
+	vector<byte> rsiBuf(15,0);
 	player->getRsiData(&rsiBuf[0],rsiBuf.size());
-	m_buf.append(rsiBuf);
+
+	ByteBuffer rsiDataBytes;
+	rsiDataBytes.append(rsiBuf);
+
+	AttributeUpdateBlock block;
+	if (isSelf)
+	{
+		block.addByte(PlayerAttrSelf::UseRSIDescription, 1);
+		block.addAttribute(PlayerAttrSelf::RSIDescription, rsiDataBytes);
+	}
+	else
+	{
+		block.addByte(PlayerAttrOther::UseRSIDescription, 1);
+		block.addAttribute(PlayerAttrOther::RSIDescription, rsiDataBytes);
+	}
+
+	m_buf << uint8(0x03);
+	m_buf << uint16(viewId);
+	ByteBuffer blockBuf = block.toBuf(!isSelf);
+	m_buf.append(blockBuf.contents(), blockBuf.size());
 	m_buf << uint16(0); //nomoreattribs
 	return m_buf;
 }
