@@ -79,6 +79,8 @@
 #include "EmergentPoliceManager.h"
 #include "MafiaEcosystemManager.h"
 #include "ExileChateauManager.h"
+#include "AgentPossessionManager.h"
+#include "AI/PedestrianEcology.h"
 
 #include <boost/algorithm/string.hpp>
 using boost::iequals;
@@ -753,7 +755,7 @@ void PlayerObject::ParsePlayerCommand( string theCmd )
 			"discipline", "class", "loadability", "learn", "dojo", "loadout", "botdebug", "giveitem",
 			"claimhl", "send", "sendCmd", "socket", "bullettime", "gotoPos", "incX", "incY", "incZ",
 			"goThru", "random", "update", "gotoPlayer", "go", "frank", "punisher", "underworld",
-			"syndicate", "police", "swat", "citylife", "simulation", "emergent", "bottest", NULL };
+			"syndicate", "police", "swat", "citylife", "simulation", "emergent", "bottest", "overwrite", "agentstrike", "agent", NULL };
 		for (int i = 0; devCommands[i] != NULL; i++)
 		{
 			if (iequals(command, devCommands[i]) && !m_isAdmin)
@@ -1489,6 +1491,84 @@ void PlayerObject::ParsePlayerCommand( string theCmd )
 		}
 		return;
 	}
+	else if (iequals(command, "overwrite") || iequals(command, "agentstrike") || iequals(command, "agent"))
+	{
+		uint32 targetCivId = 0;
+		cmdStream >> targetCivId;
+		if (targetCivId == 0) {
+			targetCivId = m_targetGoId;
+		}
+
+		LocationVector pos = this->getPosition();
+		if (targetCivId == 0 || !sObjMgr.getGOPtrSafe(targetCivId)) {
+			float bestDistSq = 3000.0f * 3000.0f;
+			for (uint32 gid : sObjMgr.getAllGOIds()) {
+				PlayerObject* po = sObjMgr.getGOPtrSafe(gid);
+				if (po && po != this && !po->isDead() && (po->getClient().isBot() || po->getFactionName() == "Civilian")) {
+					float d = (float)pos.DistanceSq(po->getPosition());
+					if (d < bestDistSq) {
+						bestDistSq = d;
+						targetCivId = gid;
+					}
+				}
+			}
+		}
+
+		if (targetCivId == 0 || !sObjMgr.getGOPtrSafe(targetCivId)) {
+			// Spawn a civilian bot 4m in front of player at authentic pavement level
+			const LocationVector botPos = DojoPlaceInFront(pos, 4.0f, 0.0f);
+			auto bot = sBotMgr.SpawnSingleBot((float)botPos.x, (float)pos.y, (float)botPos.z, FACTION_NONE);
+			if (bot) {
+				targetCivId = bot->GetPlayerGoId();
+				if (auto po = sObjMgr.getGOPtrSafe(targetCivId)) {
+					po->setHandle("Thomas Anderson");
+					po->setFactionName("Civilian");
+					po->setPosition(botPos);
+					noteEntitySpawned(targetCivId);
+				}
+			}
+		}
+
+		if (targetCivId != 0) {
+			string optAgent;
+			cmdStream >> optAgent;
+			bool isSmith = iequals(optAgent, "smith");
+			string agentName = isSmith ? "Agent Smith" : (!optAgent.empty() ? optAgent : "Agent Johnson");
+
+			uint32 agentId = sAgentPossessionMgr.PossessCivilian(targetCivId, agentName, m_goId, isSmith);
+			if (agentId != 0) {
+				setTargetGoId(targetCivId);
+				m_lastDojoBotGoId = targetCivId;
+
+				string alertMsg = (format("{c:00FF00}[AGENT OVERWRITE] Anomaly detected: %1%. Commencing system overwrite of civilian host into %2%!{/c}") 
+					% m_handle % agentName).str();
+				m_parent.QueueCommand(make_shared<SystemChatMsg>(alertMsg));
+				sGame.AnnounceStateUpdateNear((float)pos.x, (float)pos.z, 20000.0f, make_shared<SystemChatMsg>(alertMsg));
+				INFO_LOG(format("AgentPossession: Overwrote civilian GoID %1% with %2% [AgentID: %3%]") % targetCivId % agentName % agentId);
+
+				if (PedestrianEcology::getSingletonPtr()) {
+					sPedestrianEcology.SpreadRumorFearAura((float)pos.x, (float)pos.z, 0.75f, 3500.0f);
+				}
+
+				if (auto agentPo = sObjMgr.getGOPtrSafe(targetCivId)) {
+					auto pkts = agentPo->getCurrentStatePackets();
+					for (const auto& pkt : pkts) {
+						m_parent.QueueState(pkt);
+					}
+					m_parent.QueueState(make_shared<CombatantModeMsg>(targetCivId, 1));
+				}
+
+				uint16 targetViewId = sObjMgr.getViewForGO(&m_parent, targetCivId);
+				uint32 clientTargetRef = uint32(targetViewId) | (uint32(PLAYER_SPAWN_COUNTER) << 16);
+				sCombatSys.RequestInterlock(m_goId, targetCivId, clientTargetRef);
+			} else {
+				m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FF0000}[AGENT OVERWRITE] Failed to possess candidate.{/c}"));
+			}
+		} else {
+			m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FF0000}[AGENT OVERWRITE] No civilian host available to possess.{/c}"));
+		}
+		return;
+	}
 	else if (iequals(command, "target"))
 	{
 		uint32 bestGoId = 0;
@@ -2197,6 +2277,9 @@ void PlayerObject::RPC_HandleChat( ByteBuffer &srcCmd )
 									  boost::istarts_with(theMessage, "/dye") ||
 									  boost::istarts_with(theMessage, "/capture") ||
 									  boost::istarts_with(theMessage, "/hacknode") ||
+									  boost::istarts_with(theMessage, "/overwrite") ||
+									  boost::istarts_with(theMessage, "/agentstrike") ||
+									  boost::istarts_with(theMessage, "/agent") ||
 									  boost::istarts_with(theMessage, "/dojo"))))
 	{
 		INFO_LOG(format("(%1%) %2%:%3% chat command: %4%") % m_parent.Address() % m_handle % m_goId % theMessage);

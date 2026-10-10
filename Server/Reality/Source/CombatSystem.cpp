@@ -22,6 +22,8 @@
 #include "CombatAnimationMatrix.h"
 #include "HackerSystem.h"
 #include "Config.h"
+#include "AgentPossessionManager.h"
+#include "AI/PedestrianEcology.h"
 #include <boost/property_tree/ptree.hpp>
 #include <boost/property_tree/json_parser.hpp>
 
@@ -581,6 +583,9 @@ bool CombatSystem::RequestInterlock(uint32 attackerGoId, uint32 targetGoId, uint
 		sGame.AnnounceStateUpdateNear(posA.x, posA.z, 20000.0f, std::make_shared<CombatantModeMsg>(pA->getGoId(), 1));
 		sGame.AnnounceStateUpdateNear(posB.x, posB.z, 20000.0f, std::make_shared<CombatantModeMsg>(pB->getGoId(), 1));
 		INFO_LOG(format("Interlock started: %1% (%2%) vs %3% (%4%)") % attackerGoId % pA->getHandle() % targetGoId % pB->getHandle());
+		if (PedestrianEcology::getSingletonPtr()) {
+			sPedestrianEcology.SpreadRumorFearAura((float)posA.x, (float)posA.z, 0.40f, 3500.0f);
+		}
 
 		struct SideSetup { PlayerObject* self; PlayerObject* other; uint16* viewSlot; };
 		SideSetup sides[2] =
@@ -2030,6 +2035,11 @@ void CombatSystem::AwardKill(PlayerObject* killer, PlayerObject* victim)
             (format("%1% terminated an Agent in combat!") % killer->getHandle()).str(),
             victim->getPosition().x, victim->getPosition().z
         );
+    }
+
+    // Dynamic Agent Defeat Demorphing
+    if (AgentPossessionManager::getSingletonPtr() && sAgentPossessionMgr.IsEntityPossessed(victim->getGoId())) {
+        sAgentPossessionMgr.HandleAgentDefeat(victim->getGoId(), killer->getGoId());
     }
 
     // Logistics courier ambush check

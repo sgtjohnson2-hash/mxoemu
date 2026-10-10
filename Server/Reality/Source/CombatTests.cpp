@@ -42,6 +42,8 @@
 #include "EconomySystem.h"
 #include "FactionWarManager.h"
 #include "VehicleSystem.h"
+#include "AgentPossessionManager.h"
+#include "AI/PedestrianEcology.h"
 #include "Timer.h"
 #include <iostream>
 #include <vector>
@@ -1878,6 +1880,62 @@ int RunCombatTestSuite()
 			check(sVehicleSys.GetActiveVehicleCount() == initialVehicles, "VehicleSystem maintains active fleet consistency during simulation tick");
 			const auto& vehicles = sVehicleSys.GetVehicles();
 			check(!vehicles.empty() && vehicles[0].y == 572.0f, "Simulated vehicle clamped flush to authentic street pavement (572.0f)");
+		}
+
+		// ============================================================
+		// 22. Phase I: Dynamic Agent Overwrite, Civilian Possession & Crowd Fleeing Dynamics
+		// ============================================================
+		{
+			std::cout << "\n[22. Phase I: Dynamic Agent Overwrite, Civilian Possession & Crowd Fleeing Dynamics]" << std::endl;
+			Actor humanOperative = makeHuman(&humanClient, 9100105, 17043.1, 2398.8);
+			humanOperative.po->setDistrict(1);
+			humanOperative.po->setAdmin(true);
+
+			// 1. Dynamic Agent Possession of civilian host
+			Actor civilianHost = makeBot(9200201, 17043.1, 2398.8, 1, 100);
+			civilianHost.po->setHandle("Thomas Anderson");
+			civilianHost.po->setFactionName("Civilian");
+			uint32 civGoId = civilianHost.go;
+
+			check(!sAgentPossessionMgr.IsEntityPossessed(civGoId), "Civilian entity initially not possessed");
+			uint32 agentId = sAgentPossessionMgr.PossessCivilian(civGoId, "Agent Johnson", humanOperative.go, false);
+			check(agentId != 0, "AgentPossessionManager successfully overwrote civilian host");
+			check(sAgentPossessionMgr.IsEntityPossessed(civGoId), "IsEntityPossessed returns true for overwritten host");
+			check(sAgentPossessionMgr.GetTotalOverwrites() >= 1, "AgentPossessionManager records total overwrites >= 1");
+
+			const PossessedAgent* posAgent = sAgentPossessionMgr.GetPossession(agentId);
+			check(posAgent != nullptr, "PossessedAgent record query by agentId succeeds");
+			check(posAgent->agentName == "Agent Johnson", "PossessedAgent identity resolved to Agent Johnson");
+			check(posAgent->civilianGoId == civGoId, "PossessedAgent bound to authentic civilian GoId");
+
+			// 2. Chat slash command &overwrite execution
+			ByteBuffer overwriteCmd;
+			overwriteCmd << (uint8)0x28 << (uint8)0x10 << (uint16)swap16(8) << (uint32)0;
+			overwriteCmd.writeString("/overwrite");
+			humanClient.captured.clear();
+			humanOperative.po->HandleCommand(overwriteCmd);
+			check(humanClient.sawText("[AGENT OVERWRITE]") && humanClient.sawText("Commencing system overwrite"),
+				"/overwrite chat command broadcasts authentic green code rain alert");
+
+			// 3. Ambient crowd fear aura & panic fleeing dynamics
+			Actor bystander = makeBot(9200202, 17043.1, 2405.0, 1, 100);
+			bystander.po->setHandle("City Bystander");
+			bystander.po->setFactionName("Civilian");
+
+			sPedestrianEcology.SpreadRumorFearAura(17043.1f, 2398.8f, 0.90f, 3500.0f);
+			CivilianFearTier tier = sPedestrianEcology.EvaluateCivilianTier(0.85f);
+			check(tier == CIV_TIER_PANIC_STAMPEDE, "Fear level >= 0.80 transitions pedestrian to CIV_TIER_PANIC_STAMPEDE");
+
+			// 4. Agent Defeat Demorphing in combat
+			bool defeatHandled = sAgentPossessionMgr.HandleAgentDefeat(civGoId, humanOperative.go);
+			check(defeatHandled, "HandleAgentDefeat successfully demorphs defeated Agent");
+			check(sAgentPossessionMgr.GetTotalDemorphs() >= 1, "AgentPossessionManager records total demorphs >= 1");
+			check(posAgent->state == AgentPossessionState::DEFEATED_DEMORPH, "PossessedAgent state transitions to DEFEATED_DEMORPH");
+
+			// 5. DemorphAgent cleanup
+			bool demorphed = sAgentPossessionMgr.DemorphAgent(agentId);
+			check(demorphed, "DemorphAgent cleanly removes possession record");
+			check(!sAgentPossessionMgr.IsEntityPossessed(civGoId), "Entity is no longer possessed after demorph");
 		}
 	}
 	catch (const std::exception& e)

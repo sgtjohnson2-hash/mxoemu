@@ -133,7 +133,7 @@ uint32 AgentPossessionManager::PossessCivilian(uint32 civilianGoId, const std::s
     m_civToGoIdMap[civilianGoId] = id;
     m_totalOverwrites++;
 
-    DEBUG_LOG(format("AgentPossessionManager: Overwrote civilian GoID %1% with %2% [ID: %3%]")
+    INFO_LOG(format("AgentPossessionManager: Overwrote civilian GoID %1% with %2% [ID: %3%]")
               % civilianGoId % agent.agentName % id);
 
     return id;
@@ -195,7 +195,9 @@ bool AgentPossessionManager::HandleAgentDefeat(uint32 civilianGoId, uint32 kille
             // Revert handle to show dead civilian host
             po->setHandle("Deceased: " + agent.originalCivilianName);
             po->setFactionName("Civilian");
-            po->die(killerGoId);
+            if (!po->isDead()) {
+                po->die(killerGoId);
+            }
             po->sayChat("Agent connection terminated. Host perished.");
         }
         if (auto bot = sBotMgr.GetBotByGOID(civilianGoId)) {
@@ -204,8 +206,8 @@ bool AgentPossessionManager::HandleAgentDefeat(uint32 civilianGoId, uint32 kille
         }
     }
 
-    DEBUG_LOG(format("AgentPossessionManager: Agent %1% defeated. Demorphed back to %2%")
-              % agent.agentName % agent.originalCivilianName);
+    INFO_LOG(format("AgentPossessionManager: Agent %1% defeated by GOID %2%. Demorphed back to %3%")
+              % agent.agentName % killerGoId % agent.originalCivilianName);
 
     return true;
 }

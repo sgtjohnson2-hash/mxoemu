@@ -380,6 +380,9 @@ public:
 
 	void addEvent(eventType type, eventFunc func, float activationTime);
 
+	bool isAdmin() const { return m_isAdmin; }
+	void setAdmin(bool admin) { m_isAdmin = admin; }
+
 private:
 	size_t cancelEvents(eventType type);
 
