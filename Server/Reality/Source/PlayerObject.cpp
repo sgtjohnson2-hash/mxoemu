@@ -250,8 +250,8 @@ void PlayerObject::initGoId(uint32 theGoId)
 			m_abilitySystem->sendFullLoadout();
 		}
 
-		if (MissionSystem::getSingletonPtr() && !sMissionSys.HasActiveMission(m_goId)) {
-			sMissionSys.AssignMission(this, 10111); // Chapter 1.1: Intelligence Gathering / Awakening
+		if (MissionSystem::getSingletonPtr()) {
+			sMissionSys.LoadPlayerMissions(this);
 		}
 	}
 }

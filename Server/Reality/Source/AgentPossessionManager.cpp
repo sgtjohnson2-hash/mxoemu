@@ -97,7 +97,6 @@ uint32 AgentPossessionManager::PossessCivilian(uint32 civilianGoId, const std::s
 
             // 3D World Manifestation: Green code rain, handle overwrite, stat boost
             po->sayChat("Anomaly detected. Commencing system overwrite.");
-            po->Emote(50); // Shock / collapse before rising
             po->setHandle(agent.agentName);
             po->setFactionName("Machines");
             po->setMaximumHealth(10000);

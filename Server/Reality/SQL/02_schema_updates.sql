@@ -1,4 +1,4 @@
-﻿USE reality;
+USE reality;
 
 CREATE TABLE IF NOT EXISTS `ai_ltm` (
   `botId` INT,
@@ -41,4 +41,15 @@ CREATE TABLE IF NOT EXISTS `code_fragments` (
   `quality` INT NOT NULL DEFAULT 1,
   `timeExtracted` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   INDEX (`charId`)
+);
+
+CREATE TABLE IF NOT EXISTS `character_missions` (
+  `charId` BIGINT(30) UNSIGNED NOT NULL,
+  `missionId` INT UNSIGNED NOT NULL,
+  `currentObjective` INT UNSIGNED NOT NULL DEFAULT 0,
+  `state` TINYINT UNSIGNED NOT NULL DEFAULT 0,
+  `completedAt` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`charId`, `missionId`),
+  INDEX (`charId`),
+  INDEX (`state`)
 );

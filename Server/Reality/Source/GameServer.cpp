@@ -1,4 +1,4 @@
-﻿// ***************************************************************************
+// ***************************************************************************
 //
 // Reality - The Matrix Online Server Emulator
 // Copyright (C) 2006-2010 Rajko Stojadinovic
@@ -70,6 +70,8 @@
 #include "ExileChateauManager.h"
 #include "NeuralSwarmManager.h"
 #include "MachineCitySystem.h"
+#include "AgentPossessionManager.h"
+#include "OrganizationManager.h"
 #include <boost/bind.hpp>
 
 initialiseSingleton( GameServer );
@@ -123,6 +125,8 @@ bool GameServer::Start()
 	sExileMgr.Initialize();
 	sNeuralSwarmMgr.Initialize();
 	sMachineCitySystem.Initialize();
+	sAgentPossessionMgr.Initialize();
+	sOrgMgr.loadFromDB();
 
 	string Interface = sConfig.GetStringDefault("GameServer.IP", "0.0.0.0");
 	int Port = sConfig.GetIntDefault("GameServer.Port", 10000);
@@ -268,6 +272,7 @@ void GameServer::SimulationLoop()
 				sEmergentPoliceMgr.Update(delta1Hz);
 				sFrankCastleMgr.Update(delta1Hz);
 				sNeuralSwarmMgr.Update(dt1Hz);
+				sAgentPossessionMgr.Update(delta1Hz * 1000);
 				}
 
 				// Throttled background bot network queue flush

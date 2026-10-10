@@ -1057,6 +1057,64 @@ void PlayerObject::ParsePlayerCommand( string theCmd )
 		}
 		return;
 	}
+	else if (iequals(command, "trade"))
+	{
+		string targetHandle;
+		uint32 templateId = 0;
+		cmdStream >> targetHandle >> templateId;
+		if (targetHandle.empty() || templateId == 0)
+		{
+			m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FF0000}Usage: &trade <targetName> <templateId>{/c}"));
+			return;
+		}
+
+		PlayerObject* recipient = nullptr;
+		auto allIds = sObjMgr.getAllGOIds();
+		for (auto id : allIds)
+		{
+			PlayerObject* p = sObjMgr.getGOPtrSafe(id);
+			if (p && iequals(p->getHandle(), targetHandle))
+			{
+				recipient = p;
+				break;
+			}
+		}
+
+		if (!recipient)
+		{
+			m_parent.QueueCommand(make_shared<SystemChatMsg>((format("{c:FF0000}Operative '%1%' not found.{/c}") % targetHandle).str()));
+			return;
+		}
+
+		LocationVector pA = getPosition();
+		LocationVector pB = recipient->getPosition();
+		double dx = pB.x - pA.x;
+		double dz = pB.z - pA.z;
+		if ((dx * dx + dz * dz) > (1000.0 * 1000.0))
+		{
+			m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FF0000}Trade partner is out of range (max 10m).{/c}"));
+			return;
+		}
+
+		if (m_inventorySystem && recipient->getInventory())
+		{
+			if (m_inventorySystem->consumeItemByTemplate(templateId))
+			{
+				recipient->giveItem(templateId);
+				m_inventorySystem->saveToDB();
+				recipient->getInventory()->saveToDB();
+				m_parent.QueueCommand(make_shared<SystemChatMsg>(
+					(format("{c:00FF00}[TRADE] Transferred item %1% to %2%.{/c}") % templateId % targetHandle).str()));
+				recipient->getClient().QueueCommand(make_shared<SystemChatMsg>(
+					(format("{c:00FF00}[TRADE] Received item %1% from %2%.{/c}") % templateId % getHandle()).str()));
+			}
+			else
+			{
+				m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FF0000}[TRADE] You do not possess that item.{/c}"));
+			}
+		}
+		return;
+	}
 	else if (iequals(command, "dojo"))
 	{
 		string subCommand;
@@ -1956,6 +2014,56 @@ void PlayerObject::RPC_HandleChat( ByteBuffer &srcCmd )
             PlayerObject* p = sObjMgr.getGOPtrSafe(id);
             if (p && p->getOrgId() == m_orgId) {
                 p->getClient().QueueCommand(std::make_shared<SystemChatMsg>(formattedMsg));
+            }
+        }
+        return;
+    }
+
+    if (theMessage.length() >= 7 && boost::iequals(theMessage.substr(0, 7), "/trade ")) {
+        std::stringstream ss(theMessage.substr(7));
+        string targetHandle;
+        uint32 templateId = 0;
+        ss >> targetHandle >> templateId;
+        if (targetHandle.empty() || templateId == 0) {
+            m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FF0000}Usage: /trade <targetName> <templateId>{/c}"));
+            return;
+        }
+
+        PlayerObject* recipient = nullptr;
+        auto allIds = sObjMgr.getAllGOIds();
+        for (auto id : allIds) {
+            PlayerObject* p = sObjMgr.getGOPtrSafe(id);
+            if (p && boost::iequals(p->getHandle(), targetHandle)) {
+                recipient = p;
+                break;
+            }
+        }
+
+        if (!recipient) {
+            m_parent.QueueCommand(make_shared<SystemChatMsg>((format("{c:FF0000}Operative '%1%' not found.{/c}") % targetHandle).str()));
+            return;
+        }
+
+        LocationVector pA = getPosition();
+        LocationVector pB = recipient->getPosition();
+        double dx = pB.x - pA.x;
+        double dz = pB.z - pA.z;
+        if ((dx * dx + dz * dz) > (1000.0 * 1000.0)) {
+            m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FF0000}Trade partner is out of range (max 10m).{/c}"));
+            return;
+        }
+
+        if (m_inventorySystem && recipient->getInventory()) {
+            if (m_inventorySystem->consumeItemByTemplate(templateId)) {
+                recipient->giveItem(templateId);
+                m_inventorySystem->saveToDB();
+                recipient->getInventory()->saveToDB();
+                m_parent.QueueCommand(make_shared<SystemChatMsg>(
+                    (format("{c:00FF00}[TRADE] Transferred item %1% to %2%.{/c}") % templateId % targetHandle).str()));
+                recipient->getClient().QueueCommand(make_shared<SystemChatMsg>(
+                    (format("{c:00FF00}[TRADE] Received item %1% from %2%.{/c}") % templateId % getHandle()).str()));
+            } else {
+                m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FF0000}[TRADE] You do not possess that item.{/c}"));
             }
         }
         return;

@@ -18,6 +18,8 @@
 #include "Config.h"
 #include "AbilitySystem.h"
 #include "DataLoader.h"
+#include "Database/Database.h"
+#include "Database/PreparedStatement.h"
 
 createFileSingleton(MissionSystem);
 
@@ -327,10 +329,116 @@ uint32 MissionSystem::GetAvailableStoryMission(PlayerObject* player, uint32 spon
     return 0;
 }
 
+void MissionSystem::SavePlayerMission(PlayerObject* player, uint32 missionId, uint32 currentObjective, uint8 state)
+{
+    if (!player || player->getClient().isBot() || player->getCharacterUID() >= 9000000)
+        return;
+
+    PreparedStatement stmt("INSERT INTO `character_missions` (`charId`, `missionId`, `currentObjective`, `state`) VALUES (?0, ?1, ?2, ?3) ON DUPLICATE KEY UPDATE `currentObjective` = ?2, `state` = ?3");
+    stmt.SetUInt64(0, player->getCharacterUID());
+    stmt.SetUInt32(1, missionId);
+    stmt.SetUInt32(2, currentObjective);
+    stmt.SetUInt32(3, (uint32)state);
+    sDatabase.ExecutePrepared(&stmt);
+}
+
+void MissionSystem::LoadPlayerMissions(PlayerObject* player)
+{
+    if (!player) return;
+    if (player->getClient().isBot() || player->getCharacterUID() >= 9000000)
+    {
+        if (!HasActiveMission(player->getGoId()))
+            AssignMission(player, 10111);
+        return;
+    }
+
+    std::unique_lock<std::recursive_mutex> lock(m_missionMutex);
+    uint64 charUID = player->getCharacterUID();
+    uint32 playerGoId = player->getGoId();
+
+    PreparedStatement stmt("SELECT `missionId`, `currentObjective`, `state` FROM `character_missions` WHERE `charId` = ?0");
+    stmt.SetUInt64(0, charUID);
+    scoped_ptr<QueryResult> result(sDatabase.QueryPrepared(&stmt));
+
+    bool hasActive = false;
+    uint32 activeMissionId = 0;
+    uint32 activeObjIndex = 0;
+    size_t loadedCount = 0;
+
+    if (result)
+    {
+        do
+        {
+            Field* fields = result->Fetch();
+            uint32 missionId = fields[0].GetUInt32();
+            uint32 currentObj = fields[1].GetUInt32();
+            uint8 state = fields[2].GetUInt8();
+            loadedCount++;
+
+            if (state == 1) // COMPLETED
+            {
+                m_completedStoryMissions[playerGoId].push_back(missionId);
+            }
+            else if (state == 0 && !hasActive) // ACTIVE
+            {
+                hasActive = true;
+                activeMissionId = missionId;
+                activeObjIndex = currentObj;
+            }
+        } while (result->NextRow());
+    }
+
+    if (hasActive && m_missions.find(activeMissionId) != m_missions.end())
+    {
+        MissionTemplate& templ = m_missions[activeMissionId];
+        ActiveMissionState state;
+        state.missionId = activeMissionId;
+        state.currentObjectiveIndex = activeObjIndex;
+        state.objectiveStartTimeMs = getMSTime();
+
+        uint32 newInstanceId = activeMissionId + playerGoId;
+        player->getClient().m_instanceId = newInstanceId;
+        LocationVector p = player->getPosition();
+        sSpatialGrid.UpdateClientPosition(&player->getClient(), (float)p.x, (float)p.z);
+
+        for (const auto& npc : templ.npcs)
+        {
+            uint32 npcGoId = sBotMgr.SpawnMissionBot(npc, newInstanceId);
+            if (npcGoId != 0)
+            {
+                state.spawnedNpcs[npc.idNpc] = npcGoId;
+            }
+        }
+
+        m_activeMissions[playerGoId] = state;
+        INFO_LOG(format("MissionSystem: Restored active mission %1% (Obj %2%) for %3%")
+            % activeMissionId % activeObjIndex % player->getHandle());
+
+        player->getClient().QueueCommand(std::make_shared<SystemChatMsg>(
+            (format("{c:00FF00}[MISSION RESTORED] %1%{/c}") % templ.title).str()));
+        if (activeObjIndex < templ.objectives.size())
+        {
+            player->getClient().QueueCommand(std::make_shared<SystemChatMsg>(
+                (format("{c:00FFFF}[OBJECTIVE %1%/%2%] %3%{/c}")
+                    % (activeObjIndex + 1) % templ.objectives.size() % templ.objectives[activeObjIndex].description).str()));
+        }
+    }
+    else if (!hasActive && loadedCount == 0)
+    {
+        AssignMission(player, 10111);
+        INFO_LOG(format("MissionSystem: Granted starter mission 10111 for new operative %1%") % player->getHandle());
+    }
+}
+
 void MissionSystem::RecordCompletedMission(uint32 playerGoId, uint32 missionId)
 {
     std::lock_guard<std::recursive_mutex> lock(m_missionMutex);
     m_completedStoryMissions[playerGoId].push_back(missionId);
+    PlayerObject* player = sObjMgr.getGOPtrSafe(playerGoId);
+    if (player)
+    {
+        SavePlayerMission(player, missionId, 0, 1);
+    }
 }
 
 bool MissionSystem::HasCompletedMission(uint32 playerGoId, uint32 missionId) const
@@ -413,6 +521,7 @@ void MissionSystem::AssignMission(PlayerObject* player, uint32 missionId)
             ));
         }
     }
+    SavePlayerMission(player, missionId, 0, 0);
     INFO_LOG(format("Player %1% assigned mission %2%, moved to instance %3%") % player->getHandle() % missionId % newInstanceId);
 }
 
@@ -572,6 +681,7 @@ void MissionSystem::AdvanceObjective(PlayerObject* player, ObjectiveCommand comm
                             % (state.currentObjectiveIndex + 1) % templ.objectives.size() % nextObj.description).str()
                     ));
                 }
+                SavePlayerMission(player, state.missionId, state.currentObjectiveIndex, 0);
             }
             else
             {
@@ -681,6 +791,7 @@ bool MissionSystem::AbortMission(PlayerObject* player, const std::string& reason
     if (it == m_activeMissions.end()) return false;
 
     INFO_LOG(format("MissionSystem: %1% aborted mission %2% (%3%)") % player->getHandle() % it->second.missionId % reason);
+    SavePlayerMission(player, it->second.missionId, it->second.currentObjectiveIndex, 2);
     for (const auto& npc : it->second.spawnedNpcs) sBotMgr.DespawnBot(npc.second);
     m_activeMissions.erase(it);
     player->getClient().m_instanceId = 0;
@@ -999,7 +1110,7 @@ void MissionSystem::InitializeContactQuests()
     q5.objectives = {
         "Acquire Exiled Memory Shard from Club Hel",
         "Corrupt Machine Transmission Relay",
-        "Deliver Cryptographic Cipher to Château"
+        "Deliver Cryptographic Cipher to Ch?teau"
     };
     q5.requiredFaction = 2; // Merovingian
     q5.rewardInfo = 5000;
@@ -1027,7 +1138,64 @@ void MissionSystem::InitializeContactQuests()
     q6.rewardItemTemplateId = 47078; // Oracle Anniversary Cookie / Vision Token
     m_contactQuests.push_back(q6);
 
-    INFO_LOG(format("MissionSystem: Initialized %1% Contact Quests (Morpheus, Ghost, Trinity, Niobe, Merovingian, Oracle).")
+    // 7. Agent Gray (Machines)
+    ContactQuest q7;
+    q7.questId = 1007;
+    q7.contact = CONTACT_AGENT_GRAY;
+    q7.contactName = "Agent Gray";
+    q7.title = "Anomaly Neutralization";
+    q7.dialogGreeting = "Humanity is an anomaly. A systemic defect that requires precise calibration. Terminate the rogue signal repeaters.";
+    q7.dialogCompletion = "Directives executed. The simulation operates within designated parameters once more.";
+    q7.objectives = {
+        "Locate the Rogue Redpill Cell in Richland",
+        "Neutralize the Defiant Insurgents",
+        "Transmit Telemetry back to 01 Central Core"
+    };
+    q7.requiredFaction = 0; // Machine
+    q7.rewardInfo = 8000;
+    q7.rewardExp = 12000;
+    q7.rewardItemTemplateId = 46407; // Agent Shades
+    m_contactQuests.push_back(q7);
+
+    // 8. The Architect (Machines)
+    ContactQuest q8;
+    q8.questId = 1008;
+    q8.contact = CONTACT_ARCHITECT;
+    q8.contactName = "The Architect";
+    q8.title = "Systemic Equilibrium";
+    q8.dialogGreeting = "Concordantly, while others fail to comprehend the systematic anomalies, your presence here is a mathematical inevitability. Restore system equilibrium.";
+    q8.dialogCompletion = "Ergo, the equation balances. The cyclical continuum remains uninterrupted.";
+    q8.objectives = {
+        "Inspect the Primary Source Chamber Entrance",
+        "Recalibrate the Core Balancing Algorithm",
+        "Purge the Unbalanced Residual Code"
+    };
+    q8.requiredFaction = 0; // Machine
+    q8.rewardInfo = 20000;
+    q8.rewardExp = 25000;
+    q8.rewardItemTemplateId = 46568; // Source Code Matrix Disk
+    m_contactQuests.push_back(q8);
+
+    // 9. Seraph (Exiles / Zion)
+    ContactQuest q9;
+    q9.questId = 1009;
+    q9.contact = CONTACT_SERAPH;
+    q9.contactName = "Seraph";
+    q9.title = "Guardian of That Which Matters Most";
+    q9.dialogGreeting = "I protect that which matters most. You do not truly know someone until you fight them. Defend the tea house from hostile operatives.";
+    q9.dialogCompletion = "You have proven your heart. The path to the Oracle remains open to you.";
+    q9.objectives = {
+        "Meet Seraph at the Chinatown Tea House",
+        "Repel the Merovingian Enforcer Squad",
+        "Secure the Sanctuary Entrance"
+    };
+    q9.requiredFaction = 2; // Exiles
+    q9.rewardInfo = 12000;
+    q9.rewardExp = 18000;
+    q9.rewardItemTemplateId = 47243; // Seraph's Silk Garments
+    m_contactQuests.push_back(q9);
+
+    INFO_LOG(format("MissionSystem: Initialized %1% Contact Quests (Morpheus, Ghost, Trinity, Niobe, Merovingian, Oracle, Gray, Architect, Seraph).")
              % m_contactQuests.size());
 }
 

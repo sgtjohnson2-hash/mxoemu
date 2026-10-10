@@ -134,7 +134,10 @@ enum ContactId : uint32
     CONTACT_TRINITY     = 103,
     CONTACT_NIOBE       = 104,
     CONTACT_MEROVINGIAN = 105,
-    CONTACT_ORACLE      = 106
+    CONTACT_ORACLE      = 106,
+    CONTACT_AGENT_GRAY  = 107,
+    CONTACT_ARCHITECT   = 108,
+    CONTACT_SERAPH      = 109
 };
 
 struct ContactQuest
@@ -166,6 +169,10 @@ public:
     uint32 GetAvailableStoryMission(PlayerObject* player, uint32 sponsorId = 0);
     void RecordCompletedMission(uint32 playerGoId, uint32 missionId);
     bool HasCompletedMission(uint32 playerGoId, uint32 missionId) const;
+
+    // Mission Database Persistence
+    void LoadPlayerMissions(PlayerObject* player);
+    void SavePlayerMission(PlayerObject* player, uint32 missionId, uint32 currentObjective, uint8 state);
 
     void AssignMission(PlayerObject* player, uint32 missionId);
     void AdvanceObjective(PlayerObject* player, ObjectiveCommand command, uint32 targetId);

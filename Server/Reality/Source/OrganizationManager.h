@@ -24,10 +24,12 @@ public:
 
     OrganizationManager() : m_nextOrgId(1) {}
 
+    void loadFromDB();
     uint32 createOrganization(const std::string& name, uint64 leaderId);
     bool joinOrganization(uint32 orgId, uint64 memberId);
     bool leaveOrganization(uint32 orgId, uint64 memberId);
     Organization* getOrganization(uint32 orgId);
+    Organization* getOrganizationForPlayer(uint64 memberId);
 
 private:
     std::map<uint32, Organization> m_orgs;
