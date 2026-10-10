@@ -3580,6 +3580,62 @@ void PlayerObject::RPC_HandleChat( ByteBuffer &srcCmd )
         return;
     }
 
+    // Authentic Marketplace Chat Commands (/market, &market, /market list, /market sell, /market buy)
+    if (boost::iequals(theMessage, "/market") || boost::iequals(theMessage, "&market") ||
+        boost::iequals(theMessage, "/market list") || boost::iequals(theMessage, "&market list") ||
+        boost::iequals(theMessage, "/marketplace") || boost::iequals(theMessage, "&marketplace")) {
+        ByteBuffer dummy;
+        RPC_HandleMarketListItems(dummy);
+        return;
+    }
+
+    if (boost::istarts_with(theMessage, "/market sell ") || boost::istarts_with(theMessage, "&market sell ") ||
+        boost::istarts_with(theMessage, "/market list ") || boost::istarts_with(theMessage, "&market list ")) {
+        std::string args = theMessage.substr(theMessage.find(" ") + 1);
+        if (args.find("sell ") == 0) args = args.substr(5);
+        else if (args.find("list ") == 0) args = args.substr(5);
+        boost::trim(args);
+        std::vector<std::string> parts;
+        boost::split(parts, args, boost::is_any_of(" "), boost::token_compress_on);
+        if (parts.size() >= 2) {
+            try {
+                uint32 tplId = std::stoul(parts[0]);
+                uint32 price = std::stoul(parts[1]);
+                uint64 listingId = sEconomySys.ListVendorItem(this, tplId, price);
+                m_parent.QueueCommand(make_shared<SystemChatMsg>(
+                    (format("{c:00FFCC}[MARKETPLACE] Listed item %1% on Exchange for %2% $Info (Listing ID: %3%){/c}")
+                        % tplId % price % listingId).str()
+                ));
+            } catch (...) {
+                m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FF4444}Usage: /market sell <templateId> <price>{/c}"));
+            }
+        } else {
+            m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FF4444}Usage: /market sell <templateId> <price>{/c}"));
+        }
+        return;
+    }
+
+    if (boost::istarts_with(theMessage, "/market buy ") || boost::istarts_with(theMessage, "&market buy ")) {
+        std::string arg = theMessage.substr(theMessage.find("buy ") + 4);
+        boost::trim(arg);
+        try {
+            uint64 listingId = std::stoull(arg);
+            bool ok = sEconomySys.PurchaseVendorItem(this, listingId);
+            if (ok) {
+                m_parent.QueueCommand(make_shared<SystemChatMsg>(
+                    (format("{c:00FF00}[MARKETPLACE] Successfully purchased listing ID %1%!{/c}") % listingId).str()
+                ));
+            } else {
+                m_parent.QueueCommand(make_shared<SystemChatMsg>(
+                    (format("{c:FF4444}[MARKETPLACE] Purchase failed for listing ID %1% (insufficient funds, full inventory, or invalid listing).{/c}") % listingId).str()
+                ));
+            }
+        } catch (...) {
+            m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FF4444}Usage: /market buy <listingId>{/c}"));
+        }
+        return;
+    }
+
     if (boost::iequals(theMessage, "/jackout") || boost::iequals(theMessage, "/exit")) {
         ByteBuffer dummy;
         RPC_HandleJackoutRequest(dummy);
@@ -4344,6 +4400,57 @@ void PlayerObject::RPC_HandleJackoutFinished( ByteBuffer &srcCmd )
 void PlayerObject::RPC_HandleMarketListItems(ByteBuffer& srcCmd)
 {
 	DEBUG_LOG(format("(%1%) %2%:%3% RPC_HandleMarketListItems") % m_parent.Address() % m_handle % m_goId);
+	auto listings = sEconomySys.GetActiveListings();
+	if (listings.empty())
+	{
+		// Authentic retail seed items so the marketplace is always populated:
+		// 903: Foot Wear (8,000 $Info) - authentic retail HDS capture
+		// 10101: Dual Berettas (15,000 $Info)
+		// 10102: Onyx Trenchcoat (25,000 $Info)
+		// 10103: Dark Shades (5,000 $Info)
+		// 10105: Polished Berettas (18,000 $Info)
+		static const std::vector<std::pair<uint32, uint32>> seedCatalog = {
+			{ 903, 8000 },
+			{ 10101, 15000 },
+			{ 10102, 25000 },
+			{ 10103, 5000 },
+			{ 10105, 18000 }
+		};
+		for (const auto& seed : seedCatalog)
+		{
+			VendorListing l;
+			l.listingId = static_cast<uint64>(seed.first);
+			l.sellerId = 0;
+			l.templateId = seed.first;
+			l.infoPrice = seed.second;
+			l.isActive = true;
+			listings.push_back(l);
+		}
+	}
+
+	std::vector<MarketItemEntry> entries;
+	entries.reserve(listings.size());
+	uint32 now = static_cast<uint32>(time(nullptr));
+	for (const auto& l : listings)
+	{
+		MarketItemEntry entry;
+		entry.templateId = l.templateId;
+		entry.instanceData = 0;
+		entry.marketplaceId = static_cast<uint32>(l.listingId);
+		entry.sellingPrice = l.infoPrice;
+		entry.organizationId = 3;
+		entry.timePostedGMT = now;
+		entry.playerIsSelling = (m_goId != 0 && l.sellerId == m_goId) ? 1 : 0;
+		entries.push_back(entry);
+	}
+
+	m_parent.QueueCommand(std::make_shared<MarketplaceListReplyMsg>(entries));
+	m_parent.QueueCommand(std::make_shared<SystemChatMsg>(
+		(format("{c:00FFCC}[MARKETPLACE] %1% active item listing(s) retrieved from MegaCity Exchange.{/c}")
+			% entries.size()).str()
+	));
+	INFO_LOG(format("Marketplace: Dispatched %1% active listings (opcode 0x8125) to %2% (GoID %3%)")
+		% entries.size() % m_handle % m_goId);
 }
 
 void PlayerObject::RPC_HandleMarketOpen(ByteBuffer& srcCmd)

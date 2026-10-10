@@ -1980,6 +1980,70 @@ int RunCombatTestSuite()
 			check(humanOperative.po->getTrueFaction() == FACTION_ZION, "Player getTrueFaction() returns FACTION_ZION");
 			humanOperative.po->clearMaskFaction();
 			check(humanOperative.po->getFaction() == FACTION_ZION, "Player getFaction() reverts to FACTION_ZION after clearing mask");
+
+			// SECTION 24: Marketplace List Protocol (0x8125) & MegaCity Exchange
+			std::cout << "--- Section 24: Marketplace List Protocol (0x8125) & Exchange ---" << std::endl;
+
+			// 1. Direct MarketplaceListReplyMsg protocol verification
+			std::vector<MarketItemEntry> testEntries;
+			MarketItemEntry me1;
+			me1.templateId = 903;
+			me1.instanceData = 0;
+			me1.marketplaceId = 12345;
+			me1.sellingPrice = 8000;
+			me1.organizationId = 3;
+			me1.timePostedGMT = 1248518928;
+			me1.playerIsSelling = 0;
+			testEntries.push_back(me1);
+
+			MarketplaceListReplyMsg mpMsg(testEntries);
+			const ByteBuffer& mpBuf = mpMsg.toBuf();
+			check(mpBuf.size() == 2 + 2 + 6 + 2 + 23, "MarketplaceListReplyMsg has exact 35-byte length for 1 item");
+			check((uint8)mpBuf.contents()[0] == (uint8)0x81 && (uint8)mpBuf.contents()[1] == (uint8)0x25, "Opcode is swap16(0x8125)");
+			check((uint8)mpBuf.contents()[2] == 0x09 && (uint8)mpBuf.contents()[3] == 0x00, "List offset is uint16(9)");
+			check((uint8)mpBuf.contents()[10] == 23 && (uint8)mpBuf.contents()[11] == 0x00, "Payload length is uint16(23)");
+			check((uint8)mpBuf.contents()[12] == 0x00, "Item 0 starts with 0x00 separator prefix");
+
+			// 2. RPC_HandleMarketListItems (opcode 0x8124) client request dispatch
+			ByteBuffer mpReqCmd;
+			mpReqCmd << (uint8)0x81 << (uint8)0x24;
+			humanClient.captured.clear();
+			humanOperative.po->HandleCommand(mpReqCmd);
+			check(humanClient.sawText("[MARKETPLACE]"), "RPC_HandleMarketListItems emits [MARKETPLACE] system notification");
+			bool saw8125 = false;
+			for (const auto& pkt : humanClient.captured) {
+				if (pkt.size() >= 2 && (uint8)pkt[0] == 0x81 && (uint8)pkt[1] == 0x25) {
+					saw8125 = true;
+					break;
+				}
+			}
+			check(saw8125, "RPC_HandleMarketListItems dispatched opcode 0x8125 (MarketplaceListReplyMsg)");
+
+			// 3. /market and &market chat slash command execution
+			ByteBuffer marketChatCmd;
+			marketChatCmd << (uint8)0x28 << (uint8)0x10 << (uint16)swap16(8) << (uint32)0;
+			marketChatCmd.writeString("/market");
+			humanClient.captured.clear();
+			humanOperative.po->HandleCommand(marketChatCmd);
+			check(humanClient.sawText("[MARKETPLACE]"), "/market chat command triggers marketplace catalog retrieval");
+
+			// 4. Player listing creation via /market sell
+			humanOperative.po->giveItem(10101);
+			uint64 listingId = sEconomySys.ListVendorItem(humanOperative.po, 10101, 15000);
+			check(listingId > 0, "ListVendorItem creates valid listing ID");
+			auto activeListings = sEconomySys.GetActiveListings();
+			check(!activeListings.empty(), "GetActiveListings returns non-empty listing catalog");
+
+			// 5. Player marketplace purchase (atomic peer-to-peer settlement)
+			TestHumanClient buyerClient;
+			Actor buyerOperative = makeHuman(&buyerClient, 9100108, 17048.0, 2400.0);
+			buyerOperative.po->addInfo(20000);
+			uint64 buyerPreBits = buyerOperative.po->getInfo();
+			uint64 sellerPreBits = humanOperative.po->getInfo();
+			bool buySuccess = sEconomySys.PurchaseVendorItem(buyerOperative.po, listingId);
+			check(buySuccess, "PurchaseVendorItem successfully executes purchase of player listing");
+			check(buyerOperative.po->getInfo() == buyerPreBits - 15000, "PurchaseVendorItem deducted exact 15,000 $Info from buyer");
+			check(humanOperative.po->getInfo() == sellerPreBits + 15000, "PurchaseVendorItem credited exact 15,000 $Info to seller");
 		}
 	}
 	catch (const std::exception& e)

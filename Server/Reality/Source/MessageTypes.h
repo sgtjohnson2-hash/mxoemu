@@ -982,5 +982,64 @@ public:
 	~VendorOpenMsg() {}
 };
 
+// Marketplace listing catalog response (RPC 0x8125)
+// Primary source citations:
+// 1. hd_reference/hds/servertype/CR1/NetworkProtocolHeaders.cs:118 (SERVER_LOAD_MARKERPLACE = 0x8125)
+// 2. hd_reference/hds/servertype/CR2/NetworkProtocolHeaders.cs:160 (SERVER_LOAD_MARKERPLACE = 0x8125)
+// 3. hd_reference/hds/world/ServerPackets/MarketplacePackets.cs:11-44
+// 4. client.dll decompile: FUN_10111a30 (VA 0x62111a30) & FUN_101117c0 (VA 0x621117c0):
+//    - Opcode: uint16 (swap16(0x8125))
+//    - List offset / flags: uint16 (0x0009 / 9)
+//    - Header separator: 6 bytes (00 00 00 00 00 00)
+//    - Payload length: uint16 (little-endian total byte size of items array)
+//    - Array of items (each 23 bytes / 0x17):
+//        * separator: uint8 (0x00)
+//        * classData (templateId): uint32 (little-endian)
+//        * instanceData: uint32 (little-endian)
+//        * marketplaceId: uint32 (little-endian)
+//        * sellingPrice: uint32 (little-endian)
+//        * organizationId: uint8
+//        * timePostedGMT: uint32 (little-endian Unix timestamp)
+//        * playerIsSelling: uint8 (bool: 0 = false, 1 = true)
+struct MarketItemEntry
+{
+	uint32 templateId = 0;
+	uint32 instanceData = 0;
+	uint32 marketplaceId = 0;
+	uint32 sellingPrice = 0;
+	uint8 organizationId = 3;
+	uint32 timePostedGMT = 0;
+	uint8 playerIsSelling = 0;
+};
+
+class MarketplaceListReplyMsg : public StaticMsg
+{
+public:
+	MarketplaceListReplyMsg(const std::vector<MarketItemEntry>& items)
+	{
+		m_buf.clear();
+		m_buf << uint16(swap16(0x8125));
+		m_buf << uint16(9); // list offset
+		for (int i = 0; i < 6; ++i)
+		{
+			m_buf << uint8(0x00); // 6-byte header separator
+		}
+		uint16 totalBytes = static_cast<uint16>(items.size() * 23);
+		m_buf << uint16(totalBytes);
+		for (const auto& item : items)
+		{
+			m_buf << uint8(0x00); // 0x00 separator prefix
+			m_buf << uint32(item.templateId);
+			m_buf << uint32(item.instanceData);
+			m_buf << uint32(item.marketplaceId);
+			m_buf << uint32(item.sellingPrice);
+			m_buf << uint8(item.organizationId);
+			m_buf << uint32(item.timePostedGMT);
+			m_buf << uint8(item.playerIsSelling);
+		}
+	}
+	~MarketplaceListReplyMsg() {}
+};
+
 #endif
 
