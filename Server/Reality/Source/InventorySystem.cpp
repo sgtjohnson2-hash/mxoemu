@@ -260,7 +260,20 @@ bool InventorySystem::consumeItemByTemplate(uint32 templateId)
     {
         if (it->second->getTemplateId() == templateId)
         {
-            removeItem(it->second->getGoId());
+            if (it->second->getStackCount() > 1)
+            {
+                it->second->setStackCount(it->second->getStackCount() - 1);
+                std::string meta = ItemSerializer::Serialize(it->second);
+                it->second->setMetadata(meta);
+            }
+            else
+            {
+                removeItem(it->second->getGoId());
+            }
+            if (m_owner && !m_owner->getClient().isBot())
+            {
+                saveToDB();
+            }
             return true;
         }
     }

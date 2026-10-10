@@ -735,15 +735,47 @@ bool HackerSystem::ExecuteSpyAbility(PlayerObject* caster, uint16 abilityId, uin
     else if (abilityId == 146) // PoisonKnifeAbility
     {
         uint16 dmg = 25;
-        if (caster->isStealthed())
+        // Directional Backstab check: within 45 degrees of target's rear
+        LocationVector cPos = caster->getPosition();
+        LocationVector tPos = target->getPosition();
+        double dx = cPos.x - tPos.x;
+        double dz = cPos.z - tPos.z;
+        double dist = std::sqrt(dx * dx + dz * dz);
+        bool isBehind = false;
+        if (dist > 1.0)
+        {
+            double dirX = dx / dist;
+            double dirZ = dz / dist;
+            double fwdX = std::sin(tPos.rot);
+            double fwdZ = std::cos(tPos.rot);
+            double dot = dirX * fwdX + dirZ * fwdZ;
+            if (dot < -0.707) // Behind target within +/- 45 deg
+            {
+                isBehind = true;
+            }
+        }
+
+        if (isBehind)
+        {
+            dmg = static_cast<uint16>(dmg * 2.5f); // 2.5x Backstab multiplier
+            if (humanCaster)
+            {
+                caster->getClient().QueueCommand(std::make_shared<SystemChatMsg>(
+                    "{c:FFFF00}[SPY] Tactical Backstab! 2.5x critical damage applied.{/c}"));
+            }
+        }
+        else if (caster->isStealthed())
         {
             dmg = static_cast<uint16>(dmg * 1.75f); // 1.75x Ambush critical strike
-            caster->setStealth(false);
             if (humanCaster)
             {
                 caster->getClient().QueueCommand(std::make_shared<SystemChatMsg>(
                     "{c:FFFF00}[SPY] Ambush critical strike! Concealment broken.{/c}"));
             }
+        }
+        if (caster->isStealthed())
+        {
+            caster->setStealth(false);
         }
         target->takeDamage(caster->getGoId(), dmg, 0x280006DF);
         sStatusEffectManager.ApplyEffect(target->getGoId(), EFFECT_VIRUS_DOT, 10.0f, 1.0f, 8.0f, caster->getGoId());
@@ -788,15 +820,43 @@ bool HackerSystem::ExecuteSpyAbility(PlayerObject* caster, uint16 abilityId, uin
         else
         {
             uint16 dmg = (templ && templ->valueFrom > 0) ? (templ->valueFrom + caster->getLevel() * 3) : (25 + caster->getLevel() * 4);
-            if (caster->isStealthed())
+            LocationVector cPos = caster->getPosition();
+            LocationVector tPos = target->getPosition();
+            double dx = cPos.x - tPos.x;
+            double dz = cPos.z - tPos.z;
+            double dist = std::sqrt(dx * dx + dz * dz);
+            bool isBehind = false;
+            if (dist > 1.0)
+            {
+                double dirX = dx / dist;
+                double dirZ = dz / dist;
+                double fwdX = std::sin(tPos.rot);
+                double fwdZ = std::cos(tPos.rot);
+                double dot = dirX * fwdX + dirZ * fwdZ;
+                if (dot < -0.707) isBehind = true;
+            }
+
+            if (isBehind)
+            {
+                dmg = static_cast<uint16>(dmg * 2.5f);
+                if (humanCaster)
+                {
+                    caster->getClient().QueueCommand(std::make_shared<SystemChatMsg>(
+                        "{c:FFFF00}[SPY] Tactical Backstab! 2.5x critical damage applied.{/c}"));
+                }
+            }
+            else if (caster->isStealthed())
             {
                 dmg = static_cast<uint16>(dmg * 1.75f);
-                caster->setStealth(false);
                 if (humanCaster)
                 {
                     caster->getClient().QueueCommand(std::make_shared<SystemChatMsg>(
                         "{c:FFFF00}[SPY] Ambush critical strike! Concealment broken.{/c}"));
                 }
+            }
+            if (caster->isStealthed())
+            {
+                caster->setStealth(false);
             }
             target->takeDamage(caster->getGoId(), dmg, 0x280006DF);
             if (abilName.find("Poison") != std::string::npos)
