@@ -6,6 +6,7 @@
 #include "MessageTypes.h"
 #include "GameServer.h"
 #include "SmithVirusCascade.h"
+#include "FactionWarManager.h"
 #include <cstdlib>
 
 createFileSingleton(WeatherSystem);
@@ -19,6 +20,8 @@ WeatherSystem::WeatherSystem()
     m_lastSkyboxUpdateMs = 0;
     m_anomalyEndTime = 0;
     m_isAnomalyActive = false;
+    m_currentGlitchType = GLITCH_NONE;
+    m_glitchLocationDesc = "";
     m_serverStartMs = 0;
     m_baseHour = 8.0f; // 08:00 AM start
     m_lastHourAnnounce = 999;
@@ -112,9 +115,7 @@ void WeatherSystem::Update(uint32 currentMs)
     // Item 115: Matrix Glitch Anomaly
     if (m_isAnomalyActive) {
         if (currentMs >= m_anomalyEndTime) {
-            m_isAnomalyActive = false;
-            m_skyboxGreenTint = 0.5f;
-            SetWeather(0, 0.0f); // Clear weather
+            ClearGlitchAnomaly();
             INFO_LOG("WeatherSystem: Anomaly ended, weather cleared.");
             
             string broadcastMsg = (format("[System] Environmental matrix stable.")).str();
@@ -129,13 +130,26 @@ void WeatherSystem::Update(uint32 currentMs)
         float infectionPct = sSmithCascade.GetInfectionPercentage();
         if (stage >= CONTAGION_STAGE_ELEVATED || infectionPct >= 15.0f) {
             float intensity = std::min(1.0f, 0.50f + (infectionPct / 100.0f) * 0.50f);
-            TriggerGlitchAnomaly(intensity, 300000); // 5 minutes code rain degradation
+            TriggerGlitchAnomaly(intensity, 300000, GLITCH_CODE_DRIZZLE, "Smith Viral Contagion Outbreak"); // 5 minutes code rain degradation
             std::string alertMsg = (format("[Matrix Anomaly] Viral contagion outbreak detected (%1%%%%)! Cascading digital code rain degradation active.")
                 % (int)infectionPct).str();
             DEBUG_LOG(alertMsg);
             INFO_LOG(format("WeatherSystem: Viral outbreak code rain degradation active. Infection: %1%%%, Intensity: %2%")
                 % infectionPct % intensity);
             return;
+        }
+
+        // Environmental Glitch Anomaly check based on high faction tension in hotspot district
+        if (currentMs - m_lastWeatherUpdateMs >= 60000) {
+            uint32 hotspotDist = sFactionWarMgr.GetHighestTensionDistrict();
+            float tension = sFactionWarMgr.GetDistrictTension(hotspotDist);
+            if (tension >= 85.0f) {
+                std::string dName = sFactionWarMgr.GetDistrictName(hotspotDist);
+                TriggerGlitchAnomaly(0.85f, 180000, GLITCH_CODE_DRIZZLE, dName + " Frontline Tension Outbreak");
+                INFO_LOG(format("WeatherSystem: Critical district tension in %1% (%2%%%) triggered environmental code drizzle anomaly")
+                         % dName % tension);
+                return;
+            }
         }
     }
 
@@ -206,14 +220,55 @@ void WeatherSystem::UpdateSkybox(uint32 currentMs, float greenTint)
     DEBUG_LOG(skyboxMsg);
 }
 
-void WeatherSystem::TriggerGlitchAnomaly(float intensity, uint32 durationMs)
+std::string WeatherSystem::GetGlitchTypeName(GlitchAnomalyType type) const
+{
+    switch (type) {
+        case GLITCH_SPOON_BEND: return "Spoon Bending (Reality Distortion)";
+        case GLITCH_NEON_FLICKER: return "Municipal Neon Flicker";
+        case GLITCH_CODE_DRIZZLE: return "Digital Code Rain Drizzle";
+        case GLITCH_SPATIAL_TEAR: return "Spatial Geometry Tear";
+        case GLITCH_CAT_DEJAVU: return "Déjà Vu Perception Shift";
+        case GLITCH_NONE:
+        default: return "None (Equilibrium)";
+    }
+}
+
+uint32 WeatherSystem::GetGlitchRemainingMs() const
+{
+    if (!m_isAnomalyActive) return 0;
+    uint32 now = getMSTime();
+    if (now >= m_anomalyEndTime) return 0;
+    return m_anomalyEndTime - now;
+}
+
+void WeatherSystem::ClearGlitchAnomaly()
+{
+    m_isAnomalyActive = false;
+    m_anomalyEndTime = 0;
+    m_currentGlitchType = GLITCH_NONE;
+    m_glitchLocationDesc = "";
+    m_skyboxGreenTint = 0.5f;
+    SetWeather(0, 0.0f);
+    INFO_LOG("WeatherSystem: Anomaly cleared, environmental matrix restored to equilibrium.");
+}
+
+void WeatherSystem::TriggerGlitchAnomaly(float intensity, uint32 durationMs, GlitchAnomalyType type, const std::string& locationDesc)
 {
     m_isAnomalyActive = true;
     m_anomalyEndTime = getMSTime() + durationMs;
-    SetWeather(3, intensity); // 3 = Matrix Code Rain
-    m_skyboxGreenTint = intensity;
-    
-    string broadcastMsg = (format("[System] Massive anomaly detected in the environment matrix. Code rain expected.")).str();
-    DEBUG_LOG(broadcastMsg);
-    INFO_LOG(format("WeatherSystem: Triggered Glitch Anomaly with intensity %1% for %2%ms") % intensity % durationMs);
+    m_currentGlitchType = type;
+    m_glitchLocationDesc = locationDesc;
+    m_currentIntensity = std::clamp(intensity, 0.0f, 1.0f);
+
+    uint32 weatherType = 3; // Matrix Code Rain
+    if (type == GLITCH_NEON_FLICKER) weatherType = 2; // Storm / Strobe
+    else if (type == GLITCH_SPOON_BEND) weatherType = 4; // Reality Warp
+    else if (type == GLITCH_SPATIAL_TEAR) weatherType = 5; // Glitch Geometry
+    SetWeather(weatherType, m_currentIntensity);
+    m_skyboxGreenTint = m_currentIntensity;
+
+    std::string typeName = GetGlitchTypeName(type);
+    INFO_LOG(format("WeatherSystem: Triggered Glitch Anomaly [%1%] with intensity %2% for %3%ms (Location: %4%)")
+             % typeName % m_currentIntensity % durationMs % (locationDesc.empty() ? "Global" : locationDesc));
 }
+

@@ -324,6 +324,8 @@ void MatrixThreatHeatmap::TriggerEscalationResponse(int gx, int gz, EscalationTi
             sRadioDispatchSystem.TriggerAgentOverride("Agent Gray", "All municipal frequencies commandeered under Machine Directive 101. Initiate immediate sector quarantine.", districtId);
             sPedestrianEcology.DeployTacticalCordon(districtId);
             sPedestrianEcology.SpreadRumorFearAura(wx, wz, 0.35f, 2000.0f);
+            sWeatherSys.TriggerGlitchAnomaly(0.65f, 180000, WeatherSystem::GLITCH_NEON_FLICKER, "Agent Overwrite Hotspot");
+            INFO_LOG("MatrixThreatHeatmap: Escalation Tier 3 triggered neon flicker glitch anomaly");
             break;
         }
         case ESCALATION_TIER_4_MULTI_AGENT: {
@@ -351,6 +353,8 @@ void MatrixThreatHeatmap::TriggerEscalationResponse(int gx, int gz, EscalationTi
             sRadioDispatchSystem.TriggerAgentOverride("Agent Pace", "Tactical perimeter cordons active at all transit nodes. Terminate or detain any anomaly attempting breach.", districtId);
             sPedestrianEcology.DeployTacticalCordon(districtId);
             sPedestrianEcology.SpreadRumorFearAura(wx, wz, 0.45f, 2500.0f);
+            sWeatherSys.TriggerGlitchAnomaly(0.85f, 240000, WeatherSystem::GLITCH_CODE_DRIZZLE, "Multi-Agent Quarantine Zone");
+            INFO_LOG("MatrixThreatHeatmap: Escalation Tier 4 triggered code drizzle glitch anomaly");
 
             // Citywide broadcast
             std::string alert = "{c:FF0000}[System Trace Alert] Massive disruption detected! Multi-Agent Hunt Team converging on coordinates!{/c}";
@@ -422,8 +426,9 @@ void MatrixThreatHeatmap::TriggerEscalationResponse(int gx, int gz, EscalationTi
             sPedestrianEcology.DeployTacticalCordon(districtId);
             sPedestrianEcology.SpreadRumorFearAura(wx, wz, 0.65f, 3500.0f);
 
-            // Trigger environmental code rain glitch
-            sWeatherSys.TriggerGlitchAnomaly(1.0f, 60000);
+            // Trigger environmental spatial tear glitch
+            sWeatherSys.TriggerGlitchAnomaly(1.0f, 300000, WeatherSystem::GLITCH_SPATIAL_TEAR, "Smith Viral Outbreak Singularity");
+            INFO_LOG("MatrixThreatHeatmap: Escalation Tier 5 triggered spatial tear glitch anomaly");
 
             // Global Radio Free Zion urgent broadcast
             std::string alert = "{c:FFFF00}[Radio Free Zion] CRITICAL THREAT: Rogue Smith virus cascading outbreak active! EVACUATE TO THE NEAREST HARDLINE!{/c}";

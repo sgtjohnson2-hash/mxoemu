@@ -193,11 +193,16 @@ public:
 
     // Phase 8: Contact Quests Engine
     void InitializeContactQuests();
+    const std::vector<ContactQuest>& GetAllContactQuests() const { return m_contactQuests; }
     std::vector<ContactQuest> GetQuestsForContact(ContactId contact) const;
     const ContactQuest* GetContactQuest(uint32 questId) const;
     bool AcceptContactQuest(PlayerObject* player, uint32 questId);
     bool ProgressContactQuest(PlayerObject* player, uint32 questId, uint32 stepIndex);
     bool CompleteContactQuest(PlayerObject* player, uint32 questId);
+    uint32 GetPlayerContactProgress(uint64 charId, uint32 questId) const;
+    bool HasActiveContactQuest(uint64 charId, uint32 questId) const;
+    bool HasCompletedContactQuest(uint64 charId, uint32 questId) const;
+    bool ResetContactQuest(PlayerObject* player, uint32 questId);
 
     // Epoch II: Procedural Mission Synthesis Engine (Faction Tension Driven)
     uint32 SynthesizeProceduralMission(PlayerObject* player, ProceduralMissionArchetype archetype);
@@ -219,7 +224,7 @@ public:
 private:
     ObjectiveCommand ParseCommand(const std::string& cmd);
 
-    std::recursive_mutex m_missionMutex;
+    mutable std::recursive_mutex m_missionMutex;
     std::map<uint32, MissionTemplate> m_missions;
     std::map<uint32, ActiveMissionState> m_activeMissions; // Keyed by Player GoId
     std::map<uint32, SponsorContact> m_sponsors;

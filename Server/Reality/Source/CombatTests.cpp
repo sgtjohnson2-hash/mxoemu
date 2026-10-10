@@ -2202,6 +2202,101 @@ int RunCombatTestSuite()
 			check(humanClient.sawText("[HARDLINE] Transferred to") || humanClient.sawText("You want to go to Hardline:1"),
 				"/hardline tp initiates authentic hardline network transit");
 		}
+
+		// =========================================================================
+		// SECTION 27: Phase J Systems — Dynamic Glitch Anomaly Engine, Faction Tension & Contact Quests
+		// =========================================================================
+		std::cout << "\n=== SECTION 27: Phase J Systems (Glitch Anomalies, Tension & Contact Quests) ===" << std::endl;
+		{
+			// 1. WeatherSystem Glitch Anomaly Triggering & Queries
+			sWeatherSys.TriggerGlitchAnomaly(0.75f, 180000, WeatherSystem::GLITCH_SPOON_BEND, "Construct Perception Rift");
+			check(sWeatherSys.IsGlitchActive(), "WeatherSystem confirms glitch anomaly is active");
+			check(sWeatherSys.GetActiveGlitchType() == WeatherSystem::GLITCH_SPOON_BEND, "Glitch type is GLITCH_SPOON_BEND");
+			check(sWeatherSys.GetGlitchRemainingMs() > 0, "Glitch remaining time is positive");
+			check(sWeatherSys.GetGlitchTypeName(WeatherSystem::GLITCH_SPOON_BEND) == "Spoon Bending (Reality Distortion)",
+				"GetGlitchTypeName correctly maps spoon bend name");
+
+			// Clear and verify equilibrium
+			sWeatherSys.ClearGlitchAnomaly();
+			check(!sWeatherSys.IsGlitchActive(), "WeatherSystem confirms glitch anomaly cleared to equilibrium");
+			check(sWeatherSys.GetActiveGlitchType() == WeatherSystem::GLITCH_NONE, "Active glitch type reset to GLITCH_NONE");
+
+			// 2. WeatherSystem Anomaly Types (Neon Flicker, Code Drizzle, Spatial Tear, Déjà Vu)
+			sWeatherSys.TriggerGlitchAnomaly(0.70f, 120000, WeatherSystem::GLITCH_NEON_FLICKER, "Downtown Substation Strobe");
+			check(sWeatherSys.GetActiveGlitchType() == WeatherSystem::GLITCH_NEON_FLICKER, "GLITCH_NEON_FLICKER triggered");
+			sWeatherSys.TriggerGlitchAnomaly(0.90f, 120000, WeatherSystem::GLITCH_CODE_DRIZZLE, "International Cascading Glyphs");
+			check(sWeatherSys.GetActiveGlitchType() == WeatherSystem::GLITCH_CODE_DRIZZLE, "GLITCH_CODE_DRIZZLE triggered");
+			sWeatherSys.TriggerGlitchAnomaly(1.0f, 120000, WeatherSystem::GLITCH_SPATIAL_TEAR, "Slums Physical Tear");
+			check(sWeatherSys.GetActiveGlitchType() == WeatherSystem::GLITCH_SPATIAL_TEAR, "GLITCH_SPATIAL_TEAR triggered");
+			sWeatherSys.TriggerGlitchAnomaly(0.80f, 120000, WeatherSystem::GLITCH_CAT_DEJAVU, "Matrix Code Change");
+			check(sWeatherSys.GetActiveGlitchType() == WeatherSystem::GLITCH_CAT_DEJAVU, "GLITCH_CAT_DEJAVU triggered");
+			sWeatherSys.ClearGlitchAnomaly();
+
+			// 3. Faction War District Tension Queries
+			uint32 hotspotDist = sFactionWarMgr.GetHighestTensionDistrict();
+			check(hotspotDist >= 1 && hotspotDist <= 4, "GetHighestTensionDistrict returns valid district ID (1-4)");
+			float distTension = sFactionWarMgr.GetDistrictTension(hotspotDist);
+			check(distTension >= 15.0f && distTension <= 98.0f, "GetDistrictTension returns valid clamped percentage (15-98%)");
+
+			// 4. Contact Storyline Quests Database & Lookup
+			const auto& allQuests = sMissionSys.GetAllContactQuests();
+			check(allQuests.size() >= 9, "Contact Quests database contains at least 9 iconic storyline quests");
+
+			const ContactQuest* qMorpheus = sMissionSys.GetContactQuest(1001);
+			check(qMorpheus != nullptr && qMorpheus->contact == CONTACT_MORPHEUS,
+				"Contact quest 1001 correctly mapped to Morpheus");
+
+			const ContactQuest* qArchitect = sMissionSys.GetContactQuest(1008);
+			check(qArchitect != nullptr && qArchitect->contact == CONTACT_ARCHITECT,
+				"Contact quest 1008 correctly mapped to The Architect");
+
+			// 5. Contact Quest Acceptance, Progression & Completion Lifecycle
+			TestHumanClient clientA;
+			Actor op = makeHuman(&clientA, 9100115, 17052.0, 2400.0);
+			op.po->setAdmin(true);
+
+			sMissionSys.ResetContactQuest(op.po, 1001);
+			check(!sMissionSys.HasActiveContactQuest(op.po->getCharId(), 1001), "Player initially has no active quest for 1001");
+
+			bool accepted = sMissionSys.AcceptContactQuest(op.po, 1001);
+			check(accepted, "AcceptContactQuest succeeds for Morpheus quest 1001");
+			check(sMissionSys.HasActiveContactQuest(op.po->getCharId(), 1001), "HasActiveContactQuest reports true");
+			check(sMissionSys.GetPlayerContactProgress(op.po->getCharId(), 1001) == 0, "Initial quest step is 0");
+
+			bool progressed = sMissionSys.ProgressContactQuest(op.po, 1001, 1);
+			check(progressed && sMissionSys.GetPlayerContactProgress(op.po->getCharId(), 1001) == 1,
+				"ProgressContactQuest advances quest to step 1");
+
+			bool completed = sMissionSys.CompleteContactQuest(op.po, 1001);
+			check(completed, "CompleteContactQuest completes quest and awards rewards");
+			check(sMissionSys.HasCompletedContactQuest(op.po->getCharId(), 1001),
+				"HasCompletedContactQuest confirms quest 1001 is finished");
+
+			// 6. Slash Command Routing for /glitch, /tension, /contact
+			ByteBuffer glitchCmd;
+			glitchCmd << (uint8)0x28 << (uint8)0x10 << (uint16)swap16(8) << (uint32)0;
+			glitchCmd.writeString("/glitch spoon");
+			clientA.captured.clear();
+			op.po->HandleCommand(glitchCmd);
+			check(clientA.sawText("[GLITCH] Reality distortion triggered") || clientA.sawText("Spoon Bending"),
+				"/glitch spoon chat command triggers reality distortion");
+
+			ByteBuffer tensionCmd;
+			tensionCmd << (uint8)0x28 << (uint8)0x10 << (uint16)swap16(8) << (uint32)0;
+			tensionCmd.writeString("/tension");
+			clientA.captured.clear();
+			op.po->HandleCommand(tensionCmd);
+			check(clientA.sawText("DISTRICT FACTION TENSION") || clientA.sawText("[HOTSPOT]"),
+				"/tension chat command queries conflict hotspots");
+
+			ByteBuffer contactCmd;
+			contactCmd << (uint8)0x28 << (uint8)0x10 << (uint16)swap16(8) << (uint32)0;
+			contactCmd.writeString("/contact list");
+			clientA.captured.clear();
+			op.po->HandleCommand(contactCmd);
+			check(clientA.sawText("ICONIC CONTACT STORYLINE QUESTS") || clientA.sawText("Morpheus"),
+				"/contact list chat command enumerates iconic storyline quests");
+		}
 	}
 	catch (const std::exception& e)
 	{

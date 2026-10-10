@@ -16,8 +16,24 @@ public:
     void SetWeather(uint32 type, float intensity);
     void UpdateSkybox(uint32 currentMs, float threatLevel);
     
-    // Item 115: The Matrix Weather/Glitch
-    void TriggerGlitchAnomaly(float intensity, uint32 durationMs);
+    // Item 115: The Matrix Weather/Glitch Anomaly Engine
+    enum GlitchAnomalyType {
+        GLITCH_NONE = 0,
+        GLITCH_SPOON_BEND = 1,       // Spoon bending anomaly (local reality distortion)
+        GLITCH_NEON_FLICKER = 2,     // Neon signs and streetlights flickering
+        GLITCH_CODE_DRIZZLE = 3,     // Code rain drizzle / cascading glyphs
+        GLITCH_SPATIAL_TEAR = 4,     // Spatial tearing / geometry stutter
+        GLITCH_CAT_DEJAVU = 5        // Déjà vu cat black cat passing twice
+    };
+
+    void TriggerGlitchAnomaly(float intensity, uint32 durationMs, GlitchAnomalyType type = GLITCH_CODE_DRIZZLE, const std::string& locationDesc = "");
+    GlitchAnomalyType GetActiveGlitchType() const { return m_currentGlitchType; }
+    std::string GetGlitchTypeName(GlitchAnomalyType type) const;
+    std::string GetActiveGlitchDesc() const { return m_glitchLocationDesc; }
+    float GetGlitchIntensity() const { return m_currentIntensity; }
+    bool IsGlitchActive() const { return m_isAnomalyActive; }
+    uint32 GetGlitchRemainingMs() const;
+    void ClearGlitchAnomaly();
 
     // Phase 1: Matrix 24h Circadian Clock
     // 1 in-game hour = 5 real minutes (300,000 ms), full day = 120 real minutes
@@ -50,6 +66,8 @@ private:
 
     uint32 m_anomalyEndTime;
     bool m_isAnomalyActive;
+    GlitchAnomalyType m_currentGlitchType;
+    std::string m_glitchLocationDesc;
 
     uint32 m_serverStartMs;
     float m_baseHour;

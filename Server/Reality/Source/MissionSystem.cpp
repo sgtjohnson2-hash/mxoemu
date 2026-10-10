@@ -1276,6 +1276,54 @@ bool MissionSystem::CompleteContactQuest(PlayerObject* player, uint32 questId)
     return true;
 }
 
+uint32 MissionSystem::GetPlayerContactProgress(uint64 charId, uint32 questId) const
+{
+    std::lock_guard<std::recursive_mutex> lock(m_missionMutex);
+    auto pIt = m_playerContactProgress.find(charId);
+    if (pIt == m_playerContactProgress.end()) return 0;
+    auto qIt = pIt->second.find(questId);
+    if (qIt == pIt->second.end()) return 0;
+    return qIt->second;
+}
+
+bool MissionSystem::HasActiveContactQuest(uint64 charId, uint32 questId) const
+{
+    std::lock_guard<std::recursive_mutex> lock(m_missionMutex);
+    const ContactQuest* q = GetContactQuest(questId);
+    if (!q) return false;
+    auto pIt = m_playerContactProgress.find(charId);
+    if (pIt == m_playerContactProgress.end()) return false;
+    auto qIt = pIt->second.find(questId);
+    if (qIt == pIt->second.end()) return false;
+    return qIt->second < q->objectives.size();
+}
+
+bool MissionSystem::HasCompletedContactQuest(uint64 charId, uint32 questId) const
+{
+    std::lock_guard<std::recursive_mutex> lock(m_missionMutex);
+    const ContactQuest* q = GetContactQuest(questId);
+    if (!q) return false;
+    auto pIt = m_playerContactProgress.find(charId);
+    if (pIt == m_playerContactProgress.end()) return false;
+    auto qIt = pIt->second.find(questId);
+    if (qIt == pIt->second.end()) return false;
+    return qIt->second >= q->objectives.size();
+}
+
+bool MissionSystem::ResetContactQuest(PlayerObject* player, uint32 questId)
+{
+    if (!player) return false;
+    std::lock_guard<std::recursive_mutex> lock(m_missionMutex);
+    uint64 charId = player->getCharId();
+    auto pIt = m_playerContactProgress.find(charId);
+    if (pIt != m_playerContactProgress.end())
+    {
+        pIt->second.erase(questId);
+        return true;
+    }
+    return false;
+}
+
 uint32 MissionSystem::SynthesizeProceduralMission(PlayerObject* player, ProceduralMissionArchetype archetype)
 {
     if (!player) return 0;

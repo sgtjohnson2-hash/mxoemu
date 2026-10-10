@@ -2613,6 +2613,242 @@ void PlayerObject::ParsePlayerCommand( string theCmd )
             return;
         }
     }
+    else if (iequals(command, "glitch") || iequals(command, "anomaly"))
+    {
+        string sub;
+        cmdStream >> sub;
+        if (sub.empty() || iequals(sub, "status"))
+        {
+            bool active = sWeatherSys.IsGlitchActive();
+            auto type = sWeatherSys.GetActiveGlitchType();
+            std::string typeName = sWeatherSys.GetGlitchTypeName(type);
+            float intensity = sWeatherSys.GetGlitchIntensity();
+            uint32 remSec = sWeatherSys.GetGlitchRemainingMs() / 1000;
+            std::string desc = sWeatherSys.GetActiveGlitchDesc();
+            if (active) {
+                m_parent.QueueCommand(make_shared<SystemChatMsg>(
+                    (format("{c:00FF00}[GLITCH ANOMALY ACTIVE] Type: %1% | Intensity: %2$.0f%% | Remaining: %3%s | Origin: %4%{/c}")
+                        % typeName % (intensity * 100.0f) % remSec % (desc.empty() ? "District Hotspot" : desc)).str()
+                ));
+            } else {
+                m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:00FFCC}[Matrix Environment] Reality stability 100%. No active glitch anomaly detected.{/c}"));
+            }
+            INFO_LOG(format("GlitchAnomaly: Player %1% queried glitch status (active: %2%)") % m_handle % (active ? "yes" : "no"));
+            return;
+        }
+        else if (iequals(sub, "spoon"))
+        {
+            sWeatherSys.TriggerGlitchAnomaly(0.75f, 180000, WeatherSystem::GLITCH_SPOON_BEND, "Construct Perception Rift");
+            m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:00FF00}[GLITCH] Reality distortion triggered: Spoon Bending anomaly active. Do not try and bend the spoon; realize the truth.{/c}"));
+            INFO_LOG(format("GlitchAnomaly: Player %1% triggered GLITCH_SPOON_BEND") % m_handle);
+            return;
+        }
+        else if (iequals(sub, "neon"))
+        {
+            sWeatherSys.TriggerGlitchAnomaly(0.70f, 180000, WeatherSystem::GLITCH_NEON_FLICKER, "Municipal Power Fluctuations");
+            m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:00FF00}[GLITCH] Municipal grid voltage dropped: Neon flicker anomaly cascading across streetlights.{/c}"));
+            INFO_LOG(format("GlitchAnomaly: Player %1% triggered GLITCH_NEON_FLICKER") % m_handle);
+            return;
+        }
+        else if (iequals(sub, "code") || iequals(sub, "rain"))
+        {
+            sWeatherSys.TriggerGlitchAnomaly(0.90f, 240000, WeatherSystem::GLITCH_CODE_DRIZZLE, "Digital Code Rain Cascading");
+            m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:00FF00}[GLITCH] Digital code rain drizzle active. Matrix green glyph cascade saturates the construct.{/c}"));
+            INFO_LOG(format("GlitchAnomaly: Player %1% triggered GLITCH_CODE_DRIZZLE") % m_handle);
+            return;
+        }
+        else if (iequals(sub, "tear"))
+        {
+            sWeatherSys.TriggerGlitchAnomaly(1.0f, 300000, WeatherSystem::GLITCH_SPATIAL_TEAR, "Spatial Geometry Tear");
+            m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:00FF00}[GLITCH] Spatial tearing detected at local coordinates. Geometry and physics rendering stutter.{/c}"));
+            INFO_LOG(format("GlitchAnomaly: Player %1% triggered GLITCH_SPATIAL_TEAR") % m_handle);
+            return;
+        }
+        else if (iequals(sub, "dejavu") || iequals(sub, "cat"))
+        {
+            sWeatherSys.TriggerGlitchAnomaly(0.80f, 180000, WeatherSystem::GLITCH_CAT_DEJAVU, "Déjà Vu Perception Shift");
+            m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:00FF00}[GLITCH] Déjà vu: A black cat walked past, then another that looked just like it. A change was made in the Matrix.{/c}"));
+            INFO_LOG(format("GlitchAnomaly: Player %1% triggered GLITCH_CAT_DEJAVU") % m_handle);
+            return;
+        }
+        else if (iequals(sub, "clear"))
+        {
+            sWeatherSys.ClearGlitchAnomaly();
+            m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:00FFCC}[GLITCH] Environmental matrix cleared. Reality restored to equilibrium.{/c}"));
+            INFO_LOG(format("GlitchAnomaly: Player %1% cleared glitch anomaly") % m_handle);
+            return;
+        }
+        else
+        {
+            m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FFFF00}Usage: /glitch [status|spoon|neon|code|tear|dejavu|clear]{/c}"));
+            return;
+        }
+    }
+    else if (iequals(command, "tension") || iequals(command, "outbreak"))
+    {
+        string sub;
+        cmdStream >> sub;
+        uint32 hDistrict = sFactionWarMgr.GetHighestTensionDistrict();
+        float hTension = sFactionWarMgr.GetDistrictTension(hDistrict);
+        std::string hName = sFactionWarMgr.GetDistrictName(hDistrict);
+
+        if (sub.empty() || iequals(sub, "status") || iequals(sub, "list"))
+        {
+            m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:00FFCC}=== DISTRICT FACTION TENSION & CONFLICT HOTSPOTS ==={/c}"));
+            for (uint32 dId = 1; dId <= 4; ++dId)
+            {
+                float t = sFactionWarMgr.GetDistrictTension(dId);
+                std::string name = sFactionWarMgr.GetDistrictName(dId);
+                std::string status = (t >= 75.0f) ? "{c:FF0000}CRITICAL OUTBREAK{/c}" : (t >= 50.0f ? "{c:FFAA00}ELEVATED CONFLICT{/c}" : "{c:00FF00}STABLE{/c}");
+                std::ostringstream line;
+                line << "  District " << dId << " [" << name << "]: Tension " << static_cast<int>(t) << "% | Status: " << status;
+                m_parent.QueueCommand(make_shared<SystemChatMsg>(line.str()));
+            }
+            int hPct = static_cast<int>(hTension);
+            std::ostringstream hotspot;
+            hotspot << "{c:FFD700}[HOTSPOT] Highest Tension: " << hName << " (District " << hDistrict << ") at " << hPct << "% contested.{/c}";
+            m_parent.QueueCommand(make_shared<SystemChatMsg>(hotspot.str()));
+            INFO_LOG((format("DistrictTension: Player %1% queried district tension metrics (hotspot: %2% %3% percent)") % m_handle % hName % hPct).str());
+            return;
+        }
+        else if (iequals(sub, "surge"))
+        {
+            uint32 targetDist = hDistrict;
+            float surgeAmt = 35.0f;
+            cmdStream >> targetDist >> surgeAmt;
+            sMatrixThreatHeatmap.RecordDisruption((float)getPosition().x, (float)getPosition().y, (float)getPosition().z, surgeAmt, "Faction Tension Surge");
+            std::ostringstream surgeMsg;
+            surgeMsg << "{c:FF0000}[TENSION SURGE] Injected +" << static_cast<int>(surgeAmt) << " threat heat disruption into " << sFactionWarMgr.GetDistrictName(targetDist) << ". Escalation imminent!{/c}";
+            m_parent.QueueCommand(make_shared<SystemChatMsg>(surgeMsg.str()));
+            INFO_LOG((format("DistrictTension: Player %1% triggered tension surge of %2% in district %3%") % m_handle % static_cast<int>(surgeAmt) % targetDist).str());
+            return;
+        }
+        else
+        {
+            m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FFFF00}Usage: /tension [status|surge <districtId> <amount>]{/c}"));
+            return;
+        }
+    }
+    else if (iequals(command, "contact") || iequals(command, "contacts"))
+    {
+        string sub;
+        cmdStream >> sub;
+        if (sub.empty() || iequals(sub, "list"))
+        {
+            m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:00FFCC}=== ICONIC CONTACT STORYLINE QUESTS ==={/c}"));
+            const auto& quests = sMissionSys.GetAllContactQuests();
+            for (const auto& q : quests)
+            {
+                uint32 prog = sMissionSys.GetPlayerContactProgress(getCharacterUID(), q.questId);
+                std::string status = (prog >= q.objectives.size()) ? "{c:00FF00}[COMPLETED]{/c}" : 
+                                     (prog > 0 ? (format("{c:FFFF00}[STEP %1%/%2%]{/c}") % prog % q.objectives.size()).str() : "{c:AAAAAA}[AVAILABLE]{/c}");
+                m_parent.QueueCommand(make_shared<SystemChatMsg>(
+                    (format("  Quest #%1%: %2% ({c:00FFFF}%3%{/c}) - %4%") % q.questId % q.title % q.contactName % status).str()
+                ));
+            }
+            m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FFD700}Commands: /contact call <name>, /contact accept <id>, /contact complete <id>{/c}"));
+            INFO_LOG(format("ContactQuest: Player %1% listed contact storyline quests (total: %2%)") % m_handle % quests.size());
+            return;
+        }
+        else if (iequals(sub, "call"))
+        {
+            string contactTarget;
+            cmdStream >> contactTarget;
+            uint32 cId = 0;
+            if (iequals(contactTarget, "morpheus")) cId = CONTACT_MORPHEUS;
+            else if (iequals(contactTarget, "ghost")) cId = CONTACT_GHOST;
+            else if (iequals(contactTarget, "trinity")) cId = CONTACT_TRINITY;
+            else if (iequals(contactTarget, "niobe")) cId = CONTACT_NIOBE;
+            else if (iequals(contactTarget, "merovingian") || iequals(contactTarget, "mero")) cId = CONTACT_MEROVINGIAN;
+            else if (iequals(contactTarget, "oracle")) cId = CONTACT_ORACLE;
+            else if (iequals(contactTarget, "gray") || iequals(contactTarget, "agentgray")) cId = CONTACT_AGENT_GRAY;
+            else if (iequals(contactTarget, "architect")) cId = CONTACT_ARCHITECT;
+            else if (iequals(contactTarget, "seraph")) cId = CONTACT_SERAPH;
+            else {
+                try { cId = std::stoul(contactTarget); } catch (...) { cId = 0; }
+            }
+
+            ByteBuffer callCmd;
+            callCmd << (uint32)cId;
+            RPC_HandleCallContact(callCmd);
+            INFO_LOG(format("ContactQuest: Player %1% called contact %2% (ID: %3%)") % m_handle % contactTarget % cId);
+            return;
+        }
+        else if (iequals(sub, "accept"))
+        {
+            uint32 qId = 1001;
+            cmdStream >> qId;
+            const ContactQuest* q = sMissionSys.GetContactQuest(qId);
+            if (q)
+            {
+                sMissionSys.AcceptContactQuest(this, qId);
+                m_parent.QueueCommand(make_shared<SystemChatMsg>(
+                    (format("{c:00FF00}[CONTACT QUEST ACCEPTED] '%1%' from %2%{/c}") % q->title % q->contactName).str()
+                ));
+                m_parent.QueueCommand(make_shared<SystemChatMsg>(
+                    (format("{c:00FFCC}[GREETING] \"%1%\"{/c}") % q->dialogGreeting).str()
+                ));
+                if (!q->objectives.empty())
+                {
+                    m_parent.QueueCommand(make_shared<SystemChatMsg>(
+                        (format("{c:FFD700}[OBJECTIVE 1] %1%{/c}") % q->objectives[0]).str()
+                    ));
+                }
+                INFO_LOG(format("ContactQuest: Player %1% accepted contact quest %2% (%3%)") % m_handle % qId % q->title);
+            }
+            else
+            {
+                m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FF0000}[CONTACT] Quest ID not found. Use /contact list.{/c}"));
+            }
+            return;
+        }
+        else if (iequals(sub, "progress") || iequals(sub, "step"))
+        {
+            uint32 qId = 1001;
+            uint32 step = 1;
+            cmdStream >> qId >> step;
+            if (sMissionSys.ProgressContactQuest(this, qId, step))
+            {
+                const ContactQuest* q = sMissionSys.GetContactQuest(qId);
+                m_parent.QueueCommand(make_shared<SystemChatMsg>(
+                    (format("{c:00FF00}[CONTACT QUEST] Advanced '%1%' to step %2%.{/c}") % (q ? q->title : "Quest") % step).str()
+                ));
+                INFO_LOG(format("ContactQuest: Player %1% progressed contact quest %2% to step %3%") % m_handle % qId % step);
+            }
+            else
+            {
+                m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FF0000}[CONTACT] Failed to progress quest.{/c}"));
+            }
+            return;
+        }
+        else if (iequals(sub, "complete"))
+        {
+            uint32 qId = 1001;
+            cmdStream >> qId;
+            const ContactQuest* q = sMissionSys.GetContactQuest(qId);
+            if (q && sMissionSys.CompleteContactQuest(this, qId))
+            {
+                m_parent.QueueCommand(make_shared<SystemChatMsg>(
+                    (format("{c:00FF00}[CONTACT QUEST COMPLETED] '%1%'! Rewards: %2% $Info | %3% XP{/c}")
+                        % q->title % q->rewardInfo % q->rewardExp).str()
+                ));
+                m_parent.QueueCommand(make_shared<SystemChatMsg>(
+                    (format("{c:00FFCC}[COMPLETION] \"%1%\"{/c}") % q->dialogCompletion).str()
+                ));
+                INFO_LOG(format("ContactQuest: Player %1% completed contact quest %2% (%3%)") % m_handle % qId % q->title);
+            }
+            else
+            {
+                m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FF0000}[CONTACT] Failed to complete quest. Check ID or status.{/c}"));
+            }
+            return;
+        }
+        else
+        {
+            m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FFFF00}Usage: /contact [list|call <name>|accept <id>|progress <id> <step>|complete <id>]{/c}"));
+            return;
+        }
+    }
 	else
 	{
 		m_parent.QueueCommand(make_shared<SystemChatMsg>((format("Unrecognized server command %1%")%command).str()));
@@ -2668,6 +2904,12 @@ void PlayerObject::RPC_HandleChat( ByteBuffer &srcCmd )
 									  boost::istarts_with(theMessage, "/spar") ||
 									  boost::istarts_with(theMessage, "/hardline") ||
 									  boost::istarts_with(theMessage, "/hardlines") ||
+									  boost::istarts_with(theMessage, "/glitch") ||
+									  boost::istarts_with(theMessage, "/anomaly") ||
+									  boost::istarts_with(theMessage, "/tension") ||
+									  boost::istarts_with(theMessage, "/outbreak") ||
+									  boost::istarts_with(theMessage, "/contact") ||
+									  boost::istarts_with(theMessage, "/contacts") ||
 									  boost::istarts_with(theMessage, "/dojo"))))
 	{
 		INFO_LOG(format("(%1%) %2%:%3% chat command: %4%") % m_parent.Address() % m_handle % m_goId % theMessage);
