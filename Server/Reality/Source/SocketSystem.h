@@ -9,8 +9,8 @@
 class PlayerObject;
 class Item; // Assuming an Item class exists in the codebase
 
-// Structure to define what a code fragment modifies
-struct CodeFragment {
+// Structure to define what a socket fragment modifies
+struct SocketFragment {
     std::string type;   // e.g., "damage", "defense", "health"
     int value;
 };
@@ -25,14 +25,13 @@ public:
     // Attempts to socket a code fragment into a piece of gear.
     // In a real implementation this would consume the fragment item.
     // Returns true if successful, false otherwise.
-    bool ApplySocket(PlayerObject* player, uint64 gearUid, const CodeFragment& fragment);
+    bool ApplySocket(PlayerObject* player, uint64 gearUid, const SocketFragment& fragment);
 
-private:
-    // Helper to parse existing sockets from the gear's m_metadataJSON
-    std::vector<CodeFragment> ParseSockets(const std::string& metadataJson);
+    // Helper to parse existing sockets from the gear's metadata JSON
+    std::vector<SocketFragment> ParseSockets(const std::string& metadataJson);
     
     // Helper to serialize sockets back to JSON
-    std::string SerializeSockets(const std::vector<CodeFragment>& sockets, const std::string& existingJson);
+    std::string SerializeSockets(const std::vector<SocketFragment>& sockets, const std::string& existingJson);
 };
 
 #define sSocketSystem Singleton<SocketSystem>::getSingleton()

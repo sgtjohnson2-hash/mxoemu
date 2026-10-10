@@ -1942,9 +1942,9 @@ void PlayerObject::ParsePlayerCommand( string theCmd )
 	}
 	else if (iequals(command, "socket"))
 	{
-		uint64 gearUid;
+		uint64 gearUid = 0;
 		string type;
-		int value;
+		int value = 0;
 		cmdStream >> gearUid >> type >> value;
 
 		if (cmdStream.fail()) {
@@ -1952,7 +1952,7 @@ void PlayerObject::ParsePlayerCommand( string theCmd )
 			return;
 		}
 
-		CodeFragment frag = { type, value };
+		SocketFragment frag = { type, value };
 		if (sSocketSystem.ApplySocket(this, gearUid, frag)) {
 			m_parent.QueueCommand(make_shared<SystemChatMsg>((format("{c:00FF00}Successfully socketed %1% (+%2%)!{/c}") % type % value).str()));
 		} else {
@@ -2305,6 +2305,7 @@ void PlayerObject::RPC_HandleChat( ByteBuffer &srcCmd )
 									  boost::istarts_with(theMessage, "/dye") ||
 									  boost::istarts_with(theMessage, "/capture") ||
 									  boost::istarts_with(theMessage, "/hacknode") ||
+									  boost::istarts_with(theMessage, "/socket") ||
 									  boost::istarts_with(theMessage, "/overwrite") ||
 									  boost::istarts_with(theMessage, "/agentstrike") ||
 									  boost::istarts_with(theMessage, "/agent") ||

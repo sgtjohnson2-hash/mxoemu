@@ -949,7 +949,7 @@ CombatSystem::AttackResult CombatSystem::ResolveAttack(PlayerObject* attacker, P
 
     // Phase 3 Hacker Domain Abilities
     if (move.specialFlags & ABILITY_FLAG_MASK) {
-        // attacker->setMaskFaction(target->getFaction(), 300000); // 5 minutes (STUBBED: Faction masking not implemented)
+        attacker->setMaskFaction(target->getFaction(), 300000); // 5 minutes
         if (!attacker->getClient().isBot()) {
             attacker->getClient().QueueCommand(std::make_shared<SystemChatMsg>("{c:00FF00}[HACK] Simulacra Mask Active. Spoofing target faction.{/c}"));
         }

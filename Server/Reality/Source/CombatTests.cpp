@@ -44,6 +44,7 @@
 #include "VehicleSystem.h"
 #include "AgentPossessionManager.h"
 #include "AI/PedestrianEcology.h"
+#include "SocketSystem.h"
 #include "Timer.h"
 #include <iostream>
 #include <vector>
@@ -1936,6 +1937,49 @@ int RunCombatTestSuite()
 			bool demorphed = sAgentPossessionMgr.DemorphAgent(agentId);
 			check(demorphed, "DemorphAgent cleanly removes possession record");
 			check(!sAgentPossessionMgr.IsEntityPossessed(civGoId), "Entity is no longer possessed after demorph");
+		}
+
+		// =========================================================================
+		// 23. Socket System & Spy Simulacra Faction Spoofing
+		// =========================================================================
+		{
+			std::cout << "[23] Socket System & Spy Faction Masking" << std::endl;
+
+			// 1. Socket JSON serialization and parsing
+			std::string baseJson = "{\"templateId\":46568,\"durability\":100}";
+			std::vector<SocketFragment> frags;
+			frags.push_back({"damage", 15});
+			frags.push_back({"defense", 20});
+			std::string serialized = sSocketSystem.SerializeSockets(frags, baseJson);
+			check(serialized.find("\"sockets\":[") != std::string::npos, "SerializeSockets adds sockets array to JSON");
+			check(serialized.find("\"type\":\"damage\"") != std::string::npos, "SerializeSockets embeds damage fragment");
+			check(serialized.find("\"value\":15") != std::string::npos, "SerializeSockets embeds damage value");
+			check(serialized.find("\"type\":\"defense\"") != std::string::npos, "SerializeSockets embeds defense fragment");
+
+			auto parsed = sSocketSystem.ParseSockets(serialized);
+			check(parsed.size() == 2, "ParseSockets retrieves exactly 2 SocketFragments");
+			check(parsed[0].type == "damage" && parsed[0].value == 15, "ParseSockets resolves fragment 0 correctly");
+			check(parsed[1].type == "defense" && parsed[1].value == 20, "ParseSockets resolves fragment 1 correctly");
+
+			// 2. Chat slash command &socket execution
+			Actor humanOperative = makeHuman(&humanClient, 9100106, 17045.0, 2400.0);
+			humanOperative.po->setAdmin(true);
+			ByteBuffer socketCmd;
+			socketCmd << (uint8)0x28 << (uint8)0x10 << (uint16)swap16(8) << (uint32)0;
+			socketCmd.writeString("/socket 1 damage 15");
+			humanClient.captured.clear();
+			humanOperative.po->HandleCommand(socketCmd);
+			check(humanClient.sawText("Successfully socketed") || humanClient.sawText("Socketing failed"),
+				"/socket chat command successfully parsed and dispatched");
+
+			// 3. Spy / Hacker Simulacra Faction Masking
+			humanOperative.po->setFaction(FACTION_ZION);
+			check(humanOperative.po->getFaction() == FACTION_ZION, "Player initially belongs to FACTION_ZION");
+			humanOperative.po->setMaskFaction(FACTION_MACHINES, 300000);
+			check(humanOperative.po->getFaction() == FACTION_MACHINES, "Player getFaction() returns FACTION_MACHINES while masked");
+			check(humanOperative.po->getTrueFaction() == FACTION_ZION, "Player getTrueFaction() returns FACTION_ZION");
+			humanOperative.po->clearMaskFaction();
+			check(humanOperative.po->getFaction() == FACTION_ZION, "Player getFaction() reverts to FACTION_ZION after clearing mask");
 		}
 	}
 	catch (const std::exception& e)

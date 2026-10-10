@@ -30,6 +30,7 @@
 #include "MessageTypes.h"
 #include "CombatAnimationMatrix.h"
 #include "IGO.h"
+#include "Timer.h"
 #include <mutex>
 #include <atomic>
 #include <unordered_set>
@@ -166,6 +167,26 @@ public:
     
     // Organizations and Factions
     int getFaction() const {
+        if (m_maskedFaction != -1 && getMSTime() < m_maskExpiresMs) return m_maskedFaction;
+        if (m_factionName == "Civilian") return FACTION_NONE;
+        if (m_factionName == "Zion") return FACTION_ZION;
+        if (m_factionName == "Machines") return FACTION_MACHINES;
+        if (m_factionName == "Merovingian") return FACTION_MEROVINGIAN;
+        if (m_factionName == "Exile") return FACTION_EXILE;
+        if (m_alignment == 1) return FACTION_MACHINES;
+        if (m_alignment == 2) return FACTION_MEROVINGIAN;
+        if (m_alignment == 0 && m_factionName.empty()) return FACTION_ZION;
+        return FACTION_NONE;
+    }
+    void setMaskFaction(int f, uint32 durationMs) {
+        m_maskedFaction = f;
+        m_maskExpiresMs = getMSTime() + durationMs;
+    }
+    void clearMaskFaction() {
+        m_maskedFaction = -1;
+        m_maskExpiresMs = 0;
+    }
+    int getTrueFaction() const {
         if (m_factionName == "Civilian") return FACTION_NONE;
         if (m_factionName == "Zion") return FACTION_ZION;
         if (m_factionName == "Machines") return FACTION_MACHINES;
@@ -453,6 +474,8 @@ private:
     uint32 m_lastDamageTakenMs = 0;   // out-of-combat regen waits for this to age
     uint32 m_lastRegenTickMs = 0;
     uint32 m_equippedWeaponId = 0;
+    int m_maskedFaction = -1;
+    uint32 m_maskExpiresMs = 0;
 
     std::unordered_set<uint32> m_knownEntities;
     mutable std::mutex m_knownMutex;
