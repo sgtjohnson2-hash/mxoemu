@@ -45,6 +45,9 @@
 #include "AgentPossessionManager.h"
 #include "AI/PedestrianEcology.h"
 #include "SocketSystem.h"
+#include "HovercraftFlightSystem.h"
+#include "LoadingConstruct.h"
+#include "OrganizationManager.h"
 #include "Timer.h"
 #include <iostream>
 #include <vector>
@@ -2044,6 +2047,71 @@ int RunCombatTestSuite()
 			check(buySuccess, "PurchaseVendorItem successfully executes purchase of player listing");
 			check(buyerOperative.po->getInfo() == buyerPreBits - 15000, "PurchaseVendorItem deducted exact 15,000 $Info from buyer");
 			check(humanOperative.po->getInfo() == sellerPreBits + 15000, "PurchaseVendorItem credited exact 15,000 $Info to seller");
+		}
+
+		// Section 25: Phase H Systems — Coder Blueprints, Hovercraft Flight & Organization Syndicates
+		{
+			std::cout << "\n--- Section 25: Phase H Systems (Coder Blueprints, Hovercraft Flight, Organizations) ---" << std::endl;
+			Actor humanOperative = makeHuman(&humanClient, 9100110, 17050.0, 2400.0);
+			humanOperative.po->setAdmin(true);
+
+			// 1. /craft and &craft command execution
+			ByteBuffer craftListCmd;
+			craftListCmd << (uint8)0x28 << (uint8)0x10 << (uint16)swap16(8) << (uint32)0;
+			craftListCmd.writeString("/craft list");
+			humanClient.captured.clear();
+			humanOperative.po->HandleCommand(craftListCmd);
+			check(humanClient.sawText("[CRAFTING] MegaCity Coder Blueprints"), "/craft list outputs MegaCity Coder blueprint catalog");
+
+			// 2. Blueprint synthesis via /craft 101 (Health Stim Patch)
+			humanOperative.po->addInfo(500);
+			uint64 preInfo = humanOperative.po->getInfo();
+			ByteBuffer craftSynthCmd;
+			craftSynthCmd << (uint8)0x28 << (uint8)0x10 << (uint16)swap16(8) << (uint32)0;
+			craftSynthCmd.writeString("/craft 101");
+			humanClient.captured.clear();
+			humanOperative.po->HandleCommand(craftSynthCmd);
+			check(humanClient.sawText("[CRAFTING] Compilation complete! Synthesized: Health Stim Patch"),
+				"/craft 101 synthesizes Health Stim Patch");
+			check(humanOperative.po->getInfo() == preInfo - 100,
+				"Crafting deducted 100 $Info for Health Stim Patch");
+
+			// 3. /hovercraft telemetry query
+			ByteBuffer hoverCmd;
+			hoverCmd << (uint8)0x28 << (uint8)0x10 << (uint16)swap16(8) << (uint32)0;
+			hoverCmd.writeString("/hovercraft");
+			humanClient.captured.clear();
+			humanOperative.po->HandleCommand(hoverCmd);
+			check(humanClient.sawText("[Hovercraft Flight] Ship: Nebuchadnezzar"),
+				"/hovercraft queries Zion hovercraft flight simulation and reports Nebuchadnezzar");
+
+			// 4. /construct white void telemetry query
+			ByteBuffer constructCmd;
+			constructCmd << (uint8)0x28 << (uint8)0x10 << (uint16)swap16(8) << (uint32)0;
+			constructCmd.writeString("/construct");
+			humanClient.captured.clear();
+			humanOperative.po->HandleCommand(constructCmd);
+			check(humanClient.sawText("[Loading Construct] Mode: White Void"),
+				"/construct reports Loading Construct white void state and weapon loadouts");
+
+			// 5. /org create and /org leave
+			ByteBuffer orgCreateCmd;
+			orgCreateCmd << (uint8)0x28 << (uint8)0x10 << (uint16)swap16(8) << (uint32)0;
+			orgCreateCmd.writeString("/org create Nebuchadnezzar Crew");
+			humanClient.captured.clear();
+			humanOperative.po->HandleCommand(orgCreateCmd);
+			check(humanClient.sawText("[ORGANIZATION] 'Nebuchadnezzar Crew' created successfully"),
+				"/org create creates syndicate organization with operative as leader");
+			check(humanOperative.po->getOrgId() != 0, "Operative assigned non-zero Organization ID");
+
+			ByteBuffer orgLeaveCmd;
+			orgLeaveCmd << (uint8)0x28 << (uint8)0x10 << (uint16)swap16(8) << (uint32)0;
+			orgLeaveCmd.writeString("/org leave");
+			humanClient.captured.clear();
+			humanOperative.po->HandleCommand(orgLeaveCmd);
+			check(humanClient.sawText("[ORGANIZATION] You have left the Organization"),
+				"/org leave clears operative organization membership");
+			check(humanOperative.po->getOrgId() == 0, "Operative Organization ID cleared to 0");
 		}
 	}
 	catch (const std::exception& e)

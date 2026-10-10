@@ -2330,6 +2330,126 @@ void PlayerObject::ParsePlayerCommand( string theCmd )
             return;
         }
     }
+    else if (iequals(command, "craft") || iequals(command, "compile"))
+    {
+        string sub;
+        cmdStream >> sub;
+        if (sub.empty() || iequals(sub, "list"))
+        {
+            auto bps = sCraftSys.GetAllBlueprints();
+            if (bps.empty()) {
+                sCraftSys.LoadBlueprints();
+                bps = sCraftSys.GetAllBlueprints();
+            }
+            std::stringstream ss;
+            ss << "{c:00FFCC}[CRAFTING] MegaCity Coder Blueprints (" << bps.size() << " available):{/c}\n";
+            for (const auto& pair : bps) {
+                const auto& bp = pair.second;
+                ss << "{c:FFFF88}* [" << bp.blueprintId << "] " << bp.resultingName << "{/c} - Cost: "
+                   << bp.infoCost << " $Info (Time: " << bp.craftTimeMs << "ms)\n";
+            }
+            ss << "{c:00FF88}Synthesize via: /craft <blueprintId>{/c}";
+            m_parent.QueueCommand(make_shared<SystemChatMsg>(ss.str()));
+            INFO_LOG(format("Crafting: Dispatched %1% blueprint listings to %2%") % bps.size() % m_handle);
+            return;
+        }
+        else
+        {
+            uint32 bpId = 0;
+            try {
+                bpId = static_cast<uint32>(std::stoul(sub));
+            } catch (...) { bpId = 0; }
+            if (bpId > 0)
+            {
+                bool ok = sCraftSys.HandleCraftRequest(this, bpId);
+                if (ok) {
+                    INFO_LOG(format("Crafting: Player %1% successfully synthesized blueprint %2%") % m_handle % bpId);
+                }
+            }
+            else
+            {
+                m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FF4444}Usage: /craft list | /craft <blueprintId>{/c}"));
+            }
+            return;
+        }
+    }
+    else if (iequals(command, "hovercraft") || iequals(command, "ship"))
+    {
+        if (sHovercraftFlightSys.GetShipCount() == 0) {
+            sHovercraftFlightSys.SpawnHovercraft(HOVERCRAFT_NEBUCHADNEZZAR, FlightVector3(0.0f, 400.0f, 0.0f), "Nebuchadnezzar");
+        }
+        auto ship = sHovercraftFlightSys.GetHovercraft(1);
+        auto emp = sHovercraftFlightSys.GetEMPSystem();
+        auto uplink = sHovercraftFlightSys.CalculateUplinkTelemetry(1);
+        m_parent.QueueCommand(make_shared<SystemChatMsg>(
+            (format("{c:00FFCC}[Hovercraft Flight] Ship: %1% | Pos: (%2$.0f, %3$.0f, %4$.0f) | Hull: %5$.0f%% | EMP: %6$.1f%% (%7%) | Carrier: %8% (Strength: %9$.2f){/c}")
+             % (ship ? ship->name : "Nebuchadnezzar") % (ship ? ship->position.x : 0.0f) % (ship ? ship->position.y : 0.0f) % (ship ? ship->position.z : 0.0f)
+             % (ship ? ship->hullIntegrity : 100.0f) % emp.chargePercent % (emp.isReady ? "READY" : "CHARGING") % uplink.statusText % uplink.signalStrength).str()
+        ));
+        INFO_LOG(format("Hovercraft: Dispatched flight telemetry for ship %1% to %2%") % (ship ? ship->name : "Nebuchadnezzar") % m_handle);
+        return;
+    }
+    else if (iequals(command, "construct") || iequals(command, "whitevoid"))
+    {
+        size_t weapons = sLoadingConstruct.GetTotalAvailableWeapons();
+        size_t dummies = sLoadingConstruct.GetDummyCount();
+        float dilation = sLoadingConstruct.GetTimeDilation();
+        m_parent.QueueCommand(make_shared<SystemChatMsg>(
+            (format("{c:FFFFFF}[Loading Construct] Mode: White Void | Available Weapons: %1% | Sparring Dummies: %2% | Time Dilation: %3$.2fx{/c}")
+             % weapons % dummies % dilation).str()
+        ));
+        INFO_LOG(format("Construct: Dispatched Loading Construct telemetry to %1%") % m_handle);
+        return;
+    }
+    else if (iequals(command, "org") || iequals(command, "crew"))
+    {
+        string sub;
+        cmdStream >> sub;
+        if (iequals(sub, "create"))
+        {
+            string orgName;
+            std::getline(cmdStream >> std::ws, orgName);
+            if (orgName.empty()) {
+                m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FF4444}Usage: /org create <Organization Name>{/c}"));
+                return;
+            }
+            if (m_orgId != 0) {
+                m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FF0000}You are already in an Organization.{/c}"));
+                return;
+            }
+            uint32 newOrgId = sOrgMgr.createOrganization(orgName, m_goId);
+            m_orgId = newOrgId;
+            m_parent.QueueCommand(make_shared<SystemChatMsg>((format("{c:00FF00}[ORGANIZATION] '%1%' created successfully (Org ID: %2%).{/c}") % orgName % newOrgId).str()));
+            INFO_LOG(format("Organization: Player %1% created organization '%2%' (ID %3%)") % m_handle % orgName % newOrgId);
+            return;
+        }
+        else if (iequals(sub, "leave"))
+        {
+            if (m_orgId == 0) {
+                m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FF0000}You are not in an Organization.{/c}"));
+                return;
+            }
+            if (sOrgMgr.leaveOrganization(m_orgId, m_goId)) {
+                m_orgId = 0;
+                m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:00FF00}[ORGANIZATION] You have left the Organization.{/c}"));
+                INFO_LOG(format("Organization: Player %1% left organization") % m_handle);
+            }
+            return;
+        }
+        else
+        {
+            if (m_orgId == 0) {
+                m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FFFF55}[ORGANIZATION] Status: Independent Operative (Unaffiliated). Create one via: /org create <Name>{/c}"));
+            } else {
+                Organization* org = sOrgMgr.getOrganization(m_orgId);
+                if (org) {
+                    m_parent.QueueCommand(make_shared<SystemChatMsg>((format("{c:00FFCC}[ORGANIZATION] Crew: %1% (ID %2%) | Leader: %3% | Members: %4%{/c}")
+                        % org->name % org->id % org->leaderId % org->members.size()).str()));
+                }
+            }
+            return;
+        }
+    }
 	else
 	{
 		m_parent.QueueCommand(make_shared<SystemChatMsg>((format("Unrecognized server command %1%")%command).str()));
@@ -2373,6 +2493,12 @@ void PlayerObject::RPC_HandleChat( ByteBuffer &srcCmd )
 									  boost::istarts_with(theMessage, "/overwrite") ||
 									  boost::istarts_with(theMessage, "/agentstrike") ||
 									  boost::istarts_with(theMessage, "/agent") ||
+									  boost::istarts_with(theMessage, "/market") ||
+									  boost::istarts_with(theMessage, "/craft") ||
+									  boost::istarts_with(theMessage, "/hovercraft") ||
+									  boost::istarts_with(theMessage, "/construct") ||
+									  boost::istarts_with(theMessage, "/org") ||
+									  boost::istarts_with(theMessage, "/crew") ||
 									  boost::istarts_with(theMessage, "/dojo"))))
 	{
 		INFO_LOG(format("(%1%) %2%:%3% chat command: %4%") % m_parent.Address() % m_handle % m_goId % theMessage);

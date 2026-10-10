@@ -1,10 +1,12 @@
 #include "OrganizationManager.h"
+#include "Common.h"
 #include "Database/Database.h"
 #include "Database/PreparedStatement.h"
 #include "Log.h"
 #include <algorithm>
 
 void OrganizationManager::loadFromDB() {
+    if (Database_Main == nullptr) return;
     std::unique_lock<std::shared_mutex> lock(m_mutex);
     m_orgs.clear();
     
@@ -55,16 +57,18 @@ uint32 OrganizationManager::createOrganization(const std::string& name, uint64 l
     m_orgs[newId] = org;
 
     // Database persistence
-    PreparedStatement stmt("INSERT INTO `crews` (`id`, `name`, `faction`, `leader_goid`) VALUES (?0, ?1, 0, ?2) ON DUPLICATE KEY UPDATE `name`=?1, `leader_goid`=?2");
-    stmt.SetUInt32(0, newId);
-    stmt.SetString(1, name);
-    stmt.SetUInt32(2, (uint32)leaderId);
-    sDatabase.ExecutePrepared(&stmt);
+    if (Database_Main != nullptr) {
+        PreparedStatement stmt("INSERT INTO `crews` (`id`, `name`, `faction`, `leader_goid`) VALUES (?0, ?1, 0, ?2) ON DUPLICATE KEY UPDATE `name`=?1, `leader_goid`=?2");
+        stmt.SetUInt32(0, newId);
+        stmt.SetString(1, name);
+        stmt.SetUInt32(2, (uint32)leaderId);
+        sDatabase.ExecutePrepared(&stmt);
 
-    PreparedStatement mStmt("INSERT INTO `crew_members` (`crew_id`, `member_goid`, `rank`) VALUES (?0, ?1, 1) ON DUPLICATE KEY UPDATE `rank`=1");
-    mStmt.SetUInt32(0, newId);
-    mStmt.SetUInt32(1, (uint32)leaderId);
-    sDatabase.ExecutePrepared(&mStmt);
+        PreparedStatement mStmt("INSERT INTO `crew_members` (`crew_id`, `member_goid`, `rank`) VALUES (?0, ?1, 1) ON DUPLICATE KEY UPDATE `rank`=1");
+        mStmt.SetUInt32(0, newId);
+        mStmt.SetUInt32(1, (uint32)leaderId);
+        sDatabase.ExecutePrepared(&mStmt);
+    }
 
     return newId;
 }
@@ -76,10 +80,12 @@ bool OrganizationManager::joinOrganization(uint32 orgId, uint64 memberId) {
         if (std::find(it->second.members.begin(), it->second.members.end(), memberId) == it->second.members.end()) {
             it->second.members.push_back(memberId);
 
-            PreparedStatement mStmt("INSERT INTO `crew_members` (`crew_id`, `member_goid`, `rank`) VALUES (?0, ?1, 2) ON DUPLICATE KEY UPDATE `rank`=2");
-            mStmt.SetUInt32(0, orgId);
-            mStmt.SetUInt32(1, (uint32)memberId);
-            sDatabase.ExecutePrepared(&mStmt);
+            if (Database_Main != nullptr) {
+                PreparedStatement mStmt("INSERT INTO `crew_members` (`crew_id`, `member_goid`, `rank`) VALUES (?0, ?1, 2) ON DUPLICATE KEY UPDATE `rank`=2");
+                mStmt.SetUInt32(0, orgId);
+                mStmt.SetUInt32(1, (uint32)memberId);
+                sDatabase.ExecutePrepared(&mStmt);
+            }
 
             return true;
         }
@@ -96,15 +102,20 @@ bool OrganizationManager::leaveOrganization(uint32 orgId, uint64 memberId) {
         if (memberIt != members.end()) {
             members.erase(memberIt);
 
-            PreparedStatement delStmt("DELETE FROM `crew_members` WHERE `crew_id` = ?0 AND `member_goid` = ?1");
-            delStmt.SetUInt32(0, orgId);
-            delStmt.SetUInt32(1, (uint32)memberId);
-            sDatabase.ExecutePrepared(&delStmt);
+            if (Database_Main != nullptr) {
+                PreparedStatement delStmt("DELETE FROM `crew_members` WHERE `crew_id` = ?0 AND `member_goid` = ?1");
+                delStmt.SetUInt32(0, orgId);
+                delStmt.SetUInt32(1, (uint32)memberId);
+                sDatabase.ExecutePrepared(&delStmt);
+
+                if (members.empty()) {
+                    PreparedStatement delCrew("DELETE FROM `crews` WHERE `id` = ?0");
+                    delCrew.SetUInt32(0, orgId);
+                    sDatabase.ExecutePrepared(&delCrew);
+                }
+            }
 
             if (members.empty()) {
-                PreparedStatement delCrew("DELETE FROM `crews` WHERE `id` = ?0");
-                delCrew.SetUInt32(0, orgId);
-                sDatabase.ExecutePrepared(&delCrew);
                 m_orgs.erase(it);
             }
             return true;
