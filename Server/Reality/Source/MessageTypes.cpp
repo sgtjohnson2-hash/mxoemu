@@ -24,6 +24,7 @@
 // ***************************************************************************
 
 #include "MessageTypes.h"
+#include "GOAttributes.h"
 #include "PlayerObject.h"
 #include "GameClient.h"
 #include "GameServer.h"
@@ -299,7 +300,7 @@ const ByteBuffer& PlayerAppearanceMsg::toBuf()
 		throw PacketNoLongerValid();
 	}
 
-	bool isSelf = (m_toWho && m_toWho->getControlledGOPtr() == player);
+	bool isSelf = (m_toWho && m_toWho->getPlayer() == player);
 	vector<byte> rsiBuf(15,0);
 	player->getRsiData(&rsiBuf[0],rsiBuf.size());
 
