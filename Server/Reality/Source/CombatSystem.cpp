@@ -563,8 +563,15 @@ bool CombatSystem::RequestInterlock(uint32 attackerGoId, uint32 targetGoId, uint
 	sGame.AnnounceStateUpdateNear(posB.x, posB.z, 20000.0f, std::make_shared<PositionStateMsg>(pB->getGoId()));
 	sGame.AnnounceStateUpdateNear(posB.x, posB.z, 20000.0f, std::make_shared<RotationStateMsg>(pB->getGoId(), posB.getMxoRot()));
 	sGame.AnnounceStateUpdateNear(posB.x, posB.z, 20000.0f, std::make_shared<LocomotionStateMsg>(pB->getGoId(), 0, posB.getMxoRot()));
+	pA->getClient().QueueState(std::make_shared<PositionStateMsg>(pB->getGoId()));
+	pA->getClient().QueueState(std::make_shared<RotationStateMsg>(pB->getGoId(), posB.getMxoRot()));
 	pA->getClient().QueueState(std::make_shared<LocomotionStateMsg>(pB->getGoId(), 0, posB.getMxoRot()));
-	pB->getClient().QueueState(std::make_shared<LocomotionStateMsg>(pA->getGoId(), 0, posA.getMxoRot()));
+	if (!pB->getClient().isBot())
+	{
+		pB->getClient().QueueState(std::make_shared<PositionStateMsg>(pA->getGoId()));
+		pB->getClient().QueueState(std::make_shared<RotationStateMsg>(pA->getGoId(), posA.getMxoRot()));
+		pB->getClient().QueueState(std::make_shared<LocomotionStateMsg>(pA->getGoId(), 0, posA.getMxoRot()));
+	}
 
 	//spawn the ILCombatHandler view + pairing packet on both clients - this
 	//drives the client-side interlock camera and round UI
@@ -578,8 +585,13 @@ bool CombatSystem::RequestInterlock(uint32 attackerGoId, uint32 targetGoId, uint
 		// ILCombatStateMsg is queued, satisfying the client-side exchange player gating check.
 		pA->enterInterlock(targetGoId);
 		pB->enterInterlock(attackerGoId);
+		pA->getClient().QueueState(std::make_shared<SelfCombatantModeMsg>(1));
 		pA->getClient().QueueState(std::make_shared<CombatantModeMsg>(pB->getGoId(), 1));
-		pB->getClient().QueueState(std::make_shared<CombatantModeMsg>(pA->getGoId(), 1));
+		if (!pB->getClient().isBot())
+		{
+			pB->getClient().QueueState(std::make_shared<SelfCombatantModeMsg>(1));
+			pB->getClient().QueueState(std::make_shared<CombatantModeMsg>(pA->getGoId(), 1));
+		}
 		sGame.AnnounceStateUpdateNear(posA.x, posA.z, 20000.0f, std::make_shared<CombatantModeMsg>(pA->getGoId(), 1));
 		sGame.AnnounceStateUpdateNear(posB.x, posB.z, 20000.0f, std::make_shared<CombatantModeMsg>(pB->getGoId(), 1));
 		INFO_LOG(format("Interlock started: %1% (%2%) vs %3% (%4%)") % attackerGoId % pA->getHandle() % targetGoId % pB->getHandle());

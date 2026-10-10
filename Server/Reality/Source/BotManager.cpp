@@ -162,10 +162,12 @@ std::shared_ptr<BotClient> BotManager::SpawnSingleBot(float x, float y, float z,
             if ((rand() % 100) < 5) { // 5% chance
                 bot->setAgent(true);
                 po->setHandle("Agent Simulacra");
+                po->setAgentAppearance();
             }
         }
         else if (faction == FACTION_MEROVINGIAN) factionName = "Merovingian";
         po->setFactionName(factionName);
+        po->SpawnSelf();
     }
 
     {
@@ -221,6 +223,7 @@ uint32 BotManager::SpawnMissionBot(const MissionNpc& npcInfo, uint32 instanceId)
             po->setCurrentHealth(hp);
         }
         // npcInfo.idNpc could be stored if we added an idNpc field to PlayerObject, but for now we rely on the handle or instanceId
+        po->SpawnSelf();
     }
 
     {
@@ -655,6 +658,10 @@ void BotManager::PopulateWorld()
                     }
                 }
             }
+            if (bot->isAgent()) {
+                po->setAgentAppearance();
+            }
+            po->SpawnSelf();
         }
 
         newBots.push_back(bot);
@@ -849,6 +856,7 @@ std::shared_ptr<BotClient> BotManager::SpawnTester(int index, const LocationVect
         po->addInformation(startCash);
         po->ensureAbilitySystem();
         sSpatialGrid.UpdateClientPosition(bot.get(), start.x, start.z);
+        po->SpawnSelf();
         bot->MakeTester(i + 1);
         {
             std::lock_guard<std::recursive_mutex> lock(m_botMutex);

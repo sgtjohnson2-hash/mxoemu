@@ -102,6 +102,7 @@ uint32 AgentPossessionManager::PossessCivilian(uint32 civilianGoId, const std::s
             po->setMaximumHealth(10000);
             po->setCurrentHealth(10000);
             po->giveItem(500); // Service weapon
+            po->setAgentAppearance();
             po->setCombatStance(true);
 
             if (targetGoId != 0) {

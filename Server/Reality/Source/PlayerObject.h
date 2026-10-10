@@ -252,6 +252,9 @@ public:
     void setHandle(const std::string& handle) { m_handle = handle; }
     void setRsiHex(const std::string& hexStr);
     std::string getRsiHex() const;
+    void UpdateAppearance();
+    void setAgentAppearance();
+    void setMartialArtistAppearance(FightingStyle style);
 
     // Evade Shield & Bullet Dodge (retail PlayerAttrSelf/Other EvadeShieldHealth)
     uint8 getEvadeShield() const { return m_evadeShield; }
@@ -433,7 +436,6 @@ private:
 	void ParseAdminCommand(string theCmd);
 	void ParsePlayerCommand(string theCmd);
 	void GoAhead(double distanceToGo);
-	void UpdateAppearance();
 	class GameClient &m_parent;
 	
 	//Player info

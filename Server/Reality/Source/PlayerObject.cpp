@@ -462,6 +462,81 @@ void PlayerObject::UpdateAppearance()
 	sGame.AnnounceStateUpdate(NULL,make_shared<PlayerAppearanceMsg>(m_goId));
 }
 
+void PlayerObject::setAgentAppearance()
+{
+	m_rsi.reset(new RsiDataMale);
+	RsiData &ref = *m_rsi;
+	ref["Sex"] = 0;
+	ref["Body"] = 0;
+	ref["Hat"] = 0;
+	ref["Face"] = 0;
+	ref["Shirt"] = 2;              // white dress shirt with tie
+	ref["Coat"] = 10;             // Agent suit jacket
+	ref["Pants"] = 1;             // suit trousers
+	ref["Shoes"] = 6;             // dress shoes
+	ref["Gloves"] = 6;            // dress cuffs / hands
+	ref["Glasses"] = 4;           // Agent sunglasses
+	ref["Hair"] = 0;              // neat short hair / crew cut
+	ref["FacialDetail"] = 0;
+	ref["ShirtColor"] = 41;       // crisp white
+	ref["PantsColor"] = 16;       // authentic black
+	ref["CoatColor"] = 0;         // authentic black
+	ref["ShoeColor"] = 0;         // black
+	ref["GlassesColor"] = 15;     // dark black shades
+	ref["HairColor"] = 0;         // black hair
+	ref["SkinTone"] = 0;
+	ref["Tattoo"] = 0;
+	ref["FacialDetailColor"] = 0;
+
+	if (m_spawnedInWorld)
+	{
+		sGame.AnnounceStateUpdate(NULL, make_shared<PlayerAppearanceMsg>(m_goId));
+	}
+}
+
+void PlayerObject::setMartialArtistAppearance(FightingStyle style)
+{
+	m_rsi.reset(new RsiDataMale);
+	RsiData &ref = *m_rsi;
+	ref["Sex"] = 0;
+	ref["Body"] = 0;
+	ref["Hat"] = 0;
+	ref["Face"] = 0;
+	ref["Shirt"] = 1;              // sleeveless / gi top
+	ref["Coat"] = 0;              // no jacket (clean martial arts attire)
+	ref["Pants"] = 1;             // martial arts trousers
+	ref["Shoes"] = 5;             // martial arts slippers / boots
+	ref["Gloves"] = 0;
+	ref["Glasses"] = 0;           // no glasses
+	ref["Hair"] = 1;              // stylized martial arts cut
+	ref["FacialDetail"] = 0;
+	if (style == FightingStyle::Karate) {
+		ref["ShirtColor"] = 41;   // classic white karate gi
+		ref["PantsColor"] = 41;   // white gi pants
+	} else if (style == FightingStyle::KungFu) {
+		ref["ShirtColor"] = 16;   // classic black kung fu silk top
+		ref["PantsColor"] = 16;   // black kung fu trousers
+	} else if (style == FightingStyle::Aikido) {
+		ref["ShirtColor"] = 41;   // white aikido gi
+		ref["PantsColor"] = 16;   // black hakama/pants
+	} else {
+		ref["ShirtColor"] = 24;   // street brawler tank
+		ref["PantsColor"] = 16;   // dark jeans
+	}
+	ref["CoatColor"] = 0;
+	ref["ShoeColor"] = 0;
+	ref["GlassesColor"] = 0;
+	ref["HairColor"] = 0;
+	ref["SkinTone"] = 0;
+	ref["Tattoo"] = 0;
+	ref["FacialDetailColor"] = 0;
+
+	if (m_spawnedInWorld)
+	{
+		sGame.AnnounceStateUpdate(NULL, make_shared<PlayerAppearanceMsg>(m_goId));
+	}
+}
+
 void PlayerObject::SpawnSelf()
 {
 	try {

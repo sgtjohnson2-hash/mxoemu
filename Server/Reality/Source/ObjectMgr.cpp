@@ -28,6 +28,7 @@
 #include "GameClient.h"
 #include "Database/DatabaseEnv.h"
 #include "BotManager.h"
+#include "GOAttributes.h"
 
 ObjectMgr::ObjectMgr() : m_currFreeObjectId(OBJECTMANAGER_STARTINGOBJECTID),
     m_playerPool(std::make_unique<ObjectPool<PlayerObject>>())
@@ -199,21 +200,12 @@ uint16 ObjectMgr::getViewForGO( GameClient* requester, uint32 goId )
 	if (requester==NULL)
 		throw ClientNotAvailable();
 
-	// View ids are a 1:1 truncation of object ids. Do not throw for objects that
-	// were just destroyed: despawn broadcasts look the view up after removal, and
-	// an uncaught ObjectNotAvailable here terminated the whole server.
-
-/*	viewIdsMap &viewsOfClient = m_views[requester];
-	for (viewIdsMap::const_iterator it=viewsOfClient.begin();it!=viewsOfClient.end();++it)
-	{
-		if (it->second == goId)
-			return it->first;
-	}
-
-	//otherwise allocate new viewID, put that in the views list with the goId, and return it
-	uint16 newViewId = allocateViewId(requester);
-	m_views[requester][newViewId] = goId;
-	return newViewId;*/
+	// The client's own avatar is registered internally as VIEWID_SELF (2).
+	// ILTCommHandleMgr::ResolveHandle (0x622CEDA0) queries ObjectManager::FindObjectByViewId
+	// with the low 16 bits of the slot handle. If the local player's view ID is not VIEWID_SELF,
+	// ResolveHandle returns NULL, and the interlock exchange scheduler bails at 0x625F72E7.
+	if (!requester->isBot() && requester->GetPlayerGoId() != 0 && goId == requester->GetPlayerGoId())
+		return VIEWID_SELF;
 
 	return uint16(goId);
 }
@@ -246,7 +238,9 @@ uint16 ObjectMgr::allocateViewId( GameClient* requester)
 
 uint32 ObjectMgr::getGOForView(class GameClient *requester, uint16 viewId) {
     if (requester == NULL) throw ClientNotAvailable();
-    return uint32(viewId); // Simple 1:1 mapping for now
+    if (!requester->isBot() && viewId == VIEWID_SELF)
+        return requester->GetPlayerGoId();
+    return uint32(viewId); // Simple 1:1 mapping for other entities
 }
 
 uint16 ObjectMgr::allocateDynamicView(class GameClient *requester, uint32 tagObjId) {

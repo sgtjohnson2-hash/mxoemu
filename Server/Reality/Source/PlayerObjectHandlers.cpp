@@ -1371,6 +1371,13 @@ void PlayerObject::ParsePlayerCommand( string theCmd )
 			botPo->setCurrentHealth((uint16)hpF);
 			botPo->setDamageScale(dmgScale);
 
+			if (botName.find("Agent") != std::string::npos) {
+				botPo->setAgentAppearance();
+			} else {
+				botPo->setMartialArtistAppearance(botStyle);
+			}
+			botPo->SpawnSelf();
+
 			noteEntitySpawned(botGoId);
 			setTargetGoId(botGoId);
 			m_lastDojoBotGoId = botGoId;
@@ -1380,7 +1387,13 @@ void PlayerObject::ParsePlayerCommand( string theCmd )
 			for (const auto& pkt : pkts) {
 				m_parent.QueueState(pkt);
 			}
+			m_parent.QueueState(std::make_shared<PlayerAppearanceMsg>(botGoId));
+			m_parent.QueueState(std::make_shared<PositionStateMsg>(botGoId));
+			m_parent.QueueState(std::make_shared<RotationStateMsg>(botGoId, botPos.getMxoRot()));
 			m_parent.QueueState(std::make_shared<LocomotionStateMsg>(botGoId, 0, botPos.getMxoRot()));
+			sGame.AnnounceStateUpdateNear((float)bx, (float)bz, 20000.0f, std::make_shared<PlayerAppearanceMsg>(botGoId));
+			sGame.AnnounceStateUpdateNear((float)bx, (float)bz, 20000.0f, std::make_shared<PositionStateMsg>(botGoId));
+			sGame.AnnounceStateUpdateNear((float)bx, (float)bz, 20000.0f, std::make_shared<RotationStateMsg>(botGoId, botPos.getMxoRot()));
 			sGame.AnnounceStateUpdateNear((float)bx, (float)bz, 20000.0f, std::make_shared<LocomotionStateMsg>(botGoId, 0, botPos.getMxoRot()));
 			INFO_LOG(format("Dojo bot %1% spawned for %2%: dist %3% units, pos (%4%, %5%, %6%) player (%7%, %8%, %9%) bot rot %10% lvl %11% hp %12% dmgScale %13%")
 				% botGoId % m_handle % (sqrt((pos.x - bx) * (pos.x - bx) + (pos.z - bz) * (pos.z - bz)))
@@ -1393,7 +1406,12 @@ void PlayerObject::ParsePlayerCommand( string theCmd )
 		bool is1v1 = false;
 		float optHp = 0.0f;
 
-		if (iequals(subCommand, "kungfu") || iequals(subCommand, "wushu")) {
+		if (iequals(subCommand, "agent") || iequals(subCommand, "smith")) {
+			targetStyle = FightingStyle::KungFu;
+			styleLabel = iequals(subCommand, "smith") ? "Agent Smith" : "Agent Johnson";
+			is1v1 = true;
+			cmdStream >> optHp;
+		} else if (iequals(subCommand, "kungfu") || iequals(subCommand, "wushu")) {
 			targetStyle = FightingStyle::KungFu;
 			styleLabel = "Kung Fu Master";
 			is1v1 = true;
@@ -1417,7 +1435,10 @@ void PlayerObject::ParsePlayerCommand( string theCmd )
 			is1v1 = true;
 			string optStyle;
 			if (cmdStream >> optStyle) {
-				if (iequals(optStyle, "kungfu") || iequals(optStyle, "wushu")) {
+				if (iequals(optStyle, "agent") || iequals(optStyle, "smith")) {
+					targetStyle = FightingStyle::KungFu;
+					styleLabel = iequals(optStyle, "smith") ? "Agent Smith" : "Agent Johnson";
+				} else if (iequals(optStyle, "kungfu") || iequals(optStyle, "wushu")) {
 					targetStyle = FightingStyle::KungFu;
 					styleLabel = "Kung Fu Master";
 				} else if (iequals(optStyle, "karate")) {
@@ -1437,10 +1458,11 @@ void PlayerObject::ParsePlayerCommand( string theCmd )
 				}
 			} else {
 				static int s_cycleStyle = 0;
-				int s = (s_cycleStyle++) % 4;
-				if (s == 0) { targetStyle = FightingStyle::KungFu; styleLabel = "Kung Fu Master"; }
-				else if (s == 1) { targetStyle = FightingStyle::Karate; styleLabel = "Karate Master"; }
-				else if (s == 2) { targetStyle = FightingStyle::Aikido; styleLabel = "Aikido Sensei"; }
+				int s = (s_cycleStyle++) % 5;
+				if (s == 0) { targetStyle = FightingStyle::KungFu; styleLabel = "Agent Johnson"; }
+				else if (s == 1) { targetStyle = FightingStyle::KungFu; styleLabel = "Kung Fu Master"; }
+				else if (s == 2) { targetStyle = FightingStyle::Karate; styleLabel = "Karate Master"; }
+				else if (s == 3) { targetStyle = FightingStyle::Aikido; styleLabel = "Aikido Sensei"; }
 				else { targetStyle = FightingStyle::None; styleLabel = "Street Brawler"; }
 			}
 		}
@@ -1583,7 +1605,12 @@ void PlayerObject::ParsePlayerCommand( string theCmd )
 					for (const auto& pkt : pkts) {
 						m_parent.QueueState(pkt);
 					}
+					m_parent.QueueState(make_shared<PlayerAppearanceMsg>(targetCivId));
+					m_parent.QueueState(make_shared<PositionStateMsg>(targetCivId));
+					m_parent.QueueState(make_shared<RotationStateMsg>(targetCivId, agentPo->getPosition().getMxoRot()));
+					m_parent.QueueState(make_shared<LocomotionStateMsg>(targetCivId, 0, agentPo->getPosition().getMxoRot()));
 					m_parent.QueueState(make_shared<CombatantModeMsg>(targetCivId, 1));
+					sGame.AnnounceStateUpdate(NULL, make_shared<PlayerAppearanceMsg>(targetCivId));
 				}
 
 				uint16 targetViewId = sObjMgr.getViewForGO(&m_parent, targetCivId);
