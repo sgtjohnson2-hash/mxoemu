@@ -1223,19 +1223,20 @@ void PlayerObject::ParsePlayerCommand( string theCmd )
 		const ControlNode& node = it->second;
 		double dx = m_pos.x - node.x;
 		double dz = m_pos.z - node.z;
-		if ((dx * dx + dz * dz) > (2500.0 * 2500.0)) // 25 meters
+		double dist = sqrt(dx * dx + dz * dz);
+
+		INFO_LOG(format("FactionWar: %1% viral capture request for node %2% (dist=%3%m, admin=%4%)") % m_handle % nodeId % (dist / 100.0) % m_isAdmin);
+
+		if (!m_isAdmin && (dx * dx + dz * dz) > (2500.0 * 2500.0)) // 25 meters
 		{
 			m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FF0000}[FACTION WAR] You must be within 25m of the Hardline node to upload viral control code.{/c}"));
 			return;
 		}
 
 		uint32 myFaction = getFaction();
-		if (myFaction == 0) myFaction = FACTION_ZION;
-
-		if (node.controllingFaction == myFaction)
+		if (myFaction == 0 || node.controllingFaction == myFaction)
 		{
-			m_parent.QueueCommand(make_shared<SystemChatMsg>((format("{c:FFFF00}[FACTION WAR] Hardline Node #%1% is already controlled by your faction.{/c}") % nodeId).str()));
-			return;
+			myFaction = (node.controllingFaction == FACTION_ZION) ? FACTION_MACHINES : FACTION_ZION;
 		}
 
 		INFO_LOG(format("FactionWar: %1% executed viral capture on node %2% (faction %3%)") % m_handle % nodeId % myFaction);
