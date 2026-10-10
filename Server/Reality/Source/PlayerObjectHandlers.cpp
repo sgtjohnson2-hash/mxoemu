@@ -2450,6 +2450,167 @@ void PlayerObject::ParsePlayerCommand( string theCmd )
             return;
         }
     }
+    else if (iequals(command, "mission") || iequals(command, "contract"))
+    {
+        string sub;
+        cmdStream >> sub;
+        if (iequals(sub, "abort"))
+        {
+            if (sMissionSys.AbortMission(this, "player slash abort"))
+            {
+                m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FF4444}[OPERATOR] Mission aborted by operator request.{/c}"));
+                INFO_LOG(format("MissionSystem: Player %1% aborted active mission contract") % m_handle);
+            }
+            else
+            {
+                m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FFFF00}[OPERATOR] No active mission to abort.{/c}"));
+            }
+            return;
+        }
+        else if (iequals(sub, "info") || iequals(sub, "status"))
+        {
+            if (sMissionSys.HasActiveMission(m_goId))
+            {
+                sMissionSys.SendMissionObjectiveDialog(this);
+            }
+            else
+            {
+                m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FFFF00}[OPERATOR] No active mission contract.{/c}"));
+            }
+            return;
+        }
+        else
+        {
+            ByteBuffer dummy;
+            RPC_HandleMissionRequest(dummy);
+            return;
+        }
+    }
+    else if (iequals(command, "duel") || iequals(command, "spar"))
+    {
+        string sub;
+        cmdStream >> sub;
+        if (iequals(sub, "accept"))
+        {
+            uint32 challengerId = getDuelChallenger();
+            PlayerObject* challenger = sObjMgr.getGOPtrSafe(challengerId);
+            if (!challenger || challengerId == 0)
+            {
+                m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FFFF00}[DUEL] You have no pending duel challenges.{/c}"));
+                return;
+            }
+            if (isDueling() || challenger->isDueling())
+            {
+                m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FFFF00}[DUEL] A participant is already in an active duel.{/c}"));
+                return;
+            }
+            setDuelPartner(challengerId);
+            challenger->setDuelPartner(m_goId);
+            setDuelChallenger(0);
+            challenger->setDuelChallenger(0);
+
+            sGame.AnnounceCommand(&m_parent, make_shared<SystemChatMsg>(
+                (format("{c:00FF00}[DUEL] Sparring duel initiated between %1% and %2%! Combat engagement rules active.{/c}") % challenger->getHandle() % m_handle).str()
+            ));
+            INFO_LOG(format("Duel: Sparring duel started between %1% and %2%") % challenger->getHandle() % m_handle);
+            return;
+        }
+        else if (iequals(sub, "decline"))
+        {
+            uint32 challengerId = getDuelChallenger();
+            PlayerObject* challenger = sObjMgr.getGOPtrSafe(challengerId);
+            setDuelChallenger(0);
+            if (challenger)
+            {
+                challenger->m_parent.QueueCommand(make_shared<SystemChatMsg>(
+                    (format("{c:FFFF00}[DUEL] %1% declined your duel challenge.{/c}") % m_handle).str()
+                ));
+            }
+            m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FFFF00}[DUEL] Duel challenge declined.{/c}"));
+            return;
+        }
+        else
+        {
+            PlayerObject* target = nullptr;
+            if (!sub.empty())
+            {
+                for (uint32 gId : sObjMgr.getAllGOIds())
+                {
+                    PlayerObject* p = sObjMgr.getGOPtrSafe(gId);
+                    if (p && iequals(p->getHandle(), sub))
+                    {
+                        target = p;
+                        break;
+                    }
+                }
+            }
+            if (!target && m_targetGoId != 0)
+            {
+                target = sObjMgr.getGOPtrSafe(m_targetGoId);
+            }
+            if (!target || target == this)
+            {
+                m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FFFF00}Usage: /duel <targetName> | /duel accept | /duel decline{/c}"));
+                return;
+            }
+            ByteBuffer dummy;
+            dummy << (uint16)0;
+            m_targetGoId = target->getGoId();
+            RPC_HandleDuelRequest(dummy);
+            return;
+        }
+    }
+    else if (iequals(command, "hardline") || iequals(command, "hardlines"))
+    {
+        string sub;
+        cmdStream >> sub;
+        if (iequals(sub, "list"))
+        {
+            m_parent.QueueCommand(make_shared<SystemChatMsg>((format("{c:00FFCC}--- HARDLINES IN DISTRICT %1% ---{/c}") % (int)m_district).str()));
+            for (const auto& kv : GetHardlineDirectory()) {
+                if (kv.second.districtId == m_district) {
+                    std::stringstream ss;
+                    ss << "  Node #" << (int)kv.second.hardlineId << ": " << kv.second.name
+                       << " (" << (int)kv.second.x << ", " << (int)kv.second.y << ", " << (int)kv.second.z << ")";
+                    m_parent.QueueCommand(make_shared<SystemChatMsg>(ss.str()));
+                }
+            }
+            return;
+        }
+        else if (iequals(sub, "tp") || iequals(sub, "jump"))
+        {
+            uint32 destDistrict = (uint32)m_district;
+            uint32 destHL = 1;
+            cmdStream >> destDistrict >> destHL;
+            ByteBuffer tpCmd;
+            tpCmd << (uint8)1; // source HL
+            while (tpCmd.size() < 6) tpCmd << (uint8)0;
+            tpCmd << (uint8)m_district;
+            while (tpCmd.size() < 10) tpCmd << (uint8)0;
+            tpCmd << (uint8)destHL;
+            while (tpCmd.size() < 14) tpCmd << (uint8)0;
+            tpCmd << (uint8)destDistrict;
+            RPC_HandleHardlineTeleport(tpCmd);
+            return;
+        }
+        else
+        {
+            const HardlineNode* nearest = GetNearestHardline(m_district, getPosition().x, getPosition().z);
+            size_t total = GetTotalHardlines();
+            if (nearest) {
+                double dx = getPosition().x - nearest->x;
+                double dz = getPosition().z - nearest->z;
+                double range = sqrt(dx*dx + dz*dz) / 100.0;
+                m_parent.QueueCommand(make_shared<SystemChatMsg>(
+                    (format("{c:00FFCC}[HARDLINE] Nearest: %1% (District %2%, #%3%) - Range: %4$.1fm | Total Matrix Hardlines: %5%{/c}")
+                     % nearest->name % (int)nearest->districtId % (int)nearest->hardlineId % range % total).str()
+                ));
+            } else {
+                m_parent.QueueCommand(make_shared<SystemChatMsg>((format("{c:00FFCC}[HARDLINE] Total Matrix Hardlines: %1%{/c}") % total).str()));
+            }
+            return;
+        }
+    }
 	else
 	{
 		m_parent.QueueCommand(make_shared<SystemChatMsg>((format("Unrecognized server command %1%")%command).str()));
@@ -2499,15 +2660,16 @@ void PlayerObject::RPC_HandleChat( ByteBuffer &srcCmd )
 									  boost::istarts_with(theMessage, "/construct") ||
 									  boost::istarts_with(theMessage, "/org") ||
 									  boost::istarts_with(theMessage, "/crew") ||
+									  boost::istarts_with(theMessage, "/mission") ||
+									  boost::istarts_with(theMessage, "/contract") ||
+									  boost::istarts_with(theMessage, "/duel") ||
+									  boost::istarts_with(theMessage, "/spar") ||
+									  boost::istarts_with(theMessage, "/hardline") ||
+									  boost::istarts_with(theMessage, "/hardlines") ||
 									  boost::istarts_with(theMessage, "/dojo"))))
 	{
 		INFO_LOG(format("(%1%) %2%:%3% chat command: %4%") % m_parent.Address() % m_handle % m_goId % theMessage);
 		ParsePlayerCommand(theMessage.substr(1));
-		return;
-	}
-	else if (m_isAdmin && theMessage[0] == '/' && boost::istarts_with(theMessage, "/mission"))
-	{
-		ParseAdminCommand("mission"); //admin path - players no longer reach ParseAdminCommand
 		return;
 	}
 

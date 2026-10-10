@@ -271,6 +271,16 @@ public:
     
     
     
+    // Sparring Duel System
+    uint32 m_duelChallengerGoId = 0;
+    uint32 m_duelPartnerGoId = 0;
+    bool isDueling() const { return m_duelPartnerGoId != 0; }
+    void setDuelPartner(uint32 partnerGoId) { m_duelPartnerGoId = partnerGoId; }
+    uint32 getDuelPartner() const { return m_duelPartnerGoId; }
+    void setDuelChallenger(uint32 challengerGoId) { m_duelChallengerGoId = challengerGoId; }
+    uint32 getDuelChallenger() const { return m_duelChallengerGoId; }
+    void clearDuel() { m_duelPartnerGoId = 0; m_duelChallengerGoId = 0; }
+
     virtual void die(uint32 killerGoId = 0);
     void saveDataToDB();
     uint64 getCharacterUID() const { return m_characterUID; }

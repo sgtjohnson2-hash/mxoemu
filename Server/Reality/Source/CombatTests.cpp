@@ -2113,6 +2113,95 @@ int RunCombatTestSuite()
 				"/org leave clears operative organization membership");
 			check(humanOperative.po->getOrgId() == 0, "Operative Organization ID cleared to 0");
 		}
+
+		// Section 26: Phase I Systems — Procedural & Story Missions, Sparring Duels & Hardline Transit
+		{
+			std::cout << "\n--- Section 26: Phase I Systems (Missions, Sparring Duels, Hardline Transit) ---" << std::endl;
+			Actor operativeA = makeHuman(&humanClient, 9100112, 17050.0, 2400.0);
+			operativeA.po->setAdmin(true);
+
+			// 1. /mission request dispatch
+			ByteBuffer missionReqCmd;
+			missionReqCmd << (uint8)0x28 << (uint8)0x10 << (uint16)swap16(8) << (uint32)0;
+			missionReqCmd.writeString("/mission request");
+			humanClient.captured.clear();
+			operativeA.po->HandleCommand(missionReqCmd);
+			check(humanClient.sawText("[OPERATOR DISPATCH] New Contract Assigned:") || humanClient.sawText("[OPERATOR] Active contract in progress"),
+				"/mission request assigns mission contract or detects active contract");
+			check(sMissionSys.HasActiveMission(operativeA.po->getGoId()),
+				"MissionSystem confirms operative has an active mission");
+
+			// 2. /mission status query
+			ByteBuffer missionStatusCmd;
+			missionStatusCmd << (uint8)0x28 << (uint8)0x10 << (uint16)swap16(8) << (uint32)0;
+			missionStatusCmd.writeString("/mission status");
+			humanClient.captured.clear();
+			operativeA.po->HandleCommand(missionStatusCmd);
+			check(!humanClient.captured.empty(),
+				"/mission status dispatches mission objective dialog");
+
+			// 3. /mission abort
+			ByteBuffer missionAbortCmd;
+			missionAbortCmd << (uint8)0x28 << (uint8)0x10 << (uint16)swap16(8) << (uint32)0;
+			missionAbortCmd.writeString("/mission abort");
+			humanClient.captured.clear();
+			operativeA.po->HandleCommand(missionAbortCmd);
+			check(humanClient.sawText("[OPERATOR] Mission aborted by operator request"),
+				"/mission abort cleanly terminates active contract");
+			check(!sMissionSys.HasActiveMission(operativeA.po->getGoId()),
+				"MissionSystem confirms active mission slot cleared");
+
+			// 4. Sparring Duel Handshake (/duel <target> & /duel accept)
+			TestHumanClient clientB;
+			Actor operativeB = makeHuman(&clientB, 9100114, 17052.0, 2400.0);
+			operativeB.po->setAdmin(true);
+
+			ByteBuffer duelChallengeCmd;
+			duelChallengeCmd << (uint8)0x28 << (uint8)0x10 << (uint16)swap16(8) << (uint32)0;
+			duelChallengeCmd.writeString(std::string("/duel ") + operativeB.po->getHandle());
+			humanClient.captured.clear();
+			clientB.captured.clear();
+			operativeA.po->HandleCommand(duelChallengeCmd);
+			check(humanClient.sawText("[DUEL] Sparring duel challenge sent"),
+				"/duel <target> dispatches sparring challenge");
+			check(clientB.sawText("challenges you to a sparring duel"),
+				"Target client receives duel challenge notification");
+			check(operativeB.po->getDuelChallenger() == operativeA.po->getGoId(),
+				"Target operative records challenger GoId");
+
+			ByteBuffer duelAcceptCmd;
+			duelAcceptCmd << (uint8)0x28 << (uint8)0x10 << (uint16)swap16(8) << (uint32)0;
+			duelAcceptCmd.writeString("/duel accept");
+			humanClient.captured.clear();
+			clientB.captured.clear();
+			operativeB.po->HandleCommand(duelAcceptCmd);
+			check(operativeA.po->isDueling() && operativeB.po->isDueling(),
+				"/duel accept sets mutual isDueling state for both operatives");
+			check(operativeA.po->getDuelPartner() == operativeB.po->getGoId() && operativeB.po->getDuelPartner() == operativeA.po->getGoId(),
+				"Both duelists correctly paired with mutual partner GoIds");
+
+			// 5. Sparring Duel Conclusion on Defeat without death penalty
+			operativeB.po->die(operativeA.po->getGoId());
+			check(!operativeB.po->isDead(), "Defeated duelist did not die (spared from death penalty)");
+			check(!operativeA.po->isDueling() && !operativeB.po->isDueling(), "Duel concluded and cleared on defeat");
+			check(operativeB.po->getCurrentHealth() == operativeB.po->getMaximumHealth(), "Defeated duelist health restored to 100%");
+
+			// 6. Hardline Directory Query & Teleportation
+			ByteBuffer hlListCmd;
+			hlListCmd << (uint8)0x28 << (uint8)0x10 << (uint16)swap16(8) << (uint32)0;
+			hlListCmd.writeString("/hardlines");
+			humanClient.captured.clear();
+			operativeA.po->HandleCommand(hlListCmd);
+			check(humanClient.sawText("[HARDLINE]"), "/hardlines queries active Matrix hardline directory");
+
+			ByteBuffer hlTpCmd;
+			hlTpCmd << (uint8)0x28 << (uint8)0x10 << (uint16)swap16(8) << (uint32)0;
+			hlTpCmd.writeString("/hardline tp 1 1");
+			humanClient.captured.clear();
+			operativeA.po->HandleCommand(hlTpCmd);
+			check(humanClient.sawText("[HARDLINE] Transferred to") || humanClient.sawText("You want to go to Hardline:1"),
+				"/hardline tp initiates authentic hardline network transit");
+		}
 	}
 	catch (const std::exception& e)
 	{

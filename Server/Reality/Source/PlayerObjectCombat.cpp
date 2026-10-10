@@ -495,6 +495,40 @@ void PlayerObject::die( uint32 killerGoId )
 	if (m_isDead)
 		return;
 
+	if (isDueling())
+	{
+		uint32 partnerId = getDuelPartner();
+		PlayerObject* partner = sObjMgr.getGOPtrSafe(partnerId);
+		std::string partnerName = partner ? partner->getHandle() : "Opponent";
+		
+		clearDuel();
+		if (partner) partner->clearDuel();
+		
+		m_inCombat = false;
+		leaveInterlock();
+		if (partner) {
+			partner->m_inCombat = false;
+			partner->leaveInterlock();
+		}
+		
+		sGame.AnnounceCommand(&m_parent, make_shared<SystemChatMsg>(
+			(format("{c:00FFCC}[DUEL] Sparring match concluded! %1% is victorious!{/c}") % partnerName).str()
+		));
+		
+		m_healthC = m_healthM;
+		sendHealthUpdate();
+		sendVitals();
+		
+		if (partner) {
+			partner->m_healthC = partner->m_healthM;
+			partner->sendHealthUpdate();
+			partner->sendVitals();
+		}
+		
+		INFO_LOG(format("Duel: Sparring match concluded between %1% and %2%. Winner: %3%") % m_handle % partnerName % partnerName);
+		return;
+	}
+
 	m_isDead = true;
 	m_inCombat = false;
 	m_healthC = 0;
@@ -696,12 +730,35 @@ void PlayerObject::RPC_HandleLeaveCombat( ByteBuffer &srcCmd )
 //0x50 - duel request
 void PlayerObject::RPC_HandleDuelRequest( ByteBuffer &srcCmd )
 {
-	ByteBuffer extraData = ByteBuffer(&srcCmd.contents()[srcCmd.rpos()],srcCmd.remaining());
-	DEBUG_LOG(format("(%1%) %2%:%3% duel request data: %4%")
-		% m_parent.Address() % m_handle % m_goId % Bin2Hex(extraData));
+	uint16 targetViewId = 0;
+	if (srcCmd.remaining() >= sizeof(targetViewId))
+		targetViewId = srcCmd.read<uint16>();
 
-	m_parent.QueueCommand(shared_ptr<SystemChatMsg>(new SystemChatMsg(
-		"{c:FFFF00}Dueling is not implemented yet - PvP is always on for now.{/c}")));
+	uint32 targetGoId = sObjMgr.getGOForView(&m_parent, targetViewId);
+	if (targetGoId == 0)
+		targetGoId = m_targetGoId;
+
+	PlayerObject* target = sObjMgr.getGOPtrSafe(targetGoId);
+	if (!target || target == this)
+	{
+		m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FFFF00}[DUEL] Invalid target for duel challenge.{/c}"));
+		return;
+	}
+
+	if (isDueling() || target->isDueling())
+	{
+		m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FFFF00}[DUEL] A participant is already in an active duel.{/c}"));
+		return;
+	}
+
+	target->setDuelChallenger(m_goId);
+	m_parent.QueueCommand(make_shared<SystemChatMsg>(
+		(format("{c:00FFCC}[DUEL] Sparring duel challenge sent to %1%. Awaiting confirmation...{/c}") % target->getHandle()).str()
+	));
+	target->m_parent.QueueCommand(make_shared<SystemChatMsg>(
+		(format("{c:00FFFF}[DUEL] Operative %1% challenges you to a sparring duel! Type /duel accept to begin or /duel decline to refuse.{/c}") % m_handle).str()
+	));
+	INFO_LOG(format("Duel: %1% challenged %2% to a sparring duel") % m_handle % target->getHandle());
 }
 
 //0x80b9 - use an ability on a target
