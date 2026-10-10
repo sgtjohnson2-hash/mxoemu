@@ -1494,7 +1494,36 @@ void PlayerObject::ParsePlayerCommand( string theCmd )
 	else if (iequals(command, "overwrite") || iequals(command, "agentstrike") || iequals(command, "agent"))
 	{
 		uint32 targetCivId = 0;
-		cmdStream >> targetCivId;
+		uint32 customHp = 0;
+		string agentName = "Agent Johnson";
+		bool isSmith = false;
+
+		string token1, token2;
+		if (cmdStream >> token1) {
+			if (!token1.empty() && isdigit((unsigned char)token1[0])) {
+				uint32 val = (uint32)atoi(token1.c_str());
+				if (val > 1000) {
+					targetCivId = val;
+				} else {
+					customHp = val;
+				}
+			} else if (iequals(token1, "smith")) {
+				isSmith = true;
+				agentName = "Agent Smith";
+			} else if (!token1.empty()) {
+				agentName = token1;
+			}
+		}
+
+		if (cmdStream >> token2) {
+			if (!token2.empty() && isdigit((unsigned char)token2[0])) {
+				customHp = (uint32)atoi(token2.c_str());
+			} else if (iequals(token2, "smith")) {
+				isSmith = true;
+				agentName = "Agent Smith";
+			}
+		}
+
 		if (targetCivId == 0) {
 			targetCivId = m_targetGoId;
 		}
@@ -1530,11 +1559,6 @@ void PlayerObject::ParsePlayerCommand( string theCmd )
 		}
 
 		if (targetCivId != 0) {
-			string optAgent;
-			cmdStream >> optAgent;
-			bool isSmith = iequals(optAgent, "smith");
-			string agentName = isSmith ? "Agent Smith" : (!optAgent.empty() ? optAgent : "Agent Johnson");
-
 			uint32 agentId = sAgentPossessionMgr.PossessCivilian(targetCivId, agentName, m_goId, isSmith);
 			if (agentId != 0) {
 				setTargetGoId(targetCivId);
@@ -1551,6 +1575,10 @@ void PlayerObject::ParsePlayerCommand( string theCmd )
 				}
 
 				if (auto agentPo = sObjMgr.getGOPtrSafe(targetCivId)) {
+					if (customHp > 0) {
+						agentPo->setMaximumHealth(customHp);
+						agentPo->setCurrentHealth(customHp);
+					}
 					auto pkts = agentPo->getCurrentStatePackets();
 					for (const auto& pkt : pkts) {
 						m_parent.QueueState(pkt);
