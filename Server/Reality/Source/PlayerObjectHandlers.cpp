@@ -1057,6 +1057,191 @@ void PlayerObject::ParsePlayerCommand( string theCmd )
 		}
 		return;
 	}
+	else if (iequals(command, "locker") || iequals(command, "vault"))
+	{
+		string subCmd;
+		cmdStream >> subCmd;
+
+		const HardlineNode* hl = PlayerObject::GetNearestHardline(m_district, m_pos.x, m_pos.z);
+		uint32 hlId = hl ? hl->hardlineId : 0;
+		double d2 = hl ? ((m_pos.x - hl->x)*(m_pos.x - hl->x) + (m_pos.z - hl->z)*(m_pos.z - hl->z)) : 1e12;
+		bool nearHl = (d2 <= (2500.0 * 2500.0)); // 25 meters
+
+		INFO_LOG(format("HardlineLocker: %1% executed locker command '%2%' (nearHl=%3%, hlId=%4%)") % m_handle % subCmd % nearHl % hlId);
+
+		if (subCmd.empty() || boost::iequals(subCmd, "help") || boost::iequals(subCmd, "list"))
+		{
+			if (!nearHl)
+			{
+				m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FF0000}[LOCKER] Access Denied. You must be within 25m of an active Hardline.{/c}"));
+				return;
+			}
+			auto items = sEconomySys.GetLockerItems(getCharacterUID(), hlId);
+			if (items.empty())
+			{
+				m_parent.QueueCommand(make_shared<SystemChatMsg>((format("{c:FFFF00}[LOCKER] Hardline #%1% vault is empty.{/c}") % hlId).str()));
+				return;
+			}
+			m_parent.QueueCommand(make_shared<SystemChatMsg>((format("{c:00FFCC}--- HARDLINE #%1% VAULT (%2% ITEMS) ---{/c}") % hlId % items.size()).str()));
+			for (const auto& it : items)
+			{
+				m_parent.QueueCommand(make_shared<SystemChatMsg>(
+					(format("  [ID: %1%] Slot: %2% | Template: %3% | Qty: %4%")
+						% it.entryId % (int)it.slot % it.templateId % it.quantity).str()));
+			}
+			return;
+		}
+
+		if (boost::iequals(subCmd, "store"))
+		{
+			if (!nearHl)
+			{
+				m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FF0000}[LOCKER] Access Denied. You must be within 25m of an active Hardline.{/c}"));
+				return;
+			}
+			uint32 invSlot = 0;
+			cmdStream >> invSlot;
+			if (invSlot == 0 || !m_inventorySystem)
+			{
+				m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FF0000}Usage: &locker store <invSlot>{/c}"));
+				return;
+			}
+			shared_ptr<Item> item = m_inventorySystem->getItemBySlot(static_cast<uint8>(invSlot));
+			if (!item)
+			{
+				m_parent.QueueCommand(make_shared<SystemChatMsg>((format("{c:FF0000}[LOCKER] No item in inventory slot %1%.{/c}") % invSlot).str()));
+				return;
+			}
+			uint32 tId = item->getTemplateId();
+			if (sEconomySys.DepositToLocker(this, hlId, tId, static_cast<uint8>(invSlot)))
+			{
+				INFO_LOG(format("HardlineLocker: %1% deposited item %2% into vault %3%") % m_handle % tId % hlId);
+				m_parent.QueueCommand(make_shared<SystemChatMsg>(
+					(format("{c:00FF00}[LOCKER] Deposited item (Template #%1%) into Hardline #%2% vault.{/c}") % tId % hlId).str()));
+			}
+			else
+			{
+				m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FF0000}[LOCKER] Failed to deposit item into vault.{/c}"));
+			}
+			return;
+		}
+
+		if (boost::iequals(subCmd, "withdraw"))
+		{
+			if (!nearHl)
+			{
+				m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FF0000}[LOCKER] Access Denied. You must be within 25m of an active Hardline.{/c}"));
+				return;
+			}
+			uint64 entryId = 0;
+			cmdStream >> entryId;
+			if (entryId == 0)
+			{
+				m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FF0000}Usage: &locker withdraw <entryId>{/c}"));
+				return;
+			}
+			if (sEconomySys.WithdrawFromLocker(this, hlId, entryId))
+			{
+				INFO_LOG(format("HardlineLocker: %1% withdrew item %2% from vault %3%") % m_handle % entryId % hlId);
+				m_parent.QueueCommand(make_shared<SystemChatMsg>(
+					(format("{c:00FF00}[LOCKER] Withdrew item (Locker ID #%1%) from Hardline #%2% vault into inventory.{/c}") % entryId % hlId).str()));
+			}
+			else
+			{
+				m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FF0000}[LOCKER] Failed to withdraw item (check entry ID or inventory space).{/c}"));
+			}
+			return;
+		}
+		return;
+	}
+	else if (iequals(command, "dye"))
+	{
+		string slotStr;
+		uint32 colorVal = 0;
+		cmdStream >> slotStr >> colorVal;
+
+		if (slotStr.empty())
+		{
+			m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:00FFCC}Usage: &dye <coat|shirt|pants|shoes|glasses|hair|skin> <0-31>{/c}"));
+			return;
+		}
+
+		string colName = "";
+		uint32 maxColor = 31;
+		if (boost::iequals(slotStr, "coat"))        { colName = "coatcolor"; maxColor = 31; }
+		else if (boost::iequals(slotStr, "shirt"))   { colName = "shirtcolor"; maxColor = 63; }
+		else if (boost::iequals(slotStr, "pants"))   { colName = "pantscolor"; maxColor = 31; }
+		else if (boost::iequals(slotStr, "shoes"))   { colName = "shoecolor"; maxColor = 15; }
+		else if (boost::iequals(slotStr, "glasses")) { colName = "glassescolor"; maxColor = 15; }
+		else if (boost::iequals(slotStr, "hair"))    { colName = "haircolor"; maxColor = 31; }
+		else if (boost::iequals(slotStr, "skin"))    { colName = "skintone"; maxColor = 31; }
+		else
+		{
+			m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FF0000}[TAILOR] Unknown wardrobe slot. Valid: coat, shirt, pants, shoes, glasses, hair, skin.{/c}"));
+			return;
+		}
+
+		if (colorVal > maxColor) colorVal = maxColor;
+
+		if (Database_Main != nullptr)
+		{
+			try
+			{
+				PreparedStatement stmt((format("UPDATE `rsivalues` SET `%1%` = ?0 WHERE `charId` = ?1") % colName).str());
+				stmt.SetUInt32(0, colorVal);
+				stmt.SetUInt64(1, getCharacterUID());
+				sDatabase.ExecutePrepared(&stmt);
+			} catch (...) {}
+		}
+
+		UpdateAppearance();
+		INFO_LOG(format("Tailor: %1% dyed %2% to color %3%") % m_handle % slotStr % colorVal);
+		m_parent.QueueCommand(make_shared<SystemChatMsg>(
+			(format("{c:00FF00}[TAILOR] Your %1% has been dyed to palette color #%2%! Appearance matrix synchronized.{/c}")
+				% slotStr % colorVal).str()
+		));
+		return;
+	}
+	else if (iequals(command, "capture") || iequals(command, "hacknode"))
+	{
+		uint32 nodeId = 0;
+		cmdStream >> nodeId;
+		if (nodeId == 0)
+		{
+			m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FF0000}Usage: &capture <nodeId>{/c}"));
+			return;
+		}
+
+		const auto& nodes = sFactionWarMgr.GetControlNodes();
+		auto it = nodes.find(nodeId);
+		if (it == nodes.end())
+		{
+			m_parent.QueueCommand(make_shared<SystemChatMsg>((format("{c:FF0000}[FACTION WAR] Control Node #%1% not found in directory.{/c}") % nodeId).str()));
+			return;
+		}
+
+		const ControlNode& node = it->second;
+		double dx = m_pos.x - node.x;
+		double dz = m_pos.z - node.z;
+		if ((dx * dx + dz * dz) > (2500.0 * 2500.0)) // 25 meters
+		{
+			m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FF0000}[FACTION WAR] You must be within 25m of the Hardline node to upload viral control code.{/c}"));
+			return;
+		}
+
+		uint32 myFaction = getFaction();
+		if (myFaction == 0) myFaction = FACTION_ZION;
+
+		if (node.controllingFaction == myFaction)
+		{
+			m_parent.QueueCommand(make_shared<SystemChatMsg>((format("{c:FFFF00}[FACTION WAR] Hardline Node #%1% is already controlled by your faction.{/c}") % nodeId).str()));
+			return;
+		}
+
+		INFO_LOG(format("FactionWar: %1% executed viral capture on node %2% (faction %3%)") % m_handle % nodeId % myFaction);
+		sFactionWarMgr.AdvanceNodeCapture(nodeId, myFaction, 0.35f, this);
+		return;
+	}
 	else if (iequals(command, "trade"))
 	{
 		string targetHandle;
@@ -1990,8 +2175,14 @@ void PlayerObject::RPC_HandleChat( ByteBuffer &srcCmd )
 									  boost::istarts_with(theMessage, "/escape") ||
 									  boost::istarts_with(theMessage, "/target") ||
 									  boost::istarts_with(theMessage, "/loadout") ||
+									  boost::istarts_with(theMessage, "/locker") ||
+									  boost::istarts_with(theMessage, "/vault") ||
+									  boost::istarts_with(theMessage, "/dye") ||
+									  boost::istarts_with(theMessage, "/capture") ||
+									  boost::istarts_with(theMessage, "/hacknode") ||
 									  boost::istarts_with(theMessage, "/dojo"))))
 	{
+		INFO_LOG(format("(%1%) %2%:%3% chat command: %4%") % m_parent.Address() % m_handle % m_goId % theMessage);
 		ParsePlayerCommand(theMessage.substr(1));
 		return;
 	}

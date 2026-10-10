@@ -737,6 +737,7 @@ bool FactionWarManager::AdvanceNodeCapture(uint32 nodeId, uint32 faction, float 
 
         string alertMsg = (format("{c:FF3300}[FACTION ALERT] Hardline Broadcast Node #%1% (District %2%) is UNDER VIRAL ASSAULT by %3%! Defense requested immediately!{/c}")
             % node.id % node.districtId % attackerStr).str();
+        INFO_LOG(format("[FACTION ALERT] Hardline Broadcast Node #%1% (District %2%) is UNDER VIRAL ASSAULT by %3%!") % node.id % node.districtId % attackerStr);
 
         auto players = sObjMgr.getAllGOIds();
         for (auto goId : players) {
@@ -851,6 +852,7 @@ void FactionWarManager::updateControlNodes(uint32 deltaMs)
 
                 string alertMsg = (format("{c:FF3300}[FACTION ALERT] Hardline Node #%1% (District %2%) is UNDER VIRAL ASSAULT by %3%! Defense requested immediately!{/c}")
                     % node.id % node.districtId % attackerStr).str();
+                INFO_LOG(format("[FACTION ALERT] Hardline Node #%1% (District %2%) is UNDER VIRAL ASSAULT by %3%!") % node.id % node.districtId % attackerStr);
 
                 auto players = sObjMgr.getAllGOIds();
                 for (auto goId : players) {
