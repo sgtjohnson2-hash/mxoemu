@@ -1063,15 +1063,17 @@ void PlayerObject::ParsePlayerCommand( string theCmd )
 		cmdStream >> subCmd;
 
 		const HardlineNode* hl = PlayerObject::GetNearestHardline(m_district, m_pos.x, m_pos.z);
-		uint32 hlId = hl ? hl->hardlineId : 0;
+		if (!hl) hl = PlayerObject::GetNearestHardline(0, m_pos.x, m_pos.z);
+		uint32 hlId = hl ? hl->hardlineId : 152;
 		double d2 = hl ? ((m_pos.x - hl->x)*(m_pos.x - hl->x) + (m_pos.z - hl->z)*(m_pos.z - hl->z)) : 1e12;
 		bool nearHl = (d2 <= (2500.0 * 2500.0)); // 25 meters
+		bool canAccess = nearHl || m_isAdmin;
 
-		INFO_LOG(format("HardlineLocker: %1% executed locker command '%2%' (nearHl=%3%, hlId=%4%)") % m_handle % subCmd % nearHl % hlId);
+		INFO_LOG(format("HardlineLocker: %1% executed locker command '%2%' (nearHl=%3%, hlId=%4%, admin=%5%)") % m_handle % subCmd % nearHl % hlId % m_isAdmin);
 
 		if (subCmd.empty() || boost::iequals(subCmd, "help") || boost::iequals(subCmd, "list"))
 		{
-			if (!nearHl)
+			if (!canAccess)
 			{
 				m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FF0000}[LOCKER] Access Denied. You must be within 25m of an active Hardline.{/c}"));
 				return;
@@ -1094,7 +1096,7 @@ void PlayerObject::ParsePlayerCommand( string theCmd )
 
 		if (boost::iequals(subCmd, "store"))
 		{
-			if (!nearHl)
+			if (!canAccess)
 			{
 				m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FF0000}[LOCKER] Access Denied. You must be within 25m of an active Hardline.{/c}"));
 				return;
@@ -1128,7 +1130,7 @@ void PlayerObject::ParsePlayerCommand( string theCmd )
 
 		if (boost::iequals(subCmd, "withdraw"))
 		{
-			if (!nearHl)
+			if (!canAccess)
 			{
 				m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FF0000}[LOCKER] Access Denied. You must be within 25m of an active Hardline.{/c}"));
 				return;
@@ -1239,8 +1241,22 @@ void PlayerObject::ParsePlayerCommand( string theCmd )
 			myFaction = (node.controllingFaction == FACTION_ZION) ? FACTION_MACHINES : FACTION_ZION;
 		}
 
-		INFO_LOG(format("FactionWar: %1% executed viral capture on node %2% (faction %3%)") % m_handle % nodeId % myFaction);
-		sFactionWarMgr.AdvanceNodeCapture(nodeId, myFaction, 0.35f, this);
+		float deltaProgress = 0.35f;
+		if (m_isAdmin)
+		{
+			float optProgress = 0.0f;
+			if (cmdStream >> optProgress && optProgress > 0.0f)
+			{
+				deltaProgress = optProgress;
+			}
+			else
+			{
+				deltaProgress = 1.0f; // admin capture immediately completes capture!
+			}
+		}
+
+		INFO_LOG(format("FactionWar: %1% executed viral capture on node %2% (faction %3%, delta=%4%)") % m_handle % nodeId % myFaction % deltaProgress);
+		sFactionWarMgr.AdvanceNodeCapture(nodeId, myFaction, deltaProgress, this);
 		return;
 	}
 	else if (iequals(command, "trade"))
