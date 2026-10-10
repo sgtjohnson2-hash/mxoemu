@@ -69,6 +69,7 @@ public:
     
     uint32 getGoId() const { return m_goId; }
     uint32 getTemplateId() const { return m_templateId; }
+    void setTemplateId(uint32 templateId) { m_templateId = templateId; }
     uint16 getStackCount() const { return m_stackCount; }
     void setStackCount(uint16 count) { m_stackCount = count; }
     

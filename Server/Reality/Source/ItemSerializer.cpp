@@ -10,6 +10,7 @@ std::string ItemSerializer::Serialize(std::shared_ptr<Item> item)
 
     std::stringstream ss;
     ss << "{";
+    ss << "\"templateId\":" << item->getTemplateId() << ",";
     ss << "\"stackCount\":" << item->getStackCount() << ",";
     ss << "\"ammoCount\":" << item->getAmmoCount() << ",";
     ss << "\"durability\":" << item->getDurability() << ",";
@@ -24,29 +25,42 @@ void ItemSerializer::Deserialize(std::shared_ptr<Item> item, const std::string& 
 {
     if (!item || metadata.empty() || metadata == "{}") return;
 
-    // Extremely basic manual parsing for our simple mock JSON
-    // Format: {"stackCount":1,"ammoCount":0,"durability":100,"rarity":0,"isCorrupted":false}
-    
+    // Manual parsing for key:value pairs
     size_t pos = 0;
     
+    pos = metadata.find("\"templateId\":");
+    if (pos != std::string::npos) {
+        try {
+            item->setTemplateId((uint32)std::stoul(metadata.substr(pos + 13)));
+        } catch (...) {}
+    }
+
     pos = metadata.find("\"stackCount\":");
     if (pos != std::string::npos) {
-        item->setStackCount(std::stoi(metadata.substr(pos + 13)));
+        try {
+            item->setStackCount((uint16)std::stoi(metadata.substr(pos + 13)));
+        } catch (...) {}
     }
     
     pos = metadata.find("\"ammoCount\":");
     if (pos != std::string::npos) {
-        item->setAmmoCount(std::stoi(metadata.substr(pos + 12)));
+        try {
+            item->setAmmoCount((uint16)std::stoi(metadata.substr(pos + 12)));
+        } catch (...) {}
     }
     
     pos = metadata.find("\"durability\":");
     if (pos != std::string::npos) {
-        item->setDurability(std::stof(metadata.substr(pos + 13)));
+        try {
+            item->setDurability(std::stof(metadata.substr(pos + 13)));
+        } catch (...) {}
     }
     
     pos = metadata.find("\"rarity\":");
     if (pos != std::string::npos) {
-        item->setRarity((ItemRarity)std::stoi(metadata.substr(pos + 9)));
+        try {
+            item->setRarity((ItemRarity)std::stoi(metadata.substr(pos + 9)));
+        } catch (...) {}
     }
     
     pos = metadata.find("\"isCorrupted\":");

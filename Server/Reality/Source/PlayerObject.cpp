@@ -40,6 +40,7 @@
 #include "MissionSystem.h"
 #include "Config.h"
 #include "AbilitySystem.h"
+#include "ItemSerializer.h"
 #include <set>
 #include <mutex>
 #include <boost/algorithm/string.hpp>
@@ -378,14 +379,16 @@ void PlayerObject::saveDataToDB()
 	if (Database_Main == nullptr || m_characterUID >= 9000000) //virtual bots or offline test mode are memory-only
 		return;
 
-	if (m_savedPos == m_pos)
-		return setOnlineStatus(true);
-
-	bool storeSuccess = sDatabase.Execute(format("UPDATE `characters` SET `x` = '%1%', `y` = '%2%', `z` = '%3%', `rot` = '%4%', `lastOnline` = NOW() WHERE `charId` = '%5%'")
+	bool storeSuccess = sDatabase.Execute(format("UPDATE `characters` SET `x` = '%1%', `y` = '%2%', `z` = '%3%', `rot` = '%4%', `exp` = '%5%', `cash` = '%6%', `level` = '%7%', `healthC` = '%8%', `innerStrC` = '%9%', `lastOnline` = NOW() WHERE `charId` = '%10%'")
 		% m_pos.x
 		% m_pos.y
 		% m_pos.z
 		% m_pos.rot
+		% m_exp
+		% m_cash
+		% m_lvl
+		% m_healthC
+		% m_innerStrC
 		% m_characterUID );
 
 	if (!storeSuccess)
@@ -399,6 +402,16 @@ void PlayerObject::saveDataToDB()
 			m_storeCntr=0;
 		}
 		m_storeCntr++;
+	}
+
+	if (m_inventorySystem && !m_parent.isBot())
+	{
+		m_inventorySystem->saveToDB();
+	}
+
+	if (m_abilitySystem && !m_parent.isBot())
+	{
+		m_abilitySystem->saveToDB();
 	}
 }
 
@@ -508,6 +521,11 @@ void PlayerObject::PopulateWorld()
 			m_sendAfterSpawn.push(*it);
 	}
 	m_worldPopulated=true;
+
+	if (m_inventorySystem && !m_parent.isBot())
+	{
+		m_inventorySystem->sendFullInventory();
+	}
 }
 
 void PlayerObject::UpdateAoIStreaming()
@@ -1041,6 +1059,8 @@ bool PlayerObject::giveItem(unsigned int templateId)
     if (m_inventorySystem->getFirstFreeSlot() == 0) return false;
     uint32 newGoId = sObjMgr.getNewItemId();
     shared_ptr<Item> newItem(new Item(newGoId, templateId));
+    std::string meta = ItemSerializer::Serialize(newItem);
+    newItem->setMetadata(meta);
     if (m_inventorySystem->addItemAuto(newItem)) {
         if (!getClient().isBot()) {
             m_inventorySystem->saveToDB();

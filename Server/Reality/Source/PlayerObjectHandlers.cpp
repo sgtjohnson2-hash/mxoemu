@@ -49,6 +49,7 @@
 #include "DataLoader.h"
 #include "InventorySystem.h"
 #include "Item.h"
+#include "ItemSerializer.h"
 #include "WorldDirector.h"
 #include "LogisticsManager.h"
 #include "AI/MatrixThreatHeatmap.h"
@@ -431,9 +432,17 @@ void PlayerObject::ParseAdminCommand( string theCmd )
 		}
 		
 		if (getInventory()) {
-			auto item = std::make_shared<Item>(rand(), templateId);
+			uint32 newGoId = sObjMgr.getNewItemId();
+			auto item = std::make_shared<Item>(newGoId, templateId);
+			std::string meta = ItemSerializer::Serialize(item);
+			item->setMetadata(meta);
 			getInventory()->addItemAuto(item);
-			m_parent.QueueCommand(make_shared<SystemChatMsg>((format("{c:00FF00}Added item %1% to inventory.{/c}") % templateId).str()));
+			if (!getClient().isBot()) {
+				getInventory()->saveToDB();
+			}
+			const ItemTemplate* tpl = sDataLoader.GetItemTemplate(templateId);
+			std::string itemName = tpl ? tpl->name : "Item";
+			m_parent.QueueCommand(make_shared<SystemChatMsg>((format("{c:00FF00}Added [%1%] (Tpl %2%, GOID %3%) to inventory.{/c}") % itemName % templateId % newGoId).str()));
 		}
 		return;
 	}
@@ -741,7 +750,7 @@ void PlayerObject::ParsePlayerCommand( string theCmd )
 	//adminFlags set on the character (characters.adminFlags).
 	{
 		static const char* devCommands[] = {
-			"discipline", "class", "loadability", "learn", "dojo", "loadout", "botdebug",
+			"discipline", "class", "loadability", "learn", "dojo", "loadout", "botdebug", "giveitem",
 			"claimhl", "send", "sendCmd", "socket", "bullettime", "gotoPos", "incX", "incY", "incZ",
 			"goThru", "random", "update", "gotoPlayer", "go", "frank", "punisher", "underworld",
 			"syndicate", "police", "swat", "citylife", "simulation", "emergent", "bottest", NULL };
@@ -1011,6 +1020,41 @@ void PlayerObject::ParsePlayerCommand( string theCmd )
 		sCombatSys.StopFreeFire(m_goId);
 		sCombatSys.LeaveInterlock(m_goId);
 		m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FFFF00}Withdrew from combat.{/c}"));
+		return;
+	}
+	else if (iequals(command, "inventory") || iequals(command, "inv"))
+	{
+		if (m_inventorySystem)
+		{
+			m_inventorySystem->sendFullInventory();
+		}
+		return;
+	}
+	else if (iequals(command, "giveitem"))
+	{
+		uint32 templateId = 0;
+		cmdStream >> templateId;
+		if (templateId > 0 && m_inventorySystem)
+		{
+			uint32 newGoId = sObjMgr.getNewItemId();
+			auto item = std::make_shared<Item>(newGoId, templateId);
+			std::string meta = ItemSerializer::Serialize(item);
+			item->setMetadata(meta);
+			m_inventorySystem->addItemAuto(item);
+			if (!getClient().isBot())
+			{
+				m_inventorySystem->saveToDB();
+			}
+			const ItemTemplate* tpl = sDataLoader.GetItemTemplate(templateId);
+			std::string itemName = tpl ? tpl->name : "Item";
+			m_parent.QueueCommand(make_shared<SystemChatMsg>(
+				(format("{c:00FF00}[INVENTORY] Added [%1%] (Tpl %2%, GOID %3%) to inventory.{/c}")
+					% itemName % templateId % newGoId).str()));
+		}
+		else
+		{
+			m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FF0000}Usage: &giveitem <templateId>{/c}"));
+		}
 		return;
 	}
 	else if (iequals(command, "dojo"))
@@ -3805,6 +3849,11 @@ void PlayerObject::RPC_HandleVendorSell(ByteBuffer& srcCmd)
 		return;
 	}
 
+	if (!getClient().isBot())
+	{
+		m_inventorySystem->saveToDB();
+	}
+
 	addInfo(sellValue);
 	saveCashToDB();
 	m_parent.QueueCommand(std::make_shared<SetInformationCmd>(m_cash));
@@ -3988,6 +4037,10 @@ void PlayerObject::RPC_HandleItemUnmountRSI(ByteBuffer& srcCmd)
 	DEBUG_LOG(format("(%1%) %2%:%3% RPC_HandleItemUnmountRSI: slot=%4%")
 		% m_parent.Address() % m_handle % m_goId % (int)slot);
 	UpdateAppearance();
+	if (m_inventorySystem && !getClient().isBot())
+	{
+		m_inventorySystem->saveToDB();
+	}
 }
 
 void PlayerObject::RPC_HandleItemMountRSI(ByteBuffer& srcCmd)
@@ -4001,6 +4054,10 @@ void PlayerObject::RPC_HandleItemMountRSI(ByteBuffer& srcCmd)
 	DEBUG_LOG(format("(%1%) %2%:%3% RPC_HandleItemMountRSI: itemGoId=%4% slot=%5%")
 		% m_parent.Address() % m_handle % m_goId % itemGoId % (int)slot);
 	UpdateAppearance();
+	if (m_inventorySystem && !getClient().isBot())
+	{
+		m_inventorySystem->saveToDB();
+	}
 }
 
 void PlayerObject::RPC_HandleCallContact( ByteBuffer &srcCmd )

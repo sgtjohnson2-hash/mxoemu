@@ -21,6 +21,8 @@
 #include "ItemSerializer.h"
 #include "MessageTypes.h"
 #include "GameClient.h"
+#include "ObjectMgr.h"
+#include "GameServer.h"
 
 InventorySystem::InventorySystem(PlayerObject* owner) : m_owner(owner)
 {
@@ -36,7 +38,7 @@ void InventorySystem::loadFromDB()
     m_goIdToSlot.clear();
     
     PreparedStatement stmt("SELECT `goid`, `slot`, `item_metadata` FROM `inventory` WHERE `charId` = ?0");
-    stmt.SetUInt32(0, m_owner->getCharacterUID());
+    stmt.SetUInt64(0, m_owner->getCharacterUID());
     scoped_ptr<QueryResult> result(sDatabase.QueryPrepared(&stmt));
     if (result)
     {
@@ -61,26 +63,63 @@ void InventorySystem::loadFromDB()
         } while (result->NextRow());
     }
     
+    // If player has no inventory saved, seed default starter operative kit
+    if (m_items.empty() && m_owner && !m_owner->getClient().isBot())
+    {
+        struct StarterItemDef {
+            uint32 templateId;
+            uint8 slot;
+            uint16 stack;
+        };
+        const StarterItemDef starterGear[] = {
+            { 46568, 1, 1 },  // Area K Trenchcoat
+            { 46407, 2, 1 },  // System Sunglasses
+            { 47243, 3, 1 },  // Rave Pants
+            { 40476, 4, 1 },  // Caution Shoes
+            { 1002,  5, 1 },  // Beretta 92FS Pistol
+            { 1050,  6, 20 }  // 9mm Pistol Ammo Clip (20 rounds)
+        };
+        
+        for (const auto& sg : starterGear)
+        {
+            uint32 newGoId = sObjMgr.getNewItemId();
+            shared_ptr<Item> item = make_shared<Item>(newGoId, sg.templateId);
+            item->setStackCount(sg.stack);
+            item->setDurability(100.0f);
+            item->setRarity(RARITY_COMMON);
+            std::string meta = ItemSerializer::Serialize(item);
+            item->setMetadata(meta);
+            m_items[sg.slot] = item;
+            m_goIdToSlot[newGoId] = sg.slot;
+        }
+        
+        saveToDB();
+        INFO_LOG(format("Granted default starter operative kit (%1% items) to %2%") % m_items.size() % m_owner->getHandle());
+    }
+
     INFO_LOG(format("Loaded %1% inventory items for %2%") % m_items.size() % m_owner->getHandle());
 }
 
 void InventorySystem::saveToDB()
 {
-    if (!m_owner || m_owner->getCharacterUID() >= 9000000) return;
-    PreparedStatement* delStmt = new PreparedStatement("DELETE FROM `inventory` WHERE `charId` = ?0");
-    delStmt->SetUInt64(0, m_owner->getCharacterUID());
-    sAsyncDatabase.Enqueue(delStmt);
+    if (!m_owner) return;
+    if (m_owner->getClient().isBot() || m_owner->getCharacterUID() >= 9000000) return;
+
+    PreparedStatement delStmt("DELETE FROM `inventory` WHERE `charId` = ?0");
+    delStmt.SetUInt64(0, m_owner->getCharacterUID());
+    sDatabase.ExecutePrepared(&delStmt);
     
     for (auto it = m_items.begin(); it != m_items.end(); ++it)
     {
-        PreparedStatement* insStmt = new PreparedStatement("INSERT INTO `inventory` (`charId`, `goid`, `slot`, `item_metadata`) VALUES (?0, ?1, ?2, ?3)");
-        insStmt->SetUInt64(0, m_owner->getCharacterUID());
-        insStmt->SetUInt32(1, it->second->getGoId());
-        insStmt->SetUInt32(2, (uint32)it->first);
+        if (!it->second) continue;
+        PreparedStatement insStmt("INSERT INTO `inventory` (`charId`, `goid`, `slot`, `item_metadata`) VALUES (?0, ?1, ?2, ?3)");
+        insStmt.SetUInt64(0, m_owner->getCharacterUID());
+        insStmt.SetUInt32(1, it->second->getGoId());
+        insStmt.SetUInt32(2, (uint32)it->first);
         std::string metadata = ItemSerializer::Serialize(it->second);
         it->second->setMetadata(metadata);
-        insStmt->SetString(3, metadata);
-        sAsyncDatabase.Enqueue(insStmt);
+        insStmt.SetString(3, metadata);
+        sDatabase.ExecutePrepared(&insStmt);
     }
 }
 
@@ -179,14 +218,14 @@ void InventorySystem::sendFullInventory()
 {
     if (!m_owner || m_owner->getClient().isBot()) return;
 
-    // TODO: Send binary 0x63 packet to client with all items and their slots once reverse engineered.
-    // For now, we will dump the inventory state to the player's chat log for validation.
-    std::string msg = "{c:00FF00}[Inventory Loader] Loaded " + std::to_string(m_items.size()) + " items.{/c}";
+    std::string msg = "{c:00FF00}[Inventory] Loaded " + std::to_string(m_items.size()) + " items:{/c}";
     m_owner->getClient().QueueCommand(std::make_shared<SystemChatMsg>(msg));
     
     for (const auto& pair : m_items) {
-        std::string itemMsg = (format("{c:00FFFF}Slot %1%: GOID %2% Template %3%{/c}") 
-            % (int)pair.first % pair.second->getGoId() % pair.second->getTemplateId()).str();
+        const ItemTemplate* tpl = sDataLoader.GetItemTemplate(pair.second->getTemplateId());
+        std::string itemName = tpl ? tpl->name : "Item";
+        std::string itemMsg = (format("{c:00FFFF}  Slot %1%: %2% (GOID %3%, Tpl %4%, x%5%){/c}") 
+            % (int)pair.first % itemName % pair.second->getGoId() % pair.second->getTemplateId() % pair.second->getStackCount()).str();
         m_owner->getClient().QueueCommand(std::make_shared<SystemChatMsg>(itemMsg));
     }
 }
