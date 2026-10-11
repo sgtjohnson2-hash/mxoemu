@@ -1137,9 +1137,8 @@ CombatSystem::AttackResult CombatSystem::ResolveAttack(PlayerObject* attacker, P
 	dmg += move.minDmgPerLvl * attacker->getLevel();
 	dmg *= attacker->getDamageScale(); //scaled dojo bots hit harder; everyone else is 1.0
 	dmg *= TacticModifier(attackerTactic, targetTactic);
-
-    // Apply adaptive learning mitigation
-    dmg *= target->m_combatMemory.getMitigationModifier(move.id);
+	// Same-move "adaptive" mitigation used to drop a repeated strike to 15% after four hits.
+	// Interlock rounds reuse one style move, so every fight collapsed mid-way. Retail does not do this.
 
     // [Item 19] Dual Wielding Firepower
     if (move.dmgType == DAMAGE_RANGED && attacker->isDualWielding()) {
@@ -1541,8 +1540,11 @@ bool CombatSystem::RunInterlockRound(InterlockSession &session)
 		return false; //Update() reaps the session and tears down the IL views
 	}
 
-	const CombatMove* moveA = (session.queuedMoveA != 0 && session.queuedMoveA != 1) ? GetMove(session.queuedMoveA) : GetDefaultStyleMove(pA);
-	const CombatMove* moveB = (session.queuedMoveB != 0 && session.queuedMoveB != 1) ? GetMove(session.queuedMoveB) : GetDefaultStyleMove(pB);
+	const CombatMove* moveA = (session.queuedMoveA != 0 && session.queuedMoveA != 1) ? GetMove(session.queuedMoveA) : nullptr;
+	const CombatMove* moveB = (session.queuedMoveB != 0 && session.queuedMoveB != 1) ? GetMove(session.queuedMoveB) : nullptr;
+	// A hotbar id that is not a combat move used to skip the swing entirely.
+	if (!moveA) moveA = GetDefaultStyleMove(pA);
+	if (!moveB) moveB = GetDefaultStyleMove(pB);
 
 	// Bot combat AI: update round tactics and discipline moves
 	if (IsServerDrivenBot(pA)) {
