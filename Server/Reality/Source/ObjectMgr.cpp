@@ -197,7 +197,7 @@ uint32 ObjectMgr::getGOId( class PlayerObject* forWhichObj )
 
 uint16 ObjectMgr::getViewForGO( GameClient* requester, uint32 goId )
 {
-	if (requester==NULL)
+	if (requester == NULL)
 		throw ClientNotAvailable();
 
 	// The client's own avatar is registered internally as VIEWID_SELF (2).
@@ -207,27 +207,51 @@ uint16 ObjectMgr::getViewForGO( GameClient* requester, uint32 goId )
 	if (!requester->isBot() && requester->GetPlayerGoId() != 0 && goId == requester->GetPlayerGoId())
 		return VIEWID_SELF;
 
-	return uint16(goId);
+	std::unique_lock<std::shared_mutex> lock(m_objMutex);
+	viewIdsMap &viewsOfClient = m_views[requester];
+
+	// Check if this goId is already mapped to a viewId for this client
+	for (const auto& pair : viewsOfClient)
+	{
+		if (pair.second == goId)
+			return pair.first;
+	}
+
+	// client.dll ConnectionContext viewListSize is 128 (0x80 elements).
+	// View 0 = unassigned, 1 = ObjectManager, 2 = Self.
+	// Dynamic view IDs must strictly be in [3..127]. Any viewId >= 128 triggers
+	// "HandleInput, view ID is out of range!" at 0x622C383E and is dropped by client.dll.
+	for (uint16 id = 3; id < 128; ++id)
+	{
+		if (viewsOfClient.find(id) == viewsOfClient.end())
+		{
+			viewsOfClient[id] = goId;
+			return id;
+		}
+	}
+
+	ERROR_LOG(format("ObjectMgr::getViewForGO: client %1% exhausted view table (max 125 views) for goId %2%")
+		% requester->Address() % goId);
+	throw NoMoreFreeViews();
 }
 
 void ObjectMgr::releaseRelevantSet( GameClient *requester )
 {
 	std::unique_lock<std::shared_mutex> lock(m_objMutex);
-	clientToViewMap::iterator it=m_views.find(requester);
-	if (it!=m_views.end())
+	clientToViewMap::iterator it = m_views.find(requester);
+	if (it != m_views.end())
 		m_views.erase(it);
 }
 
-uint16 ObjectMgr::allocateViewId( GameClient* requester)
+uint16 ObjectMgr::allocateViewId( GameClient* requester )
 {
 	if (requester == NULL)
 		throw ClientNotAvailable();
 
 	std::unique_lock<std::shared_mutex> lock(m_objMutex);
-	//get the views map for current client
 	const viewIdsMap &viewsOfClient = m_views[requester];
-	//go through all possible viewIds, when we find one thats not in the list, return it
-	for (uint16 id=3;id<OBJECTMANAGER_STARTINGOBJECTID;++id) //1 = object manager, 2 = self view (client-reserved)
+	// client.dll viewListSize is 128; allocate in [3..127]
+	for (uint16 id = 3; id < 128; ++id)
 	{
 		if (viewsOfClient.find(id) == viewsOfClient.end())
 			return id;
@@ -236,28 +260,56 @@ uint16 ObjectMgr::allocateViewId( GameClient* requester)
 	throw NoMoreFreeViews();
 }
 
-uint32 ObjectMgr::getGOForView(class GameClient *requester, uint16 viewId) {
-    if (requester == NULL) throw ClientNotAvailable();
-    if (!requester->isBot() && viewId == VIEWID_SELF)
-        return requester->GetPlayerGoId();
-    return uint32(viewId); // Simple 1:1 mapping for other entities
+uint32 ObjectMgr::getGOForView( class GameClient *requester, uint16 viewId )
+{
+	if (requester == NULL)
+		throw ClientNotAvailable();
+
+	if (!requester->isBot() && viewId == VIEWID_SELF)
+		return requester->GetPlayerGoId();
+
+	std::shared_lock<std::shared_mutex> lock(m_objMutex);
+	auto it = m_views.find(requester);
+	if (it != m_views.end())
+	{
+		auto vit = it->second.find(viewId);
+		if (vit != it->second.end())
+			return vit->second;
+	}
+
+	return 0;
 }
 
-uint16 ObjectMgr::allocateDynamicView(class GameClient *requester, uint32 tagObjId) {
-    if (requester == NULL) throw ClientNotAvailable();
-    uint16 newViewId = allocateViewId(requester);
-    std::unique_lock<std::shared_mutex> lock(m_objMutex);
-    m_views[requester][newViewId] = tagObjId;
-    return newViewId;
+uint16 ObjectMgr::allocateDynamicView( class GameClient *requester, uint32 tagObjId )
+{
+	if (requester == NULL)
+		throw ClientNotAvailable();
+
+	std::unique_lock<std::shared_mutex> lock(m_objMutex);
+	viewIdsMap &viewsOfClient = m_views[requester];
+	for (uint16 id = 3; id < 128; ++id)
+	{
+		if (viewsOfClient.find(id) == viewsOfClient.end())
+		{
+			viewsOfClient[id] = tagObjId;
+			return id;
+		}
+	}
+
+	throw NoMoreFreeViews();
 }
 
-void ObjectMgr::releaseDynamicView(class GameClient *requester, uint16 viewId) {
-    if (requester == NULL) return;
-    std::unique_lock<std::shared_mutex> lock(m_objMutex);
-    clientToViewMap::iterator it = m_views.find(requester);
-    if (it != m_views.end()) {
-        it->second.erase(viewId);
-    }
+void ObjectMgr::releaseDynamicView( class GameClient *requester, uint16 viewId )
+{
+	if (requester == NULL)
+		return;
+
+	std::unique_lock<std::shared_mutex> lock(m_objMutex);
+	clientToViewMap::iterator it = m_views.find(requester);
+	if (it != m_views.end())
+	{
+		it->second.erase(viewId);
+	}
 }
 
 

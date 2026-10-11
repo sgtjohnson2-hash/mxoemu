@@ -2311,8 +2311,8 @@ int RunCombatTestSuite()
 			check(spawnBuf.size() == 44, "SpawnILCombatHandlerMsg size is authentic 44 bytes");
 			check(spawnBuf.read<uint8>(0) == 0x03 && spawnBuf.read<uint16>(1) == VIEWID_OBJECTMANAGER,
 				"SpawnILCombatHandlerMsg routed to VIEWID_OBJECTMANAGER (1)");
-			check(spawnBuf.read<uint8>(3) == 0x0E,
-				"SpawnILCombatHandlerMsg header is 0x0E (CREATE command 2 | bit 2=4 dynamic | bit 3=8 spawnIdCounter)");
+			check(spawnBuf.read<uint8>(3) == 0x0C,
+				"SpawnILCombatHandlerMsg header is 0x0C (CREATE command 0 | bit 2=4 dynamic | bit 3=8 spawnIdCounter)");
 			check(spawnBuf.read<uint16>(4) == GOID_ILCOMBATHANDLER,
 				"SpawnILCombatHandlerMsg GOID is GOID_ILCOMBATHANDLER (27 / ELTGOILCombatHandler)");
 			check(spawnBuf.read<uint8>(6) == 0x41 && spawnBuf.read<uint8>(7) == 0xCD && spawnBuf.read<uint8>(8) == 0xAB,
@@ -2321,6 +2321,37 @@ int RunCombatTestSuite()
 				"SpawnILCombatHandlerMsg creation attributes count=2, mask=0x05 (Position + StartTime)");
 			check(spawnBuf.read<uint16>(39) == 4 && spawnBuf.read<uint8>(41) == 0x00 && spawnBuf.read<uint16>(42) == 0,
 				"SpawnILCombatHandlerMsg registers viewId 4, role 0, terminated with nomoreattribs 0");
+
+			// 8. Verify ObjectMgr client view allocation within retail 7.6005 128-element limit
+			// (client.dll HandleInput 0x622C362B viewListSize cmp eax, edx; jae 0x622C383E)
+			TestHumanClient testClient;
+			testClient.SetPlayerGoId(33000);
+			uint16 selfView = sObjMgr.getViewForGO(&testClient, 33000);
+			check(selfView == VIEWID_SELF, "Local player goId maps to VIEWID_SELF (2)");
+
+			uint32 botGoId1 = 33267;
+			uint16 botView1 = sObjMgr.getViewForGO(&testClient, botGoId1);
+			check(botView1 >= 3 && botView1 < 128,
+				"Opponent bot goId maps to client viewId in [3..127] strictly within viewListSize 128");
+			check(sObjMgr.getViewForGO(&testClient, botGoId1) == botView1,
+				"Subsequent getViewForGO for the same goId returns identical allocated viewId");
+			check(sObjMgr.getGOForView(&testClient, botView1) == botGoId1,
+				"getGOForView maps viewId back to original bot goId 33267");
+			check(sObjMgr.getGOForView(&testClient, VIEWID_SELF) == 33000,
+				"getGOForView maps VIEWID_SELF (2) to local player goId 33000");
+			check(sObjMgr.getGOForView(&testClient, 127) == 0,
+				"getGOForView returns 0 for unallocated viewId");
+
+			uint32 botGoId2 = 33268;
+			uint16 botView2 = sObjMgr.getViewForGO(&testClient, botGoId2);
+			check(botView2 >= 3 && botView2 < 128 && botView2 != botView1,
+				"Second opponent bot receives distinct small viewId in [3..127]");
+			check(sObjMgr.getGOForView(&testClient, botView2) == botGoId2,
+				"getGOForView maps second bot viewId back to 33268");
+
+			sObjMgr.releaseRelevantSet(&testClient);
+			check(sObjMgr.getGOForView(&testClient, botView1) == 0,
+				"releaseRelevantSet clears all allocated views for disconnected client");
 		}
 	}
 	catch (const std::exception& e)
