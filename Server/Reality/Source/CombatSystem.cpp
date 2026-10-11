@@ -591,7 +591,10 @@ bool CombatSystem::RequestInterlock(uint32 attackerGoId, uint32 targetGoId, uint
 		// ILCombatStateMsg is queued, satisfying the client-side exchange player gating check.
 		pA->enterInterlock(targetGoId);
 		pB->enterInterlock(attackerGoId);
-		pA->getClient().QueueState(std::make_shared<CombatantModeMsg>(pB->getGoId(), 1));
+		if (!pA->getClient().isBot())
+		{
+			pA->getClient().QueueState(std::make_shared<CombatantModeMsg>(pB->getGoId(), 1));
+		}
 		if (!pB->getClient().isBot())
 		{
 			pB->getClient().QueueState(std::make_shared<CombatantModeMsg>(pA->getGoId(), 1));
@@ -620,6 +623,7 @@ bool CombatSystem::RequestInterlock(uint32 attackerGoId, uint32 targetGoId, uint
 				//combat mode on - exact HDS capture (CombatHandler.ProcessRequestCloseCombat)
 				sides[i].self->getClient().QueueState(std::make_shared<SelfCombatantModeMsg>(1));
 				sides[i].self->getClient().QueueState(std::make_shared<SelfCombatModeOnMsg>());
+				sides[i].self->getClient().QueueState(std::make_shared<CombatantModeMsg>(sides[i].other->getGoId(), 1));
 
 				uint16 ilViewId = sObjMgr.allocateDynamicView(&sides[i].self->getClient(), uint32(GOID_ILCOMBATHANDLER) << 16);
 				*(sides[i].viewSlot) = ilViewId;
@@ -1435,6 +1439,7 @@ void CombatSystem::SendInterlockExchange(InterlockSession &session, PlayerObject
 			uint16 otherViewId = sObjMgr.getViewForGO(&sides[i].p->getClient(), opponent->getGoId());
 			uint32 otherViewWithSpawnId = uint32(otherViewId) | (uint32(PLAYER_SPAWN_COUNTER) << 16);
 			slots.push_back(otherViewWithSpawnId);
+			sides[i].p->getClient().QueueState(std::make_shared<CombatantModeMsg>(opponent->getGoId(), 1));
 		}
 
 		std::vector<ILExchange> ex;
