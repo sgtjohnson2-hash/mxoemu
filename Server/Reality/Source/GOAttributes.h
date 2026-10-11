@@ -203,9 +203,9 @@ namespace PlayerAttrSelf
 static const uint16 VIEWID_OBJECTMANAGER = 1;
 static const uint16 VIEWID_SELF = 2;
 
-//ILCombatHandler game object (GOID 55, 0x37): creation attributes are
-//Position(24B double vec, idx0), HalfExtents(12B, idx1), StartTime(float, idx2)
-static const uint16 GOID_ILCOMBATHANDLER = 55;
+//ILCombatHandler game object (GOID 27, 0x1B, ELTGOILCombatHandler in retail 7.6005 client.dll): creation attributes are
+//Position(24B double vec, idx0), HalfExtents(12B, idx1), StartTime(float, idx2). Note: 55 is ELTGODataNode.
+static const uint16 GOID_ILCOMBATHANDLER = 27;
 static const uint16 GOID_PLAYERCHARACTER = 0x000C;
 
 #endif

@@ -591,11 +591,9 @@ bool CombatSystem::RequestInterlock(uint32 attackerGoId, uint32 targetGoId, uint
 		// ILCombatStateMsg is queued, satisfying the client-side exchange player gating check.
 		pA->enterInterlock(targetGoId);
 		pB->enterInterlock(attackerGoId);
-		pA->getClient().QueueState(std::make_shared<SelfCombatantModeMsg>(1));
 		pA->getClient().QueueState(std::make_shared<CombatantModeMsg>(pB->getGoId(), 1));
 		if (!pB->getClient().isBot())
 		{
-			pB->getClient().QueueState(std::make_shared<SelfCombatantModeMsg>(1));
 			pB->getClient().QueueState(std::make_shared<CombatantModeMsg>(pA->getGoId(), 1));
 		}
 		sGame.AnnounceStateUpdateNear(posA.x, posA.z, 20000.0f, std::make_shared<CombatantModeMsg>(pA->getGoId(), 1));
