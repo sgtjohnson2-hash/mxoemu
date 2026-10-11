@@ -1661,7 +1661,7 @@ void ILExchange::write( ByteBuffer &buf ) const
 ILCombatStateMsg::ILCombatStateMsg( uint16 ilViewId, LocationVector pos, uint32 seq,
 	const std::vector<uint32> &slotHandles, const std::vector<ILExchange> &exchanges )
 {
-	int updateMode = sConfig.GetIntDefault("Interlock.UpdateMode", 0);
+	int updateMode = sConfig.GetIntDefault("Interlock.UpdateMode", 2);
 	// Mode 2: Authentic direct ilViewId framing via AttributeUpdateBlock (Attribute 3: CLTGOCmpILCombatHandlerClient).
 	// Opcode 0x03, ilViewId, count=1, group header=0x08 (bit 3), pos, seq, mask, slots, count, exchanges, nomoreattribs.
 	// Mode 0: Authentic ObjectManager framing (VIEWID_OBJECTMANAGER Attribute 2).
