@@ -85,7 +85,13 @@ public:
 	{
 		PlayerObject* me = m_playerObject;
 		if (me == NULL)
-			return true;
+		{
+			shared_ptr<ObjectUpdateMsg> upd = dynamic_pointer_cast<ObjectUpdateMsg>(msg);
+			if (upd == NULL)
+				return true;
+			const uint32 objId = upd->getObjectId();
+			return (m_playerGoId != 0 && objId == m_playerGoId);
+		}
 		shared_ptr<ObjectUpdateMsg> upd = dynamic_pointer_cast<ObjectUpdateMsg>(msg);
 		if (upd == NULL)
 			return true;
