@@ -200,9 +200,9 @@ void CombatSystem::LoadAbilities()
 		tuneMove(126, DAMAGE_RANGED, 3500.0f, false, true);  // PistolDisarmingShot
 		tuneMove(129, DAMAGE_RANGED, 3500.0f, false, true);  // Handguns
 		tuneMove(147, DAMAGE_RANGED, 4500.0f, false, true);  // Rifles
-		tuneMove(453, DAMAGE_RANGED, 400.0f,  false, true);  // Rifle butt
+		tuneMove(453, DAMAGE_MELEE,  300.0f,  true,  false); // Rifle butt is a melee smash, not a volley
 		tuneMove(499, DAMAGE_RANGED, 400.0f,  false, true);  // Point blank
-		tuneMove(501, DAMAGE_RANGED, 400.0f,  false, true);  // Pistol whip
+		tuneMove(501, DAMAGE_MELEE,  300.0f,  true,  false); // Pistol whip
 		tuneMove(505, DAMAGE_RANGED, 8000.0f, false, true);  // Sniper
 		tuneMove(146, DAMAGE_MELEE,  400.0f,  false, false); // Poison knife
 		tuneMove(283, DAMAGE_RANGED, 3000.0f, false, true);  // Knife throw
@@ -1197,35 +1197,30 @@ CombatSystem::AttackResult CombatSystem::ResolveAttack(PlayerObject* attacker, P
         }
     }
 
-	//toughness absorbs part of the blow; blocking halves what gets through
-	//and recovers Inner Strength (documented block behavior)
+	// Blocking halves what gets through and recovers Inner Strength.
+	// Level mitigation is applied once, in takeDamage. Subtracting it here as well
+	// made the hit line bigger than the health-bar drop.
+	const bool grabBreaksPower = (attackerTactic == TACTIC_RETALIATE && targetTactic == TACTIC_POWER);
+	if (targetTactic == TACTIC_DEFENSE)
 	{
-		float absorbed = (target->getHandle().find("Dojo") != std::string::npos) ? 0.0f : (float(target->getLevel()) * 0.5f);
-		if (attackerTactic == TACTIC_RETALIATE && targetTactic == TACTIC_POWER)
+		if (bypassBlock || attackerTactic == TACTIC_RETALIATE)
 		{
-			// Grab breaks Power: throws heavy power stance and bypasses toughness absorption
-			absorbed = 0.0f;
+			if (!target->getClient().isBot())
+				target->getClient().QueueCommand(std::make_shared<SystemChatMsg>("{c:FF0000}[COMBAT] Your Block was broken by a Grab! Unblockable throw!{/c}"));
 		}
-
-		if (targetTactic == TACTIC_DEFENSE)
+		else
 		{
-			if (bypassBlock || attackerTactic == TACTIC_RETALIATE)
-			{
-				// Grab breaks Guard: unblockable throw bypasses defense completely
-				if (!target->getClient().isBot())
-					target->getClient().QueueCommand(std::make_shared<SystemChatMsg>("{c:FF0000}[COMBAT] Your Block was broken by a Grab! Unblockable throw!{/c}"));
-			}
-			else
-			{
-				dmg *= 0.5f;
-				target->restoreIS(5);
-			}
+			dmg *= 0.5f;
+			target->restoreIS(5);
 		}
-		dmg = (dmg > absorbed) ? (dmg - absorbed) : 0.0f;
 	}
 
 	if (dmg > 65535.0f) dmg = 65535.0f; //uint16 cast below
-	res.damageTaken = (uint16)dmg;
+	const uint16 rawDamage = (uint16)dmg;
+	const uint16 levelMit = (!grabBreaksPower && target->getHandle().find("Dojo") == std::string::npos)
+		? uint16(target->getLevel() / 2) : 0;
+	const uint16 expected = (rawDamage == 0) ? 0 : ((rawDamage > levelMit) ? uint16(rawDamage - levelMit) : 1);
+	res.damageTaken = expected;
     
     // [Item 15] Melee Weapon Durability
     if (res.hit && move.dmgType == DAMAGE_MELEE) {
@@ -1264,8 +1259,11 @@ CombatSystem::AttackResult CombatSystem::ResolveAttack(PlayerObject* attacker, P
 		} else if (move.dmgType == DAMAGE_RANGED || move.dmgType == DAMAGE_BALLISTIC) {
 			hitFx = (s_cfgHitFx != 0) ? 0x280006ea : 0; // FX_BULLET_BODY_HITS_BULLETHIT_HF (authentic retail bullet impact)
 		}
-		target->takeDamage(attacker->getGoId(), res.damageTaken, hitFx);
+		uint16 hpBefore = target->getCurrentHealth();
+		target->takeDamage(attacker->getGoId(), rawDamage, hitFx, !grabBreaksPower);
         target->recordIncomingAttack(move.id);
+		uint16 hpAfter = target->getCurrentHealth();
+		res.damageTaken = (hpBefore > hpAfter) ? uint16(hpBefore - hpAfter) : 0;
 
 		if (res.isBlocked) {
 			if (!attacker->getClient().isBot()) {

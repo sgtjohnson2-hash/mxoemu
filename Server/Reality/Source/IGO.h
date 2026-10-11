@@ -57,7 +57,7 @@ public:
     
     uint8 nextSpawnCounter() { std::unique_lock<std::shared_mutex> lock(m_igoMutex); return m_spawnCounter++; }
 
-    virtual void takeDamage(uint32 attackerGoId, uint16 damage, uint32 fxId);
+    virtual void takeDamage(uint32 attackerGoId, uint16 damage, uint32 fxId, bool applyMitigation = true);
     virtual void die(uint32 killerGoId);
     
     virtual uint8 getLevel() const { return 1; }

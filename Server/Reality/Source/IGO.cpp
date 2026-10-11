@@ -53,14 +53,14 @@ void IGO::leaveInterlock()
     setCombatStance(false);
 }
 
-void IGO::takeDamage(uint32 attackerGoId, uint16 damage, uint32 fxId)
+void IGO::takeDamage(uint32 attackerGoId, uint16 damage, uint32 fxId, bool applyMitigation)
 {
     if (m_isDead)
         return;
 
     // Apply armor/mitigation formulas here
     // Apply basic mitigation based on entity level
-    uint16 mitigation = getLevel() / 2;
+    uint16 mitigation = applyMitigation ? (getLevel() / 2) : 0;
     uint16 actualDamage = (damage > mitigation) ? (damage - mitigation) : 1; 
 
     if (m_healthC <= actualDamage)

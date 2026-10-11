@@ -125,7 +125,7 @@ public:
 	uint32 getLootTableId() const { return m_lootTableId; }
 	void setLootTableId(uint32 id) { m_lootTableId = id; }
 	
-	virtual void takeDamage(uint32 attackerGoId, uint16 damage, uint32 fxId = 0);
+	virtual void takeDamage(uint32 attackerGoId, uint16 damage, uint32 fxId = 0, bool applyMitigation = true);
 	virtual void applyHeal(uint32 healerGoId, uint16 amount, uint32 fxId = 0x01000060);
 	virtual void revive(uint32 reviverGoId, float healthPct = 0.5f);
 	void setFirewall(uint16 amount) { m_firewallPoints = amount; }

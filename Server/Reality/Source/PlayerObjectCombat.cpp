@@ -256,7 +256,7 @@ void PlayerObject::setCombatStance( bool inCombatStance )
 	sGame.AnnounceStateUpdate(&m_parent,shared_ptr<CombatantModeMsg>(new CombatantModeMsg(m_goId,mode)));
 }
 
-void PlayerObject::takeDamage( uint32 attackerGoId, uint16 damage, uint32 fxId )
+void PlayerObject::takeDamage( uint32 attackerGoId, uint16 damage, uint32 fxId, bool applyMitigation )
 {
 	if (m_isDead)
 		return;
@@ -301,8 +301,9 @@ void PlayerObject::takeDamage( uint32 attackerGoId, uint16 damage, uint32 fxId )
 		}
 	}
 
-	// Apply basic mitigation based on player level (Dojo sparring dummies have 0 mitigation for clean training takedowns)
-	uint16 mitigation = (m_handle.find("Dojo") != std::string::npos) ? 0 : (m_lvl / 2);
+	// Apply basic mitigation based on player level (Dojo sparring dummies have 0 mitigation for clean training takedowns).
+	// ResolveAttack used to subtract the same amount again, so the hit chat over-reported and high-level fights barely moved the bar.
+	uint16 mitigation = (!applyMitigation || m_handle.find("Dojo") != std::string::npos) ? 0 : (m_lvl / 2);
 	uint16 actualDamage = (damage > mitigation) ? (damage - mitigation) : 1;
 
 	// Apply firewall absorption
@@ -356,8 +357,6 @@ void PlayerObject::takeDamage( uint32 attackerGoId, uint16 damage, uint32 fxId )
 	//the victim's own client gets the self-view layout (HUD bar + FX)
 	sGame.AnnounceStateUpdate(&m_parent,shared_ptr<CombatHitFxMsg>(new CombatHitFxMsg(m_goId,fxId,m_hitCounter)));
 	m_parent.QueueState(shared_ptr<SelfHitFxMsg>(new SelfHitFxMsg(this,fxId,m_hitCounter)));
-	// SelfHitFxMsg::toBuf still drops that packet. Heals already push the HUD
-	// through sendVitals; damage did not, so the bar stayed full until death.
 	sendVitals();
 
 	if (m_healthC == 0) {
@@ -725,6 +724,25 @@ void PlayerObject::RPC_HandleChangeTactic( ByteBuffer &srcCmd )
 
 	m_tactic = serverTactic;
 	sCombatSys.SetTactic(m_goId, serverTactic);
+
+	if (!m_parent.isBot())
+	{
+		const char* stance = "Normal";
+		switch (serverTactic)
+		{
+			case TACTIC_RETALIATE: stance = "Grab"; break;
+			case TACTIC_AIMEDSHOT: stance = "Aimed Shot"; break;
+			case TACTIC_BURST:     stance = "Burst"; break;
+			case TACTIC_DEFENSE:   stance = "Block"; break;
+			case TACTIC_POWER:     stance = "Power"; break;
+			case TACTIC_SPEED:     stance = "Speed"; break;
+			case TACTIC_PRECISE:   stance = "Precise"; break;
+			case TACTIC_ENERGIZED: stance = "Energized"; break;
+			default: break;
+		}
+		m_parent.QueueCommand(std::make_shared<SystemChatMsg>(
+			(format("{c:00FFCC}[COMBAT] Stance: %1% (client %2%).{/c}") % stance % uint32(rawClientTactic)).str()));
+	}
 }
 
 //0x44 - leave combat / withdraw from interlock
