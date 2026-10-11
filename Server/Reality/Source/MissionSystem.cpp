@@ -60,6 +60,29 @@ static MissionNpc PlaceMissionNpcNearPlayer(const MissionNpc& npc, PlayerObject*
     return placed;
 }
 
+// Open-street missions used to move the player into a private spatial instance and
+// spawn every objective target at once. The city disappeared, and a later target
+// could die before that step existed. Stay in the current instance and spawn the
+// current step only.
+static void SpawnCurrentObjectiveNpc(PlayerObject* player, MissionTemplate& templ, ActiveMissionState& state)
+{
+    if (!player) return;
+    if (state.currentObjectiveIndex >= templ.objectives.size()) return;
+    const MissionObjective& obj = templ.objectives[state.currentObjectiveIndex];
+    if (obj.targetNpcId == 0) return;
+    if (state.spawnedNpcs.find(obj.targetNpcId) != state.spawnedNpcs.end()) return;
+
+    for (const auto& npc : templ.npcs)
+    {
+        if (npc.idNpc != obj.targetNpcId) continue;
+        MissionNpc placed = PlaceMissionNpcNearPlayer(npc, player, 0);
+        uint32 npcGoId = sBotMgr.SpawnMissionBot(placed, player->getClient().m_instanceId);
+        if (npcGoId != 0)
+            state.spawnedNpcs[npc.idNpc] = npcGoId;
+        break;
+    }
+}
+
 void MissionSystem::AddMissionTemplate(const MissionTemplate& templ)
 {
     std::lock_guard<std::recursive_mutex> lock(m_missionMutex);
@@ -218,9 +241,13 @@ void MissionSystem::LoadMissionsFromXML(const std::string& directoryPath)
                         || obj.command == ObjectiveCommand::ESCORT
                         || obj.isEscort;
                     npc.type = friendly ? "FRIENDLY" : "HOSTILE";
-                    npc.handle = friendly
-                        ? (std::string("Contact") + std::to_string(obj.targetNpcId))
-                        : (std::string("Hostile") + std::to_string(obj.targetNpcId));
+                    std::string label = friendly ? "Contact" : "Hostile";
+                    const std::string& d = obj.description;
+                    if (d.find("Ghost") != std::string::npos) label = "Ghost";
+                    else if (d.find("Operative") != std::string::npos || d.find("Operator") != std::string::npos) label = "Zion Operative";
+                    else if (d.find("mbush") != std::string::npos) label = "Ambush";
+                    else if (d.find("Program") != std::string::npos) label = "Corrupted Program";
+                    npc.handle = label;
                     npc.level = friendly ? 1 : 8;
                     npc.maxHP = friendly ? 200 : 450;
                     npc.rsi = friendly ? 0x86010058u : 0x13050008u;
@@ -440,21 +467,9 @@ void MissionSystem::LoadPlayerMissions(PlayerObject* player)
         state.currentObjectiveIndex = activeObjIndex;
         state.objectiveStartTimeMs = getMSTime();
 
-        uint32 newInstanceId = activeMissionId + playerGoId;
-        player->getClient().m_instanceId = newInstanceId;
-        LocationVector p = player->getPosition();
-        sSpatialGrid.UpdateClientPosition(&player->getClient(), (float)p.x, (float)p.z);
-
         int slot = 0;
-        for (const auto& npc : templ.npcs)
-        {
-            MissionNpc placed = PlaceMissionNpcNearPlayer(npc, player, slot++);
-            uint32 npcGoId = sBotMgr.SpawnMissionBot(placed, newInstanceId);
-            if (npcGoId != 0)
-            {
-                state.spawnedNpcs[npc.idNpc] = npcGoId;
-            }
-        }
+        (void)slot;
+        SpawnCurrentObjectiveNpc(player, templ, state);
 
         m_activeMissions[playerGoId] = state;
         INFO_LOG(format("MissionSystem: Restored active mission %1% (Obj %2%) for %3%")
@@ -514,36 +529,15 @@ void MissionSystem::AssignMission(PlayerObject* player, uint32 missionId)
     state.missionId = missionId;
     state.currentObjectiveIndex = 0;
     state.objectiveStartTimeMs = getMSTime();
-    
-    // Item 104: Assign a unique instance ID to the player for this mission
-    uint32 newInstanceId = missionId + player->getGoId();
-    player->getClient().m_instanceId = newInstanceId;
-    {
-        LocationVector p = player->getPosition();
-        sSpatialGrid.UpdateClientPosition(&player->getClient(), (float)p.x, (float)p.z);
-    }
 
-    // Phase 7: Spawn Mission NPCs
-    int slot = 0;
-    for (const auto& npc : templ.npcs) {
-        MissionNpc placed = PlaceMissionNpcNearPlayer(npc, player, slot++);
-        uint32 npcGoId = sBotMgr.SpawnMissionBot(placed, newInstanceId);
-        if (npcGoId != 0) {
-            state.spawnedNpcs[npc.idNpc] = npcGoId;
-        }
-    }
+    // Spawn only the NPC for this step. Later steps appear when the step starts.
+    SpawnCurrentObjectiveNpc(player, templ, state);
 
-    if (templ.objectives.size() > 0)
+    if (!templ.objectives.empty() && templ.objectives[0].isEscort)
     {
-        state.objectiveStartTimeMs = getMSTime();
-        MissionObjective& firstObj = templ.objectives[0];
-        if (firstObj.isEscort)
-        {
-            // Item 107: Escort Logic Spawn
-            auto pos = player->getPosition();
-            sBotMgr.SpawnBot(firstObj.escortTargetId, pos.x + 2.0f, pos.y, pos.z + 2.0f, player->getFaction());
-            INFO_LOG(format("MissionSystem: Spawning Escort Target %1% for Player %2%") % firstObj.escortTargetId % player->getHandle());
-        }
+        auto pos = player->getPosition();
+        sBotMgr.SpawnBot(templ.objectives[0].escortTargetId, pos.x + 2.0f, pos.y, pos.z + 2.0f, player->getFaction());
+        INFO_LOG(format("MissionSystem: Spawning Escort Target %1% for Player %2%") % templ.objectives[0].escortTargetId % player->getHandle());
     }
 
     // Stored only now: the copy used to be taken before spawnedNpcs was filled, so mission
@@ -564,13 +558,21 @@ void MissionSystem::AssignMission(PlayerObject* player, uint32 missionId)
         }
         if (!templ.objectives.empty())
         {
+            std::string who;
+            for (const auto& npc : templ.npcs)
+            {
+                if (npc.idNpc == templ.objectives[0].targetNpcId) { who = npc.handle; break; }
+            }
             player->getClient().QueueCommand(std::make_shared<SystemChatMsg>(
-                (format("{c:00FFFF}[OBJECTIVE 1/%1%] %2%{/c}") % templ.objectives.size() % templ.objectives[0].description).str()
+                (format("{c:00FFFF}[OBJECTIVE 1/%1%] %2%%3%{/c}")
+                    % templ.objectives.size()
+                    % templ.objectives[0].description
+                    % (who.empty() ? std::string() : (std::string(". ") + who + " is a few metres away."))).str()
             ));
         }
     }
     SavePlayerMission(player, missionId, 0, 0);
-    INFO_LOG(format("Player %1% assigned mission %2%, moved to instance %3%") % player->getHandle() % missionId % newInstanceId);
+    INFO_LOG(format("Player %1% assigned mission %2%") % player->getHandle() % missionId);
 }
 
 void MissionSystem::AdvanceObjective(PlayerObject* player, ObjectiveCommand command, uint32 targetId)
@@ -715,6 +717,7 @@ void MissionSystem::AdvanceObjective(PlayerObject* player, ObjectiveCommand comm
             if (state.currentObjectiveIndex < templ.objectives.size())
             {
                 state.objectiveStartTimeMs = getMSTime();
+                SpawnCurrentObjectiveNpc(player, templ, state);
                 MissionObjective& nextObj = templ.objectives[state.currentObjectiveIndex];
                 if (nextObj.isEscort)
                 {
@@ -724,9 +727,15 @@ void MissionSystem::AdvanceObjective(PlayerObject* player, ObjectiveCommand comm
                 }
                 if (!player->getClient().isBot())
                 {
+                    std::string who;
+                    for (const auto& npc : templ.npcs)
+                    {
+                        if (npc.idNpc == nextObj.targetNpcId) { who = npc.handle; break; }
+                    }
                     player->getClient().QueueCommand(std::make_shared<SystemChatMsg>(
-                        (format("{c:00FFFF}[OBJECTIVE %1%/%2%] %3%{/c}")
-                            % (state.currentObjectiveIndex + 1) % templ.objectives.size() % nextObj.description).str()
+                        (format("{c:00FFFF}[OBJECTIVE %1%/%2%] %3%%4%{/c}")
+                            % (state.currentObjectiveIndex + 1) % templ.objectives.size() % nextObj.description
+                            % (who.empty() ? std::string() : (std::string(". ") + who + " is a few metres away."))).str()
                     ));
                 }
                 SavePlayerMission(player, state.missionId, state.currentObjectiveIndex, 0);
@@ -773,6 +782,13 @@ void MissionSystem::AdvanceObjective(PlayerObject* player, ObjectiveCommand comm
                         player->getClient().QueueCommand(std::make_shared<SystemChatMsg>(
                             (format("{c:00FFCC}[ABILITY UNLOCKED] You learned %1%!{/c}") % abName).str()));
                     }
+                }
+
+                if (!player->getClient().isBot())
+                {
+                    if (player->getInventory())
+                        player->getInventory()->saveToDB();
+                    player->saveDataToDB();
                 }
 
                 if (templ.nextMissionSuccessId > 0) {
@@ -1655,18 +1671,7 @@ uint32 MissionSystem::SynthesizeProceduralMission(PlayerObject* player, Procedur
     state.currentObjectiveIndex = 0;
     state.objectiveStartTimeMs = getMSTime();
 
-    uint32 newInstanceId = missionId + playerGoId;
-    player->getClient().m_instanceId = newInstanceId;
-
-    // Dynamically spawn synthesized mission NPCs into the world and instance
-    int slot = 0;
-    for (const auto& npc : templ.npcs) {
-        MissionNpc placed = PlaceMissionNpcNearPlayer(npc, player, slot++);
-        uint32 npcGoId = sBotMgr.SpawnMissionBot(placed, newInstanceId);
-        if (npcGoId != 0) {
-            state.spawnedNpcs[npc.idNpc] = npcGoId;
-        }
-    }
+    SpawnCurrentObjectiveNpc(player, templ, state);
 
     m_activeMissions[playerGoId] = state;
 
