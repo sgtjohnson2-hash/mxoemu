@@ -1667,31 +1667,35 @@ ILCombatStateMsg::ILCombatStateMsg( uint16 ilViewId, LocationVector pos, uint32 
 	const std::vector<uint32> &slotHandles, const std::vector<ILExchange> &exchanges )
 {
 	int updateMode = sConfig.GetIntDefault("Interlock.UpdateMode", 2);
-	// Mode 2: Authentic direct ilViewId framing (Opcode 0x03, ilViewId, attribute count 1,
-	// attribute ID 3 [CLTGOCmpILCombatHandlerClient], pos, seq, mask, slots, count, exchanges).
+	// Mode 2: Authentic direct ilViewId framing via AttributeUpdateBlock (Attribute 3: CLTGOCmpILCombatHandlerClient).
+	// Opcode 0x03, ilViewId, count=1, group header=0x08 (bit 3), pos, seq, mask, slots, count, exchanges, nomoreattribs.
 	// Mode 0: Legacy ObjectManager framing.
 	if (updateMode == 2 || (updateMode == 1 && (slotHandles.empty() || seq > 1)))
 	{
-		m_buf.clear();
-		m_buf << uint8(0x03);
-		m_buf << uint16(ilViewId);
-		m_buf << uint8(0x01); // 1 attribute
-		m_buf << uint8(0x03); // attribute ID 3 (CLTGOCmpILCombatHandlerClient)
+		ByteBuffer payload;
 		byte posBuf[sizeof(double)*3];
 		pos.toDoubleBuf(posBuf, sizeof(posBuf));
-		m_buf.append(posBuf, sizeof(posBuf));
-		m_buf << uint32(seq);
+		payload.append(posBuf, sizeof(posBuf));
+		payload << uint32(seq);
 		uint32 mask = 0;
 		for (size_t i=0;i<slotHandles.size() && i<6;i++)
 			mask |= (1u << i);
-		m_buf << uint32(mask);
+		payload << uint32(mask);
 		for (size_t i=0;i<slotHandles.size() && i<6;i++)
-			m_buf << uint32(slotHandles[i]);
-		m_buf << uint8(exchanges.size());
+			payload << uint32(slotHandles[i]);
+		payload << uint8(exchanges.size());
 		for (size_t i=0;i<exchanges.size();i++)
-			exchanges[i].write(m_buf);
-		// Direct ilViewId framing ends cleanly with 0x0000 (nomoreattribs)
-		m_buf << uint16(0);
+			exchanges[i].write(payload);
+
+		AttributeUpdateBlock block;
+		block.addAttribute(3, payload);
+		ByteBuffer blockBuf = block.toBuf(true);
+
+		m_buf.clear();
+		m_buf << uint8(0x03);
+		m_buf << uint16(ilViewId);
+		m_buf.append(blockBuf.contents(), blockBuf.size());
+		m_buf << uint16(0); // nomoreattribs
 		return;
 	}
 
