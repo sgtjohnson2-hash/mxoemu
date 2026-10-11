@@ -3,6 +3,7 @@
 #include "ScriptEngine.h"
 #include "Log.h"
 #include "MessageTypes.h"
+#include "GameClient.h"
 #include <sstream>
 
 DialogTree::DialogTree(PlayerObject* player, uint32 npcId, const std::string& scriptName)
