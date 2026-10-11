@@ -1132,7 +1132,12 @@ bool PlayerObject::addItemByTemplateId(unsigned int templateId)
     return giveItem(templateId);
 }
 
-void PlayerObject::SendWaypoint(float x, float y, float z, const std::string& name) { }
+void PlayerObject::SendWaypoint(float x, float y, float z, const std::string& name)
+{
+	if (getClient().isBot()) return;
+	getClient().QueueCommand(std::make_shared<SystemChatMsg>(
+		(format("{c:00FFFF}[WAYPOINT] %1%  X:%2% Y:%3% Z:%4%{/c}") % name % x % y % z).str()));
+}
 std::vector<std::shared_ptr<class Item>> PlayerObject::getEquippedWeapons() {
     std::vector<std::shared_ptr<class Item>> weapons;
     if (m_equippedWeaponId != 0) {

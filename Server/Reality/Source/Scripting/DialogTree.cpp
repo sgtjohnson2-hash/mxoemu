@@ -2,6 +2,8 @@
 #include "PlayerObject.h"
 #include "ScriptEngine.h"
 #include "Log.h"
+#include "MessageTypes.h"
+#include <sstream>
 
 DialogTree::DialogTree(PlayerObject* player, uint32 npcId, const std::string& scriptName)
     : m_player(player), m_npcId(npcId), m_scriptName(scriptName), m_currentNodeId(0)
@@ -86,10 +88,21 @@ void DialogTree::SendCurrentNode()
     if (m_currentNodeId >= m_nodes.size()) return;
 
     DialogNode& node = m_nodes[m_currentNodeId];
-    
-    // In Reality, this would be serialized into an RPC or EventMsg and sent to m_player.
-    // For Phase 4, we just mock the log.
-    INFO_LOG(format("NPC Dialog sent to %1%: %2%") % m_player->getFirstName() % node.text);
+
+    std::ostringstream spoken;
+    spoken << "{c:00FFFF}[CONTACT] " << node.text << "{/c}";
+    if (m_player && !m_player->getClient().isBot())
+    {
+        m_player->getClient().QueueCommand(std::make_shared<SystemChatMsg>(spoken.str()));
+        for (size_t i = 0; i < node.options.size(); ++i)
+        {
+            std::ostringstream opt;
+            opt << "{c:FFFFFF}  [" << (i + 1) << "] " << node.options[i].second << "{/c}";
+            m_player->getClient().QueueCommand(std::make_shared<SystemChatMsg>(opt.str()));
+        }
+    }
+
+    INFO_LOG(format("NPC Dialog sent to %1%: %2%") % (m_player ? m_player->getFirstName() : std::string("?")) % node.text);
     for (size_t i = 0; i < node.options.size(); ++i)
     {
         INFO_LOG(format("  Option %1%: %2%") % node.options[i].first % node.options[i].second);

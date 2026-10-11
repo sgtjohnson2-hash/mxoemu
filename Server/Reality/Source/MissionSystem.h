@@ -57,6 +57,9 @@ struct MissionNpc
     uint32 rsi{0};
     uint32 level{1};
     uint32 maxHP{100};
+    // False when the XML named an objective NPC but gave no coordinates.
+    // Those are placed next to the player at accept time.
+    bool anchored{true};
 };
 
 struct MissionTemplate

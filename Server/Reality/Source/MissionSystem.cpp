@@ -42,7 +42,22 @@ ObjectiveCommand MissionSystem::ParseCommand(const std::string& cmd)
     if (cmd == "ESCORT") return ObjectiveCommand::ESCORT;
     if (cmd == "USE_ITEM") return ObjectiveCommand::USE_ITEM;
     if (cmd == "HACK") return ObjectiveCommand::HACK;
-    return ObjectiveCommand::TALK; // Default
+    return ObjectiveCommand::TALK;
+}
+
+static MissionNpc PlaceMissionNpcNearPlayer(const MissionNpc& npc, PlayerObject* player, int slot)
+{
+    if (npc.anchored || !player) return npc;
+    MissionNpc placed = npc;
+    LocationVector p = player->getPosition();
+    // World coordinates are centimetres. Keep contacts on a 4m ring at the player's feet.
+    static const float ox[8] = { 400.f, 280.f, 0.f, -280.f, -400.f, -280.f, 0.f, 280.f };
+    static const float oz[8] = { 0.f, 280.f, 400.f, 280.f, 0.f, -280.f, -400.f, -280.f };
+    int i = slot & 7;
+    placed.x = (float)p.x + ox[i];
+    placed.y = (float)p.y;
+    placed.z = (float)p.z + oz[i];
+    return placed;
 }
 
 void MissionSystem::AddMissionTemplate(const MissionTemplate& templ)
@@ -181,6 +196,35 @@ void MissionSystem::LoadMissionsFromXML(const std::string& directoryPath)
                         npc.maxHP = kv.second.get<uint32>("<xmlattr>.maxHP", 100);
                         templ.npcs.push_back(npc);
                     }
+                }
+
+                // Chapter files list objective NPC ids without <npc> tags, so TALK/DEFEAT
+                // could never match a spawned body. Synthesize one NPC per missing id.
+                for (const auto& obj : templ.objectives)
+                {
+                    if (obj.targetNpcId == 0) continue;
+                    bool found = false;
+                    for (const auto& existing : templ.npcs)
+                    {
+                        if (existing.idNpc == obj.targetNpcId) { found = true; break; }
+                    }
+                    if (found) continue;
+
+                    MissionNpc npc;
+                    npc.anchored = false;
+                    npc.idNpc = obj.targetNpcId;
+                    bool friendly = obj.command == ObjectiveCommand::TALK
+                        || obj.command == ObjectiveCommand::GIVE
+                        || obj.command == ObjectiveCommand::ESCORT
+                        || obj.isEscort;
+                    npc.type = friendly ? "FRIENDLY" : "HOSTILE";
+                    npc.handle = friendly
+                        ? (std::string("Contact") + std::to_string(obj.targetNpcId))
+                        : (std::string("Hostile") + std::to_string(obj.targetNpcId));
+                    npc.level = friendly ? 1 : 8;
+                    npc.maxHP = friendly ? 200 : 450;
+                    npc.rsi = friendly ? 0x86010058u : 0x13050008u;
+                    templ.npcs.push_back(npc);
                 }
                 
                 if (!templ.objectives.empty()) {
@@ -401,9 +445,11 @@ void MissionSystem::LoadPlayerMissions(PlayerObject* player)
         LocationVector p = player->getPosition();
         sSpatialGrid.UpdateClientPosition(&player->getClient(), (float)p.x, (float)p.z);
 
+        int slot = 0;
         for (const auto& npc : templ.npcs)
         {
-            uint32 npcGoId = sBotMgr.SpawnMissionBot(npc, newInstanceId);
+            MissionNpc placed = PlaceMissionNpcNearPlayer(npc, player, slot++);
+            uint32 npcGoId = sBotMgr.SpawnMissionBot(placed, newInstanceId);
             if (npcGoId != 0)
             {
                 state.spawnedNpcs[npc.idNpc] = npcGoId;
@@ -478,8 +524,10 @@ void MissionSystem::AssignMission(PlayerObject* player, uint32 missionId)
     }
 
     // Phase 7: Spawn Mission NPCs
+    int slot = 0;
     for (const auto& npc : templ.npcs) {
-        uint32 npcGoId = sBotMgr.SpawnMissionBot(npc, newInstanceId);
+        MissionNpc placed = PlaceMissionNpcNearPlayer(npc, player, slot++);
+        uint32 npcGoId = sBotMgr.SpawnMissionBot(placed, newInstanceId);
         if (npcGoId != 0) {
             state.spawnedNpcs[npc.idNpc] = npcGoId;
         }
@@ -1611,8 +1659,10 @@ uint32 MissionSystem::SynthesizeProceduralMission(PlayerObject* player, Procedur
     player->getClient().m_instanceId = newInstanceId;
 
     // Dynamically spawn synthesized mission NPCs into the world and instance
+    int slot = 0;
     for (const auto& npc : templ.npcs) {
-        uint32 npcGoId = sBotMgr.SpawnMissionBot(npc, newInstanceId);
+        MissionNpc placed = PlaceMissionNpcNearPlayer(npc, player, slot++);
+        uint32 npcGoId = sBotMgr.SpawnMissionBot(placed, newInstanceId);
         if (npcGoId != 0) {
             state.spawnedNpcs[npc.idNpc] = npcGoId;
         }

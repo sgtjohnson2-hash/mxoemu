@@ -8,7 +8,9 @@ services:
       MYSQL_USER: reality
       MYSQL_PASSWORD: reality
     ports:
-      - "0.0.0.0:3307:3306"
+      # Localhost only. The live VPS was accepting public connections on 3307.
+      # Reach the database with an SSH tunnel: ssh -L 3307:127.0.0.1:3307 <host>
+      - "127.0.0.1:3307:3306"
     volumes:
       - db_data:/var/lib/mysql
       - ./Server/Reality/SQL:/docker-entrypoint-initdb.d:ro

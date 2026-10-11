@@ -7,6 +7,8 @@
 #include "BehaviorTree.h"
 #include "Timer.h"
 #include "GameClient.h"
+#include "MessageTypes.h"
+#include "MissionSystem.h"
 
 // --- Lua Bindings ---
 
@@ -66,9 +68,17 @@ static int lua_PlayerGiveItem(lua_State* L)
 	if (!player) return 0;
 
 	uint32 itemId = (uint32)luaL_checkinteger(L, 1);
-	
-	// Mock implementation for GiveItem
-	INFO_LOG(format("Lua Mission: Giving item %1% to player %2%") % itemId % player->getFirstName());
+
+	bool gave = player->giveItem(itemId);
+	INFO_LOG(format("Lua Mission: Giving item %1% to player %2% (%3%)")
+		% itemId % player->getFirstName() % (gave ? "ok" : "failed"));
+	if (!player->getClient().isBot())
+	{
+		player->getClient().QueueCommand(std::make_shared<SystemChatMsg>(
+			gave
+			? (format("{c:00FF00}[MISSION] Received item %1%.{/c}") % itemId).str()
+			: (format("{c:FF0000}[MISSION] Could not receive item %1%. Inventory is full.{/c}") % itemId).str()));
+	}
 
 	return 0;
 }
@@ -84,8 +94,30 @@ static int lua_PlayerSpawnMob(lua_State* L)
 	float y = (float)luaL_checknumber(L, 3);
 	float z = (float)luaL_checknumber(L, 4);
 
-	INFO_LOG(format("Lua Mission: Spawning mob %1% at (%2%, %3%, %4%) for player %5%") 
-		% mobId % x % y % z % player->getFirstName());
+	MissionNpc npc;
+	npc.anchored = true;
+	npc.type = "HOSTILE";
+	npc.x = x;
+	npc.y = y;
+	npc.z = z;
+	npc.idNpc = mobId;
+	npc.handle = std::string("Hostile") + std::to_string(mobId);
+	npc.level = 5;
+	npc.maxHP = 350;
+	npc.rsi = 0x13050008u;
+	uint32 goId = 0;
+	if (BotManager::getSingletonPtr())
+		goId = BotManager::getSingletonPtr()->SpawnMissionBot(npc, player->getClient().m_instanceId);
+
+	INFO_LOG(format("Lua Mission: Spawning mob %1% at (%2%, %3%, %4%) for player %5% go %6%")
+		% mobId % x % y % z % player->getFirstName() % goId);
+	if (!player->getClient().isBot())
+	{
+		player->getClient().QueueCommand(std::make_shared<SystemChatMsg>(
+			goId
+			? (format("{c:FF4444}[MISSION] Hostile%1% has entered the area.{/c}") % mobId).str()
+			: "{c:FF0000}[MISSION] Failed to spawn the target.{/c}"));
+	}
 
 	return 0;
 }
