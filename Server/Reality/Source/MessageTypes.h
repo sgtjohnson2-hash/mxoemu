@@ -747,14 +747,16 @@ class SelfHitFxMsg : public StaticMsg
 public:
 	SelfHitFxMsg(class PlayerObject *thePlayer, uint32 fxId, uint8 hitCounter);
 	~SelfHitFxMsg() {}
+	const ByteBuffer& toBuf() { throw PacketNoLongerValid(); }
 };
 
-//self-view combatant mode change
+//self-view combatant mode change - View 2 has only 24 attributes in retail 7.6005 (no Attribute 43)
 class SelfCombatantModeMsg : public StaticMsg
 {
 public:
 	SelfCombatantModeMsg(uint8 mode);
 	~SelfCombatantModeMsg() {}
+	const ByteBuffer& toBuf() { throw PacketNoLongerValid(); }
 };
 
 //evade shield update on another player's view (PlayerAttrOther::EvadeShieldHealth, idx 21)

@@ -218,7 +218,7 @@ int RunCombatTestSuite()
 		const ByteBuffer& mb = m.toBuf();
 		uint16 len = uint16(uint8(mb.contents()[4])) | (uint16(uint8(mb.contents()[5])) << 8);
 		bool mode2Valid = mb.size() == 169 && mb.contents()[0] == 0x03 && mb.contents()[3] == 0x01 && mb.contents()[4] == 0x08;
-		bool mode0Valid = mb.size() >= 6 && mb.contents()[3] == 0x02 && (len == 0xA5 || len == 0xA7) && (size_t(len) + 4 == mb.size() || size_t(len) + 6 == mb.size() || size_t(len) + 8 == mb.size());
+		bool mode0Valid = mb.size() >= 6 && mb.contents()[3] == 0x02 && (len == 0xA2 || len == 0xA5 || len == 0xA7) && (size_t(len) + 4 == mb.size() || size_t(len) + 6 == mb.size() || size_t(len) + 8 == mb.size());
 		check(mode2Valid || mode0Valid,
 			"IL state message wire framing valid (authentic direct ilViewId attr 3 group header 0x08 or legacy)");
 	}

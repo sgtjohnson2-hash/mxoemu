@@ -1577,16 +1577,6 @@ SelfEquippedItemMsg::SelfEquippedItemMsg( uint32 itemId )
 SelfCombatantModeMsg::SelfCombatantModeMsg( uint8 mode )
 {
 	m_buf.clear();
-
-	AttributeUpdateBlock block;
-	block.addByte(PlayerAttrSelf::CombatantMode,mode);
-
-	m_buf << uint8(0x03);
-	m_buf << uint16(VIEWID_SELF);
-	m_buf << uint8(0x02); //self-view attribute update type (HDS: sendISCurrent, mood, appearance)
-	ByteBuffer blockBuf = block.toBuf(false);
-	m_buf.append(blockBuf.contents(),blockBuf.size());
-	m_buf << uint16(0); // nomoreattribs
 }
 
 SpawnILCombatHandlerMsg::SpawnILCombatHandlerMsg( uint16 viewId, uint8 spawnIdCounter, LocationVector pos, float simTime )
@@ -1705,8 +1695,6 @@ ILCombatStateMsg::ILCombatStateMsg( uint16 ilViewId, LocationVector pos, uint32 
 	}
 
 	ByteBuffer payload;
-	payload << uint16(ilViewId);
-	payload << uint8(0x01);
 	byte posBuf[sizeof(double)*3];
 	pos.toDoubleBuf(posBuf,sizeof(posBuf));
 	payload.append(posBuf,sizeof(posBuf));
