@@ -607,24 +607,28 @@ NodeStatus ActionCombatCycle::Tick(BotClient* bot)
     float dist = float(me->getPosition().Distance(target->getPosition()));
     bool hasIS = me->getCurrentIS() > 50;
 
-    std::string currentState = BotClient::s_qTable.GetStateHash(hpPct, dist, hasIS);
-    std::vector<std::string> actions = {"DEFENSE", "RETALIATE", "POWER", "SPEED", "GRAB"};
-    
-    // Inject faction-based combat flavor
-    float r = static_cast<float>(rand()) / RAND_MAX;
+    float targetHpPct = (target->getMaximumHealth() > 0)
+        ? float(target->getCurrentHealth()) / float(target->getMaximumHealth()) : 1.0f;
+
     std::string chosenStr;
-    
-    if (r > 0.8f) {
-        // 20% chance to override Q-Learning with Faction-specific flavor
-        if (me->getFaction() == FACTION_MACHINES) {
-            chosenStr = "SPEED"; // Agents are overwhelmingly fast
-        } else if (me->getFaction() == FACTION_MEROVINGIAN) {
-            chosenStr = "GRAB"; // Exiles fight dirty
+    if (hpPct < 0.30f)
+        chosenStr = "DEFENSE"; // losing: cover up instead of trading
+    else if (targetHpPct < 0.20f)
+        chosenStr = "POWER";   // they are nearly down: finish
+    else
+    {
+        std::string currentState = BotClient::s_qTable.GetStateHash(hpPct, dist, hasIS);
+        std::vector<std::string> actions = {"DEFENSE", "RETALIATE", "POWER", "SPEED", "GRAB"};
+        float r = static_cast<float>(rand()) / RAND_MAX;
+        if (r > 0.8f) {
+            if (me->getFaction() == FACTION_MACHINES) chosenStr = "SPEED";
+            else if (me->getFaction() == FACTION_MEROVINGIAN) chosenStr = "GRAB";
+            else chosenStr = "POWER";
         } else {
-            chosenStr = "POWER"; // Zion relies on brute force
+            chosenStr = BotClient::s_qTable.SelectBestAction(currentState, actions);
         }
-    } else {
-        chosenStr = BotClient::s_qTable.SelectBestAction(currentState, actions);
+        float reward = (1.0f - targetHpPct) - (1.0f - hpPct);
+        BotClient::s_qTable.UpdateQValue(currentState, chosenStr, reward, currentState, actions);
     }
     
     uint8 chosen;
@@ -636,13 +640,6 @@ NodeStatus ActionCombatCycle::Tick(BotClient* bot)
 
     me->setTactic(chosen);
     sCombatSys.SetTactic(bot->GetPlayerGoId(), chosen);
-    
-    // Evaluate reward for previous state (mock simulation)
-    // Normally, the damage taken/dealt events from CombatSystem would trigger UpdateQValue.
-    // For this rewrite, we will just use a basic heuristic: if we used power and the target's HP is low, it's good.
-    float targetHpPct = float(target->getCurrentHealth()) / float(target->getMaximumHealth());
-    float reward = (1.0f - targetHpPct) - (1.0f - hpPct); 
-    BotClient::s_qTable.UpdateQValue(currentState, chosenStr, reward, currentState, actions);
 
     uint32 delay = (uint32)(2000.0f / me->GetTimeDilation());
     bot->SetNextActionTime(currentTime + delay); // Scaled GCD

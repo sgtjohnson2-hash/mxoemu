@@ -139,6 +139,79 @@ void BotClient::StopInfecting()
     m_infectChannelStartMs = 0;
 }
 
+// Someone this bot should treat as an enemy. Other bots are ignored unless they
+// are already swinging at us, or Bots.NpcVsNpc is on. Civilians and quest givers never qualify.
+static bool HostileTo(BotClient* bot, PlayerObject* me, PlayerObject* other)
+{
+    if (!bot || !me || !other || other == me || other->isDead()) return false;
+    std::string f = other->getFactionName();
+    if (f == "FRIENDLY") return false;
+    if (f == "Civilian" || other->getHandle().find("Civilian") != std::string::npos)
+        return false;
+
+    bool onUs = other->getTargetGoId() == me->getGoId() || other->getInterlockPartner() == me->getGoId();
+    if (!onUs && std::fabs(other->getPosition().y - me->getPosition().y) > 400.0)
+        return false;
+
+    if (onUs)
+        return true;
+
+    mxoFaction theirs = bot->GetFaction();
+    if (f == "Machines" || f == "HOSTILE") theirs = FACTION_MACHINES;
+    else if (f == "Merovingian") theirs = FACTION_MEROVINGIAN;
+    else if (f == "Zion") theirs = FACTION_ZION;
+    else return false;
+    if (theirs == bot->GetFaction()) return false;
+
+    if (other->getClient().isBot())
+    {
+        static const bool npc = sConfig.GetBoolDefault("Bots.NpcVsNpc", false);
+        if (!npc) return false;
+    }
+    return true;
+}
+
+// Closest real threat within 25 m, preferring whoever is already fighting us.
+// If an ally next to us is in a fight with a player, that player is the threat.
+static uint32 NoticeThreat(BotClient* bot, PlayerObject* me)
+{
+    std::vector<GameClient*> nearby = sSpatialGrid.GetClientsInRadius(
+        (float)me->getPosition().x, (float)me->getPosition().z, 2500.0f, me->getClient().m_instanceId);
+    uint32 best = 0;
+    float bestScore = 1.0e9f;
+    for (GameClient* c : nearby)
+    {
+        if (!c || c == bot) continue;
+        PlayerObject* o = c->getPlayer();
+        if (!o) o = BotGetPlayer(c->GetPlayerGoId());
+        if (!o || o == me || o->isDead()) continue;
+
+        float dx = (float)(o->getPosition().x - me->getPosition().x);
+        float dz = (float)(o->getPosition().z - me->getPosition().z);
+        float d = std::sqrt(dx * dx + dz * dz);
+
+        if (!HostileTo(bot, me, o))
+        {
+            uint32 partner = o->getInterlockPartner();
+            if (partner == 0) continue;
+            PlayerObject* foe = BotGetPlayer(partner);
+            if (!foe || foe->isDead() || foe->getClient().isBot()) continue;
+            if (!HostileTo(bot, me, foe)) continue;
+            o = foe;
+            d += 200.0f; // a direct threat sorts ahead of an assist
+        }
+
+        bool onUs = o->getTargetGoId() == me->getGoId() || o->getInterlockPartner() == me->getGoId();
+        float score = onUs ? d - 5000.0f : d;
+        if (score < bestScore)
+        {
+            bestScore = score;
+            best = o->getGoId();
+        }
+    }
+    return best;
+}
+
 void BotClient::UpdateBotAI(float deltaSeconds)
 {
 
@@ -191,10 +264,79 @@ void BotClient::UpdateBotAI(float deltaSeconds)
     static const bool s_legacySim = sConfig.GetBoolDefault("World.LegacySimulation", false);
     if (!s_legacySim)
     {
+        auto stepToward = [&](float tx, float tz, float speed, uint8 anim)
+        {
+            LocationVector loc = me->getPosition();
+            float dx = tx - (float)loc.x;
+            float dz = tz - (float)loc.z;
+            float len = std::sqrt(dx * dx + dz * dz);
+            if (len < 40.0f)
+            {
+                SetLocomotionAnimation(0);
+                return;
+            }
+            dx /= len; dz /= len;
+            float dt = (deltaSeconds > 0.0001f) ? deltaSeconds : 0.1f;
+            float nx = (float)loc.x + dx * speed * dt;
+            float nz = (float)loc.z + dz * speed * dt;
+            if (sSpatialGrid.CheckCollision(nx, nz, 1.0f, m_playerGoId))
+            {
+                nx = (float)loc.x + (-dz) * 80.0f;
+                nz = (float)loc.z + dx * 80.0f;
+                if (sSpatialGrid.CheckCollision(nx, nz, 1.0f, m_playerGoId))
+                    return;
+            }
+            loc.x = nx;
+            loc.z = nz;
+            loc.rot = std::atan2(dz, dx);
+            me->setPosition(loc);
+            sSpatialGrid.UpdateClientPosition(this, nx, nz);
+            SetLocomotionAnimation(anim);
+            uint32 nowMs = getMSTime();
+            if (nowMs - m_lastRoamBroadcastMs >= 150)
+            {
+                m_lastRoamBroadcastMs = nowMs;
+                sGame.AnnounceStateUpdateNear(loc.x, loc.z, 20000.0f, std::make_shared<PositionStateMsg>(m_playerGoId));
+                sGame.AnnounceStateUpdateNear(loc.x, loc.z, 20000.0f, std::make_shared<LocomotionStateMsg>(m_playerGoId, anim, loc.getMxoRot()));
+            }
+        };
+
+        float homeX = m_hasHome ? m_homeX : m_spawnX;
+        float homeZ = m_hasHome ? m_homeZ : m_spawnZ;
+        float homeDx = (float)me->getPosition().x - homeX;
+        float homeDz = (float)me->getPosition().z - homeZ;
+        bool farFromHome = (homeDx * homeDx + homeDz * homeDz) > (8000.0f * 8000.0f);
+
+        if (!m_passive && me->getInterlockPartner() == 0 && farFromHome)
+        {
+            m_targetGoId = 0;
+            m_pathWaypoints.clear();
+            stepToward(homeX, homeZ, 450.0f, 30);
+            return;
+        }
+
+        if (m_targetGoId == 0 && !m_passive && BotManager::getSingletonPtr()->IsAggroEnabled()
+            && me->getFactionName() != "Civilian")
+        {
+            uint32 noticed = NoticeThreat(this, me);
+            if (noticed != 0)
+                m_targetGoId = noticed;
+        }
+
         if (m_targetGoId != 0)
         {
             PlayerObject* target = BotGetPlayer(m_targetGoId);
-            if (target && !target->isDead() && float(me->getPosition().Distance(target->getPosition())) < 4000.0f)
+            float hpPct = (me->getMaximumHealth() > 0)
+                ? float(me->getCurrentHealth()) / float(me->getMaximumHealth()) : 1.0f;
+            if (target && !target->isDead() && hpPct < 0.25f && me->getInterlockPartner() == 0)
+            {
+                m_targetGoId = 0;
+                m_pathWaypoints.clear();
+                sCombatSys.RemoveCombatant(m_playerGoId);
+                stepToward(homeX, homeZ, 520.0f, 30);
+                return;
+            }
+            if (target && !target->isDead() && float(me->getPosition().Distance(target->getPosition())) < 6000.0f)
             {
                 m_pathWaypoints.clear();
                 ActionEngageTarget engage;
@@ -224,7 +366,7 @@ void BotClient::UpdateBotAI(float deltaSeconds)
             }
         }
         if (m_passive)
-            return; // dojo dummy: stand still until attacked
+            return; // dojo dummy and mission contacts stand still until attacked
         RoamAndSwarm(deltaSeconds);
         return;
     }
@@ -598,7 +740,32 @@ void BotClient::RoamAndSwarm(float deltaSeconds)
                     sGame.AnnounceStateUpdateNear(loc.x, loc.z, 15000.0f, std::make_shared<LocomotionStateMsg>(m_playerGoId, 3, newRot));
                 }
             } else {
-                m_currentWaypointIndex++;
+                // Someone is standing on the next step. Sidestep instead of abandoning the walk.
+                float sx = -dz / dist;
+                float sz = dx / dist;
+                bool moved = false;
+                for (float sign : { 1.0f, -1.0f })
+                {
+                    float ax = (float)loc.x + sx * 80.0f * sign;
+                    float az = (float)loc.z + sz * 80.0f * sign;
+                    if (sSpatialGrid.CheckCollision(ax, az, 1.0f, m_playerGoId))
+                        continue;
+                    loc.x = ax;
+                    loc.z = az;
+                    loc.rot = std::atan2(dz, dx);
+                    me->setPosition(loc);
+                    sSpatialGrid.UpdateClientPosition(this, ax, az);
+                    uint32 nowMs = getMSTime();
+                    if (nowMs - m_lastRoamBroadcastMs >= 150) {
+                        m_lastRoamBroadcastMs = nowMs;
+                        sGame.AnnounceStateUpdateNear(loc.x, loc.z, 15000.0f, std::make_shared<PositionStateMsg>(m_playerGoId));
+                        sGame.AnnounceStateUpdateNear(loc.x, loc.z, 15000.0f, std::make_shared<LocomotionStateMsg>(m_playerGoId, 3, loc.getMxoRot()));
+                    }
+                    moved = true;
+                    break;
+                }
+                if (!moved)
+                    m_currentWaypointIndex++;
             }
         }
     }
