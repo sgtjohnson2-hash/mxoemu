@@ -1001,7 +1001,7 @@ CombatSystem::AttackResult CombatSystem::ResolveAttack(PlayerObject* attacker, P
         }
     }
 
-    if (target->getClient().isBot() && target->getHandle().find("Agent") != std::string::npos && (rand() % 100 < 30)) {
+    if (target->getClient().isBot() && target->getHandle().find("Agent") != std::string::npos && target->getHandle().find("Dojo") == std::string::npos && (rand() % 100 < 30)) {
         res.hit = false;
         sMatrixThreatHeatmap.RecordDisruption((float)target->getPosition().x, (float)target->getPosition().y, (float)target->getPosition().z, 15.0f, "Agent Wire-Fu Dodge");
         return res; // Agent Dodge
@@ -1124,8 +1124,8 @@ CombatSystem::AttackResult CombatSystem::ResolveAttack(PlayerObject* attacker, P
         sMatrixThreatHeatmap.RecordDisruption((float)attacker->getPosition().x, (float)attacker->getPosition().y, (float)attacker->getPosition().z, 12.0f, "Melee Interlock");
     }
 
-    if (target->getClient().isBot() && target->getHandle().find("Agent") != std::string::npos) {
-        dmg *= 0.5f; // Agent Resilience
+    if (target->getClient().isBot() && target->getHandle().find("Agent") != std::string::npos && target->getHandle().find("Dojo") == std::string::npos) {
+        dmg *= 0.5f; // Agent Resilience (wild Agents only; Dojo sparring dummies take full damage)
     }
 
     // Phase 4: Seraphic Kinetic Deflection (Absorbs 50% damage, deflects 20% kinetic force back to attacker)
@@ -1172,7 +1172,7 @@ CombatSystem::AttackResult CombatSystem::ResolveAttack(PlayerObject* attacker, P
 	//toughness absorbs part of the blow; blocking halves what gets through
 	//and recovers Inner Strength (documented block behavior)
 	{
-		float absorbed = float(target->getLevel()) * 0.5f;
+		float absorbed = (target->getHandle().find("Dojo") != std::string::npos) ? 0.0f : (float(target->getLevel()) * 0.5f);
 		if (attackerTactic == TACTIC_RETALIATE && targetTactic == TACTIC_POWER)
 		{
 			// Grab breaks Power: throws heavy power stance and bypasses toughness absorption

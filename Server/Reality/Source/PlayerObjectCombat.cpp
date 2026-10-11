@@ -301,8 +301,8 @@ void PlayerObject::takeDamage( uint32 attackerGoId, uint16 damage, uint32 fxId )
 		}
 	}
 
-	// Apply basic mitigation based on player level
-	uint16 mitigation = m_lvl / 2;
+	// Apply basic mitigation based on player level (Dojo sparring dummies have 0 mitigation for clean training takedowns)
+	uint16 mitigation = (m_handle.find("Dojo") != std::string::npos) ? 0 : (m_lvl / 2);
 	uint16 actualDamage = (damage > mitigation) ? (damage - mitigation) : 1;
 
 	// Apply firewall absorption
