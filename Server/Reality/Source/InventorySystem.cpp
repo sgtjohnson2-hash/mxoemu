@@ -56,6 +56,17 @@ void InventorySystem::loadFromDB()
             shared_ptr<Item> newItem(new Item(goId, templateId));
             newItem->setMetadata(metadata);
             ItemSerializer::Deserialize(newItem, metadata);
+            // Guns saved before ammo was tracked have ammoCount 0 and no ammoInit.
+            // A magazine that was actually emptied is saved with ammoInit and stays empty.
+            const ItemTemplate* loadedTpl = sDataLoader.GetItemTemplate(newItem->getTemplateId());
+            if (loadedTpl && loadedTpl->type == ITEM_TYPE_WEAPON && loadedTpl->maxAmmo > 0
+                && newItem->getAmmoCount() == 0
+                && metadata.find("\"ammoInit\"") == std::string::npos)
+            {
+                newItem->setAmmoCount(loadedTpl->maxAmmo);
+                metadata = ItemSerializer::Serialize(newItem);
+                newItem->setMetadata(metadata);
+            }
             
             m_items[slot] = newItem;
             m_goIdToSlot[goId] = slot;
@@ -87,6 +98,9 @@ void InventorySystem::loadFromDB()
             item->setStackCount(sg.stack);
             item->setDurability(100.0f);
             item->setRarity(RARITY_COMMON);
+            const ItemTemplate* starterTpl = sDataLoader.GetItemTemplate(sg.templateId);
+            if (starterTpl && starterTpl->type == ITEM_TYPE_WEAPON && starterTpl->maxAmmo > 0)
+                item->setAmmoCount(starterTpl->maxAmmo);
             std::string meta = ItemSerializer::Serialize(item);
             item->setMetadata(meta);
             m_items[sg.slot] = item;

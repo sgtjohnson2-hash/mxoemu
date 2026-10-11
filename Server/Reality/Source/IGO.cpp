@@ -23,7 +23,7 @@ IGO::IGO()
 
     m_targetGoId = 0;
     m_ilPartner = 0;
-    m_tactic = 0; // TACTIC_NORMAL
+    m_tactic = 8; // TACTIC_NORMAL. 0 is Grab; this used to open every fight as a grab.
     m_inCombat = false;
     m_isDead = false;
     m_hitCounter = 0;

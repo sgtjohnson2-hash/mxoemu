@@ -13,6 +13,7 @@ std::string ItemSerializer::Serialize(std::shared_ptr<Item> item)
     ss << "\"templateId\":" << item->getTemplateId() << ",";
     ss << "\"stackCount\":" << item->getStackCount() << ",";
     ss << "\"ammoCount\":" << item->getAmmoCount() << ",";
+    ss << "\"ammoInit\":1,";
     ss << "\"durability\":" << item->getDurability() << ",";
     ss << "\"rarity\":" << (int)item->getRarity() << ",";
     ss << "\"isCorrupted\":" << (item->isCorrupted() ? "true" : "false");

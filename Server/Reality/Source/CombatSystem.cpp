@@ -1555,6 +1555,13 @@ bool CombatSystem::RunInterlockRound(InterlockSession &session)
 	if (!moveA) moveA = GetDefaultStyleMove(pA);
 	if (!moveB) moveB = GetDefaultStyleMove(pB);
 
+	// Humans and tester bots drive their own stance. Copy it every round so a &tactic
+	// that landed on the player object cannot be left behind on Normal.
+	if (!IsServerDrivenBot(pA))
+		session.tacticA = (pA->getTactic() <= TACTIC_NORMAL) ? pA->getTactic() : uint8(TACTIC_NORMAL);
+	if (!IsServerDrivenBot(pB))
+		session.tacticB = (pB->getTactic() <= TACTIC_NORMAL) ? pB->getTactic() : uint8(TACTIC_NORMAL);
+
 	// Bot combat AI: update round tactics and discipline moves
 	if (IsServerDrivenBot(pA)) {
 		uint8 newTac = TACTIC_POWER;

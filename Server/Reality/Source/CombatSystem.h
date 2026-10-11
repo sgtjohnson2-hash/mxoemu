@@ -102,6 +102,8 @@ struct InterlockSession
 	uint32 goIdB;
 	uint8 tacticA;
 	uint8 tacticB;
+	uint8 committedTacticA = TACTIC_NORMAL; // stance the opponent showed last round
+	uint8 committedTacticB = TACTIC_NORMAL;
 	uint16 queuedMoveA;		//0 = plain attack this round
 	uint16 queuedMoveB;
 	uint32 nextRoundTime;	//ms timestamp (getMSTime)

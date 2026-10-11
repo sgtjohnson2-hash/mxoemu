@@ -1116,6 +1116,9 @@ bool PlayerObject::giveItem(unsigned int templateId)
     if (m_inventorySystem->getFirstFreeSlot() == 0) return false;
     uint32 newGoId = sObjMgr.getNewItemId();
     shared_ptr<Item> newItem(new Item(newGoId, templateId));
+    const ItemTemplate* givenTpl = sDataLoader.GetItemTemplate(templateId);
+    if (givenTpl && givenTpl->type == ITEM_TYPE_WEAPON && givenTpl->maxAmmo > 0)
+        newItem->setAmmoCount(givenTpl->maxAmmo);
     std::string meta = ItemSerializer::Serialize(newItem);
     newItem->setMetadata(meta);
     if (m_inventorySystem->addItemAuto(newItem)) {
