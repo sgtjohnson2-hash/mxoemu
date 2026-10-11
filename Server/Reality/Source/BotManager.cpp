@@ -127,6 +127,17 @@ std::shared_ptr<BotClient> BotManager::SpawnSingleBot(float x, float y, float z,
                     else if (faction == FACTION_MACHINES) factionName = "Machines";
                     else if (faction == FACTION_MEROVINGIAN) factionName = "Merovingian";
                     po->setFactionName(factionName);
+                    if (po->getEquippedWeaponId() == 0 && po->giveItem(1001))
+                    {
+                        for (auto item : po->getInventory()->getAllItems())
+                        {
+                            if (item && item->getTemplateId() == 1001)
+                            {
+                                po->setEquippedWeaponId(item->getGoId());
+                                break;
+                            }
+                        }
+                    }
                 }
                 return recycledBot;
             }
@@ -151,10 +162,21 @@ std::shared_ptr<BotClient> BotManager::SpawnSingleBot(float x, float y, float z,
     }
     bot->MoveTo(x, y, z);
     
-    // Give bot a mock ranged weapon (e.g., Template ID 500 = SMG)
+    // A real pistol in the bag, equipped, with a full magazine. Template 500 was not a weapon,
+    // so the bot's inventory never fired. Bots are not written back to the character tables.
+    if (po && po->getEquippedWeaponId() == 0 && po->giveItem(1001))
+    {
+        for (auto item : po->getInventory()->getAllItems())
+        {
+            if (item && item->getTemplateId() == 1001)
+            {
+                po->setEquippedWeaponId(item->getGoId());
+                break;
+            }
+        }
+    }
+
     if (po) {
-        po->giveItem(500); // 500 is just a mock template ID for now
-        
         std::string factionName = "Civilian";
         if (faction == FACTION_ZION) factionName = "Zion";
         else if (faction == FACTION_MACHINES) {

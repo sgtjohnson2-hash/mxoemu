@@ -152,17 +152,15 @@ static bool HostileTo(BotClient* bot, PlayerObject* me, PlayerObject* other)
     bool onUs = other->getTargetGoId() == me->getGoId() || other->getInterlockPartner() == me->getGoId();
     if (!onUs && std::fabs(other->getPosition().y - me->getPosition().y) > 400.0)
         return false;
-
     if (onUs)
         return true;
 
-    mxoFaction theirs = bot->GetFaction();
-    if (f == "Machines" || f == "HOSTILE") theirs = FACTION_MACHINES;
-    else if (f == "Merovingian") theirs = FACTION_MEROVINGIAN;
-    else if (f == "Zion") theirs = FACTION_ZION;
-    else return false;
-    if (theirs == bot->GetFaction()) return false;
+    int mine = me->getFaction();
+    int theirs = other->getFaction();
+    if (mine == FACTION_NONE || theirs == FACTION_NONE || mine == theirs)
+        return false;
 
+    // A player of another faction is a fight. Other bots are not, unless NpcVsNpc is on.
     if (other->getClient().isBot())
     {
         static const bool npc = sConfig.GetBoolDefault("Bots.NpcVsNpc", false);
@@ -367,6 +365,42 @@ void BotClient::UpdateBotAI(float deltaSeconds)
         }
         if (m_passive)
             return; // dojo dummy and mission contacts stand still until attacked
+
+        // Take or hold a hardline on this block. Standing inside 15 m is what
+        // advances the capture; the faction war tick already counts bots.
+        if (me->getFaction() >= FACTION_ZION && me->getFaction() <= FACTION_MEROVINGIAN)
+        {
+            const ControlNode* goal = nullptr;
+            float best = 8000.0f;
+            for (const auto& kv : sFactionWarMgr.GetControlNodes())
+            {
+                const ControlNode& node = kv.second;
+                float dx = node.x - (float)me->getPosition().x;
+                float dz = node.z - (float)me->getPosition().z;
+                float d = std::sqrt(dx * dx + dz * dz);
+                if (d > 8000.0f) continue;
+                bool enemy = node.controllingFaction != (uint32)me->getFaction();
+                bool defend = !enemy && (node.isContested || node.captureProgress > 0.01f);
+                if (!enemy && !defend) continue;
+                if (d < best)
+                {
+                    best = d;
+                    goal = &node;
+                }
+            }
+            if (goal)
+            {
+                if (best > 1200.0f)
+                {
+                    m_pathWaypoints.clear();
+                    stepToward(goal->x, goal->z, 180.0f, 3);
+                }
+                else
+                    SetLocomotionAnimation(0); // on the uplink: hold it
+                return;
+            }
+        }
+
         RoamAndSwarm(deltaSeconds);
         return;
     }
