@@ -233,7 +233,9 @@ void GameServer::SimulationLoop()
 				{
 					if (!bot) continue;
 					PlayerObject* po = bot->getPlayer();
-					if (po && (po->m_deathDelayMS > 0 || po->getInterlockPartner() != 0)) {
+					// Dead bots must keep ticking or the 8 s respawn event never runs.
+					// After die() the interlock and the takedown timer are both gone.
+					if (po && (po->isDead() || po->m_deathDelayMS > 0 || po->getInterlockPartner() != 0)) {
 						po->Update();
 					}
 				}

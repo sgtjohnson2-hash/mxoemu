@@ -623,6 +623,8 @@ void PlayerObject::respawn()
 	m_innerStrC = m_innerStrM;
 	m_tactic = TACTIC_NORMAL;
 	m_hitCounter = 0;
+	m_ilPartner = 0;
+	m_inCombat = false;
 
 	//respawn at the nearest hardline in this district, if we know any
 	bool movedToHardline = false;
@@ -664,6 +666,7 @@ void PlayerObject::respawn()
 			movedToHardline
 				? "{c:00FF00}You have been re-inserted at the nearest hardline.{/c}"
 				: "{c:00FF00}You have been re-inserted.{/c}")));
+		saveDataToDB();
 	}
 }
 
