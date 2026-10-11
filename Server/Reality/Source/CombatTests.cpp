@@ -204,20 +204,20 @@ int RunCombatTestSuite()
 		e.attackerHealth = 0x21; e.defenderHealth = 0x70;
 		ByteBuffer out;
 		e.write(out);
-		bool sizeOk = (out.size() == 0x79);
-		check(sizeOk, "IL exchange serializes to 0x79 bytes (authentic 7.6005 stride)");
+		bool sizeOk = (out.size() == 0x7A);
+		check(sizeOk, "IL exchange serializes to 0x7A bytes (authentic 7.6005 stride)");
 		const uint8* ob = reinterpret_cast<const uint8*>(out.contents());
 		bool headOk = sizeOk && ob[0] == 1 && ob[1] == 2 && ob[0x1E] == (uint8)FightingStyle::KungFu &&
 			*reinterpret_cast<const uint16*>(&ob[0x1F]) == 1 && *reinterpret_cast<const uint32*>(&ob[0x38]) == 0x2026;
-		check(headOk, "IL exchange fields (0x00-0x78) match authentic 0x79 protocol offsets");
+		check(headOk, "IL exchange fields (0x00-0x79) match authentic 0x7A protocol offsets");
 
 		std::vector<uint32> slots; slots.push_back(0x00020001); slots.push_back(2);
 		std::vector<ILExchange> ex; ex.push_back(e);
 		ILCombatStateMsg m(0x1234, LocationVector(0,0,0), 1, slots, ex);
 		const ByteBuffer& mb = m.toBuf();
 		uint16 len = uint16(uint8(mb.contents()[4])) | (uint16(uint8(mb.contents()[5])) << 8);
-		check(mb.size() >= 6 && mb.contents()[3] == 0x02 && len == 0xA7 && (size_t(len) + 4 == mb.size() || size_t(len) + 6 == mb.size()),
-			"IL state message length field = 0xA7 like the authentic interlock start");
+		check(mb.size() >= 6 && mb.contents()[3] == 0x02 && len == 0xA8 && (size_t(len) + 4 == mb.size() || size_t(len) + 6 == mb.size()),
+			"IL state message length field = 0xA8 like the authentic interlock start");
 	}
 
 	try
@@ -1205,7 +1205,7 @@ int RunCombatTestSuite()
 
 			ByteBuffer ilBuf;
 			exchange.write(ilBuf);
-			check(ilBuf.size() == 0x79, "ILExchange serialized buffer size is exactly 121 bytes (0x79)");
+			check(ilBuf.size() == 0x7A, "ILExchange serialized buffer size is exactly 122 bytes (0x7A)");
 			const uint8* rawBytes = reinterpret_cast<const uint8*>(ilBuf.contents());
 			check(rawBytes[0x1E] == (uint8)FightingStyle::KungFu, "ILExchange wire byte 0x1E is style Kung Fu (2)");
 			uint16 wireNum = *reinterpret_cast<const uint16*>(&rawBytes[0x1F]);

@@ -926,14 +926,14 @@ struct ILExchange
 	uint16 unk5A;				// 0x5A..0x5B (0x1000)
 	uint16 unk5C;				// 0x5C..0x5D (0)
 	uint16 unk5E;				// 0x5E..0x5F (0)
-	uint16 unk60;				// 0x60..0x61 (0)
-	uint16 unk62;				// 0x62..0x63 (0)
+	uint32 unk60;				// 0x60..0x63 (0)
 	uint32 unk64;				// 0x64..0x67 (0)
 	uint32 unk68;				// 0x68..0x6B (0)
 	uint32 unk6C;				// 0x6C..0x6F (0)
 	uint32 unk70;				// 0x70..0x73 (0x00000100)
 	uint32 unk74;				// 0x74..0x77 (0x00602b02)
 	uint8 unk78;				// 0x78 (0)
+	uint8 unk79;				// 0x79 (0)
 
 	ILExchange();
 	void write(ByteBuffer &buf) const;

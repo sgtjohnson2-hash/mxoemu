@@ -1630,6 +1630,8 @@ ILExchange::ILExchange()
 	unk5A = 0x1000;
 	unk70 = 0x00000100;
 	unk74 = 0x00602b02;
+	unk78 = 0;
+	unk79 = 0;
 }
 
 void ILExchange::write( ByteBuffer &buf ) const
@@ -1648,18 +1650,19 @@ void ILExchange::write( ByteBuffer &buf ) const
 	buf << uint32(attackerHealth) << uint32(defenderHealth);
 	buf << uint16(unk58) << uint16(unk5A);
 	buf << uint16(unk5C) << uint16(unk5E);
-	buf << uint16(unk60) << uint16(unk62);
+	buf << uint32(unk60);
 	buf << uint32(unk64) << uint32(unk68) << uint32(unk6C);
 	buf << uint32(unk70) << uint32(unk74);
 	buf << uint8(unk78);
-	while (buf.size() - startPos < 0x79)
+	buf << uint8(unk79);
+	while (buf.size() - startPos < 0x7A)
 		buf << uint8(0);
 }
 
 ILCombatStateMsg::ILCombatStateMsg( uint16 ilViewId, LocationVector pos, uint32 seq,
 	const std::vector<uint32> &slotHandles, const std::vector<ILExchange> &exchanges )
 {
-	int updateMode = sConfig.GetIntDefault("Interlock.UpdateMode", 1);
+	int updateMode = sConfig.GetIntDefault("Interlock.UpdateMode", 0);
 	// Mode 1: Authentic HDS Hybrid (Opening packet with slots uses ObjectManager attribute 2 framing
 	// per HDS capture 010002A700; periodic round updates use direct ilViewId framing per HDS UpdateCloseCombat).
 	// Mode 2: Direct ilViewId framing for both opening and rounds.
