@@ -20,6 +20,7 @@
 #include "Config.h"
 #include "BotTester.h"
 #include "CombatSystem.h"
+#include "InventorySystem.h"
 #include <fstream>
 #include <memory>
 
