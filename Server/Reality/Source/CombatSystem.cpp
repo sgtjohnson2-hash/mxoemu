@@ -540,8 +540,11 @@ bool CombatSystem::RequestInterlock(uint32 attackerGoId, uint32 targetGoId, uint
 	InterlockSession session;
 	session.goIdA = attackerGoId;
 	session.goIdB = targetGoId;
-	session.tacticA = TACTIC_NORMAL;
-	session.tacticB = TACTIC_NORMAL;
+	session.tacticA = pA->getTactic();
+	session.tacticB = pB->getTactic();
+	// Bots predict from last round. Seeding this with the live stance would let them counter it immediately.
+	session.committedTacticA = TACTIC_NORMAL;
+	session.committedTacticB = TACTIC_NORMAL;
 	session.queuedMoveA = 0;
 	session.queuedMoveB = 0;
 	session.nextRoundTime = getMSTime() + uint32(INTERLOCK_ROUND_SECONDS * 1000.0f);
@@ -1104,12 +1107,18 @@ CombatSystem::AttackResult CombatSystem::ResolveAttack(PlayerObject* attacker, P
 	}
 	else
 	{
-		// Authentic melee hit resolution: attack roll vs defense roll
+		// Melee. A block is a hit that is reduced, not a miss.
+		// Inside an interlock the stance exchange already decided this swing. A second
+		// attack-vs-defense roll missed about half of those hits after the banner.
 		bool isMeleeBlock = (targetTactic == TACTIC_DEFENSE && !bypassBlock && attackerTactic != TACTIC_RETALIATE);
 		if (isMeleeBlock)
 		{
 			res.hit = true;
 			res.isBlocked = true;
+		}
+		else if (inInterlock)
+		{
+			res.hit = true;
 		}
 		else
 		{
@@ -1551,7 +1560,7 @@ bool CombatSystem::RunInterlockRound(InterlockSession &session)
 		uint8 newTac = TACTIC_POWER;
 		bool isElite = (pA->getHandle().find("Agent") != std::string::npos || (pA->getLevel() >= 30 && pA->getHandle().find("Dojo") == std::string::npos));
 		if (isElite) {
-			switch (session.tacticB) {
+			switch (session.committedTacticB) {
 				case TACTIC_POWER:     newTac = TACTIC_RETALIATE; break;
 				case TACTIC_SPEED:     newTac = TACTIC_POWER;     break;
 				case TACTIC_RETALIATE: newTac = TACTIC_SPEED;     break;
@@ -1589,7 +1598,7 @@ bool CombatSystem::RunInterlockRound(InterlockSession &session)
 		uint8 newTac = TACTIC_POWER;
 		bool isElite = (pB->getHandle().find("Agent") != std::string::npos || (pB->getLevel() >= 30 && pB->getHandle().find("Dojo") == std::string::npos));
 		if (isElite) {
-			switch (session.tacticA) {
+			switch (session.committedTacticA) {
 				case TACTIC_POWER:     newTac = TACTIC_RETALIATE; break;
 				case TACTIC_SPEED:     newTac = TACTIC_POWER;     break;
 				case TACTIC_RETALIATE: newTac = TACTIC_SPEED;     break;
@@ -1742,6 +1751,8 @@ bool CombatSystem::RunInterlockRound(InterlockSession &session)
 
 	session.queuedMoveA = 0;
 	session.queuedMoveB = 0;
+	session.committedTacticA = tacA;
+	session.committedTacticB = tacB;
 
 	if (humanRound)
 	{
