@@ -258,7 +258,7 @@ void PlayerObject::setCombatStance( bool inCombatStance )
 
 void PlayerObject::takeDamage( uint32 attackerGoId, uint16 damage, uint32 fxId, bool applyMitigation )
 {
-	if (m_isDead)
+	if (m_isDead || damage == 0)
 		return;
 	m_lastDamageTakenMs = getMSTime();
 

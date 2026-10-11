@@ -162,6 +162,21 @@ void PlayerObject::loadFromDB( bool updatePos )
 		m_cash = field[17].GetUInt64();
 		m_district = field[18].GetUInt8();
 		m_isAdmin = field[19].GetBool();
+
+		// A disconnect during the 3 s takedown used to save 0 HP with no dead flag,
+		// so the next login was a living character the server treated as empty.
+		if (m_healthM == 0)
+			m_healthM = 250;
+		if (m_healthC == 0 || m_healthC > m_healthM)
+			m_healthC = std::max<uint16>(1, m_healthM / 2);
+		if (m_innerStrM == 0)
+			m_innerStrM = 100;
+		if (m_innerStrC > m_innerStrM)
+			m_innerStrC = m_innerStrM;
+		if (m_lvl == 0)
+			m_lvl = 1;
+		if (m_district == 0)
+			m_district = 1;
 	}
 	//grab data from rsi table
 	{
@@ -357,7 +372,7 @@ void PlayerObject::saveDataToDB()
 	if (Database_Main == nullptr || m_characterUID >= 9000000) //virtual bots or offline test mode are memory-only
 		return;
 
-	bool storeSuccess = sDatabase.Execute(format("UPDATE `characters` SET `x` = '%1%', `y` = '%2%', `z` = '%3%', `rot` = '%4%', `exp` = '%5%', `cash` = '%6%', `level` = '%7%', `healthC` = '%8%', `innerStrC` = '%9%', `lastOnline` = NOW() WHERE `charId` = '%10%'")
+	bool storeSuccess = sDatabase.Execute(format("UPDATE `characters` SET `x` = '%1%', `y` = '%2%', `z` = '%3%', `rot` = '%4%', `exp` = '%5%', `cash` = '%6%', `level` = '%7%', `healthC` = '%8%', `healthM` = '%9%', `innerStrC` = '%10%', `innerStrM` = '%11%', `district` = '%12%', `lastOnline` = NOW() WHERE `charId` = '%13%'")
 		% m_pos.x
 		% m_pos.y
 		% m_pos.z
@@ -366,7 +381,10 @@ void PlayerObject::saveDataToDB()
 		% m_cash
 		% uint32(m_lvl)
 		% m_healthC
+		% m_healthM
 		% m_innerStrC
+		% m_innerStrM
+		% uint32(m_district)
 		% m_characterUID );
 
 	if (!storeSuccess)

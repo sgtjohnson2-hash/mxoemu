@@ -55,7 +55,7 @@ void IGO::leaveInterlock()
 
 void IGO::takeDamage(uint32 attackerGoId, uint16 damage, uint32 fxId, bool applyMitigation)
 {
-    if (m_isDead)
+    if (m_isDead || damage == 0)
         return;
 
     // Apply armor/mitigation formulas here

@@ -4709,7 +4709,11 @@ void PlayerObject::RPC_HandleReadyForWorldChange( ByteBuffer &srcCmd )
 	if (shouldBeZero != 0)
 		DEBUG_LOG(format("ReadyForWorldChange uint32 is %1%")%shouldBeZero);
 
-	m_district = 0x03;
+	// The saved district is already on the character. Forcing 3 put Slums
+	// coordinates into the International load. 0 is not a district; the schema default is 1.
+	if (m_district == 0)
+		m_district = 1;
+
 	InitializeWorld();
 	SpawnSelf();
 }
