@@ -7,6 +7,7 @@
 #include "Item.h"
 #include "GameServer.h"
 #include "InventorySystem.h"
+#include "ItemSerializer.h"
 #include "Database/Database.h"
 #include "Database/PreparedStatement.h"
 #include <fstream>
@@ -356,14 +357,25 @@ bool EconomySystem::DepositToLocker(PlayerObject* player, uint32 hardlineId, uin
         return false;
     }
 
-    if (player->getInventory() && !player->getInventory()->consumeItemByTemplate(templateId))
-    {
+    auto inv = player->getInventory();
+    if (!inv) return false;
+
+    shared_ptr<Item> itemToDeposit = (slot > 0) ? inv->getItemBySlot(slot) : nullptr;
+    if (itemToDeposit) {
+        if (itemToDeposit->getStackCount() > 1) {
+            itemToDeposit->setStackCount(itemToDeposit->getStackCount() - 1);
+            std::string meta = ItemSerializer::Serialize(itemToDeposit);
+            itemToDeposit->setMetadata(meta);
+        } else {
+            inv->removeItem(itemToDeposit->getGoId());
+        }
+    } else if (!inv->consumeItemByTemplate(templateId)) {
         sBotMgr.LogCombat("Item not present in inventory to deposit.");
         return false;
     }
 
-    if (player->getInventory() && !player->getClient().isBot()) {
-        player->getInventory()->saveToDB();
+    if (!player->getClient().isBot()) {
+        inv->saveToDB();
     }
 
     LockerItem item;

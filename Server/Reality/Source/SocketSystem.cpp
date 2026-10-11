@@ -69,6 +69,11 @@ bool SocketSystem::ApplySocket(PlayerObject* player, uint64 gearUid, const Socke
         }
     }
 
+    if (!inMemoryItem && targetInvId == 0) {
+        WARNING_LOG("SocketSystem: Target item for socketing not found in inventory.");
+        return false;
+    }
+
     if (targetInvId == 0) {
         targetInvId = (uint32)gearUid;
     }

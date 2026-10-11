@@ -115,6 +115,7 @@ bool GameServer::Start()
 	sAsyncDatabase.Initialize();
 	sStatusEffectManager.Initialize();
 	sHackerSystem.Initialize();
+	sEconomySys.Initialize();
 
 	// Initialize Megacity Tactical & Emergent Simulation Engines
 	sFrankCastleMgr.Initialize();
