@@ -1324,46 +1324,8 @@ ILExchange CombatSystem::BuildExchange(const InterlockSession &session, PlayerOb
 uint32 CombatSystem::SelectInterlockMove(const InterlockSession &session, PlayerObject* attacker, PlayerObject* defender, InterlockExchangeOutcome outcome)
 {
 	if (!attacker || !defender)
-		return 12559; // Authentic unarmed fallback (Brawl vs Brawl)
+		return 0x2026; // Authentic unarmed fallback (Kung Fu strike)
 
-	static const bool useDynamicILDB = sConfig.GetBoolDefault("Interlock.UseDynamicILDB", true);
-	if (useDynamicILDB)
-	{
-		bool isFinisher = (defender->isDead() || defender->getCurrentHealth() == 0);
-		uint8 attT = (attacker->getGoId() == session.goIdA) ? session.tacticA : session.tacticB;
-		uint8 defT = (defender->getGoId() == session.goIdA) ? session.tacticA : session.tacticB;
-		const ILDBMoveRecord* rec = CombatAnimationMatrix::FindMove(
-			attacker->getFightingStyle(), attT,
-			defender->getFightingStyle(), defT,
-			outcome, isFinisher
-		);
-		if (rec && (rec->aggrAnim != 0 || rec->defeAnim != 0))
-			return rec->moveId;
-	}
-
-	// Fallbacks when no dynamic ILDB move matched:
-	// If the binary database is loaded, use authentic 0-indexed martial arts moves:
-	if (CombatAnimationMatrix::GetTotalMovesLoaded() > 0)
-	{
-		if (defender->isDead() || defender->getCurrentHealth() == 0)
-			return 18599; // Authentic Kung Fu finisher
-
-		FightingStyle style = attacker->getFightingStyle();
-		switch (style)
-		{
-			case FightingStyle::Karate:
-				return 5821; // Karate KD vs KB BackFloorsweep
-			case FightingStyle::Aikido:
-				return 41;   // Aikido AD vs AB CartwheelToTomoNage
-			case FightingStyle::KungFu:
-				return (session.exchangeNum % 2 == 0) ? 18593 : 18486; // Kung Fu Short WP vs WD/SD PegAHF
-			case FightingStyle::None:
-			default:
-				return (session.exchangeNum % 2 == 0) ? 12559 : 12590; // Self-defense SD vs SB/WB SDLbTripStomp
-		}
-	}
-
-	// Static fallback when database is not loaded (headless unit tests before ILDB load):
 	if (defender->isDead() || defender->getCurrentHealth() == 0)
 		return 0x4EE5; // Double Overhead Smash / Ground Slam Finisher (retail capture)
 
@@ -1389,16 +1351,6 @@ uint32 CombatSystem::SelectInterlockMove(const InterlockSession &session, Player
 		case FightingStyle::None:
 		default:
 		{
-			uint8 attT = (attacker->getGoId() == session.goIdA) ? session.tacticA : session.tacticB;
-			uint8 defT = (defender->getGoId() == session.goIdA) ? session.tacticA : session.tacticB;
-			const ILDBMoveRecord* rec = CombatAnimationMatrix::FindMove(
-				attacker->getFightingStyle(), attT,
-				defender->getFightingStyle(), defT,
-				outcome, false
-			);
-			if (rec && (rec->aggrAnim != 0 || rec->defeAnim != 0))
-				return rec->moveId;
-
 			static const uint32 authenticMoves[] = { 0x2026, 0x2388, 0x236D, 0x2367 };
 			return authenticMoves[session.exchangeNum % 4];
 		}

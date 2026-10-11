@@ -81,7 +81,6 @@ BotClient::BotClient(uint64 charUID)
     {
         sObjMgr.getGOPtr(m_playerGoId)->InitializeWorld();
         // Bots don't need to populate their network queue with the entire world state
-        sObjMgr.getGOPtr(m_playerGoId)->SpawnSelf();
         
         // Dummy encryption to avoid errors
         m_encryptionInitialized = true;

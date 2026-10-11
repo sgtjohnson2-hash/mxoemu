@@ -1334,7 +1334,7 @@ void PlayerObject::ParsePlayerCommand( string theCmd )
 			const double bx = botPos.x;
 			const double bz = botPos.z;
 
-			auto bot = sBotMgr.SpawnSingleBot((float)bx, (float)pos.y, (float)bz, FACTION_MACHINES);
+			auto bot = sBotMgr.SpawnSingleBot((float)bx, (float)pos.y, (float)bz, FACTION_MACHINES, false);
 			if (!bot)
 				return false;
 			uint32 botGoId = bot->GetPlayerGoId();

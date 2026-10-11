@@ -133,6 +133,7 @@ namespace
 			a.po->setLevel(level);
 			setHP(a, hp, hp);
 			place(a, x, z);
+			a.po->SpawnSelf();
 		}
 		return a;
 	}
@@ -204,20 +205,20 @@ int RunCombatTestSuite()
 		e.attackerHealth = 0x21; e.defenderHealth = 0x70;
 		ByteBuffer out;
 		e.write(out);
-		bool sizeOk = (out.size() == 0x7A);
-		check(sizeOk, "IL exchange serializes to 0x7A bytes (authentic 7.6005 stride)");
+		bool sizeOk = (out.size() == 0x79);
+		check(sizeOk, "IL exchange serializes to 0x79 bytes (authentic 7.6005 stride)");
 		const uint8* ob = reinterpret_cast<const uint8*>(out.contents());
 		bool headOk = sizeOk && ob[0] == 1 && ob[1] == 2 && ob[0x1E] == (uint8)FightingStyle::KungFu &&
-			*reinterpret_cast<const uint16*>(&ob[0x1F]) == 1 && *reinterpret_cast<const uint32*>(&ob[0x38]) == 0x2026;
-		check(headOk, "IL exchange fields (0x00-0x79) match authentic 0x7A protocol offsets");
+			ob[0x1F] == 0 && *reinterpret_cast<const uint16*>(&ob[0x20]) == 1 && *reinterpret_cast<const uint32*>(&ob[0x3D]) == 0x2026;
+		check(headOk, "IL exchange fields (0x00-0x78) match authentic 0x79 protocol offsets");
 
 		std::vector<uint32> slots; slots.push_back(0x00020001); slots.push_back(2);
 		std::vector<ILExchange> ex; ex.push_back(e);
 		ILCombatStateMsg m(0x1234, LocationVector(0,0,0), 1, slots, ex);
 		const ByteBuffer& mb = m.toBuf();
 		uint16 len = uint16(uint8(mb.contents()[4])) | (uint16(uint8(mb.contents()[5])) << 8);
-		check(mb.size() >= 6 && mb.contents()[3] == 0x02 && len == 0xA8 && (size_t(len) + 4 == mb.size() || size_t(len) + 6 == mb.size()),
-			"IL state message length field = 0xA8 like the authentic interlock start");
+		check(mb.size() >= 6 && mb.contents()[3] == 0x02 && len == 0xA7 && (size_t(len) + 4 == mb.size() || size_t(len) + 6 == mb.size()),
+			"IL state message length field = 0xA7 like the authentic interlock start");
 	}
 
 	try
@@ -1205,32 +1206,33 @@ int RunCombatTestSuite()
 
 			ByteBuffer ilBuf;
 			exchange.write(ilBuf);
-			check(ilBuf.size() == 0x7A, "ILExchange serialized buffer size is exactly 122 bytes (0x7A)");
+			check(ilBuf.size() == 0x79, "ILExchange serialized buffer size is exactly 121 bytes (0x79)");
 			const uint8* rawBytes = reinterpret_cast<const uint8*>(ilBuf.contents());
 			check(rawBytes[0x1E] == (uint8)FightingStyle::KungFu, "ILExchange wire byte 0x1E is style Kung Fu (2)");
-			uint16 wireNum = *reinterpret_cast<const uint16*>(&rawBytes[0x1F]);
-			check(wireNum == 4, "ILExchange wire bytes at 0x1F are sequence number 4");
-			int16 wireOffset = *reinterpret_cast<const int16*>(&rawBytes[0x25]);
-			check(wireOffset == 460, "ILExchange wire bytes at 0x25 are 460ms defenderOffsetMs");
-			check(rawBytes[0x27] == 0x23, "ILExchange wire byte 0x27 is flags 0x23");
+			check(rawBytes[0x1F] == 0, "ILExchange wire byte 0x1F is unk1F (0)");
+			uint16 wireNum = *reinterpret_cast<const uint16*>(&rawBytes[0x20]);
+			check(wireNum == 4, "ILExchange wire bytes at 0x20 are sequence number 4");
+			int16 wireOffset = *reinterpret_cast<const int16*>(&rawBytes[0x26]);
+			check(wireOffset == 460, "ILExchange wire bytes at 0x26 are 460ms defenderOffsetMs");
+			check(rawBytes[0x2C] == 0x23, "ILExchange wire byte 0x2C is flags 0x23");
 			uint16 attAdjust = *reinterpret_cast<const uint16*>(&rawBytes[0x02]);
 			check(attAdjust == 775, "ILExchange wire bytes at 0x02 are attackerAdjustMs 775");
 			uint16 defAdjust = *reinterpret_cast<const uint16*>(&rawBytes[0x04]);
 			check(defAdjust == 775, "ILExchange wire bytes at 0x04 are defenderAdjustMs 775");
-			uint32 wireMove0 = *reinterpret_cast<const uint32*>(&rawBytes[0x28]);
-			check(wireMove0 == IL_MOVE_PRE, "ILExchange wire bytes at 0x28 are attacker lead-in move 0x5214");
-			uint32 wireMove2 = *reinterpret_cast<const uint32*>(&rawBytes[0x38]);
-			check(wireMove2 == 0x2026, "ILExchange wire bytes at 0x38 are main move 0x2026");
-			uint32 attHp = *reinterpret_cast<const uint32*>(&rawBytes[0x50]);
-			uint32 defHp = *reinterpret_cast<const uint32*>(&rawBytes[0x54]);
+			uint32 wireMove0 = *reinterpret_cast<const uint32*>(&rawBytes[0x2D]);
+			check(wireMove0 == IL_MOVE_PRE, "ILExchange wire bytes at 0x2D are attacker lead-in move 0x5214");
+			uint32 wireMove2 = *reinterpret_cast<const uint32*>(&rawBytes[0x3D]);
+			check(wireMove2 == 0x2026, "ILExchange wire bytes at 0x3D are main move 0x2026");
+			uint32 attHp = *reinterpret_cast<const uint32*>(&rawBytes[0x55]);
+			uint32 defHp = *reinterpret_cast<const uint32*>(&rawBytes[0x59]);
 			check(attHp == exchange.attackerHealth && defHp == exchange.defenderHealth,
-				"ILExchange wire bytes at 0x50/0x54 are authentic attacker/defender health");
-			uint16 u58 = *reinterpret_cast<const uint16*>(&rawBytes[0x58]);
-			uint16 u5A = *reinterpret_cast<const uint16*>(&rawBytes[0x5A]);
-			check(u58 == 0x1000 && u5A == 0x1000, "ILExchange wire bytes at 0x58/0x5A are authentic 0x1000");
-			uint32 u70 = *reinterpret_cast<const uint32*>(&rawBytes[0x70]);
-			uint32 u74 = *reinterpret_cast<const uint32*>(&rawBytes[0x74]);
-			check(u70 == 0x00000100 && u74 == 0x00602b02, "ILExchange wire bytes at 0x70/0x74 match retail capture");
+				"ILExchange wire bytes at 0x55/0x59 are authentic attacker/defender health");
+			uint16 u5D = *reinterpret_cast<const uint16*>(&rawBytes[0x5D]);
+			uint16 u5F = *reinterpret_cast<const uint16*>(&rawBytes[0x5F]);
+			check(u5D == 0x1000 && u5F == 0x1000, "ILExchange wire bytes at 0x5D/0x5F are authentic 0x1000");
+			uint32 u6D = *reinterpret_cast<const uint32*>(&rawBytes[0x6D]);
+			uint32 u71 = *reinterpret_cast<const uint32*>(&rawBytes[0x71]);
+			check(u6D == 0x00000100 && u71 == 0x00602b02, "ILExchange wire bytes at 0x6D/0x71 match retail capture");
 		}
 
 		// ------------------------------------------------------------------

@@ -1,4 +1,4 @@
-﻿#ifndef MXOSIM_BOTMANAGER_H
+#ifndef MXOSIM_BOTMANAGER_H
 #define MXOSIM_BOTMANAGER_H
 
 #include "BotClient.h"
@@ -16,7 +16,7 @@ public:
     ~BotManager();
 
     void SpawnBot(int count, float x, float y, float z, int faction = 0);
-    std::shared_ptr<BotClient> SpawnSingleBot(float x, float y, float z, int faction = 0);
+    std::shared_ptr<BotClient> SpawnSingleBot(float x, float y, float z, int faction = 0, bool autoSpawnSelf = true);
     uint32 SpawnMissionBot(const struct MissionNpc& npcInfo, uint32 instanceId);
     void CommandBotAttack(const std::string& targetName);
     void BotStressTest(int count);

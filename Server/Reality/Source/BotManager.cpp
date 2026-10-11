@@ -100,7 +100,7 @@ uint64 BotManager::findOrCreateBotCharacter(int botNumber, float x, float y, flo
     return 9000000 + botNumber;
 }
 
-std::shared_ptr<BotClient> BotManager::SpawnSingleBot(float x, float y, float z, int faction)
+std::shared_ptr<BotClient> BotManager::SpawnSingleBot(float x, float y, float z, int faction, bool autoSpawnSelf)
 {
     // Item 113: Dynamic Spawns based on Control
     if (faction == FACTION_MACHINES || faction == FACTION_ZION || faction == FACTION_MEROVINGIAN) {
@@ -167,7 +167,9 @@ std::shared_ptr<BotClient> BotManager::SpawnSingleBot(float x, float y, float z,
         }
         else if (faction == FACTION_MEROVINGIAN) factionName = "Merovingian";
         po->setFactionName(factionName);
-        po->SpawnSelf();
+        if (autoSpawnSelf) {
+            po->SpawnSelf();
+        }
     }
 
     {
