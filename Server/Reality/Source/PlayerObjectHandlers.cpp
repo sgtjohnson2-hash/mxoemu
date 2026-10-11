@@ -1391,10 +1391,12 @@ void PlayerObject::ParsePlayerCommand( string theCmd )
 			m_parent.QueueState(std::make_shared<PositionStateMsg>(botGoId));
 			m_parent.QueueState(std::make_shared<RotationStateMsg>(botGoId, botPos.getMxoRot()));
 			m_parent.QueueState(std::make_shared<LocomotionStateMsg>(botGoId, 0, botPos.getMxoRot()));
+			m_parent.QueueState(std::make_shared<CombatantModeMsg>(botGoId, 1));
 			sGame.AnnounceStateUpdateNear((float)bx, (float)bz, 20000.0f, std::make_shared<PlayerAppearanceMsg>(botGoId));
 			sGame.AnnounceStateUpdateNear((float)bx, (float)bz, 20000.0f, std::make_shared<PositionStateMsg>(botGoId));
 			sGame.AnnounceStateUpdateNear((float)bx, (float)bz, 20000.0f, std::make_shared<RotationStateMsg>(botGoId, botPos.getMxoRot()));
 			sGame.AnnounceStateUpdateNear((float)bx, (float)bz, 20000.0f, std::make_shared<LocomotionStateMsg>(botGoId, 0, botPos.getMxoRot()));
+			sGame.AnnounceStateUpdateNear((float)bx, (float)bz, 20000.0f, std::make_shared<CombatantModeMsg>(botGoId, 1));
 			INFO_LOG(format("Dojo bot %1% spawned for %2%: dist %3% units, pos (%4%, %5%, %6%) player (%7%, %8%, %9%) bot rot %10% lvl %11% hp %12% dmgScale %13%")
 				% botGoId % m_handle % (sqrt((pos.x - bx) * (pos.x - bx) + (pos.z - bz) * (pos.z - bz)))
 				% bx % pos.y % bz % pos.x % pos.y % pos.z % botPos.rot % int(botLvl) % hpF % dmgScale);
@@ -1495,17 +1497,28 @@ void PlayerObject::ParsePlayerCommand( string theCmd )
 		else if (iequals(subCommand, "clear"))
 		{
 			int killed = 0;
+			std::vector<uint32> toDestroy;
 			auto goIds = sObjMgr.getAllGOIds();
 			for (uint32 id : goIds) {
 				PlayerObject* p = sObjMgr.getGOPtrSafe(id);
-				if (p && p != this && p->getClient().isBot() && !p->isDead()) {
+				if (p && p != this && p->getClient().isBot()) {
 					if (p->getPosition().DistanceSq(pos) < 5000.0f * 5000.0f) {
-						p->die(0); // killerGoId 0 = no reward; announces death + cleans combat state
+						if (!p->isDead()) {
+							p->die(0); // killerGoId 0 = no reward; announces death + cleans combat state
+						}
+						toDestroy.push_back(id);
 						killed++;
 					}
 				}
 			}
-			m_parent.QueueCommand(make_shared<SystemChatMsg>((format("{c:00FF00}Dojo: Cleared %1% bots.{/c}") % killed).str()));
+			for (uint32 id : toDestroy) {
+				sCombatSys.RemoveCombatant(id);
+				sObjMgr.destroyObject(id);
+			}
+			if (!toDestroy.empty() && BotManager::getSingletonPtr()) {
+				sBotMgr.PruneDeadBots();
+			}
+			m_parent.QueueCommand(make_shared<SystemChatMsg>((format("{c:00FF00}Dojo: Cleared and despawned %1% bots.{/c}") % killed).str()));
 		}
 		else
 		{

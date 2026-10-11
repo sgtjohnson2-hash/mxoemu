@@ -618,6 +618,7 @@ bool CombatSystem::RequestInterlock(uint32 attackerGoId, uint32 targetGoId, uint
 					continue; //bots have no client to drive
 
 				//combat mode on - exact HDS capture (CombatHandler.ProcessRequestCloseCombat)
+				sides[i].self->getClient().QueueState(std::make_shared<SelfCombatantModeMsg>(1));
 				sides[i].self->getClient().QueueState(std::make_shared<SelfCombatModeOnMsg>());
 
 				uint16 ilViewId = sObjMgr.allocateDynamicView(&sides[i].self->getClient(), uint32(GOID_ILCOMBATHANDLER) << 16);

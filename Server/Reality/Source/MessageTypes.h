@@ -750,13 +750,12 @@ public:
 	const ByteBuffer& toBuf() { throw PacketNoLongerValid(); }
 };
 
-//self-view combatant mode change - View 2 has only 24 attributes in retail 7.6005 (no Attribute 43)
+//self-view combatant mode change (PlayerAttrSelf::CombatantMode, idx 43)
 class SelfCombatantModeMsg : public StaticMsg
 {
 public:
 	SelfCombatantModeMsg(uint8 mode);
 	~SelfCombatantModeMsg() {}
-	const ByteBuffer& toBuf() { throw PacketNoLongerValid(); }
 };
 
 //evade shield update on another player's view (PlayerAttrOther::EvadeShieldHealth, idx 21)
@@ -867,6 +866,7 @@ public:
 		const byte rawData[19] = { 0x03, 0x02, 0x00, 0x03, 0x01, 0x0C, 0x00, 0x80, 0x84, 0x00,
 			0x80, 0x80, 0x80, 0x80, 0x01, 0x00, 0x00, 0x10, 0x00 };
 		m_buf.append(rawData,sizeof(rawData));
+		m_buf << uint16(0); // nomoreattribs
 	}
 	~SelfCombatModeOnMsg() {}
 };

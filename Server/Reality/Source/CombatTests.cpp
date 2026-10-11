@@ -2373,6 +2373,24 @@ int RunCombatTestSuite()
 				"CombatantModeMsg group headers match 7-bit groups 0..4 (0x80 0x80 0x80 0x80 0x08)");
 			check(combatantBuf.read<uint8>(8) == 0x01, "CombatantModeMsg Attribute 31 value is 0x01 (combat mode)");
 			check(combatantBuf.read<uint16>(9) == 0, "CombatantModeMsg terminated with nomoreattribs uint16(0)");
+
+			// 10. Verify SelfCombatantModeMsg wire layout for local player (View 2 / VIEWID_SELF)
+			// Attribute 43 (PlayerAttrSelf::CombatantMode) packs into Group 6 bit 1:
+			// Headers: 6x 0x80 followed by 0x02, value: 0x01 (mode 1), terminated with nomoreattribs uint16(0).
+			// Total wire size must be exactly 14 bytes: 0x03 [VIEWID_SELF:2] [type:1=0x02] [groups:7] [value:1] [nomoreattribs:2]
+			SelfCombatantModeMsg selfCombatantMsg(1);
+			const ByteBuffer& selfBuf = selfCombatantMsg.toBuf();
+			check(selfBuf.size() == 14, "SelfCombatantModeMsg size is authentic 14 bytes");
+			check(selfBuf.read<uint8>(0) == 0x03, "SelfCombatantModeMsg opcode is 0x03");
+			check(selfBuf.read<uint16>(1) == VIEWID_SELF, "SelfCombatantModeMsg viewId matches VIEWID_SELF (2)");
+			check(selfBuf.read<uint8>(3) == 0x02, "SelfCombatantModeMsg update type is 0x02");
+			check(selfBuf.read<uint8>(4) == 0x80 && selfBuf.read<uint8>(5) == 0x80 &&
+				selfBuf.read<uint8>(6) == 0x80 && selfBuf.read<uint8>(7) == 0x80 &&
+				selfBuf.read<uint8>(8) == 0x80 && selfBuf.read<uint8>(9) == 0x80 &&
+				selfBuf.read<uint8>(10) == 0x02,
+				"SelfCombatantModeMsg group headers match 7-bit groups 0..6 (6x0x80 + 0x02)");
+			check(selfBuf.read<uint8>(11) == 0x01, "SelfCombatantModeMsg Attribute 43 value is 0x01 (combat mode)");
+			check(selfBuf.read<uint16>(12) == 0, "SelfCombatantModeMsg terminated with nomoreattribs uint16(0)");
 		}
 	}
 	catch (const std::exception& e)

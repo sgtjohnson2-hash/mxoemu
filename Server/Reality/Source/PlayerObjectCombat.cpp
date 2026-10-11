@@ -244,9 +244,13 @@ void PlayerObject::setCombatStance( bool inCombatStance )
 {
 	uint8 mode = inCombatStance ? 1 : 0;
 	//own HUD/stance: authentic HDS combat mode on for real clients
-	if (inCombatStance && !m_parent.isBot())
+	if (!m_parent.isBot())
 	{
-		m_parent.QueueState(std::make_shared<SelfCombatModeOnMsg>());
+		m_parent.QueueState(std::make_shared<SelfCombatantModeMsg>(mode));
+		if (inCombatStance)
+		{
+			m_parent.QueueState(std::make_shared<SelfCombatModeOnMsg>());
+		}
 	}
 	//everyone else sees the stance change on our view
 	sGame.AnnounceStateUpdate(&m_parent,shared_ptr<CombatantModeMsg>(new CombatantModeMsg(m_goId,mode)));

@@ -1577,6 +1577,15 @@ SelfEquippedItemMsg::SelfEquippedItemMsg( uint32 itemId )
 SelfCombatantModeMsg::SelfCombatantModeMsg( uint8 mode )
 {
 	m_buf.clear();
+	AttributeUpdateBlock block;
+	block.addByte(PlayerAttrSelf::CombatantMode, mode);
+
+	m_buf << uint8(0x03);
+	m_buf << uint16(VIEWID_SELF);
+	m_buf << uint8(0x02);
+	ByteBuffer blockBuf = block.toBuf(false);
+	m_buf.append(blockBuf.contents(),blockBuf.size());
+	m_buf << uint16(0); // nomoreattribs
 }
 
 SpawnILCombatHandlerMsg::SpawnILCombatHandlerMsg( uint16 viewId, uint8 spawnIdCounter, LocationVector pos, float simTime )
