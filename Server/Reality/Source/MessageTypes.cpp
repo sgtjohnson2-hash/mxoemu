@@ -1400,6 +1400,11 @@ const ByteBuffer& CombatantModeMsg::toBuf()
 		throw PacketNoLongerValid();
 	}
 
+	if (viewId == VIEWID_SELF || viewId == 0)
+	{
+		throw PacketNoLongerValid();
+	}
+
 	AttributeUpdateBlock block;
 	block.addByte(PlayerAttrOther::CombatantMode,m_mode);
 
@@ -1666,10 +1671,10 @@ void ILExchange::write( ByteBuffer &buf ) const
 ILCombatStateMsg::ILCombatStateMsg( uint16 ilViewId, LocationVector pos, uint32 seq,
 	const std::vector<uint32> &slotHandles, const std::vector<ILExchange> &exchanges )
 {
-	int updateMode = sConfig.GetIntDefault("Interlock.UpdateMode", 2);
+	int updateMode = sConfig.GetIntDefault("Interlock.UpdateMode", 0);
 	// Mode 2: Authentic direct ilViewId framing via AttributeUpdateBlock (Attribute 3: CLTGOCmpILCombatHandlerClient).
 	// Opcode 0x03, ilViewId, count=1, group header=0x08 (bit 3), pos, seq, mask, slots, count, exchanges, nomoreattribs.
-	// Mode 0: Legacy ObjectManager framing.
+	// Mode 0: Authentic ObjectManager framing (VIEWID_OBJECTMANAGER Attribute 2).
 	if (updateMode == 2 || (updateMode == 1 && (slotHandles.empty() || seq > 1)))
 	{
 		ByteBuffer payload;
@@ -1720,7 +1725,7 @@ ILCombatStateMsg::ILCombatStateMsg( uint16 ilViewId, LocationVector pos, uint32 
 	m_buf << uint8(0x03);
 	m_buf << uint16(VIEWID_OBJECTMANAGER);
 	m_buf << uint8(0x02);
-	m_buf << uint16(payload.size() + 2);
+	m_buf << uint16(payload.size());
 	m_buf.append(payload.contents(),payload.size());
 	m_buf << uint16(0); // nomoreattribs
 }
