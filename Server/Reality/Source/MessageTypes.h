@@ -747,7 +747,8 @@ class SelfHitFxMsg : public StaticMsg
 public:
 	SelfHitFxMsg(class PlayerObject *thePlayer, uint32 fxId, uint8 hitCounter);
 	~SelfHitFxMsg() {}
-	const ByteBuffer& toBuf() { throw PacketNoLongerValid(); }
+	// Constructor already wrote the self-view buffer. The override used to throw,
+	// which dropped the victim's hit packet and rewound the reliable sequence.
 };
 
 //self-view combatant mode change (PlayerAttrSelf::CombatantMode, idx 43)

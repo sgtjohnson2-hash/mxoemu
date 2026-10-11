@@ -356,6 +356,9 @@ void PlayerObject::takeDamage( uint32 attackerGoId, uint16 damage, uint32 fxId )
 	//the victim's own client gets the self-view layout (HUD bar + FX)
 	sGame.AnnounceStateUpdate(&m_parent,shared_ptr<CombatHitFxMsg>(new CombatHitFxMsg(m_goId,fxId,m_hitCounter)));
 	m_parent.QueueState(shared_ptr<SelfHitFxMsg>(new SelfHitFxMsg(this,fxId,m_hitCounter)));
+	// SelfHitFxMsg::toBuf still drops that packet. Heals already push the HUD
+	// through sendVitals; damage did not, so the bar stayed full until death.
+	sendVitals();
 
 	if (m_healthC == 0) {
         if (m_deathDelayMS == 0) {
