@@ -8,6 +8,7 @@
 #include "Log.h"
 #include "GameServer.h"
 #include "CombatSystem.h"
+#include "AbilitySystem.h"
 #include "DataLoader.h"
 #include "SpatialGrid.h"
 #include "StatusEffectManager.h"
@@ -640,6 +641,19 @@ NodeStatus ActionCombatCycle::Tick(BotClient* bot)
 
     me->setTactic(chosen);
     sCombatSys.SetTactic(bot->GetPlayerGoId(), chosen);
+
+    // One real ability for this faction, loaded once, cast through the same handler a player uses.
+    me->ensureAbilitySystem();
+    if (auto ab = me->getAbilitySystem())
+    {
+        uint16 id = 133; // Kung Fu
+        if (me->getFaction() == FACTION_MACHINES) id = 14;          // Power Shot
+        else if (me->getFaction() == FACTION_MEROVINGIAN) id = (hpPct < 0.50f) ? 77 : 146; // Restore, else Poison Knife
+        if (!ab->getAbility(id))
+            ab->loadAbility(id, 1, 0);
+        if (ab->canCastAbility(id))
+            sCombatSys.UseAbility(me, id, target->getGoId());
+    }
 
     uint32 delay = (uint32)(2000.0f / me->GetTimeDilation());
     bot->SetNextActionTime(currentTime + delay); // Scaled GCD
