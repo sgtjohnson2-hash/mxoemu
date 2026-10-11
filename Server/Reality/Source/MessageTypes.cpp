@@ -1666,19 +1666,17 @@ void ILExchange::write( ByteBuffer &buf ) const
 ILCombatStateMsg::ILCombatStateMsg( uint16 ilViewId, LocationVector pos, uint32 seq,
 	const std::vector<uint32> &slotHandles, const std::vector<ILExchange> &exchanges )
 {
-	int updateMode = sConfig.GetIntDefault("Interlock.UpdateMode", 0);
-	// Mode 1: Authentic HDS Hybrid (Opening packet with slots uses ObjectManager attribute 2 framing
-	// per HDS capture 010002A700; periodic round updates use direct ilViewId framing per HDS UpdateCloseCombat).
-	// Mode 2: Direct ilViewId framing for both opening and rounds.
-	// Mode 0: ObjectManager framing for both opening and rounds.
-	if ((updateMode == 1 && (slotHandles.empty() || seq > 1)) || updateMode == 2)
+	int updateMode = sConfig.GetIntDefault("Interlock.UpdateMode", 2);
+	// Mode 2: Authentic direct ilViewId framing (Opcode 0x03, ilViewId, attribute count 1,
+	// attribute ID 3 [CLTGOCmpILCombatHandlerClient], pos, seq, mask, slots, count, exchanges).
+	// Mode 0: Legacy ObjectManager framing.
+	if (updateMode == 2 || (updateMode == 1 && (slotHandles.empty() || seq > 1)))
 	{
-		// HDS direct-view update framing from UpdateCloseCombat capture:
-		// Leading opcode 0x03, direct ilViewId, group flags 0x0003, pos, seq, mask, slots, count, exchanges, 27-byte tail
 		m_buf.clear();
 		m_buf << uint8(0x03);
 		m_buf << uint16(ilViewId);
-		m_buf << uint16(0x0003); // attribute group flags: 3 (position + combat data)
+		m_buf << uint8(0x01); // 1 attribute
+		m_buf << uint8(0x03); // attribute ID 3 (CLTGOCmpILCombatHandlerClient)
 		byte posBuf[sizeof(double)*3];
 		pos.toDoubleBuf(posBuf, sizeof(posBuf));
 		m_buf.append(posBuf, sizeof(posBuf));
