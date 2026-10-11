@@ -1684,7 +1684,7 @@ ILCombatStateMsg::ILCombatStateMsg( uint16 ilViewId, LocationVector pos, uint32 
 
 		AttributeUpdateBlock block;
 		block.addAttribute(3, payload);
-		ByteBuffer blockBuf = block.toBuf(true);
+		ByteBuffer blockBuf = block.toBuf(false);
 
 		m_buf.clear();
 		m_buf << uint8(0x03);
