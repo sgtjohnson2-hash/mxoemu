@@ -122,6 +122,7 @@ bool Database::Initialize(const char* Hostname, unsigned int port, const char* U
 	// Ensure schema migrations and persistence tables exist
 	if (!m_isMockMode) {
 		Execute("ALTER TABLE `characters` ADD COLUMN IF NOT EXISTS `rebirth_count` INT DEFAULT 0;");
+		Execute("ALTER TABLE `characters` ADD COLUMN IF NOT EXISTS `fightingStyle` TINYINT UNSIGNED NOT NULL DEFAULT 0;");
 		Execute("ALTER TABLE `hardlines` ADD COLUMN IF NOT EXISTS `FactionTag` INT UNSIGNED NOT NULL DEFAULT 0;");
 		Execute("ALTER TABLE `inventory` ADD COLUMN IF NOT EXISTS `item_metadata` TEXT DEFAULT NULL;");
 		Execute("CREATE TABLE IF NOT EXISTS `ai_ltm` ("

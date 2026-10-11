@@ -699,12 +699,33 @@ bool CombatSystem::RequestInterlock(uint32 attackerGoId, uint32 targetGoId, uint
 					std::vector<uint32> slots;
 					slots.push_back(selfViewWithSpawnId);
 					slots.push_back(otherViewWithSpawnId);
-					uint32 openMove = SelectInterlockMove(session, pA, pB, InterlockExchangeOutcome::NormalHit);
-					InterlockAnimPair openPair = CombatAnimationMatrix::GetDynamicAnimationPair(
-						pA->getFightingStyle(), session.tacticA,
-						pB->getFightingStyle(), session.tacticB,
-						InterlockExchangeOutcome::NormalHit, false
-					);
+					// The opening used to be one hardcoded clip. Use the same ILDB move the
+					// later rounds use, and fall back if the database is not loaded.
+					uint32 openMove = 0;
+					InterlockAnimPair openPair;
+					if (sConfig.GetBoolDefault("Interlock.UseDynamicILDB", true))
+					{
+						const ILDBMoveRecord* openRec = CombatAnimationMatrix::FindMoveVariant(
+							pA->getFightingStyle(), session.tacticA,
+							pB->getFightingStyle(), session.tacticB,
+							InterlockExchangeOutcome::NormalHit, false, 1);
+						if (openRec && openRec->moveId != 0)
+						{
+							openMove = openRec->moveId;
+							openPair.attackerAnimId = openRec->aggrAnim;
+							openPair.defenderAnimId = openRec->defeAnim;
+							openPair.contactDelaySeconds = (openRec->aggrDur > 0) ? ((float)openRec->aggrDur / 1000.0f) : 0.50f;
+						}
+					}
+					if (openMove == 0)
+					{
+						openMove = SelectInterlockMove(session, pA, pB, InterlockExchangeOutcome::NormalHit);
+						openPair = CombatAnimationMatrix::GetDynamicAnimationPair(
+							pA->getFightingStyle(), session.tacticA,
+							pB->getFightingStyle(), session.tacticB,
+							InterlockExchangeOutcome::NormalHit, false
+						);
+					}
 					std::vector<ILExchange> opening;
 					opening.push_back(BuildExchange(session, sides[i].self, pA, pB, 1,
 						0, 0, openMove, &openPair));
