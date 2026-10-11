@@ -59,8 +59,10 @@ public:
 		ByteBuffer buf; buf << value; addAttribute(index,buf);
 	}
 
-	//serialize: [count?] group0 [values...] group1 [values...] ...
-	ByteBuffer toBuf(bool includeCount) const
+	// serialize: group0 [values...] group1 [values...] ... (group headers have bit 7 set if more follow)
+	// Retail 7.6005 CLTDistrObjView::UnpackAttributes (0x623217B0) and UnpackAttributeUpdate (0x623215B0)
+	// both expect raw group bitmasks starting at byte 0 with NO count prefix.
+	ByteBuffer toBuf(bool includeCount = false) const
 	{
 		ByteBuffer result;
 		if (m_attribs.empty())

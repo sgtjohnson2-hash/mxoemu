@@ -321,7 +321,7 @@ const ByteBuffer& PlayerAppearanceMsg::toBuf()
 
 	m_buf << uint8(0x03);
 	m_buf << uint16(viewId);
-	ByteBuffer blockBuf = block.toBuf(!isSelf);
+	ByteBuffer blockBuf = block.toBuf(false);
 	m_buf.append(blockBuf.contents(), blockBuf.size());
 	m_buf << uint16(0); //nomoreattribs
 	return m_buf;
@@ -1321,7 +1321,7 @@ const ByteBuffer& HealthUpdateMsg::toBuf()
 
 	m_buf << uint8(0x03);
 	m_buf << uint16(viewId);
-	ByteBuffer blockBuf = block.toBuf(true);
+	ByteBuffer blockBuf = block.toBuf(false);
 	m_buf.append(blockBuf.contents(),blockBuf.size());
 	m_buf << uint16(0); // nomoreattribs
 	return m_buf;
@@ -1371,7 +1371,7 @@ const ByteBuffer& CombatHitFxMsg::toBuf()
 
 	m_buf << uint8(0x03);
 	m_buf << uint16(viewId);
-	ByteBuffer blockBuf = block.toBuf(true);
+	ByteBuffer blockBuf = block.toBuf(false);
 	m_buf.append(blockBuf.contents(),blockBuf.size());
 	m_buf << uint16(0); // nomoreattribs
 	return m_buf;
@@ -1410,7 +1410,7 @@ const ByteBuffer& CombatantModeMsg::toBuf()
 
 	m_buf << uint8(0x03);
 	m_buf << uint16(viewId);
-	ByteBuffer blockBuf = block.toBuf(true);
+	ByteBuffer blockBuf = block.toBuf(false);
 	m_buf.append(blockBuf.contents(),blockBuf.size());
 	m_buf << uint16(0); // nomoreattribs
 	return m_buf;
@@ -1502,7 +1502,7 @@ const ByteBuffer& EvadeShieldUpdateMsg::toBuf()
 
 	m_buf << uint8(0x03);
 	m_buf << uint16(viewId);
-	ByteBuffer blockBuf = block.toBuf(true);
+	ByteBuffer blockBuf = block.toBuf(false);
 	m_buf.append(blockBuf.contents(),blockBuf.size());
 	m_buf << uint16(0); // nomoreattribs
 	return m_buf;
@@ -1554,7 +1554,7 @@ const ByteBuffer& EquippedItemUpdateMsg::toBuf()
 
 	m_buf << uint8(0x03);
 	m_buf << uint16(viewId);
-	ByteBuffer blockBuf = block.toBuf(true);
+	ByteBuffer blockBuf = block.toBuf(false);
 	m_buf.append(blockBuf.contents(),blockBuf.size());
 	m_buf << uint16(0); // nomoreattribs
 	return m_buf;

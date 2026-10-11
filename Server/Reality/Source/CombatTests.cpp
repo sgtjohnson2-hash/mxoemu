@@ -2352,6 +2352,27 @@ int RunCombatTestSuite()
 			sObjMgr.releaseRelevantSet(&testClient);
 			check(sObjMgr.getGOForView(&testClient, botView1) == 0,
 				"releaseRelevantSet clears all allocated views for disconnected client");
+
+			// 9. Verify CombatantModeMsg wire layout matching retail 7.6005 CLTDistrObjView::UnpackAttributes (0x623217B0)
+			// Attribute 31 (PlayerAttrOther::CombatantMode) packs into Group 4 bit 3:
+			// Headers: 0x80 0x80 0x80 0x80 0x08, value: 0x01 (mode 1), terminated with nomoreattribs uint16(0).
+			// Total wire size must be exactly 11 bytes with NO count prefix.
+			TestHumanClient modeClient;
+			modeClient.SetPlayerGoId(33000);
+			uint32 testBotGoId = 33269;
+			uint16 testBotViewId = sObjMgr.getViewForGO(&modeClient, testBotGoId);
+			CombatantModeMsg combatantMsg(testBotGoId, 1);
+			combatantMsg.setReceiver(&modeClient);
+			const ByteBuffer& combatantBuf = combatantMsg.toBuf();
+			check(combatantBuf.size() == 11, "CombatantModeMsg size is authentic 11 bytes (no count prefix)");
+			check(combatantBuf.read<uint8>(0) == 0x03, "CombatantModeMsg opcode is 0x03");
+			check(combatantBuf.read<uint16>(1) == testBotViewId, "CombatantModeMsg viewId matches botViewId");
+			check(combatantBuf.read<uint8>(3) == 0x80 && combatantBuf.read<uint8>(4) == 0x80 &&
+				combatantBuf.read<uint8>(5) == 0x80 && combatantBuf.read<uint8>(6) == 0x80 &&
+				combatantBuf.read<uint8>(7) == 0x08,
+				"CombatantModeMsg group headers match 7-bit groups 0..4 (0x80 0x80 0x80 0x80 0x08)");
+			check(combatantBuf.read<uint8>(8) == 0x01, "CombatantModeMsg Attribute 31 value is 0x01 (combat mode)");
+			check(combatantBuf.read<uint16>(9) == 0, "CombatantModeMsg terminated with nomoreattribs uint16(0)");
 		}
 	}
 	catch (const std::exception& e)
