@@ -1286,8 +1286,23 @@ void PlayerObject::regenerateVitals()
         return;
     m_lastRegenTickMs = now;
 
-    if (m_isDead || m_healthC == 0 || m_inCombat || m_ilPartner != 0 || m_deathDelayMS > 0)
+    if (m_isDead || m_healthC == 0 || m_deathDelayMS > 0)
         return;
+
+    // Health only comes back out of the fight. Inner Strength still ticks during one,
+    // slower than the calm rate, or a special drains the bar and never returns.
+    const bool fighting = m_inCombat || m_ilPartner != 0;
+    if (fighting)
+    {
+        if (m_innerStrC >= m_innerStrM)
+            return;
+        uint32 combatPct = std::max<uint32>(1, isPct / 2);
+        uint32 is = uint32(m_innerStrC) + std::max<uint32>(1, uint32(m_innerStrM) * combatPct / 100);
+        m_innerStrC = uint16(std::min<uint32>(is, m_innerStrM));
+        sendVitals();
+        return;
+    }
+
     if (now - m_lastDamageTakenMs < calmMs)
         return;
     if (m_healthC >= m_healthM && m_innerStrC >= m_innerStrM)
