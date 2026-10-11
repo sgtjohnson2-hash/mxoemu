@@ -133,9 +133,11 @@ bool StaticObjectManager::LoadCSV(const std::string& filePath)
             float posY = std::strtof(col[7], nullptr);
             float posZ = std::strtof(col[8], nullptr);
 
-            float halfWidth = 1500.0f;
-            float halfDepth = 1500.0f;
-            float halfHeight = 2500.0f;
+            // The CSV has no real extents. A 30 m cube around every prop sealed the
+            // street, and a shot that started inside one of those cubes was always "blocked".
+            float halfWidth = 200.0f;
+            float halfDepth = 200.0f;
+            float halfHeight = 500.0f;
 
             StaticAABB box;
             box.metrId = metrId;
@@ -211,12 +213,21 @@ bool StaticObjectManager::RayAABBIntersect(const StaticAABB& box, float ox, floa
     float tmin = std::min(t1, t2);
     float tmax = std::max(t1, t2);
 
+    float t3 = (box.minY - oy) * invDy;
+    float t4 = (box.maxY - oy) * invDy;
+    tmin = std::max(tmin, std::min(t3, t4));
+    tmax = std::min(tmax, std::max(t3, t4));
+
     float t5 = (box.minZ - oz) * invDz;
     float t6 = (box.maxZ - oz) * invDz;
     tmin = std::max(tmin, std::min(t5, t6));
     tmax = std::min(tmax, std::max(t5, t6));
 
     if (tmax < 0.0f || tmin > tmax)
+        return false;
+
+    // The muzzle is inside this volume. It is not cover between the shooter and the target.
+    if (tmin < 0.0f)
         return false;
 
     return tmin <= rayLength;

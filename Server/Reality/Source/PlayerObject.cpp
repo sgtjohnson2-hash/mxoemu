@@ -63,7 +63,9 @@ PlayerObject::PlayerObject( GameClient &parent,uint64 charUID, bool isBot ) :m_p
 	if (!isBot) {
 		loadFromDB(true);
 		m_inventorySystem->loadFromDB();
-		// Nothing in the bag was marked equipped, so a pistol in the starter kit never fired.
+		// A saved equip that is no longer in the bag falls through to the first weapon.
+		if (m_equippedWeaponId != 0 && !m_inventorySystem->getItemByGoId(m_equippedWeaponId))
+			m_equippedWeaponId = 0;
 		if (m_equippedWeaponId == 0)
 		{
 			for (auto item : m_inventorySystem->getAllItems())
@@ -124,7 +126,7 @@ void PlayerObject::loadFromDB( bool updatePos )
 		format sql = format("SELECT `handle`, `firstName`, `lastName`, `background`,\
 							`x`, `y`, `z`, `rot`, \
 							`healthC`, `healthM`, `innerStrC`, `innerStrM`,\
-							`level`, `profession`, `alignment`, `pvpflag`, `exp`, `cash`, `district`, `adminFlags`, `fightingStyle`\
+							`level`, `profession`, `alignment`, `pvpflag`, `exp`, `cash`, `district`, `adminFlags`, `fightingStyle`, `equippedItem`\
 							FROM `characters` WHERE `charId` = '%1%' LIMIT 1") % m_characterUID;
 
 		scoped_ptr<QueryResult> result(sDatabase.Query(sql));
@@ -182,6 +184,7 @@ void PlayerObject::loadFromDB( bool updatePos )
 			if (style <= (uint8)FightingStyle::Karate)
 				m_fightingStyle = (FightingStyle)style;
 		}
+		m_equippedWeaponId = field[21].GetUInt32();
 
 		// A disconnect during the 3 s takedown used to save 0 HP with no dead flag,
 		// so the next login was a living character the server treated as empty.
@@ -392,7 +395,7 @@ void PlayerObject::saveDataToDB()
 	if (Database_Main == nullptr || m_characterUID >= 9000000) //virtual bots or offline test mode are memory-only
 		return;
 
-	bool storeSuccess = sDatabase.Execute(format("UPDATE `characters` SET `x` = '%1%', `y` = '%2%', `z` = '%3%', `rot` = '%4%', `exp` = '%5%', `cash` = '%6%', `level` = '%7%', `healthC` = '%8%', `healthM` = '%9%', `innerStrC` = '%10%', `innerStrM` = '%11%', `district` = '%12%', `fightingStyle` = '%13%', `lastOnline` = NOW() WHERE `charId` = '%14%'")
+	bool storeSuccess = sDatabase.Execute(format("UPDATE `characters` SET `x` = '%1%', `y` = '%2%', `z` = '%3%', `rot` = '%4%', `exp` = '%5%', `cash` = '%6%', `level` = '%7%', `healthC` = '%8%', `healthM` = '%9%', `innerStrC` = '%10%', `innerStrM` = '%11%', `district` = '%12%', `fightingStyle` = '%13%', `equippedItem` = '%14%', `lastOnline` = NOW() WHERE `charId` = '%15%'")
 		% m_pos.x
 		% m_pos.y
 		% m_pos.z
@@ -406,6 +409,7 @@ void PlayerObject::saveDataToDB()
 		% m_innerStrM
 		% uint32(m_district)
 		% uint32(m_fightingStyle)
+		% m_equippedWeaponId
 		% m_characterUID );
 
 	if (!storeSuccess)

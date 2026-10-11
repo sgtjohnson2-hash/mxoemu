@@ -582,6 +582,9 @@ bool CombatSystem::RequestInterlock(uint32 attackerGoId, uint32 targetGoId, uint
 
 	posA.rot = std::atan2(-(posB.x - posA.x), -(posB.z - posA.z));
 	posB.rot = std::atan2(-(posA.x - posB.x), -(posA.z - posB.z));
+	// A bot spawned on a different floor made the exchange play in the air.
+	// The attacker is standing on the floor the fight was started from.
+	posB.y = posA.y;
 	pA->setPosition(posA);
 	pB->setPosition(posB);
 
