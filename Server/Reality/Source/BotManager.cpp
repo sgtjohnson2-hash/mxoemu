@@ -207,8 +207,9 @@ uint32 BotManager::SpawnMissionBot(const MissionNpc& npcInfo, uint32 instanceId)
     bot->MoveTo(npcInfo.x, npcInfo.y, npcInfo.z);
     
     bot->SetSpawnLocation(npcInfo.x, npcInfo.y, npcInfo.z);
-    if (npcInfo.type == "FRIENDLY")
-        bot->SetPassive(true); // quest givers stand still and never pick fights
+    // Quest givers and mission targets stand on their mark. A hostile still
+    // fights back once it is hit; it does not wander off before that step.
+    bot->SetPassive(true);
 
     PlayerObject* po = sObjMgr.getGOPtr(bot->GetPlayerGoId());
     if (po) {

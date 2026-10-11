@@ -78,7 +78,14 @@ static void SpawnCurrentObjectiveNpc(PlayerObject* player, MissionTemplate& temp
         MissionNpc placed = PlaceMissionNpcNearPlayer(npc, player, 0);
         uint32 npcGoId = sBotMgr.SpawnMissionBot(placed, player->getClient().m_instanceId);
         if (npcGoId != 0)
+        {
             state.spawnedNpcs[npc.idNpc] = npcGoId;
+            // AoI only introduces one stranger per second, and a full street can fill the
+            // cap before this contact. Put them on the player's client now.
+            PlayerObject* npcPo = sObjMgr.getGOPtrSafe(npcGoId);
+            if (npcPo && !player->getClient().isBot())
+                player->ensureEntityKnown(npcPo);
+        }
         break;
     }
 }
