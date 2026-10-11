@@ -1831,6 +1831,9 @@ bool CombatSystem::RunFreeFireShot(FreeFireState &state)
 	PlayerObject* pB = getPlayerSafe(state.targetGoId);
 	if (!pA || !pB || pA->isDead() || pB->isDead())
 		return false; //Update() reaps the engagement (never erase mid-iteration)
+	// The shot that emptied the bar already landed. Do not keep firing for the takedown window.
+	if (pA->getCurrentHealth() == 0 || pB->getCurrentHealth() == 0)
+		return false;
 
 	const CombatMove* moveA = state.moveId ? GetMove(state.moveId) : DefaultRanged();
 	if (!moveA)

@@ -5016,11 +5016,18 @@ void PlayerObject::RPC_HandleJackoutRequest( ByteBuffer &srcCmd )
 
 void PlayerObject::jackoutEvent()
 {
+	if (m_parent.isBot())
+		return;
+
+	// Drop the fight first so the other person is not left in a dead interlock.
+	sCombatSys.RemoveCombatant(m_goId);
 	m_parent.QueueCommand(make_shared<HexGenericMsg>("80fd000000000000"));
+	m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:00FF00}[JACKOUT] Carrier signal terminated. Jackout complete.{/c}"));
 	m_parent.FlushQueue();
 	saveDataToDB();
 	INFO_LOG(format("Player %1% successfully jacked out of the Matrix.") % m_handle);
-	m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:00FF00}[JACKOUT] Carrier signal terminated. Jackout complete.{/c}"));
+	// The client never sends JackoutFinished. Without this the socket stays open and you are still in the city.
+	m_parent.Invalidate();
 }
 
 void PlayerObject::RPC_HandleJackoutFinished( ByteBuffer &srcCmd )

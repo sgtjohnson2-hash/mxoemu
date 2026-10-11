@@ -63,6 +63,21 @@ PlayerObject::PlayerObject( GameClient &parent,uint64 charUID, bool isBot ) :m_p
 	if (!isBot) {
 		loadFromDB(true);
 		m_inventorySystem->loadFromDB();
+		// Nothing in the bag was marked equipped, so a pistol in the starter kit never fired.
+		if (m_equippedWeaponId == 0)
+		{
+			for (auto item : m_inventorySystem->getAllItems())
+			{
+				if (!item)
+					continue;
+				const ItemTemplate* tpl = sDataLoader.GetItemTemplate(item->getTemplateId());
+				if (tpl && tpl->type == ITEM_TYPE_WEAPON)
+				{
+					m_equippedWeaponId = item->getGoId();
+					break;
+				}
+			}
+		}
 	} else {
 		m_handle = "Bot_" + std::to_string(charUID);
 		m_firstName = "Bot";
@@ -599,6 +614,8 @@ void PlayerObject::PopulateWorld()
 	if (m_inventorySystem && !m_parent.isBot())
 	{
 		m_inventorySystem->sendFullInventory();
+		if (m_equippedWeaponId != 0)
+			sendEquippedWeaponUpdate();
 	}
 }
 
