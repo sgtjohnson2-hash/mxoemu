@@ -32,6 +32,15 @@ std::map<std::string, std::pair<uint32, std::string>> TesterBrain::s_findings;
 
 namespace
 {
+    // A bot has no screen, so nothing has allocated a view for the person it wants
+    // to click. The handlers only accept a view id. Allocate one, then send that.
+    uint16 ViewFor(GameClient* who, uint32 goId)
+    {
+        if (!who || goId == 0) return 0;
+        try { return sObjMgr.getViewForGO(who, goId); }
+        catch (...) { return 0; }
+    }
+
     // client RPC opcodes (PlayerObject::HandleCommand tables)
     const uint8  RPC_CLOSE_COMBAT   = 0x40;
     const uint8  RPC_RANGED_COMBAT  = 0x41;
@@ -403,19 +412,22 @@ bool TesterBrain::EngageTarget(PlayerObject* me, uint32 targetGoId, uint32 now, 
     m_engageAttempts++;
     m_status = "engaging " + t->getHandle();
 
-    uint16 view = uint16(targetGoId);
+    m_bot->SetTargetGoId(targetGoId);
+    me->setTargetGoId(targetGoId);
+    uint16 view = ViewFor(m_bot, targetGoId);
+
     if (m_engageAttempts <= 3)
     {
         // 0x40 close combat request: target view u16, spawn counter u16
         ByteBuffer b = Rpc8(RPC_CLOSE_COMBAT);
-        b << uint16(view) << uint16(0);
+        b << view << uint16(0);
         SendRpc(b, "0x40 close combat");
     }
     else
     {
         // interlock refused three times: try free fire (0x41: target view u16)
         ByteBuffer b = Rpc8(RPC_RANGED_COMBAT);
-        b << uint16(view);
+        b << view;
         SendRpc(b, "0x41 ranged combat");
     }
 
@@ -499,8 +511,9 @@ void TesterBrain::DoCombat(PlayerObject* me, uint32 now)
         if (!ids.empty())
         {
             uint16 id = ids[rand() % ids.size()];
+            uint16 view = ViewFor(m_bot, opp);
             ByteBuffer b = Rpc16(RPC_ABILITY_USE);
-            b << uint16(id) << uint16(uint16(opp));
+            b << uint16(id) << view;
             if (SendRpc(b, "0x80b9 ability use")) m_stats.abilitiesUsed++;
         }
     }
@@ -525,7 +538,6 @@ uint32 TesterBrain::FindHuntTarget(PlayerObject* me)
         if (t->getHandle().find("Civilian") != std::string::npos) continue;
         if (t->getLevel() > me->getLevel() + 3) continue;
         if (t->getInterlockPartner() != 0) continue;
-        if (uint16(t->getGoId()) != t->getGoId()) continue;
         if (std::fabs(t->getPosition().y - p.y) > 1500.0) continue; // other floor / rooftop
         double d = Dist2D(p, t->getPosition().x, t->getPosition().z);
         if (d < bestDist) { bestDist = d; best = t->getGoId(); }
@@ -728,8 +740,9 @@ void TesterBrain::DoMission(PlayerObject* me, uint32 now, float dt)
         m_lastInteractMs = now;
         m_interactAttempts++;
         // 0x80c7 dynamic object interaction: view u16, object type u16, interaction u16
+        uint16 view = ViewFor(m_bot, info.targetGoId);
         ByteBuffer b = Rpc16(RPC_OBJ_INTERACT);
-        b << uint16(uint16(info.targetGoId)) << uint16(0) << uint16(0);
+        b << view << uint16(0) << uint16(0);
         SendRpc(b, "0x80c7 object interaction");
         if (m_interactAttempts >= 4)
         {
