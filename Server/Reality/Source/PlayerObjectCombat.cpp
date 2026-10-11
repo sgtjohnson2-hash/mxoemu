@@ -615,16 +615,15 @@ void PlayerObject::respawn()
 	m_tactic = TACTIC_NORMAL;
 	m_hitCounter = 0;
 
-
 	//respawn at the nearest hardline in this district, if we know any
+	bool movedToHardline = false;
 	{
-        // V17: Use cached hardlines instead of synchronous DB query
 		if (s_hardlineCache.count((uint32)m_district) > 0)
 		{
 			double bestDistSq = -1;
 			LocationVector bestPos = m_pos;
-            const auto& hardlines = s_hardlineCache[(uint32)m_district];
-            for (const auto& hlPos : hardlines)
+			const auto& hardlines = s_hardlineCache[(uint32)m_district];
+			for (const auto& hlPos : hardlines)
 			{
 				double distSq = m_pos.DistanceSq(hlPos);
 				if (bestDistSq < 0 || distSq < bestDistSq)
@@ -633,18 +632,30 @@ void PlayerObject::respawn()
 					bestPos = hlPos;
 				}
 			}
-			
+
 			m_pos = bestPos;
+			movedToHardline = true;
 			sGame.AnnounceStateUpdate(NULL,shared_ptr<PositionStateMsg>(new PositionStateMsg(m_goId)));
-			// m_parent.QueueCommand(shared_ptr<TeleportSelfCmd>(new TeleportSelfCmd(m_goId,bestPos,m_district)));
+			if (m_parent.hasSocket())
+				sSpatialGrid.UpdateClientPosition(&m_parent, (float)m_pos.x, (float)m_pos.z);
 		}
 	}
+
+	// PositionStateMsg updates other clients. The local client ignores a position
+	// write on its own view, so it needs the same materialize packet a hardline uses.
+	if (!m_parent.isBot())
+		m_parent.QueueState(std::make_shared<JackoutEffectMsg>(m_goId, false));
 
 	//clear IsDead and refresh all bars including maxima
 	sGame.AnnounceStateUpdate(&m_parent,shared_ptr<HealthUpdateMsg>(new HealthUpdateMsg(m_goId,true,true)));
 	sendVitals(true,true);
-	m_parent.QueueCommand(shared_ptr<SystemChatMsg>(new SystemChatMsg(
-		"{c:00FF00}You have been re-inserted at the nearest hardline.{/c}")));
+	if (!m_parent.isBot())
+	{
+		m_parent.QueueCommand(shared_ptr<SystemChatMsg>(new SystemChatMsg(
+			movedToHardline
+				? "{c:00FF00}You have been re-inserted at the nearest hardline.{/c}"
+				: "{c:00FF00}You have been re-inserted.{/c}")));
+	}
 }
 
 // ---------------------------------------------------------------------------
