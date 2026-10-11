@@ -1567,6 +1567,11 @@ bool CombatSystem::RunInterlockRound(InterlockSession &session)
 	PlayerObject* pB = getPlayerSafe(session.goIdB);
 	if (!pA || !pB) return false;
 
+	// The blow that emptied the bar already played. Further rounds were hitting a
+	// body at 0 HP until the 3 s takedown timer called die(). Hold the interlock.
+	if (pA->getCurrentHealth() == 0 || pB->getCurrentHealth() == 0)
+		return true;
+
 	// Interlock broken by movement without explicit withdraw
 	float dist = float(pA->getPosition().Distance(pB->getPosition()));
 	if (dist > 1500.0f) {
