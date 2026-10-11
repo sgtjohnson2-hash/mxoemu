@@ -1994,6 +1994,7 @@ void PlayerObject::ParsePlayerCommand( string theCmd )
 
 		SocketFragment frag = { type, value };
 		if (sSocketSystem.ApplySocket(this, gearUid, frag)) {
+			if (m_inventorySystem) m_inventorySystem->saveToDB();
 			m_parent.QueueCommand(make_shared<SystemChatMsg>((format("{c:00FF00}Successfully socketed %1% (+%2%)!{/c}") % type % value).str()));
 		} else {
 			m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FF0000}Socketing failed.{/c}"));

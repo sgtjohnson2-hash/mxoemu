@@ -2,6 +2,7 @@
 #include "Item.h"
 #include "InventorySystem.h"
 #include "PlayerObject.h"
+#include "GameClient.h"
 #include "Log.h"
 #include "Database/Database.h"
 #include "Database/PreparedStatement.h"
@@ -26,11 +27,23 @@ bool SocketSystem::ApplySocket(PlayerObject* player, uint64 gearUid, const Socke
 {
     if (!player) return false;
 
-    // Fetch existing metadata from inventory table
+    // Fetch existing metadata from inventory table or in-memory item
     std::string currentJson = "{}";
     uint32 targetInvId = 0;
+
+    shared_ptr<Item> inMemoryItem = nullptr;
+    if (player->getInventory()) {
+        if (gearUid <= 30) {
+            inMemoryItem = player->getInventory()->getItemBySlot((uint8)gearUid);
+        } else {
+            inMemoryItem = player->getInventory()->getItemByGoId((uint32)gearUid);
+        }
+        if (inMemoryItem) {
+            currentJson = inMemoryItem->getMetadata();
+        }
+    }
     
-    if (Database_Main != nullptr) {
+    if (Database_Main != nullptr && (currentJson.empty() || currentJson == "{}")) {
         // Check if gearUid is a slot (1..30)
         if (gearUid <= 30) {
             PreparedStatement slotStmt("SELECT invId, item_metadata FROM inventory WHERE charId = ?0 AND slot = ?1 LIMIT 1");
@@ -64,23 +77,27 @@ bool SocketSystem::ApplySocket(PlayerObject* player, uint64 gearUid, const Socke
     sockets.push_back(fragment);
     std::string updatedJson = SerializeSockets(sockets, currentJson);
 
+    if (inMemoryItem) {
+        inMemoryItem->setMetadata(updatedJson);
+    }
+
     if (Database_Main != nullptr) {
         PreparedStatement updateStmt("UPDATE inventory SET item_metadata = ?0 WHERE invId = ?1");
         updateStmt.SetString(0, updatedJson);
         updateStmt.SetUInt32(1, targetInvId);
         sDatabase.ExecutePrepared(&updateStmt);
+
+        if (gearUid <= 30) {
+            PreparedStatement updateStmt2("UPDATE inventory SET item_metadata = ?0 WHERE charId = ?1 AND slot = ?2");
+            updateStmt2.SetString(0, updatedJson);
+            updateStmt2.SetUInt64(1, player->getCharacterUID());
+            updateStmt2.SetUInt32(2, (uint32)gearUid);
+            sDatabase.ExecutePrepared(&updateStmt2);
+        }
     }
 
-    if (player->getInventory()) {
-        shared_ptr<Item> inMemoryItem = nullptr;
-        if (gearUid <= 30) {
-            inMemoryItem = player->getInventory()->getItemBySlot((uint8)gearUid);
-        } else {
-            inMemoryItem = player->getInventory()->getItemByGoId((uint32)gearUid);
-        }
-        if (inMemoryItem) {
-            inMemoryItem->setMetadata(updatedJson);
-        }
+    if (player->getInventory() && !player->getClient().isBot()) {
+        player->getInventory()->saveToDB();
     }
 
     INFO_LOG(format("SocketSystem: Player %1% socketed %2% (+%3%) into Item (invId %4%)") 
