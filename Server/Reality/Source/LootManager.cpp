@@ -99,38 +99,38 @@ void LootManager::GenerateLoot(PlayerObject* killer, PlayerObject* victim)
     if (it != m_lootTables.end())
     {
         const auto& allItems = sDataLoader.GetAllItems();
-
+        bool toldFull = false;
         for (const auto& entry : it->second) {
             float roll = (float)(rand() % 10000) / 100.0f; // 0.00 to 99.99
             if (roll < entry.chance) {
                 auto itemIt = allItems.find(entry.templateId);
-                if (itemIt != allItems.end()) {
-                    if (killer->getInventory()) {
-                        auto dropItem = std::make_shared<Item>(sObjMgr.getNewItemId(), entry.templateId);
-                        
-                        int rarityRoll = rand() % 1000;
-                        ItemRarity rarity = RARITY_COMMON;
-                        std::string colorCode = "{c:FFFFFF}";
-                        if (rarityRoll < 5) { rarity = RARITY_LEGENDARY; colorCode = "{c:FF8800}"; }
-                        else if (rarityRoll < 50) { rarity = RARITY_EPIC; colorCode = "{c:CC00FF}"; }
-                        else if (rarityRoll < 200) { rarity = RARITY_RARE; colorCode = "{c:0088FF}"; }
-                        else if (rarityRoll < 400) { rarity = RARITY_UNCOMMON; colorCode = "{c:00FF00}"; }
-                        
-                        dropItem->setRarity(rarity);
+                std::string itemName = (itemIt != allItems.end()) ? itemIt->second.name : (format("Item %1%") % entry.templateId).str();
 
-                        if (killer->getInventory()->addItem(dropItem, 1)) {
-                            std::string itemName = itemIt->second.name;
-                            
-                            if (!killer->getClient().isBot()) {
-                                killer->getClient().QueueCommand(std::make_shared<SystemChatMsg>(
-                                    (format("%1%[LOOT] Defeated %2%! Looted item: %3%.{/c}") % colorCode % victim->getHandle() % itemName).str()
-                                ));
-                            }
-                            INFO_LOG(format("LootManager: %1% looted %2% (template %3%, Rarity: %4%) from %5%") 
-                                % killer->getHandle() % itemName % entry.templateId % (int)rarity % victim->getHandle());
-                        }
+                // addItem(slot 1) failed as soon as the starter weapon occupied slot 1,
+                // so a kill never put the drop in the bag. giveItem takes the next free slot and saves it.
+                if (!killer->giveItem(entry.templateId)) {
+                    if (!toldFull && !killer->getClient().isBot()) {
+                        killer->getClient().QueueCommand(std::make_shared<SystemChatMsg>(
+                            "{c:FF5555}[LOOT] Inventory full.{/c}"));
+                        toldFull = true;
                     }
+                    continue;
                 }
+
+                int rarityRoll = rand() % 1000;
+                std::string colorCode = "{c:FFFFFF}";
+                if (rarityRoll < 5) colorCode = "{c:FF8800}";
+                else if (rarityRoll < 50) colorCode = "{c:CC00FF}";
+                else if (rarityRoll < 200) colorCode = "{c:0088FF}";
+                else if (rarityRoll < 400) colorCode = "{c:00FF00}";
+
+                if (!killer->getClient().isBot()) {
+                    killer->getClient().QueueCommand(std::make_shared<SystemChatMsg>(
+                        (format("%1%[LOOT] Defeated %2%! Looted item: %3%.{/c}") % colorCode % victim->getHandle() % itemName).str()
+                    ));
+                }
+                INFO_LOG(format("LootManager: %1% looted %2% (template %3%) from %4%")
+                    % killer->getHandle() % itemName % entry.templateId % victim->getHandle());
             }
         }
     }
