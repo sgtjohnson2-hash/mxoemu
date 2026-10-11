@@ -585,6 +585,14 @@ bool CombatSystem::RequestInterlock(uint32 attackerGoId, uint32 targetGoId, uint
 	pA->setPosition(posA);
 	pB->setPosition(posB);
 
+	// PositionStateMsg does not move the local avatar. The same materialize packet a
+	// hardline uses does, so the client starts the fight at the snapped melee range
+	// instead of sending its old position back and pulling the pair apart.
+	if (!pA->getClient().isBot())
+		pA->getClient().QueueState(std::make_shared<JackoutEffectMsg>(pA->getGoId(), false));
+	if (!pB->getClient().isBot())
+		pB->getClient().QueueState(std::make_shared<JackoutEffectMsg>(pB->getGoId(), false));
+
 	sSpatialGrid.UpdateClientPosition(&pA->getClient(), (float)posA.x, (float)posA.z);
 	sSpatialGrid.UpdateClientPosition(&pB->getClient(), (float)posB.x, (float)posB.z);
 

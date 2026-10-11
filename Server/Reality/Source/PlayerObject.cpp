@@ -761,6 +761,7 @@ void PlayerObject::HandleStateUpdate( ByteBuffer &srcData )
 	srcData >> updateType;
 	bool validUpdate=false;
 	bool movementUpdate=false;
+	LocationVector posBeforeMove = m_pos;
 	switch (updateType)
 	{
 	//change angle
@@ -853,6 +854,13 @@ void PlayerObject::HandleStateUpdate( ByteBuffer &srcData )
 	{
 		if(movementUpdate)
 		{
+			// The client is authoritative for walking, but an interlock has already
+			// placed both bodies. Accepting this packet walks them out of the exchange.
+			if (m_ilPartner != 0)
+			{
+				m_pos = posBeforeMove;
+				return;
+			}
 			size_t cancelled = this->cancelEvents(EVENT_JACKOUT);
 			if (cancelled > 0)
 			{
