@@ -828,9 +828,20 @@ void PlayerObject::RPC_HandleAbilityUse( ByteBuffer &srcCmd )
 	INFO_LOG(format("(%1%) %2%:%3% UseAbility request ability %4% view %5% -> target go %6%")
 		% m_parent.Address() % m_handle % m_goId % abilityId % targetViewId % targetGoId);
 
-	//cooldown bookkeeping when the ability is part of the player's loadout
+	// Loadout abilities carry a cooldown. The check used to exist only on AbilitySystem
+	// and the handler stamped the timer even when the cast then failed.
 	if (m_abilitySystem && m_abilitySystem->getAbility(abilityId))
-		m_abilitySystem->onAbilityCast(abilityId);
+	{
+		if (!m_abilitySystem->canCastAbility(abilityId))
+		{
+			if (!m_parent.isBot())
+			{
+				m_parent.QueueCommand(std::make_shared<SystemChatMsg>(
+					"{c:FFFF00}[COMBAT] Ability is still cooling down.{/c}"));
+			}
+			return;
+		}
+	}
 
 	// Update active martial arts discipline style when an ability of that style is executed
 	const AbilityTemplate* abilTempl = sDataLoader.GetAbilityTemplate(abilityId);
@@ -876,7 +887,9 @@ void PlayerObject::RPC_HandleAbilityUse( ByteBuffer &srcCmd )
 		}
 	}
 
-	sCombatSys.UseAbility(this,abilityId,targetGoId);
+	bool castOk = sCombatSys.UseAbility(this,abilityId,targetGoId);
+	if (castOk && m_abilitySystem && m_abilitySystem->getAbility(abilityId))
+		m_abilitySystem->onAbilityCast(abilityId);
 }
 
 //0x80ae - client loads/unloads abilities into memory (hotbar loadout)

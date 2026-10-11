@@ -1357,32 +1357,43 @@ uint32 CombatSystem::SelectInterlockMove(const InterlockSession &session, Player
 	if (!attacker || !defender)
 		return 0x2026; // Authentic unarmed fallback (Kung Fu strike)
 
-	// The outcome is the result of THIS swing. Session tactics used to override it, so a
-	// Speed interrupt (the other side had queued Grab) played an Aikido throw.
 	if (outcome != InterlockExchangeOutcome::Blocked &&
 	    outcome != InterlockExchangeOutcome::Dodged &&
 	    (defender->isDead() || defender->getCurrentHealth() == 0))
 		return 0x4EE5; // Double Overhead Smash / Ground Slam Finisher (retail capture)
 
-	switch (outcome)
+	// Tactics belong to THIS swing's attacker, not "either fighter queued Grab".
+	// A Speed interrupt used to animate as a throw because the defender's Grab was enough.
+	uint8 attTac = TACTIC_NORMAL;
+	uint8 defTac = TACTIC_NORMAL;
+	if (attacker->getGoId() == session.goIdA)
 	{
-		case InterlockExchangeOutcome::StanceCrush:
-			return 0x2367; // Hyperstrike / Stance Crush (retail capture)
-		case InterlockExchangeOutcome::FastInterrupt:
-			if (attacker->getFightingStyle() == FightingStyle::Karate)
-				return 0x2388; // Karate thrust. The grab was cancelled.
-			return 0x2026; // Fast strike. The grab was cancelled; do not animate the throw.
-		case InterlockExchangeOutcome::GuardBreak:
-			return 0x236D; // Aikido Throw / Momentum Reversal (retail capture)
-		case InterlockExchangeOutcome::Blocked:
-		case InterlockExchangeOutcome::Dodged:
-		case InterlockExchangeOutcome::Clash:
-		case InterlockExchangeOutcome::NormalHit:
-		case InterlockExchangeOutcome::SpecialHit:
-		case InterlockExchangeOutcome::Disarm:
-		default:
-			break;
+		attTac = session.tacticA;
+		defTac = session.tacticB;
 	}
+	else if (attacker->getGoId() == session.goIdB)
+	{
+		attTac = session.tacticB;
+		defTac = session.tacticA;
+	}
+
+	const bool fastInterrupt = outcome == InterlockExchangeOutcome::FastInterrupt
+		|| (attTac == TACTIC_SPEED && defTac == TACTIC_RETALIATE);
+	const bool guardBreak = outcome == InterlockExchangeOutcome::GuardBreak
+		|| (attTac == TACTIC_RETALIATE && (defTac == TACTIC_DEFENSE || defTac == TACTIC_POWER));
+	const bool stanceCrush = outcome == InterlockExchangeOutcome::StanceCrush
+		|| (attTac == TACTIC_POWER && defTac == TACTIC_SPEED);
+
+	if (fastInterrupt)
+	{
+		if (attacker->getFightingStyle() == FightingStyle::Karate)
+			return 0x2388;
+		return 0x2026;
+	}
+	if (guardBreak)
+		return 0x236D; // Aikido Throw / Momentum Reversal (retail capture)
+	if (stanceCrush)
+		return 0x2367; // Hyperstrike / Stance Crush (retail capture)
 
 	FightingStyle style = attacker->getFightingStyle();
 	switch (style)
