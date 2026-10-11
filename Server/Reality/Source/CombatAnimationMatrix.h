@@ -80,6 +80,18 @@ public:
         bool finisher = false
     );
 
+    // Same match as FindMove, then picks one of the matches. exchangeNum 0 is FindMove's first hit.
+    // The returned moveId is what the client looks up in its own ILDB to play the clip.
+    static const ILDBMoveRecord* FindMoveVariant(
+        FightingStyle attackerStyle,
+        uint8 attackerTactic,
+        FightingStyle defenderStyle,
+        uint8 defenderTactic,
+        InterlockExchangeOutcome outcome,
+        bool finisher,
+        uint32 variant
+    );
+
     static InterlockAnimPair GetAnimationPair(
         FightingStyle attackerStyle,
         uint8 attackerTactic,

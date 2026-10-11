@@ -170,6 +170,95 @@ const ILDBMoveRecord* CombatAnimationMatrix::FindMove(
     return nullptr;
 }
 
+namespace {
+
+bool IldbRecordMatches(
+    const ILDBMoveRecord& rec,
+    uint8 attS, uint8 attackerTactic, uint8 defS, uint8 defenderTactic,
+    uint8 requiredFlag, bool checkFlag, bool checkDefender)
+{
+    if (rec.moveId == 0 || rec.aggrAnim == 0 || rec.defeAnim == 0)
+        return false;
+    if (checkFlag && (rec.flags & requiredFlag) == 0)
+        return false;
+    if (rec.attStyle != attS)
+        return false;
+    if (attackerTactic != 8 && rec.attTactic != attackerTactic)
+        return false;
+    if (checkDefender)
+    {
+        if (rec.defStyle != defS)
+            return false;
+        if (defenderTactic != 8 && rec.defTactic != defenderTactic)
+            return false;
+    }
+    return true;
+}
+
+const ILDBMoveRecord* PickVariant(
+    const std::vector<ILDBMoveRecord>& moves,
+    uint8 attS, uint8 attackerTactic, uint8 defS, uint8 defenderTactic,
+    uint8 requiredFlag, bool checkFlag, bool checkDefender, uint32 variant)
+{
+    uint32 count = 0;
+    for (const auto& rec : moves)
+    {
+        if (IldbRecordMatches(rec, attS, attackerTactic, defS, defenderTactic, requiredFlag, checkFlag, checkDefender))
+            ++count;
+    }
+    if (count == 0)
+        return nullptr;
+    uint32 want = variant % count;
+    uint32 seen = 0;
+    for (const auto& rec : moves)
+    {
+        if (!IldbRecordMatches(rec, attS, attackerTactic, defS, defenderTactic, requiredFlag, checkFlag, checkDefender))
+            continue;
+        if (seen == want)
+            return &rec;
+        ++seen;
+    }
+    return nullptr;
+}
+
+} // namespace
+
+const ILDBMoveRecord* CombatAnimationMatrix::FindMoveVariant(
+    FightingStyle attackerStyle,
+    uint8 attackerTactic,
+    FightingStyle defenderStyle,
+    uint8 defenderTactic,
+    InterlockExchangeOutcome outcome,
+    bool finisher,
+    uint32 variant)
+{
+    std::lock_guard<std::recursive_mutex> lock(s_ildbMutex);
+    if (s_ildbMoves.empty())
+        return nullptr;
+
+    uint8 attS = (uint8)attackerStyle;
+    uint8 defS = (uint8)defenderStyle;
+    uint8 requiredFlag = 2;
+    if (finisher)
+        requiredFlag = 1;
+    else if (outcome == InterlockExchangeOutcome::Blocked)
+        requiredFlag = 4;
+    else if (outcome == InterlockExchangeOutcome::Clash)
+        requiredFlag = 8;
+
+    const ILDBMoveRecord* rec = nullptr;
+    rec = PickVariant(s_ildbMoves, attS, attackerTactic, defS, defenderTactic, requiredFlag, true, true, variant);
+    if (!rec)
+        rec = PickVariant(s_ildbMoves, attS, attackerTactic, defS, defenderTactic, requiredFlag, true, false, variant);
+    if (!rec && !finisher)
+    {
+        rec = PickVariant(s_ildbMoves, attS, attackerTactic, defS, defenderTactic, requiredFlag, false, true, variant);
+        if (!rec)
+            rec = PickVariant(s_ildbMoves, attS, attackerTactic, defS, defenderTactic, requiredFlag, false, false, variant);
+    }
+    return rec;
+}
+
 InterlockAnimPair CombatAnimationMatrix::GetDynamicAnimationPair(
     FightingStyle attackerStyle,
     uint8 attackerTactic,

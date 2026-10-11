@@ -1458,26 +1458,44 @@ void CombatSystem::SendInterlockExchange(InterlockSession &session, PlayerObject
 		outcome = InterlockExchangeOutcome::SpecialHit;
 	}
 
-	uint32 mainMove = SelectInterlockMove(session, attacker, defender, outcome);
+	bool isFinisher = outcome != InterlockExchangeOutcome::Blocked
+		&& outcome != InterlockExchangeOutcome::Dodged
+		&& (defender->isDead() || defender->getCurrentHealth() == 0);
 
+	// The client plays whatever ILDB move id is in slot 2. The old hardcoded ids
+	// (0x2026 and three others) are one generic clip, so a block looked like a punch.
 	static const bool useDynamicILDB = sConfig.GetBoolDefault("Interlock.UseDynamicILDB", true);
 	InterlockAnimPair pair;
+	uint32 mainMove = 0;
 	if (useDynamicILDB)
 	{
-		bool isFinisher = (defender->isDead() || defender->getCurrentHealth() == 0);
-		pair = CombatAnimationMatrix::GetDynamicAnimationPair(
+		const ILDBMoveRecord* rec = CombatAnimationMatrix::FindMoveVariant(
 			attacker->getFightingStyle(), attackerTactic,
 			defender->getFightingStyle(), defenderTactic,
-			outcome, isFinisher
-		);
+			outcome, isFinisher, session.exchangeNum);
+		if (rec && rec->moveId != 0)
+		{
+			mainMove = rec->moveId;
+			pair.attackerAnimId = rec->aggrAnim;
+			pair.defenderAnimId = rec->defeAnim;
+			pair.contactDelaySeconds = (rec->aggrDur > 0) ? ((float)rec->aggrDur / 1000.0f) : 0.50f;
+			if (outcome == InterlockExchangeOutcome::Clash || outcome == InterlockExchangeOutcome::Blocked)
+				pair.hitFxId = 0x28000794;
+			else if (outcome == InterlockExchangeOutcome::Dodged)
+				pair.hitFxId = 0;
+			else if (outcome == InterlockExchangeOutcome::GuardBreak)
+				pair.hitFxId = 0x28000432;
+			else
+				pair.hitFxId = 0x280006DF;
+		}
 	}
-	else
+	if (mainMove == 0)
 	{
+		mainMove = SelectInterlockMove(session, attacker, defender, outcome);
 		pair = CombatAnimationMatrix::GetAnimationPair(
 			attacker->getFightingStyle(), attackerTactic,
 			defender->getFightingStyle(), defenderTactic,
-			outcome, move.id
-		);
+			outcome, move.id);
 	}
 
 	PlayerObject* pA = getPlayerSafe(session.goIdA);
