@@ -33,6 +33,7 @@
 #include "DojoSpawn.h"
 #include "MessageTypes.h"
 #include "GOAttributes.h"
+#include "RsiData.h"
 #include "InventorySystem.h"
 #include "Item.h"
 #include "StatusEffectManager.h"
@@ -2391,6 +2392,51 @@ int RunCombatTestSuite()
 				"SelfCombatantModeMsg group headers match 7-bit groups 0..6 (6x0x80 + 0x02)");
 			check(selfBuf.read<uint8>(11) == 0x01, "SelfCombatantModeMsg Attribute 43 value is 0x01 (combat mode)");
 			check(selfBuf.read<uint16>(12) == 0, "SelfCombatantModeMsg terminated with nomoreattribs uint16(0)");
+
+			// 11. Female RSI serialization test
+			RsiDataFemale femRsi;
+			femRsi["Sex"] = 1;
+			femRsi["Body"] = 1;
+			femRsi["Hat"] = 1;
+			femRsi["Face"] = 2;
+			femRsi["Shirt"] = 7;
+			femRsi["Coat"] = 7;
+			femRsi["Pants"] = 1;
+			femRsi["Shoes"] = 6;
+			femRsi["Gloves"] = 7;
+			femRsi["Glasses"] = 6;
+			femRsi["Hair"] = 1;
+			femRsi["Leggings"] = 2;
+			femRsi["FacialDetail"] = 7;
+			femRsi["ShirtColor"] = 0;
+			femRsi["PantsColor"] = 0;
+			femRsi["CoatColor"] = 1;
+			femRsi["ShoeColor"] = 3;
+			femRsi["GlassesColor"] = 5;
+			femRsi["HairColor"] = 4;
+			femRsi["SkinTone"] = 3;
+			femRsi["Tattoo"] = 6;
+			femRsi["FacialDetailColor"] = 2;
+			byte femBytes[15] = {0};
+			uint8 len = femRsi.ToBytes(femBytes, 15);
+			check(len >= 12 && len <= 15, "Female RSI serializes to valid byte length (12..15)");
+
+			// 12. Verify PlayerAppearanceMsg for bot with short hash (e.g. Harahel "93030008")
+			// Ensures safe authentic default RSI is used and PlayerAppearanceMsg serializes properly.
+			auto botClient = std::make_shared<BotClient>(9000000 + 499);
+			PlayerObject* harahel = sObjMgr.getGOPtr(botClient->GetPlayerGoId());
+			check(harahel != nullptr, "Test bot player object constructed");
+			if (harahel) {
+				harahel->setHandle("Harahel");
+				harahel->setRsiHex("93030008");
+				uint16 botView = sObjMgr.getViewForGO(&modeClient, harahel->getGoId());
+				PlayerAppearanceMsg appMsg(harahel->getGoId());
+				appMsg.setReceiver(&modeClient);
+				const ByteBuffer& appBuf = appMsg.toBuf();
+				check(appBuf.size() > 0, "PlayerAppearanceMsg serializes cleanly for Harahel bot");
+				check(appBuf.read<uint8>(0) == 0x03, "PlayerAppearanceMsg opcode is 0x03");
+				check(appBuf.read<uint16>(1) == botView, "PlayerAppearanceMsg viewId matches allocated view");
+			}
 		}
 	}
 	catch (const std::exception& e)

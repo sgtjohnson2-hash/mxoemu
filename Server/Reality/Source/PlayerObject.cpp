@@ -316,8 +316,11 @@ void PlayerObject::setRsiHex(const std::string& hexStr)
 	if (bytes.empty()) return;
 
 	if (bytes.size() >= 15) {
-		if (!m_rsi) {
+		uint8 sex = (bytes[0] & 0x01);
+		if (sex == 0) {
 			m_rsi.reset(new RsiDataMale);
+		} else {
+			m_rsi.reset(new RsiDataFemale);
 		}
 		m_rsi->FromBytes(&bytes[0], bytes.size());
 		return;
@@ -336,39 +339,27 @@ void PlayerObject::setRsiHex(const std::string& hexStr)
 		sex = 1;
 	}
 
-	if (sex == 0)
-		m_rsi.reset(new RsiDataMale);
-	else
-		m_rsi.reset(new RsiDataFemale);
-
 	if (nameLower.find("agent") != std::string::npos)
 	{
 		setAgentAppearance();
 		return;
 	}
 
-	RsiData& rsi = *m_rsi;
-	rsi["Sex"] = sex;
-	rsi["Body"] = (bytes[0] >> 1) & 0x03;
-	rsi["Hat"] = (bytes.size() > 1) ? (bytes[1] & 0x3F) : 0;
-	rsi["Face"] = (bytes.size() > 2) ? (bytes[2] & 0x1F) : (uint8)(m_handle.length() % 20);
-	rsi["Shirt"] = (bytes.size() > 3) ? (bytes[3] & 0x1F) : (uint8)((bytes[0] * 7) % 25);
-	rsi["Coat"] = (bytes[0] % 15);
-	rsi["Pants"] = ((bytes.size() > 1 ? bytes[1] : 3) % 20);
-	rsi["Shoes"] = ((bytes.size() > 2 ? bytes[2] : 5) % 15);
-	rsi["Gloves"] = (bytes[0] % 10);
-	rsi["Glasses"] = ((bytes[0] % 8));
-	rsi["Hair"] = (bytes.size() > 1 ? (bytes[1] >> 2) % 20 : 2);
-	rsi["FacialDetail"] = (bytes[0] % 10);
-	rsi["ShirtColor"] = ((bytes[0] * 3) % 40);
-	rsi["PantsColor"] = ((bytes[0] * 5) % 30);
-	rsi["CoatColor"] = ((bytes[0] * 2) % 30);
-	rsi["ShoeColor"] = 1;
-	rsi["GlassesColor"] = 1;
-	rsi["HairColor"] = (bytes.size() > 2 ? (bytes[2] % 12) : 1);
-	rsi["SkinTone"] = (bytes.size() > 3 ? (bytes[3] % 10) : 2);
-	rsi["Tattoo"] = (bytes[0] % 8);
-	rsi["FacialDetailColor"] = 0;
+	// For bots with short archetype hashes (e.g. mob_parsed.csv 4-byte ids like 93030008),
+	// assign authentic client-verified retail default RSI appearance to prevent client.dll
+	// NULL demeanor lookup crashes.
+	if (sex == 0)
+	{
+		m_rsi.reset(new RsiDataMale);
+		const byte defaultMaleRsi[] = {0x00,0x0C,0x71,0x48,0x18,0x0C,0xE2,0x00,0x23,0x00,0xB0,0x00,0x40,0x00,0x00};
+		m_rsi->FromBytes(defaultMaleRsi, sizeof(defaultMaleRsi));
+	}
+	else
+	{
+		m_rsi.reset(new RsiDataFemale);
+		const byte defaultFemaleRsi[] = {0xa0, 0x88, 0x73, 0x84, 0xc3, 0x98, 0x24, 0xe0, 0x00, 0x26, 0xa4, 0x19, 0x90, 0x00, 0x00};
+		m_rsi->FromBytes(defaultFemaleRsi, sizeof(defaultFemaleRsi));
+	}
 }
 
 void PlayerObject::checkAndStore()
@@ -392,7 +383,7 @@ void PlayerObject::saveDataToDB()
 		% m_pos.rot
 		% m_exp
 		% m_cash
-		% m_lvl
+		% uint32(m_lvl)
 		% m_healthC
 		% m_innerStrC
 		% m_characterUID );
