@@ -316,7 +316,7 @@ void PlayerObject::setRsiHex(const std::string& hexStr)
 	if (bytes.empty()) return;
 
 	if (bytes.size() >= 15) {
-		uint8 sex = (bytes[0] & 0x01);
+		uint8 sex = (bytes[0] & 0x80) ? 1 : 0;
 		if (sex == 0) {
 			m_rsi.reset(new RsiDataMale);
 		} else {
@@ -326,18 +326,8 @@ void PlayerObject::setRsiHex(const std::string& hexStr)
 		return;
 	}
 
-	uint8 sex = (bytes[0] & 0x01);
 	std::string nameLower = m_handle;
 	std::transform(nameLower.begin(), nameLower.end(), nameLower.begin(), ::tolower);
-	if (nameLower.find("madonna") != std::string::npos ||
-		nameLower.find("girl") != std::string::npos ||
-		nameLower.find("woman") != std::string::npos ||
-		nameLower.find("female") != std::string::npos ||
-		nameLower.find("lady") != std::string::npos ||
-		nameLower.find("sister") != std::string::npos)
-	{
-		sex = 1;
-	}
 
 	if (nameLower.find("agent") != std::string::npos)
 	{
@@ -348,18 +338,9 @@ void PlayerObject::setRsiHex(const std::string& hexStr)
 	// For bots with short archetype hashes (e.g. mob_parsed.csv 4-byte ids like 93030008),
 	// assign authentic client-verified retail default RSI appearance to prevent client.dll
 	// NULL demeanor lookup crashes.
-	if (sex == 0)
-	{
-		m_rsi.reset(new RsiDataMale);
-		const byte defaultMaleRsi[] = {0x00,0x0C,0x71,0x48,0x18,0x0C,0xE2,0x00,0x23,0x00,0xB0,0x00,0x40,0x00,0x00};
-		m_rsi->FromBytes(defaultMaleRsi, sizeof(defaultMaleRsi));
-	}
-	else
-	{
-		m_rsi.reset(new RsiDataFemale);
-		const byte defaultFemaleRsi[] = {0xa0, 0x88, 0x73, 0x84, 0xc3, 0x98, 0x24, 0xe0, 0x00, 0x26, 0xa4, 0x19, 0x90, 0x00, 0x00};
-		m_rsi->FromBytes(defaultFemaleRsi, sizeof(defaultFemaleRsi));
-	}
+	m_rsi.reset(new RsiDataMale);
+	const byte defaultMaleRsi[] = {0x00,0x0C,0x71,0x48,0x18,0x0C,0xE2,0x00,0x23,0x00,0xB0,0x00,0x40,0x00,0x00};
+	m_rsi->FromBytes(defaultMaleRsi, sizeof(defaultMaleRsi));
 }
 
 void PlayerObject::checkAndStore()

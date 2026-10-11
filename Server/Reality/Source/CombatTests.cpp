@@ -2420,6 +2420,7 @@ int RunCombatTestSuite()
 			byte femBytes[15] = {0};
 			uint8 len = femRsi.ToBytes(femBytes, 15);
 			check(len >= 12 && len <= 15, "Female RSI serializes to valid byte length (12..15)");
+			check((femBytes[0] & 0x80) == 0x80, "Female RSI bit 0 (sex=1) is MSB 0x80 in byte 0");
 
 			// 12. Verify PlayerAppearanceMsg for bot with short hash (e.g. Harahel "93030008")
 			// Ensures safe authentic default RSI is used and PlayerAppearanceMsg serializes properly.
