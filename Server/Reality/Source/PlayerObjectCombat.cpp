@@ -350,6 +350,15 @@ void PlayerObject::takeDamage( uint32 attackerGoId, uint16 damage, uint32 fxId, 
 
 	m_hitCounter++;
 
+	if (m_parent.isBot() && attackerGoId != 0 && attackerGoId != m_goId
+		&& m_handle.find("Civilian") == std::string::npos
+		&& getFactionName() != "Civilian")
+	{
+		BotClient* bot = dynamic_cast<BotClient*>(&m_parent);
+		if (bot && bot->GetTargetGoId() == 0)
+			bot->SetTargetGoId(attackerGoId);
+	}
+
 	// Notify Adaptive Music System of combat intensity (threat level)
 	sAdaptiveMusicSystem.registerThreat(m_goId, actualDamage * 2, getMSTime());
 

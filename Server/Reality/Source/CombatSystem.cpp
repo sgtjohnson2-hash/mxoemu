@@ -775,29 +775,20 @@ bool CombatSystem::RequestRangedCombat(uint32 attackerGoId, uint32 targetGoId, u
         }
     }
 
-	float shotIntervalSec = FREEFIRE_SHOT_SECONDS;
-	auto weapons = pA->getEquippedWeapons();
-	if (!weapons.empty())
-	{
-		const ItemTemplate* wpnTpl = sDataLoader.GetItemTemplate(weapons[0]->getTemplateId());
-		if (wpnTpl && wpnTpl->type == ITEM_TYPE_WEAPON && wpnTpl->attackSpeed > 0.1f)
-		{
-			shotIntervalSec = wpnTpl->attackSpeed;
-		}
-	}
-	float dilation = pA->GetTimeDilation();
-	if (dilation > 0.1f)
-		shotIntervalSec /= dilation;
-
 	FreeFireState state;
 	state.attackerGoId = attackerGoId;
 	state.targetGoId = targetGoId;
 	state.moveId = moveId;
-	state.nextShotTime = getMSTime() + uint32(shotIntervalSec * 1000.0f);
+	state.nextShotTime = getMSTime();
 	state.shotCount = 0;
 
 	m_freefires.push_back(state);
 	pA->setCombatStance(true);
+	if (!pA->getClient().isBot())
+	{
+		pA->getClient().QueueCommand(std::make_shared<SystemChatMsg>(
+			(format("{c:FFFF00}[COMBAT] Firing on %1%.{/c}") % pB->getHandle()).str()));
+	}
 	if (pB->getClient().isBot()) {
 		BotClient* botB = dynamic_cast<BotClient*>(&pB->getClient());
 		if (botB && botB->GetTargetGoId() == 0) {
