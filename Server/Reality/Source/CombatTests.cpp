@@ -32,6 +32,7 @@
 #include "CombatAnimationMatrix.h"
 #include "DojoSpawn.h"
 #include "MessageTypes.h"
+#include "GOAttributes.h"
 #include "InventorySystem.h"
 #include "Item.h"
 #include "StatusEffectManager.h"
@@ -2302,6 +2303,24 @@ int RunCombatTestSuite()
 			op.po->HandleCommand(contactCmd);
 			check(clientA.sawText("ICONIC CONTACT STORYLINE QUESTS") || clientA.sawText("Morpheus"),
 				"/contact list chat command enumerates iconic storyline quests");
+
+			// 7. Verify SpawnILCombatHandlerMsg wire layout matching retail 7.6005 CLTAdminControlView (0x622D6B79 / 0x622D9510)
+			LocationVector testPos(100.0, 572.0, 200.0);
+			SpawnILCombatHandlerMsg spawnMsg(4, 0x41, testPos, 123.45f);
+			const ByteBuffer& spawnBuf = spawnMsg.toBuf();
+			check(spawnBuf.size() == 44, "SpawnILCombatHandlerMsg size is authentic 44 bytes");
+			check(spawnBuf.read<uint8>(0) == 0x03 && spawnBuf.read<uint16>(1) == VIEWID_OBJECTMANAGER,
+				"SpawnILCombatHandlerMsg routed to VIEWID_OBJECTMANAGER (1)");
+			check(spawnBuf.read<uint8>(3) == 0x0E,
+				"SpawnILCombatHandlerMsg header is 0x0E (CREATE command 2 | bit 2=4 dynamic | bit 3=8 spawnIdCounter)");
+			check(spawnBuf.read<uint16>(4) == GOID_ILCOMBATHANDLER,
+				"SpawnILCombatHandlerMsg GOID is GOID_ILCOMBATHANDLER (27 / ELTGOILCombatHandler)");
+			check(spawnBuf.read<uint8>(6) == 0x41 && spawnBuf.read<uint8>(7) == 0xCD && spawnBuf.read<uint8>(8) == 0xAB,
+				"SpawnILCombatHandlerMsg includes spawnIdCounter and 0xCD 0xAB magic");
+			check(spawnBuf.read<uint8>(9) == 0x02 && spawnBuf.read<uint8>(10) == 0x05,
+				"SpawnILCombatHandlerMsg creation attributes count=2, mask=0x05 (Position + StartTime)");
+			check(spawnBuf.read<uint16>(39) == 4 && spawnBuf.read<uint8>(41) == 0x00 && spawnBuf.read<uint16>(42) == 0,
+				"SpawnILCombatHandlerMsg registers viewId 4, role 0, terminated with nomoreattribs 0");
 		}
 	}
 	catch (const std::exception& e)

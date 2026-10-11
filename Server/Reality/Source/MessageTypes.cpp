@@ -1587,8 +1587,9 @@ SpawnILCombatHandlerMsg::SpawnILCombatHandlerMsg( uint16 viewId, uint8 spawnIdCo
 	m_buf << uint8(0x03);
 	m_buf << uint16(VIEWID_OBJECTMANAGER);
 
-	//creation packet: 0C (fully dynamic) [goid:2] [idCounter] CD AB [attributes]
-	m_buf << uint8(0x0C);
+	//creation packet: 0E (cmd 2 CREATE | bit 2=4 dynamic skip-id | bit 3=8 spawnIdCounter) [goid:2] [idCounter] CD AB [attributes]
+	//CLTAdminControlView::HandleCommand (0x622D6B79): bl & 3 == 2 dispatches to 0x622D9510 (Object/View creation unpacker)
+	m_buf << uint8(0x0E);
 	m_buf << uint16(GOID_ILCOMBATHANDLER);
 	m_buf << uint8(spawnIdCounter);
 	m_buf << uint8(0xCD);
