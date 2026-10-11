@@ -185,6 +185,34 @@ void CombatSystem::LoadAbilities()
 			}
 		}
 
+		// The hardcoded martial list above also registered firearms and spy tools as
+		// 3m interlock punches, and synthesis skips ids already in the table.
+		auto tuneMove = [this](uint16 id, mxoDamageType dmg, float range, bool interlockOnly, bool freefireOnly)
+		{
+			auto it = m_moveTable.find(id);
+			if (it == m_moveTable.end()) return;
+			it->second.dmgType = dmg;
+			it->second.range = range;
+			it->second.interlockOnly = interlockOnly;
+			it->second.freefireOnly = freefireOnly;
+		};
+		tuneMove(14,  DAMAGE_RANGED, 3500.0f, false, true);  // PowerShot
+		tuneMove(126, DAMAGE_RANGED, 3500.0f, false, true);  // PistolDisarmingShot
+		tuneMove(129, DAMAGE_RANGED, 3500.0f, false, true);  // Handguns
+		tuneMove(147, DAMAGE_RANGED, 4500.0f, false, true);  // Rifles
+		tuneMove(453, DAMAGE_RANGED, 400.0f,  false, true);  // Rifle butt
+		tuneMove(499, DAMAGE_RANGED, 400.0f,  false, true);  // Point blank
+		tuneMove(501, DAMAGE_RANGED, 400.0f,  false, true);  // Pistol whip
+		tuneMove(505, DAMAGE_RANGED, 8000.0f, false, true);  // Sniper
+		tuneMove(146, DAMAGE_MELEE,  400.0f,  false, false); // Poison knife
+		tuneMove(283, DAMAGE_RANGED, 3000.0f, false, true);  // Knife throw
+		tuneMove(209, DAMAGE_MELEE,  0.0f,    false, false); // Stealth is not a strike
+		if (m_moveTable.count(209))
+		{
+			m_moveTable[209].minDmg = 0.0f;
+			m_moveTable[209].maxDmg = 0.0f;
+		}
+
 		// Dynamic Move Table Synthesis: Synthesize CombatMove definitions for all abilities in DataLoader
 		for (const auto& kv : sDataLoader.GetAllAbilities())
 		{
@@ -1329,19 +1357,33 @@ uint32 CombatSystem::SelectInterlockMove(const InterlockSession &session, Player
 	if (!attacker || !defender)
 		return 0x2026; // Authentic unarmed fallback (Kung Fu strike)
 
-	if (defender->isDead() || defender->getCurrentHealth() == 0)
+	// The outcome is the result of THIS swing. Session tactics used to override it, so a
+	// Speed interrupt (the other side had queued Grab) played an Aikido throw.
+	if (outcome != InterlockExchangeOutcome::Blocked &&
+	    outcome != InterlockExchangeOutcome::Dodged &&
+	    (defender->isDead() || defender->getCurrentHealth() == 0))
 		return 0x4EE5; // Double Overhead Smash / Ground Slam Finisher (retail capture)
 
-	// Power Stance Crush (Power vs Speed frame advantage)
-	if ((session.tacticA == TACTIC_POWER && session.tacticB == TACTIC_SPEED) ||
-	    (session.tacticB == TACTIC_POWER && session.tacticA == TACTIC_SPEED))
-		return 0x2367; // Hyperstrike / Stance Crush (retail capture)
+	switch (outcome)
+	{
+		case InterlockExchangeOutcome::StanceCrush:
+			return 0x2367; // Hyperstrike / Stance Crush (retail capture)
+		case InterlockExchangeOutcome::FastInterrupt:
+			if (attacker->getFightingStyle() == FightingStyle::Karate)
+				return 0x2388; // Karate thrust. The grab was cancelled.
+			return 0x2026; // Fast strike. The grab was cancelled; do not animate the throw.
+		case InterlockExchangeOutcome::GuardBreak:
+			return 0x236D; // Aikido Throw / Momentum Reversal (retail capture)
+		case InterlockExchangeOutcome::Blocked:
+		case InterlockExchangeOutcome::Dodged:
+		case InterlockExchangeOutcome::Clash:
+		case InterlockExchangeOutcome::NormalHit:
+		case InterlockExchangeOutcome::SpecialHit:
+		case InterlockExchangeOutcome::Disarm:
+		default:
+			break;
+	}
 
-	// Grab / Retaliate against Power or Block
-	if (session.tacticA == TACTIC_RETALIATE || session.tacticB == TACTIC_RETALIATE)
-		return 0x236D; // Aikido Throw / Momentum Reversal (retail capture)
-
-	// Style-specific discipline resolution
 	FightingStyle style = attacker->getFightingStyle();
 	switch (style)
 	{
@@ -1944,6 +1986,18 @@ bool CombatSystem::UseAbility(PlayerObject* caster, uint16 abilityId, uint32 tar
         % caster->getHandle() % caster->getGoId() % move->name % requestedAbilityId % abilityId % targetGoId
         % IsInterlocked(caster->getGoId()) % move->castTime);
 
+    // Hacker, coder, soldier, and spy already spend Inner Strength on their own path.
+    // Martial and generic moves did not, so every special was free.
+    const bool spentIS = move->isCost > 0;
+    if (spentIS && !caster->spendIS(move->isCost))
+    {
+        if (humanCaster)
+            caster->getClient().QueueCommand(std::make_shared<SystemChatMsg>(
+                (format("{c:FF0000}[COMBAT] Not enough Inner Strength for %1% (%2% required).{/c}")
+                    % move->name % move->isCost).str()));
+        return false;
+    }
+
     //cast bar for anything with a cast time
     if (move->castTime > 0.05f && humanCaster)
         caster->getClient().QueueCommand(std::make_shared<CastBarMsg>(abilityId, move->castTime));
@@ -1956,6 +2010,7 @@ bool CombatSystem::UseAbility(PlayerObject* caster, uint16 abilityId, uint32 tar
     {
         if (targetGoId == 0 || !RequestInterlock(caster->getGoId(), targetGoId))
         {
+            if (spentIS) caster->restoreIS(move->isCost);
             INFO_LOG(format("UseAbility: %1%:%2% %3% needs an interlock but none could be opened (target go %4%)")
                 % caster->getHandle() % caster->getGoId() % move->name % targetGoId);
             if (humanCaster)
@@ -1964,14 +2019,22 @@ bool CombatSystem::UseAbility(PlayerObject* caster, uint16 abilityId, uint32 tar
             return false;
         }
     }
-    if (move->freefireOnly && IsInterlocked(caster->getGoId())) return false;
+    if (move->freefireOnly && IsInterlocked(caster->getGoId()))
+    {
+        if (spentIS) caster->restoreIS(move->isCost);
+        return false;
+    }
     
     if (IsInterlocked(caster->getGoId())) {
         QueueAbility(caster->getGoId(), abilityId);
         return true;
-    } else {
-        return RequestRangedCombat(caster->getGoId(), targetGoId, abilityId);
     }
+    if (!RequestRangedCombat(caster->getGoId(), targetGoId, abilityId))
+    {
+        if (spentIS) caster->restoreIS(move->isCost);
+        return false;
+    }
+    return true;
 }
 
 void CombatSystem::AwardKill(PlayerObject* killer, PlayerObject* victim)
