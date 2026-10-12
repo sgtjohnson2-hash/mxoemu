@@ -354,6 +354,27 @@ int RunCombatTestSuite()
 			check(got && s0.ilViewIdA != 0 && s0.ilViewIdB == 0 && s0.exchangeNum == 1,
 				"human interlock spawns an IL handler view only for the human and sends exchange #1");
 			uint16 before = got ? s0.exchangeNum : 0;
+
+			// HUD RPCs at the start: 0x40 combat target and a round-0 0x45 status (client.dll
+			// FUN_621a13b0 / FUN_6219dbb0). 0x45 is 89 bytes and @0x31 must equal @0x35.
+			auto findMsg = [&](uint8 op, size_t len, std::string* out) {
+				for (auto it = humanClient.captured.rbegin(); it != humanClient.captured.rend(); ++it)
+					if (it->size() == len && uint8((*it)[0]) == op) { if (out) *out = *it; return true; }
+				return false;
+			};
+			std::string tgt, st0;
+			bool hasTarget = findMsg(0x40, 7, &tgt);
+			check(hasTarget && *reinterpret_cast<const uint32*>(&tgt[1]) == (0x002F0000u | 0x1234u),
+				"interlock start sends RPC 0x40 with the opponent handle (view | spawn<<16)");
+			bool hasStatus0 = findMsg(0x45, 0x59, &st0);
+			check(hasStatus0 && *reinterpret_cast<const uint16*>(&st0[3]) == 1
+				&& *reinterpret_cast<const uint32*>(&st0[0x31]) == (0x002F0000u | 0x1234u)
+				&& *reinterpret_cast<const uint32*>(&st0[0x35]) == *reinterpret_cast<const uint32*>(&st0[0x31])
+				&& *reinterpret_cast<const uint32*>(&st0[0x4D]) != 0,
+				"interlock start sends an 89-byte RPC 0x45 round status (seq 1, handle twice, lock time)");
+
+			human.po->setTactic(TACTIC_POWER);
+			humanClient.captured.clear();
 			for (int r = 0; r < 6 && sCombatSys.IsInterlocked(human.go); ++r)
 			{
 				InterlockSession* live = sCombatSys.GetInterlockSession(human.go);
@@ -363,6 +384,39 @@ int RunCombatTestSuite()
 			InterlockSession s1;
 			bool got1 = sCombatSys.GetInterlockSessionCopy(human.go, s1);
 			check(got1 && s1.exchangeNum > before, "interlock rounds produce new numbered IL exchanges");
+
+			std::string st1;
+			bool hasStatus1 = findMsg(0x45, 0x59, &st1);
+			check(hasStatus1 && *reinterpret_cast<const uint16*>(&st1[3]) > 1
+				&& uint8(st1[0x08]) == CLIENT_TACTIC_POWER,
+				"each round sends a newer 0x45 with the viewer's tactic in client numbering (Power = 1)");
+			check(hasStatus1 && *reinterpret_cast<const int16*>(&st1[0x0B]) >= 0
+				&& *reinterpret_cast<const int16*>(&st1[0x1E]) >= 0,
+				"0x45 round damage fields are filled and never negative");
+
+			// RPC 0x42 in the 7-byte client format: [0x42][u16 setting][u16 0][u16 variant]
+			struct { uint16 setting; uint8 expect; const char* name; } cases[] = {
+				{ CLIENT_TACTIC_SPEED, TACTIC_SPEED, "Speed" }, { CLIENT_TACTIC_POWER, TACTIC_POWER, "Power" },
+				{ CLIENT_TACTIC_GRAB, TACTIC_RETALIATE, "Grab" }, { CLIENT_TACTIC_BLOCK, TACTIC_DEFENSE, "Block" } };
+			bool allMapped = true, allConfirmed = true;
+			for (auto& c : cases)
+			{
+				humanClient.captured.clear();
+				ByteBuffer cmd;
+				cmd << uint8(0x42) << uint16(c.setting) << uint16(0) << uint16(0);
+				human.po->HandleCommand(cmd);
+				allMapped &= (human.po->getTactic() == c.expect);
+				std::string ack;
+				allConfirmed &= findMsg(0x42, 7, &ack) && *reinterpret_cast<const uint16*>(&ack[1]) == c.setting;
+			}
+			check(allMapped, "client 0x42 settings map 0 Speed, 1 Power, 2 Grab, 3 Block to the server tactics");
+			check(allConfirmed, "server confirms each tactic with RPC 0x42 in client numbering");
+			human.po->setTactic(TACTIC_NORMAL);
+
+			ByteBuffer withdraw;
+			withdraw << uint8(0x42) << uint16(CLIENT_TACTIC_WITHDRAW) << uint16(0) << uint16(2);
+			human.po->HandleCommand(withdraw);
+			check(!sCombatSys.IsInterlocked(human.go), "client 0x42 setting 4 (HUD Withdraw) leaves the interlock");
 			sCombatSys.EndInterlock(human.go, false);
 		}
 

@@ -734,37 +734,58 @@ void PlayerObject::RPC_HandleRangeCombatRequest( ByteBuffer &srcCmd )
 }
 
 //0x42 - combat tactic change
+//The 7.6005 client sends 7 bytes: [0x42][u16 setting][u16 0][u16 variant] (client.dll
+//FUN_620ba5a0 / FUN_620b8e30). Setting is the interlock HUD button: 0 Speed, 1 Power,
+//2 Grab, 3 Block, 4 Withdraw (FUN_620bac9f, FUN_620baa00). Variant 0 = basic tactic,
+//1/2 = energized/precise versions. The old handler read one byte as the server enum, so
+//a client Speed (0) became Grab and Power (1) became Aimed Shot.
+//A single byte is still accepted as the server enum (BotTester before the 7-byte format).
 void PlayerObject::RPC_HandleChangeTactic( ByteBuffer &srcCmd )
 {
-	//The client sends the ILDB tactic value directly (Block=3 Grab=0 Power=4 Speed=5, see
-	//mxoTacticType). The 0..3 "TacticAdapter" remap had no source and has been removed.
-	//Logged at INFO until the value set is confirmed from a real session.
-	uint8 rawClientTactic = srcCmd.read<uint8>();
-	uint8 serverTactic = (rawClientTactic <= TACTIC_NORMAL) ? rawClientTactic : uint8(TACTIC_NORMAL);
+	uint8 serverTactic = TACTIC_NORMAL;
+	uint16 setting = 0xFFFF;
+	uint16 variant = 0;
+	if (srcCmd.remaining() >= 6)
+	{
+		setting = srcCmd.read<uint16>();
+		srcCmd.read<uint16>();
+		variant = srcCmd.read<uint16>();
+		if (setting == CLIENT_TACTIC_WITHDRAW)
+		{
+			INFO_LOG(format("(%1%) %2%:%3% tactic withdraw") % m_parent.Address() % m_handle % m_goId);
+			sCombatSys.StopFreeFire(m_goId);
+			sCombatSys.LeaveInterlock(m_goId);
+			return;
+		}
+		serverTactic = TacticFromClientSetting(uint8(setting));
+	}
+	else if (srcCmd.remaining() >= 1)
+	{
+		uint8 raw = srcCmd.read<uint8>();
+		serverTactic = (raw <= TACTIC_NORMAL) ? raw : uint8(TACTIC_NORMAL);
+	}
 
-	INFO_LOG(format("(%1%) %2%:%3% tactic change raw=%4%")
-		% m_parent.Address() % m_handle % m_goId % uint32(rawClientTactic));
+	INFO_LOG(format("(%1%) %2%:%3% tactic change setting=%4% variant=%5% -> server tactic %6%")
+		% m_parent.Address() % m_handle % m_goId % setting % variant % uint32(serverTactic));
 
 	m_tactic = serverTactic;
 	sCombatSys.SetTactic(m_goId, serverTactic);
 
 	if (!m_parent.isBot())
 	{
+		//confirm it so the HUD shows the stance the server will actually use
+		m_parent.QueueCommand(std::make_shared<ServerTacticMsg>(ClientSettingFromTactic(serverTactic), variant));
 		const char* stance = "Normal";
 		switch (serverTactic)
 		{
 			case TACTIC_RETALIATE: stance = "Grab"; break;
-			case TACTIC_AIMEDSHOT: stance = "Aimed Shot"; break;
-			case TACTIC_BURST:     stance = "Burst"; break;
 			case TACTIC_DEFENSE:   stance = "Block"; break;
 			case TACTIC_POWER:     stance = "Power"; break;
 			case TACTIC_SPEED:     stance = "Speed"; break;
-			case TACTIC_PRECISE:   stance = "Precise"; break;
-			case TACTIC_ENERGIZED: stance = "Energized"; break;
 			default: break;
 		}
 		m_parent.QueueCommand(std::make_shared<SystemChatMsg>(
-			(format("{c:00FFCC}[COMBAT] Stance: %1% (client %2%).{/c}") % stance % uint32(rawClientTactic)).str()));
+			(format("{c:00FFCC}[COMBAT] Stance: %1%.{/c}") % stance).str()));
 	}
 }
 

@@ -961,6 +961,78 @@ public:
 	~ILCombatStateMsg() {}
 };
 
+// ---------------------------------------------------------------------------------------------
+// Interlock HUD RPCs (one-byte opcodes, server -> client). Decoded from the 7.6005 client.dll
+// RPC dispatcher (case 0x40 / 0x42 / 0x45 around VA 0x62178700) and the handlers it calls.
+// ---------------------------------------------------------------------------------------------
+
+// Interlock tactic "setting" as the client UI numbers it. client.dll FUN_620bac9f maps the HUD
+// button commands ITSp/ITPo/ITGr/ITBl to settings 0..3; withdraw is 4 (FUN_620baa00).
+enum ClientTacticSetting
+{
+	CLIENT_TACTIC_SPEED = 0,
+	CLIENT_TACTIC_POWER = 1,
+	CLIENT_TACTIC_GRAB = 2,
+	CLIENT_TACTIC_BLOCK = 3,
+	CLIENT_TACTIC_WITHDRAW = 4,
+	CLIENT_TACTIC_NONE = 4, // any value >= 4 hides the tactic icon (FUN_620b98b0: setting < 4)
+};
+uint8 ClientSettingFromTactic(uint8 serverTactic);
+uint8 TacticFromClientSetting(uint8 clientSetting); // TACTIC_NORMAL when unknown
+
+// RPC 0x40 server -> client: set the client's combat target. client.dll FUN_621a13b0 resolves
+// the u32 handle (view | spawn<<16) at offset 1 and points the target UI at it.
+class CombatTargetMsg : public StaticMsg
+{
+public:
+	CombatTargetMsg(uint32 targetHandle)
+	{
+		m_buf.clear();
+		m_buf << uint8(0x40);
+		m_buf << uint32(targetHandle);
+		m_buf << uint8(0);
+		m_buf << uint8(0);
+	}
+	~CombatTargetMsg() {}
+};
+
+// RPC 0x42 server -> client: confirm the interlock tactic. client.dll FUN_6219e020 stores u16@1
+// as the server setting and FUN_620b8460 shows it ("Server tactic: setting(%d) tacticType(%d)").
+// Same 7-byte shape as the client's own 0x42 (FUN_620b8e30).
+class ServerTacticMsg : public StaticMsg
+{
+public:
+	ServerTacticMsg(uint8 clientSetting, uint16 variant)
+	{
+		m_buf.clear();
+		m_buf << uint8(0x42);
+		m_buf << uint16(clientSetting);
+		m_buf << uint16(variant);
+		m_buf << uint16(0);
+	}
+	~ServerTacticMsg() {}
+};
+
+// RPC 0x45 server -> client: interlock round status that drives the CViewInterlock HUD
+// (tactic icons, round damage, VS/lock/resolve timers). 89 bytes, layout from the client's
+// default constructor FUN_621264d0 and parser FUN_6219dbb0:
+//   @1 u16 ?            @3 u16 sequence (newer replaces, equal updates; FUN_621a1970)
+//   @5 u8  ?            @6 viewer record (19 bytes): @7 type (<6), @8 setting (<4), @0xb s16 damage
+//   @0x19 opponent record (19 bytes): @0x1a type, @0x1b setting, @0x1e s16 damage
+//   @0x2c u16 ?  @0x2e s16 viewer bonus damage  @0x30 u8 ?
+//   @0x31 u32 opponent handle; @0x35 u32 must equal @0x31 or the HUD ignores the update
+//   @0x39 u16 ?  @0x3b s16 opponent bonus damage  @0x3d u32 effect flags  @0x41 u32 ?
+//   @0x45..@0x4b 4 x u16 ?  @0x4d u32 lock time, sim milliseconds (FUN_620ba830 * 0.001)
+//   @0x51 u32 viewer highlight  @0x55 u32 opponent highlight
+class ILRoundStatusMsg : public StaticMsg
+{
+public:
+	ILRoundStatusMsg(uint16 sequence, uint32 opponentHandle,
+		uint8 viewerSetting, int16 viewerDamage,
+		uint8 opponentSetting, int16 opponentDamage, uint32 lockTimeMs);
+	~ILRoundStatusMsg() {}
+};
+
 // Vendor shop catalog open response (RPC 0x810d)
 // Primary source citations:
 // 1. hd_reference/hds/servertype/CR2/NetworkProtocolHeaders.cs:161 (SERVER_VENDOR_OPEN = 0x810d)

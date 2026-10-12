@@ -490,14 +490,15 @@ void TesterBrain::DoCombat(PlayerObject* me, uint32 now)
         return;
     }
 
-    // tactics (0x42 sends the ILDB value: grab 0, block 3, power 4, speed 5)
+    // tactics: the 7-byte packet the retail HUD buttons send (client.dll FUN_620ba5a0):
+    // [0x42][u16 setting 0 Speed / 1 Power / 2 Grab / 3 Block][u16 0][u16 variant 0]
     if (inIL && now - m_lastTacticMs >= 4000)
     {
         m_lastTacticMs = now;
-        static const uint8 tactics[] = { TACTIC_RETALIATE, TACTIC_DEFENSE, TACTIC_POWER, TACTIC_SPEED };
-        uint8 t = tactics[rand() % 4];
         ByteBuffer b = Rpc8(RPC_TACTIC);
-        b << uint8(t);
+        b << uint16(rand() % 4);
+        b << uint16(0);
+        b << uint16(0);
         if (SendRpc(b, "0x42 tactic")) m_stats.tacticsChanged++;
     }
 

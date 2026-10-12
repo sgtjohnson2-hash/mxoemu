@@ -1641,6 +1641,54 @@ SpawnILCombatHandlerMsg::SpawnILCombatHandlerMsg( uint16 viewId, uint8 spawnIdCo
 	m_buf << uint16(0); // nomoreattribs
 }
 
+uint8 ClientSettingFromTactic(uint8 serverTactic)
+{
+	switch (serverTactic)
+	{
+		case TACTIC_SPEED:     return CLIENT_TACTIC_SPEED;
+		case TACTIC_POWER:     return CLIENT_TACTIC_POWER;
+		case TACTIC_RETALIATE: return CLIENT_TACTIC_GRAB;
+		case TACTIC_DEFENSE:   return CLIENT_TACTIC_BLOCK;
+		default:               return CLIENT_TACTIC_NONE;
+	}
+}
+
+uint8 TacticFromClientSetting(uint8 clientSetting)
+{
+	switch (clientSetting)
+	{
+		case CLIENT_TACTIC_SPEED: return TACTIC_SPEED;
+		case CLIENT_TACTIC_POWER: return TACTIC_POWER;
+		case CLIENT_TACTIC_GRAB:  return TACTIC_RETALIATE;
+		case CLIENT_TACTIC_BLOCK: return TACTIC_DEFENSE;
+		default:                  return TACTIC_NORMAL;
+	}
+}
+
+ILRoundStatusMsg::ILRoundStatusMsg(uint16 sequence, uint32 opponentHandle,
+	uint8 viewerSetting, int16 viewerDamage,
+	uint8 opponentSetting, int16 opponentDamage, uint32 lockTimeMs)
+{
+	uint8 b[0x59];
+	memset(b, 0, sizeof(b));
+	b[0] = 0x45;
+	memcpy(&b[0x03], &sequence, 2);
+	// viewer record @6
+	b[0x07] = 0;                 // type: 0 = basic tactic (4 = special, FUN_620ba5a0)
+	b[0x08] = viewerSetting;
+	memcpy(&b[0x0B], &viewerDamage, 2);
+	// opponent record @0x19
+	b[0x1A] = 0;
+	b[0x1B] = opponentSetting;
+	memcpy(&b[0x1E], &opponentDamage, 2);
+	// FUN_6219dbb0: the HUD only takes the update when @0x35 is non-zero and equals @0x31
+	memcpy(&b[0x31], &opponentHandle, 4);
+	memcpy(&b[0x35], &opponentHandle, 4);
+	memcpy(&b[0x4D], &lockTimeMs, 4);
+	m_buf.clear();
+	m_buf.append(b, sizeof(b));
+}
+
 ILExchange::ILExchange()
 {
 	memset(this, 0, sizeof(*this));

@@ -390,6 +390,29 @@ const CombatMove* CombatSystem::GetDefaultStyleMove(PlayerObject* player)
     return DefaultMelee();
 }
 
+// RPC 0x45 to each human in the interlock: the tactics both sides used, the damage each dealt
+// and when the next round locks. This is what drives the retail interlock HUD (tactic icons,
+// damage, VS / lock timers); without it the HUD never leaves its initial state.
+static void SendILRoundStatus(const InterlockSession &session, PlayerObject* pA, PlayerObject* pB,
+	int dmgByA, int dmgByB, uint32 msUntilLock)
+{
+	if (!pA || !pB)
+		return;
+	// Interlock.HudRpcs = 0 turns the 0x40/0x45 HUD feed off without a rebuild (config reload)
+	if (!sConfig.GetBoolDefault("Interlock.HudRpcs", true))
+		return;
+	uint32 lockMs = uint32(double(sGame.GetSimTime()) * 1000.0 + 0.5) + msUntilLock;
+	uint16 seq = uint16(session.roundNumber + 1);
+	if (!pA->getClient().isBot() && session.otherRefA != 0)
+		pA->getClient().QueueCommand(std::make_shared<ILRoundStatusMsg>(seq, session.otherRefA,
+			ClientSettingFromTactic(session.committedTacticA), int16(dmgByA),
+			ClientSettingFromTactic(session.committedTacticB), int16(dmgByB), lockMs));
+	if (!pB->getClient().isBot() && session.otherRefB != 0)
+		pB->getClient().QueueCommand(std::make_shared<ILRoundStatusMsg>(seq, session.otherRefB,
+			ClientSettingFromTactic(session.committedTacticB), int16(dmgByB),
+			ClientSettingFromTactic(session.committedTacticA), int16(dmgByA), lockMs));
+}
+
 void CombatSystem::Update()
 {
 	std::lock_guard<std::recursive_mutex> lock(m_combatMutex);
@@ -407,6 +430,8 @@ void CombatSystem::Update()
 		bool keepAlive = (pA && pB && !pA->isDead() && !pB->isDead());
 
 		if (keepAlive && currTime >= it->nextRoundTime) {
+			const int hpA0 = int(pA->getCurrentHealth());
+			const int hpB0 = int(pB->getCurrentHealth());
 			keepAlive = RunInterlockRound(*it);
 
 			// [Item 13] Bullet Time / Dilation Zones
@@ -415,6 +440,8 @@ void CombatSystem::Update()
 
 			it->nextRoundTime = currTime + uint32((INTERLOCK_ROUND_SECONDS * 1000.0f) / avgDilation);
 			it->roundNumber++;
+			SendILRoundStatus(*it, pA, pB, hpB0 - int(pB->getCurrentHealth()),
+				hpA0 - int(pA->getCurrentHealth()), it->nextRoundTime - currTime);
 		}
 
 		if (!keepAlive) {
@@ -727,6 +754,9 @@ bool CombatSystem::RequestInterlock(uint32 attackerGoId, uint32 targetGoId, uint
 					}
 					if (i == 0) session.otherRefA = otherViewWithSpawnId;
 					else session.otherRefB = otherViewWithSpawnId;
+					// point the client's combat target / target window at the opponent
+					if (sConfig.GetBoolDefault("Interlock.HudRpcs", true))
+						sides[i].self->getClient().QueueCommand(std::make_shared<CombatTargetMsg>(otherViewWithSpawnId));
 					std::vector<uint32> slots = BuildILSlots(otherViewWithSpawnId);
 					// The opening used to be one hardcoded clip. Use the same ILDB move the
 					// later rounds use, and fall back if the database is not loaded.
@@ -774,6 +804,11 @@ bool CombatSystem::RequestInterlock(uint32 attackerGoId, uint32 targetGoId, uint
 	}
 
 	m_interlocks.push_back(session);
+	// round 0 status: no damage yet, tactics open until the first round resolves
+	{
+		uint32 now = getMSTime();
+		SendILRoundStatus(session, pA, pB, 0, 0, session.nextRoundTime > now ? session.nextRoundTime - now : 0);
+	}
 	return true;
 }
 
