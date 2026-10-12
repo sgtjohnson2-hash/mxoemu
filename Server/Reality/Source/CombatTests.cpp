@@ -88,6 +88,16 @@ namespace
 			};
 		}
 		virtual void FlushQueue(bool alsoResend = false) {}
+		// A test client lives on the stack of one test block. Remove its character with it,
+		// or later broadcasts (faction alerts, AnnounceCommand) walk a PlayerObject whose
+		// client is gone and jump through a dead vtable (that segfault aborted the suite).
+		~TestHumanClient()
+		{
+			m_commandTap = 0;
+			uint32 go = GetPlayerGoId();
+			if (go != 0 && sObjMgr.getGOPtrSafe(go) != nullptr)
+				sObjMgr.destroyObject(go);
+		}
 
 		bool sawText(const std::string& needle) const
 		{
@@ -218,12 +228,15 @@ int RunCombatTestSuite()
 		std::vector<ILExchange> ex; ex.push_back(e);
 		ILCombatStateMsg m(0x1234, LocationVector(0,0,0), 1, slots, ex);
 		const ByteBuffer& mb = m.toBuf();
-		bool mode2Valid = (mb.size() == 168 && mb.contents()[0] == 0x03 && mb.contents()[3] == 0x08) ||
-			(mb.size() == 169 && mb.contents()[0] == 0x03 && mb.contents()[3] == 0x01 && mb.contents()[4] == 0x08);
-		uint16 len = mb.size() >= 6 ? (uint16(uint8(mb.contents()[4])) | (uint16(uint8(mb.contents()[5])) << 8)) : 0;
-		bool mode0Valid = mb.size() >= 6 && mb.contents()[3] == 0x02 && (len == 0xA2 || len == 0xA5 || len == 0xA7) && (size_t(len) + 4 == mb.size() || size_t(len) + 6 == mb.size() || size_t(len) + 8 == mb.size());
-		check(mode2Valid || mode0Valid,
-			"IL state message wire framing valid (authentic direct ilViewId attr 3 group header 0x08 or legacy)");
+		// Exact HDS capture framing: 03 01 00 02 A7 00 [ilView] 01 [162-byte payload] 00 00
+		const uint8* mbb = reinterpret_cast<const uint8*>(mb.contents());
+		static const uint8 head[] = { 0x03, 0x01, 0x00, 0x02, 0xA7, 0x00, 0x34, 0x12, 0x01 };
+		bool headMatch = mb.size() == 173 && memcmp(mbb, head, sizeof(head)) == 0;
+		check(headMatch, "IL state message = HDS capture framing 03 01 00 02 A7 00 [view] 01 (len 0xA7, autoview flags 0x01)");
+		// slot mask 3 and the two handles directly after pos(24) + seq(4)
+		bool slotsOk = mb.size() == 173 && *reinterpret_cast<const uint32*>(&mbb[9 + 24]) == 1 &&
+			*reinterpret_cast<const uint32*>(&mbb[9 + 28]) == 3 && mbb[9 + 40] == 1;
+		check(slotsOk, "IL state message carries seq 1, slot mask 3, two handles, one exchange");
 	}
 
 	try
@@ -1407,6 +1420,10 @@ int RunCombatTestSuite()
 			auto dualWpns = humanOperative.po->getEquippedWeapons();
 			check(!dualWpns.empty(), "Dual Berettas resolved in getEquippedWeapons()");
 			dualWpns[0]->setAmmoCount(10);
+			// the reload shot above can empty the target's bar; a target at 0 HP is (correctly)
+			// no longer shot at, so give the burst a live target
+			enemyBot.po->setDead(false);
+			enemyBot.po->setCurrentHealth(enemyBot.po->getMaximumHealth());
 			check(sCombatSys.RunFreeFireShot(ffState), "RunFreeFireShot executes dual-wield burst");
 			check(dualWpns[0]->getAmmoCount() == 8, "Dual-wield consumes 2 rounds per volley (10 -> 8)");
 

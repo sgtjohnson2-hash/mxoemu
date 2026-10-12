@@ -1671,7 +1671,44 @@ void ILExchange::write( ByteBuffer &buf ) const
 ILCombatStateMsg::ILCombatStateMsg( uint16 ilViewId, LocationVector pos, uint32 seq,
 	const std::vector<uint32> &slotHandles, const std::vector<ILExchange> &exchanges )
 {
-	int updateMode = sConfig.GetIntDefault("Interlock.UpdateMode", 2);
+	int updateMode = sConfig.GetIntDefault("Interlock.UpdateMode", 3);
+
+	// Mode 3 (default): the captured HDS interlock-start framing, byte for byte.
+	//   03 01 00 | 02 [u16 len] [ilView u16] 01 | payload
+	//   len = 2 (len) + 2 (view) + 1 (autoview flags) + payload  -> 0xA7 for one exchange.
+	// The view's autoview unpacker (client.dll FUN_623215b0) takes one flag bit per item;
+	// the IL state is item 0, so the flags byte must be 0x01. Mode 2 sent 0x08 (item 3)
+	// and mode 0 left out the view id and the flags byte: the client consumed the bytes
+	// and silently dropped the interlock state, so no exchange played and the interlock
+	// window (opened by the first played exchange, FUN_625f6580 -> FUN_6219f1b0) never came up.
+	if (updateMode == 3)
+	{
+		ByteBuffer payload;
+		byte posBuf[sizeof(double)*3];
+		pos.toDoubleBuf(posBuf, sizeof(posBuf));
+		payload.append(posBuf, sizeof(posBuf));
+		payload << uint32(seq);
+		uint32 mask = 0;
+		for (size_t i=0;i<slotHandles.size() && i<6;i++)
+			mask |= (1u << i);
+		payload << uint32(mask);
+		for (size_t i=0;i<slotHandles.size() && i<6;i++)
+			payload << uint32(slotHandles[i]);
+		payload << uint8(exchanges.size());
+		for (size_t i=0;i<exchanges.size();i++)
+			exchanges[i].write(payload);
+
+		m_buf.clear();
+		m_buf << uint8(0x03);
+		m_buf << uint16(VIEWID_OBJECTMANAGER);
+		m_buf << uint8(0x02);
+		m_buf << uint16(payload.size() + 5);
+		m_buf << uint16(ilViewId);
+		m_buf << uint8(0x01);
+		m_buf.append(payload.contents(), payload.size());
+		m_buf << uint16(0); // nomoreattribs
+		return;
+	}
 	// Mode 2: Authentic direct ilViewId framing via AttributeUpdateBlock (Attribute 3: CLTGOCmpILCombatHandlerClient).
 	// Opcode 0x03, ilViewId, count=1, group header=0x08 (bit 3), pos, seq, mask, slots, count, exchanges, nomoreattribs.
 	// Mode 0: Authentic ObjectManager framing (VIEWID_OBJECTMANAGER Attribute 2).
