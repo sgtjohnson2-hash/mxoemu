@@ -48,6 +48,7 @@
 #include "AI/PedestrianEcology.h"
 #include "SocketSystem.h"
 #include "HovercraftFlightSystem.h"
+#include "Config.h"
 #include "LoadingConstruct.h"
 #include "OrganizationManager.h"
 #include "Timer.h"
@@ -2395,6 +2396,9 @@ int RunCombatTestSuite()
 				"SpawnILCombatHandlerMsg creation attributes count=2, mask=0x05 (Position + StartTime)");
 			check(spawnBuf.read<uint16>(39) == 4 && spawnBuf.read<uint8>(41) == 0x00 && spawnBuf.read<uint16>(42) == 0,
 				"SpawnILCombatHandlerMsg registers viewId 4, role 0, terminated with nomoreattribs 0");
+			// client.dll FUN_625f6580 reads StartTime as u32 ms (/1000, %1000); 123.45 s -> 123450
+			check(sConfig.GetIntDefault("Interlock.StartTimeMode", 1) != 1 || spawnBuf.read<uint32>(35) == 123450,
+				"SpawnILCombatHandlerMsg StartTime is u32 sim milliseconds (Interlock.StartTimeMode 1)");
 
 			// 8. Verify ObjectMgr client view allocation within retail 7.6005 128-element limit
 			// (client.dll HandleInput 0x622C362B viewListSize cmp eax, edx; jae 0x622C383E)

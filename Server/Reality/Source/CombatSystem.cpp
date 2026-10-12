@@ -41,7 +41,10 @@ createFileSingleton(CombatSystem);
 // That layout came from a reading of client.dll 0x624fd270 that was never confirmed in game.
 std::vector<uint32> BuildILSlots(uint32 otherRef)
 {
-	const uint32 selfRef = uint32(VIEWID_SELF) | (uint32(PLAYER_SPAWN_COUNTER) << 16);
+	// Interlock.SelfSpawnCounter: spawn counter byte of our own avatar handle. HDS sent
+	// playerData.selfSpawnIdCounter, which it never assigned (0). Our self spawn uses 0x2F.
+	const int selfCounter = sConfig.GetIntDefault("Interlock.SelfSpawnCounter", PLAYER_SPAWN_COUNTER);
+	const uint32 selfRef = uint32(VIEWID_SELF) | (uint32(selfCounter & 0xFF) << 16);
 	std::vector<uint32> slots;
 	if (ILSlotsOpponentFirst())
 	{

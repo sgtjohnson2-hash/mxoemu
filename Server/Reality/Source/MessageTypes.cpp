@@ -1624,7 +1624,17 @@ SpawnILCombatHandlerMsg::SpawnILCombatHandlerMsg( uint16 viewId, uint8 spawnIdCo
 	byte posBuf[sizeof(double)*3];
 	pos.toDoubleBuf(posBuf,sizeof(posBuf));
 	m_buf.append(posBuf,sizeof(posBuf));
-	m_buf << float(simTime);
+	//StartTime. client.dll FUN_625f6580 reads it as a u32 and splits it with /1000 and %1000,
+	//so it is milliseconds of sim time. A float of sim seconds reads as a time about 14 days
+	//ahead, and the client waits for it. Interlock.StartTimeMode: 1 = u32 ms (default),
+	//0 = float seconds (old behaviour), 2 = float ms. Read per message so a config reload applies.
+	int startMode = sConfig.GetIntDefault("Interlock.StartTimeMode", 1);
+	if (startMode == 0)
+		m_buf << float(simTime);
+	else if (startMode == 2)
+		m_buf << float(simTime * 1000.0f);
+	else
+		m_buf << uint32(double(simTime) * 1000.0 + 0.5);
 
 	m_buf << uint16(viewId);
 	m_buf << uint8(0x00);
