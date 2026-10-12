@@ -403,14 +403,26 @@ static void SendILRoundStatus(const InterlockSession &session, PlayerObject* pA,
 		return;
 	uint32 lockMs = uint32(double(sGame.GetSimTime()) * 1000.0 + 0.5) + msUntilLock;
 	uint16 seq = uint16(session.roundNumber + 1);
+	// Interlock.HudDamageMode: which damage goes in which record. 0 = each record carries the
+	// damage that side dealt; 1 = each record carries the damage that side took. Live with mode 0
+	// the HUD showed MISS over the opponent while the player was hitting it for 35-42.
+	// 9 = diagnostic: viewer record 111, opponent record 222, to see where the HUD draws each.
+	const int dmgMode = sConfig.GetIntDefault("Interlock.HudDamageMode", 1);
+	if (dmgMode == 1)
+		std::swap(dmgByA, dmgByB);
+	DEBUG_LOG(format("IL round status seq %1%: A %2% (tactic %3%, record dmg %4%) B %5% (tactic %6%, record dmg %7%) lock +%8%ms")
+		% seq % pA->getHandle() % uint32(session.committedTacticA) % dmgByA
+		% pB->getHandle() % uint32(session.committedTacticB) % dmgByB % msUntilLock);
+	const int16 viewA = int16(dmgMode == 9 ? 111 : dmgByA), oppA = int16(dmgMode == 9 ? 222 : dmgByB);
+	const int16 viewB = int16(dmgMode == 9 ? 111 : dmgByB), oppB = int16(dmgMode == 9 ? 222 : dmgByA);
 	if (!pA->getClient().isBot() && session.otherRefA != 0)
 		pA->getClient().QueueCommand(std::make_shared<ILRoundStatusMsg>(seq, session.otherRefA,
-			ClientSettingFromTactic(session.committedTacticA), int16(dmgByA),
-			ClientSettingFromTactic(session.committedTacticB), int16(dmgByB), lockMs));
+			ClientSettingFromTactic(session.committedTacticA), viewA,
+			ClientSettingFromTactic(session.committedTacticB), oppA, lockMs));
 	if (!pB->getClient().isBot() && session.otherRefB != 0)
 		pB->getClient().QueueCommand(std::make_shared<ILRoundStatusMsg>(seq, session.otherRefB,
-			ClientSettingFromTactic(session.committedTacticB), int16(dmgByB),
-			ClientSettingFromTactic(session.committedTacticA), int16(dmgByA), lockMs));
+			ClientSettingFromTactic(session.committedTacticB), viewB,
+			ClientSettingFromTactic(session.committedTacticA), oppB, lockMs));
 }
 
 void CombatSystem::Update()
