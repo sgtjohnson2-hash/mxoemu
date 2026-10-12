@@ -610,6 +610,13 @@ void PlayerObject::die( uint32 killerGoId )
 	//(removed: setOnlineStatus(false) flagged dead players offline in the DB/friends list, and a
 	//jackout beam was used as a "downed" visual; the IsDead attribute above is the death state)
 
+	if (m_parent.isBot() && m_despawnOnDeath)
+	{
+		// leave the body for the takedown, then remove it (deferred, so safe from this event)
+		const uint32 goId = m_goId;
+		this->addEvent(EVENT_RESPAWN,[goId]() { sBotMgr.DespawnBot(goId); },6.0f);
+		return;
+	}
 	this->addEvent(EVENT_RESPAWN,boost::bind(&PlayerObject::respawn,this),8.0f);
 }
 

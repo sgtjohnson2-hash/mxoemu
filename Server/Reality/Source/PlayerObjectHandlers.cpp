@@ -1370,6 +1370,7 @@ void PlayerObject::ParsePlayerCommand( string theCmd )
 			botPo->setMaximumHealth((uint16)hpF);
 			botPo->setCurrentHealth((uint16)hpF);
 			botPo->setDamageScale(dmgScale);
+			botPo->m_despawnOnDeath = true;
 
 			if (botName.find("Agent") != std::string::npos) {
 				botPo->setAgentAppearance();

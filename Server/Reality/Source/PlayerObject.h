@@ -380,6 +380,9 @@ public:
     uint32 m_deathDelayMS = 0;
     uint32 m_deathDelayKillerId = 0;
     uint32 m_lastDojoBotGoId = 0;
+    // Summoned sparring partners (dojo) leave after they are beaten instead of standing back
+    // up in place 8 s later at half health.
+    bool m_despawnOnDeath = false;
     
     std::string m_crewName;
     std::string m_factionName;
