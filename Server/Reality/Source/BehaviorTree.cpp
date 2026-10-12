@@ -643,7 +643,16 @@ NodeStatus ActionCombatCycle::Tick(BotClient* bot)
     sCombatSys.SetTactic(bot->GetPlayerGoId(), chosen);
 
     // One real ability for this faction, loaded once, cast through the same handler a player uses.
+    // Only the bot that is interlocked with this target casts. Every engaged bot used to cast
+    // (Power Shot goes straight to takeDamage), so a crowd killed the player in ~3 s and the
+    // interlock never got past its opening clip.
     me->ensureAbilitySystem();
+    if (me->getInterlockPartner() != target->getGoId() || !sCombatSys.IsInterlocked(me->getGoId()))
+    {
+        uint32 delay = (uint32)(2000.0f / me->GetTimeDilation());
+        bot->SetNextActionTime(currentTime + delay);
+        return NodeStatus::SUCCESS;
+    }
     if (auto ab = me->getAbilitySystem())
     {
         uint16 id = 133; // Kung Fu
