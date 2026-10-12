@@ -112,6 +112,8 @@ struct InterlockSession
 	uint16 ilViewIdB;		//ILCombatHandler view spawned on B's client
 	LocationVector ilPos;	//IL handler position; exchange positions are relative to it
 	uint16 exchangeNum;		//last interlock exchange number sent (client plays only newer ones)
+	uint32 otherRefA = 0;	//opponent slot handle (view | spawn<<16) as A's client knows it
+	uint32 otherRefB = 0;	//opponent slot handle as B's client knows it
 };
 
 // Interlock move references (interlock database rez 0x24000B8B), from captured live exchanges
@@ -119,6 +121,10 @@ static const uint32 IL_MOVE_DATABASE = 0x24000B8B;
 static const uint32 IL_MOVE_PRE = 0x5214;			//lead-in used on both sides in 4 of 5 captures
 static const uint32 IL_MOVE_OPEN_ATTACKER_PRE = 0x523C;
 static const uint32 IL_MOVE_OPEN_MAIN = 0x2026;	//main move of the captured interlock start
+
+// Interlock slot layout for one client (see CombatSystem.cpp; order from Reality.conf Interlock.SlotOrder)
+std::vector<uint32> BuildILSlots(uint32 otherRef);
+uint8 ILSlotFor(bool isViewer);
 
 // One free-fire engagement (attacker keeps firing at target until it ends)
 struct FreeFireState

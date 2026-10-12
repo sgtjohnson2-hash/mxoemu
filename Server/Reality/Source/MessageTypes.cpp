@@ -1588,6 +1588,20 @@ SelfCombatantModeMsg::SelfCombatantModeMsg( uint8 mode )
 	m_buf << uint16(0); // nomoreattribs
 }
 
+uint16 GetILCombatHandlerGoId()
+{
+	int goId = sConfig.GetIntDefault("Interlock.HandlerGoId", GOID_ILCOMBATHANDLER_HDS);
+	if (goId != GOID_ILCOMBATHANDLER_HDS && goId != GOID_ILCOMBATHANDLER_ALT)
+		goId = GOID_ILCOMBATHANDLER_HDS; //only the two cited candidates are allowed
+	return uint16(goId);
+}
+
+bool ILSlotsOpponentFirst()
+{
+	std::string order = sConfig.GetStringDefault("Interlock.SlotOrder", "hds");
+	return order != "self";
+}
+
 SpawnILCombatHandlerMsg::SpawnILCombatHandlerMsg( uint16 viewId, uint8 spawnIdCounter, LocationVector pos, float simTime )
 {
 	m_buf.clear();
@@ -1599,7 +1613,7 @@ SpawnILCombatHandlerMsg::SpawnILCombatHandlerMsg( uint16 viewId, uint8 spawnIdCo
 	//creation packet: 0C (cmd 0 CREATE | bit 2=4 dynamic skip-id | bit 3=8 spawnIdCounter) [goid:2] [idCounter] CD AB [attributes]
 	//CLTAdminControlView::HandleCommand (0x622D6B79): bl & 3 == 0 dispatches to Case 0 (0x622D9510 Object/View creation unpacker)
 	m_buf << uint8(0x0C);
-	m_buf << uint16(GOID_ILCOMBATHANDLER);
+	m_buf << uint16(GetILCombatHandlerGoId());
 	m_buf << uint8(spawnIdCounter);
 	m_buf << uint8(0xCD);
 	m_buf << uint8(0xAB);
@@ -1624,13 +1638,14 @@ ILExchange::ILExchange()
 	defenderSlot = 2;
 	attackerAdjustMs = 775;
 	defenderAdjustMs = 775;
-	style = 2;
+	// Defaults = HDS CombatHandler.cs L76 capture ("Special agent test"), decoded field by field.
+	style = 0;
 	unk1F = 0;
 	number = 1;
-	startMs = 0;
+	startMs = 0x113;
 	defenderOffsetMs = 500;
-	unk28 = 0;
-	unk2A = 0;
+	unk28 = 0x534;
+	unk2A = 0x29A;
 	flags = 0x23;
 	attackerHealth = 100;
 	defenderHealth = 100;

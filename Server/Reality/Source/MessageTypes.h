@@ -891,7 +891,16 @@ public:
 	~DeleteViewMsg() {}
 };
 
-//spawns an ILCombatHandler game object view (GOID 55) - the client-side
+//Interlock wire choices read from Reality.conf. Defaults follow the HDS interlock-start
+//capture (hd_reference/hds/world/Client/RpcHandlers/CombatHandler.cs L37, L58-77).
+//Interlock.HandlerGoId: 55 (HDS) or 27 (see GOAttributes.h).
+uint16 GetILCombatHandlerGoId();
+//Interlock.SlotOrder: "hds" (default) = slot 1 the opponent (the u32 the client sent in its
+//close-combat request, L64), slot 2 self (u16 2 + u16 selfSpawnIdCounter, L65-66).
+//"self" = the previous order, slot 1 self, slot 2 opponent.
+bool ILSlotsOpponentFirst();
+
+//spawns an ILCombatHandler game object view (GO id from GetILCombatHandlerGoId) - the client-side
 //component that drives the interlock camera and round UI
 class SpawnILCombatHandlerMsg : public StaticMsg
 {
@@ -912,13 +921,13 @@ struct ILExchange
 	uint16 defenderAdjustMs;	// 0x04..0x05 time to slide defender to defenderPos (775)
 	float attackerPos[3];		// 0x06..0x11 relative to IL handler position (12 bytes)
 	float defenderPos[3];		// 0x12..0x1D relative to IL handler position (12 bytes)
-	uint8 style;				// 0x1E martial arts fighting style (Kung Fu=2, Karate=3, etc.)
+	uint8 style;				// 0x1E HDS captures: 0 (L76), 7 (L73), 1 (L71). Not our FightingStyle enum.
 	uint8 unk1F;				// 0x1F (0)
 	uint16 number;				// 0x20..0x21 sequence number (client only plays newer numbers)
-	uint32 startMs;				// 0x22..0x25 start time (bit0 in flags makes client clamp to now+5ms)
-	int16 defenderOffsetMs;		// 0x26..0x27 defender contact delay from startMs (500)
-	uint16 unk28;				// 0x28..0x29 (0)
-	uint16 unk2A;				// 0x2A..0x2B (0)
+	uint32 startMs;				// 0x22..0x25 start time; HDS captures 0x113 (L73, L76) / 0x104 (L71)
+	int16 defenderOffsetMs;		// 0x26..0x27 defender contact delay from startMs (500 / 1441 / 666 in captures)
+	uint16 unk28;				// 0x28..0x29 0x534 = 1332 in all three HDS captures
+	uint16 unk2A;				// 0x2A..0x2B 0x29A = 666 (L76) / 0x535 = 1333 (L71, L73)
 	uint8 flags;				// 0x2C bit0 relative start, bit1 dilation/camera update, bit5 (0x23)
 	uint32 moves[5][2];			// 0x2D..0x54 (40 bytes): 5 moves (moveId, rezId 0x24000B8B)
 								//   moves[0]: Attacker lead-in (0x523C)

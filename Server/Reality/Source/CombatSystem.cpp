@@ -32,6 +32,38 @@ const float CombatSystem::FREEFIRE_SHOT_SECONDS = 2.0f;
 
 createFileSingleton(CombatSystem);
 
+// Interlock participant slots as one client sees them. Shared by the opening and every round
+// so both always agree.
+// "hds" order (default), from HDS CombatHandler.cs L63-67:
+//   mask 3, slot 1 = the opponent handle the client sent in its close-combat request (L64),
+//   slot 2 = u16 2 (own avatar view) + u16 selfSpawnIdCounter (L65-66).
+// "self" order (Interlock.SlotOrder = self) keeps the earlier layout: slot 1 self, slot 2 opponent.
+// That layout came from a reading of client.dll 0x624fd270 that was never confirmed in game.
+std::vector<uint32> BuildILSlots(uint32 otherRef)
+{
+	const uint32 selfRef = uint32(VIEWID_SELF) | (uint32(PLAYER_SPAWN_COUNTER) << 16);
+	std::vector<uint32> slots;
+	if (ILSlotsOpponentFirst())
+	{
+		slots.push_back(otherRef);
+		slots.push_back(selfRef);
+	}
+	else
+	{
+		slots.push_back(selfRef);
+		slots.push_back(otherRef);
+	}
+	return slots;
+}
+
+uint8 ILSlotFor(bool isViewer)
+{
+	const bool oppFirst = ILSlotsOpponentFirst();
+	if (isViewer)
+		return oppFirst ? 2 : 1;
+	return oppFirst ? 1 : 2;
+}
+
 // sObjMgr.getGOPtr throws on missing objects - combat wants a null instead so
 // a mid-fight disconnect can never unwind the server loop
 static PlayerObject* getPlayerSafe(uint32 goId)
@@ -667,7 +699,7 @@ bool CombatSystem::RequestInterlock(uint32 attackerGoId, uint32 targetGoId, uint
 				sides[i].self->getClient().QueueState(std::make_shared<SelfCombatModeOnMsg>());
 				sides[i].self->getClient().QueueState(std::make_shared<CombatantModeMsg>(sides[i].other->getGoId(), 1));
 
-				uint16 ilViewId = sObjMgr.allocateDynamicView(&sides[i].self->getClient(), uint32(GOID_ILCOMBATHANDLER) << 16);
+				uint16 ilViewId = sObjMgr.allocateDynamicView(&sides[i].self->getClient(), uint32(GetILCombatHandlerGoId()) << 16);
 				*(sides[i].viewSlot) = ilViewId;
 
 				static std::atomic<uint8> s_ilSpawnCounter(0x40);
@@ -690,18 +722,9 @@ bool CombatSystem::RequestInterlock(uint32 attackerGoId, uint32 targetGoId, uint
 							clientTargetRef |= (uint32(PLAYER_SPAWN_COUNTER) << 16);
 						otherViewWithSpawnId = clientTargetRef;
 					}
-					// On every client: slot 1 = that client's own character, slot 2 = the opponent.
-					// ILTCommHandleMgr::ResolveHandle (client.dll 0x622ceda0) resolves slot handles by unpacking
-					// the low word as viewId and calling ObjectManager::FindObjectByViewId(viewId).
-					// The local player entity has viewId = sObjMgr.getViewForGO(&client, selfGoId).
-					// Only when slot 1 resolves to the local player entity does client.dll FUN_104fd060
-					// (0x624fd270) pass the check (DAT_108a4378 == param_1[10]), unlocking the interlock camera,
-					// spawning the tactic HUD buttons, and driving the martial arts animation blend trees.
-					uint16 selfViewId = sObjMgr.getViewForGO(&sides[i].self->getClient(), sides[i].self->getGoId());
-					uint32 selfViewWithSpawnId = uint32(selfViewId) | (uint32(PLAYER_SPAWN_COUNTER) << 16);
-					std::vector<uint32> slots;
-					slots.push_back(selfViewWithSpawnId);
-					slots.push_back(otherViewWithSpawnId);
+					if (i == 0) session.otherRefA = otherViewWithSpawnId;
+					else session.otherRefB = otherViewWithSpawnId;
+					std::vector<uint32> slots = BuildILSlots(otherViewWithSpawnId);
 					// The opening used to be one hardcoded clip. Use the same ILDB move the
 					// later rounds use, and fall back if the database is not loaded.
 					uint32 openMove = 0;
@@ -1336,9 +1359,8 @@ ILExchange CombatSystem::BuildExchange(const InterlockSession &session, PlayerOb
 	const InterlockAnimPair* animPair)
 {
 	ILExchange e;
-	// On every client: slot 1 = that client's own character (VIEWID_SELF), slot 2 = the opponent
-	e.attackerSlot = (attacker == viewer) ? 1 : 2;
-	e.defenderSlot = (defender == viewer) ? 1 : 2;
+	e.attackerSlot = ILSlotFor(attacker == viewer);
+	e.defenderSlot = ILSlotFor(defender == viewer);
 	LocationVector a = attacker->getPosition();
 	LocationVector d = defender->getPosition();
 	e.attackerPos[0] = float(a.x - session.ilPos.x);
@@ -1348,9 +1370,16 @@ ILExchange CombatSystem::BuildExchange(const InterlockSession &session, PlayerOb
 	e.defenderPos[1] = float(d.y - session.ilPos.y);
 	e.defenderPos[2] = float(d.z - session.ilPos.z);
 	e.number = number;
-	//far-future start + flag bit0: the client clamps it to "now + 5 ms" on its own clock,
-	//so server/client clock skew can't make it skip the exchange
-	e.startMs = 1000000;
+	// HDS CombatHandler.cs L76 capture: startMs 0x113, timing pair 0x534 / 0x29A, style byte 0.
+	// (L71/L73 carry 0x104-0x113, 0x534 / 0x535 and style 1 / 7.) The previous startMs of
+	// 1000000 had no source.
+	static const int s_startMs = sConfig.GetIntDefault("Interlock.ExchangeStartMs", 0x113);
+	static const int s_durMs = sConfig.GetIntDefault("Interlock.ExchangeDurMs", 0x534);
+	static const int s_contactMs = sConfig.GetIntDefault("Interlock.ExchangeContactMs", 0x29A);
+	static const int s_styleByte = sConfig.GetIntDefault("Interlock.ExchangeStyleByte", 0);
+	e.startMs = uint32(s_startMs);
+	e.unk28 = uint16(s_durMs);
+	e.unk2A = uint16(s_contactMs);
 
 	// Dynamic contact frame timing synchronization (aligns blocks/dodges with strike impact)
 	if (animPair && animPair->contactDelaySeconds > 0.05f)
@@ -1364,10 +1393,19 @@ ILExchange CombatSystem::BuildExchange(const InterlockSession &session, PlayerOb
 
 	e.flags = 0x23;
 
-	// Propagate authentic martial arts fighting style (attacker's discipline)
-	e.style = (uint8)attacker->getFightingStyle();
+	// -1 = old behaviour (attacker's FightingStyle enum); otherwise the fixed captured byte
+	e.style = (s_styleByte < 0) ? (uint8)attacker->getFightingStyle() : uint8(s_styleByte);
 
 	uint32 moveResolved = mainMove ? mainMove : IL_MOVE_OPEN_MAIN;
+	// Interlock.MoveSet = capture: main move limited to ids seen in HDS captures
+	// (0x2026 L76, 0x236D L73, 0x2367 L71) plus the retail finisher 0x4EE5.
+	static const bool s_captureMoves = sConfig.GetStringDefault("Interlock.MoveSet", "ildb") == "capture";
+	if (s_captureMoves && moveResolved != 0x2026 && moveResolved != 0x236D
+		&& moveResolved != 0x2367 && moveResolved != 0x4EE5)
+	{
+		static const uint32 capMoves[] = { 0x2026, 0x236D, 0x2367 };
+		moveResolved = capMoves[number % 3];
+	}
 	uint32 attMove = attackerPreMove ? attackerPreMove : IL_MOVE_OPEN_ATTACKER_PRE;
 	uint32 defMove = defenderPreMove ? defenderPreMove : IL_MOVE_PRE;
 	e.moves[0][0] = attMove; e.moves[0][1] = IL_MOVE_DATABASE;
@@ -1530,17 +1568,15 @@ void CombatSystem::SendInterlockExchange(InterlockSession &session, PlayerObject
 			continue;
 
 		PlayerObject* opponent = (sides[i].p == pA) ? pB : pA;
-		std::vector<uint32> slots;
-		uint16 selfViewId = sObjMgr.getViewForGO(&sides[i].p->getClient(), sides[i].p->getGoId());
-		uint32 selfViewWithSpawnId = uint32(selfViewId) | (uint32(PLAYER_SPAWN_COUNTER) << 16);
-		slots.push_back(selfViewWithSpawnId);
-		if (opponent)
+		uint32 otherRef = (sides[i].p == pA) ? session.otherRefA : session.otherRefB;
+		if (opponent && otherRef == 0)
 		{
 			uint16 otherViewId = sObjMgr.getViewForGO(&sides[i].p->getClient(), opponent->getGoId());
-			uint32 otherViewWithSpawnId = uint32(otherViewId) | (uint32(PLAYER_SPAWN_COUNTER) << 16);
-			slots.push_back(otherViewWithSpawnId);
-			sides[i].p->getClient().QueueState(std::make_shared<CombatantModeMsg>(opponent->getGoId(), 1));
+			otherRef = uint32(otherViewId) | (uint32(PLAYER_SPAWN_COUNTER) << 16);
 		}
+		std::vector<uint32> slots = BuildILSlots(otherRef);
+		if (opponent)
+			sides[i].p->getClient().QueueState(std::make_shared<CombatantModeMsg>(opponent->getGoId(), 1));
 
 		std::vector<ILExchange> ex;
 		ex.push_back(BuildExchange(session, sides[i].p, attacker, defender, session.exchangeNum,

@@ -239,6 +239,58 @@ int RunCombatTestSuite()
 		check(slotsOk, "IL state message carries seq 1, slot mask 3, two handles, one exchange");
 	}
 
+	// ---------------------------------------------------------------- IL start vs HDS capture
+	// hd_reference/hds/world/Client/RpcHandlers/CombatHandler.cs L58-77 ("Special agent test"):
+	//   ... [pos] 01000000 03000000 [targetViewWithSpawnId] 0200 [selfSpawnIdCounter] 01 | 0102 + L76 hex
+	// Everything after the position must match byte for byte, given the capture's own inputs
+	// (relative positions, health, defender offset 500) and default conf.
+	{
+		static const char* capHex =
+			"01000000" "03000000" "05002f00" "02002f00" "01"
+			"0102"
+			"0703070300bafc42000020c1801baf4200803e40000020c1e0b319430000010013010000f40134059a02233c5200008b0b0024"
+			"145200008b0b0024262000008b0b00240000000000000000000000000000000021000000700000000010001000000000"
+			"000000000000000000010000022b600000000000";
+		std::vector<uint8> cap;
+		for (const char* p = capHex; p[0] && p[1]; p += 2)
+		{
+			auto nib = [](char c) -> uint8 { return uint8((c <= '9') ? c - '0' : (c | 0x20) - 'a' + 10); };
+			cap.push_back(uint8((nib(p[0]) << 4) | nib(p[1])));
+		}
+
+		ILExchange e; // defaults must already be the capture's timing/style values
+		e.attackerSlot = ILSlotFor(false); // capture: the opponent attacks
+		e.defenderSlot = ILSlotFor(true);
+		const uint8 posBytes[24] = {
+			0x00,0xba,0xfc,0x42, 0x00,0x00,0x20,0xc1, 0x80,0x1b,0xaf,0x42,
+			0x00,0x80,0x3e,0x40, 0x00,0x00,0x20,0xc1, 0xe0,0xb3,0x19,0x43 };
+		memcpy(e.attackerPos, posBytes, 12);
+		memcpy(e.defenderPos, posBytes + 12, 12);
+		e.number = 1;
+		e.defenderOffsetMs = 500;
+		e.moves[0][0] = 0x523C; e.moves[0][1] = IL_MOVE_DATABASE;
+		e.moves[1][0] = 0x5214; e.moves[1][1] = IL_MOVE_DATABASE;
+		e.moves[2][0] = 0x2026; e.moves[2][1] = IL_MOVE_DATABASE;
+		e.attackerHealth = 0x21; e.defenderHealth = 0x70;
+
+		std::vector<uint32> slots = BuildILSlots(0x002F0005);
+		std::vector<ILExchange> ex; ex.push_back(e);
+		ILCombatStateMsg m(0x1234, LocationVector(0,0,0), 1, slots, ex);
+		const ByteBuffer& mb = m.toBuf();
+		const uint8* mbb = reinterpret_cast<const uint8*>(mb.contents());
+		const size_t off = 9 + 24; // framing + position
+		bool sizeOk = mb.size() == off + cap.size() + 2;
+		size_t firstDiff = cap.size();
+		if (sizeOk)
+			for (size_t i = 0; i < cap.size(); i++)
+				if (mbb[off + i] != cap[i]) { firstDiff = i; break; }
+		check(sizeOk && firstDiff == cap.size(),
+			"IL start payload after position == HDS CombatHandler.cs L63-77 capture byte for byte ("
+			+ (firstDiff == cap.size() ? std::string("no diff, ") + std::to_string(cap.size()) + " bytes"
+				: "first diff at byte " + std::to_string(firstDiff)) + ")");
+		check(GetILCombatHandlerGoId() == 55, "IL handler GO id defaults to 55 (HDS GameObjectDefinitions.cs:37009)");
+	}
+
 	try
 	{
 		// ---------------------------------------------------------------- loadout (N1)
@@ -1216,7 +1268,11 @@ int RunCombatTestSuite()
 				IL_MOVE_PRE, IL_MOVE_PRE, 0x2026, &kfVsKarateBlock
 			);
 
-			check(exchange.style == (uint8)FightingStyle::KungFu, "ILExchange: style is Kung Fu (2)");
+			check(exchange.style == 0, "ILExchange: style byte 0 (HDS CombatHandler.cs L76 capture)");
+			check(exchange.startMs == 0x113 && exchange.unk28 == 0x534 && exchange.unk2A == 0x29A,
+				"ILExchange: startMs 0x113, timing pair 0x534 / 0x29A (HDS L76 capture)");
+			check(exchange.attackerSlot == 2 && exchange.defenderSlot == 1,
+				"ILExchange: viewer attacking = slot 2, opponent = slot 1 (HDS slot order)");
 			check(exchange.defenderOffsetMs == 460, "ILExchange: defenderOffsetMs dynamically synchronized to 460ms");
 			check(exchange.moves[2][0] == 0x2026, "ILExchange: mainMove is 0x2026 (Kung Fu strike)");
 			check(exchange.moves[3][0] == 0, "ILExchange: moves[3][0] is zeroed (ILDB moves only in slots 0-2)");
@@ -1226,7 +1282,7 @@ int RunCombatTestSuite()
 			exchange.write(ilBuf);
 			check(ilBuf.size() == 0x79, "ILExchange serialized buffer size is exactly 121 bytes (0x79)");
 			const uint8* rawBytes = reinterpret_cast<const uint8*>(ilBuf.contents());
-			check(rawBytes[0x1E] == (uint8)FightingStyle::KungFu, "ILExchange wire byte 0x1E is style Kung Fu (2)");
+			check(rawBytes[0x1E] == 0, "ILExchange wire byte 0x1E is style byte 0 (HDS L76 capture)");
 			check(rawBytes[0x1F] == 0, "ILExchange wire byte 0x1F is unk1F (0)");
 			uint16 wireNum = *reinterpret_cast<const uint16*>(&rawBytes[0x20]);
 			check(wireNum == 4, "ILExchange wire bytes at 0x20 are sequence number 4");
@@ -2331,8 +2387,8 @@ int RunCombatTestSuite()
 				"SpawnILCombatHandlerMsg routed to VIEWID_OBJECTMANAGER (1)");
 			check(spawnBuf.read<uint8>(3) == 0x0C,
 				"SpawnILCombatHandlerMsg header is 0x0C (CREATE command 0 | bit 2=4 dynamic | bit 3=8 spawnIdCounter)");
-			check(spawnBuf.read<uint16>(4) == GOID_ILCOMBATHANDLER,
-				"SpawnILCombatHandlerMsg GOID is GOID_ILCOMBATHANDLER (27 / ELTGOILCombatHandler)");
+			check(spawnBuf.read<uint16>(4) == GetILCombatHandlerGoId(),
+				"SpawnILCombatHandlerMsg GOID is Interlock.HandlerGoId (default 55, HDS Object55 ILCombatHandler)");
 			check(spawnBuf.read<uint8>(6) == 0x41 && spawnBuf.read<uint8>(7) == 0xCD && spawnBuf.read<uint8>(8) == 0xAB,
 				"SpawnILCombatHandlerMsg includes spawnIdCounter and 0xCD 0xAB magic");
 			check(spawnBuf.read<uint8>(9) == 0x02 && spawnBuf.read<uint8>(10) == 0x05,

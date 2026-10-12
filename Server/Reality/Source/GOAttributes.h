@@ -205,9 +205,16 @@ namespace PlayerAttrSelf
 static const uint16 VIEWID_OBJECTMANAGER = 1;
 static const uint16 VIEWID_SELF = 2;
 
-//ILCombatHandler game object (GOID 27, 0x1B, ELTGOILCombatHandler in retail 7.6005 client.dll): creation attributes are
-//Position(24B double vec, idx0), HalfExtents(12B, idx1), StartTime(float, idx2). Note: 55 is ELTGODataNode.
-static const uint16 GOID_ILCOMBATHANDLER = 27;
+//ILCombatHandler game object. Creation attributes: Position(24B double vec, idx0), HalfExtents(12B, idx1),
+//StartTime(float, idx2) - HDS AttributeClass3664.cs.
+//Candidates for the GO id:
+//  55 - HDS GameObjectDefinitions.cs:37009 `Object55 = new AttributeClass3664("ILCombatHandler", 55)`, spawned by
+//       CombatHandler.cs:37 in the server that produced the interlock captures. Default.
+//  27 - commit 95ed54e9, inferred only from the client string ELTGOILCombatHandler; no id table was found.
+//The live value comes from Reality.conf Interlock.HandlerGoId (GetILCombatHandlerGoId in MessageTypes.cpp).
+static const uint16 GOID_ILCOMBATHANDLER_HDS = 55;
+static const uint16 GOID_ILCOMBATHANDLER_ALT = 27;
+static const uint16 GOID_ILCOMBATHANDLER = GOID_ILCOMBATHANDLER_HDS;
 static const uint16 GOID_PLAYERCHARACTER = 0x000C;
 
 #endif
