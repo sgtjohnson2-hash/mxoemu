@@ -1801,7 +1801,8 @@ bool CombatSystem::RunInterlockRound(InterlockSession &session)
 
 		// Both combatants exchange glancing blows at 0.90x damage (TacticModifier handles 0.90x)
 		if (moveA) StrikeInterlock(session, pA, pB, *moveA, tacA, tacB, true, false);
-		if (moveB && !pB->isDead()) StrikeInterlock(session, pB, pA, *moveB, tacB, tacA, true, false);
+		// 0 HP is down even before the reaper sets the dead flag: no swing back from the knocked-out side
+		if (moveB && !pB->isDead() && pB->getCurrentHealth() > 0) StrikeInterlock(session, pB, pA, *moveB, tacB, tacA, true, false);
 	}
 
 	// Execution & Interrupt Resolution:
@@ -1831,7 +1832,9 @@ bool CombatSystem::RunInterlockRound(InterlockSession &session)
 				StrikeInterlock(session, pA, pB, *moveA, tacA, tacB, true, false);
 			}
 		}
-		if (!pB->isDead()) {
+		// B at 0 HP is knocked out even before the reaper sets the dead flag. It used to swing back
+		// after the killing blow (live 10:58:09, exchange 148 from a 0 HP Dojo Street Brawler).
+		if (!pB->isDead() && pB->getCurrentHealth() > 0) {
 			bool specialFromB = (session.queuedMoveB != 0);
 			if (tacB != TACTIC_DEFENSE || specialFromB) {
 				if (moveB) {

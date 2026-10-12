@@ -596,6 +596,11 @@ NodeStatus ActionCombatCycle::Tick(BotClient* bot)
     if (!me || !target) {
         return NodeStatus::FAILURE;
     }
+    // A knocked-out bot (0 HP, not yet reaped) kept casting: live 10:58:10 a 0 HP Dojo Street
+    // Brawler fired Power Shot at the player that had just beaten it.
+    if (me->isDead() || me->getCurrentHealth() == 0 || target->isDead() || target->getCurrentHealth() == 0) {
+        return NodeStatus::FAILURE;
+    }
 
     //make sure we are actually engaged through the combat system
     if (!me->isInCombat())
@@ -655,9 +660,10 @@ NodeStatus ActionCombatCycle::Tick(BotClient* bot)
     }
     if (auto ab = me->getAbilitySystem())
     {
+        // Kung Fu for everyone but the Merovingian. Agents used to cast Power Shot, a ranged
+        // ability, but this point is only reached while interlocked, i.e. in close combat.
         uint16 id = 133; // Kung Fu
-        if (me->getFaction() == FACTION_MACHINES) id = 14;          // Power Shot
-        else if (me->getFaction() == FACTION_MEROVINGIAN) id = (hpPct < 0.50f) ? 77 : 146; // Restore, else Poison Knife
+        if (me->getFaction() == FACTION_MEROVINGIAN) id = (hpPct < 0.50f) ? 77 : 146; // Restore, else Poison Knife
         if (!ab->getAbility(id))
             ab->loadAbility(id, 1, 0);
         if (ab->canCastAbility(id))
