@@ -1454,11 +1454,13 @@ int RunCombatTestSuite()
 			obj1.command = ObjectiveCommand::TALK;
 			obj1.targetNpcId = 1800001;
 			obj1.description = "Meet the Contact at Mara Central.";
+			obj1.dialog = "Follow the white rabbit to Mara.";
 			testMission.objectives.push_back(obj1);
 			MissionObjective obj2;
 			obj2.command = ObjectiveCommand::DEFEAT;
 			obj2.targetNpcId = 1800002;
 			obj2.description = "Defeat the corrupt Machine courier.";
+			obj2.dialog = "You cannot stop the cascade.";
 			testMission.objectives.push_back(obj2);
 
 			sMissionSys.AddMissionTemplate(testMission);
@@ -1470,13 +1472,47 @@ int RunCombatTestSuite()
 			// Advance Objective 1 -> 2
 			humanClient.captured.clear();
 			sMissionSys.AdvanceObjective(humanOperative.po, ObjectiveCommand::TALK, 1800001);
+			check(humanClient.sawText("Follow the white rabbit to Mara."), "Human operative receives contact dialogue in chat stream");
 			check(humanClient.sawText("[OBJECTIVE 2/2] Defeat the corrupt Machine courier."), "Human operative receives [OBJECTIVE 2/2] advancement notice");
 
 			// Complete Objective 2 -> Mission Complete
 			humanClient.captured.clear();
 			sMissionSys.AdvanceObjective(humanOperative.po, ObjectiveCommand::DEFEAT, 1800002);
+			check(humanClient.sawText("You cannot stop the cascade."), "Human operative receives dying hostile dialogue in chat stream");
 			check(!sMissionSys.HasActiveMission(humanOperative.go), "Mission completes and active mission state is cleared");
 			check(humanClient.sawText("[MISSION COMPLETE] Operation White Rabbit!"), "Human operative receives [MISSION COMPLETE] celebration chat notice");
+
+			// 3. Authentic Story Mission 10111 (Chapter 1.1: Intelligence Gathering)
+			sMissionSys.LoadMissionsFromXML("Data/hd_dump/missions");
+			humanClient.captured.clear();
+			sMissionSys.AssignMission(humanOperative.po, 10111);
+			check(sMissionSys.HasActiveMission(humanOperative.go), "Operative assigned authentic story mission 10111");
+			check(humanClient.sawText("Meet the Zion Operative"), "Mission 10111 initial objective received");
+
+			// Advance Obj 1 (TALK to 9010)
+			humanClient.captured.clear();
+			sMissionSys.AdvanceObjective(humanOperative.po, ObjectiveCommand::TALK, 9010);
+			check(humanClient.sawText("The Truce is fragile"), "Operative receives Zion Operative dialog");
+			check(humanClient.sawText("Defeat the Corrupted Program"), "Objective 2 (Corrupted Program) active");
+
+			// Advance Obj 2 (DEFEAT 9011)
+			humanClient.captured.clear();
+			sMissionSys.AdvanceObjective(humanOperative.po, ObjectiveCommand::DEFEAT, 9011);
+			check(humanClient.sawText("the flies have already scattered"), "Operative receives Corrupted Program dying words");
+			check(humanClient.sawText("Fight through the ambush"), "Objective 3 (Ambush) active");
+
+			// Advance Obj 3 (DEFEAT 9999 Ambush)
+			humanClient.captured.clear();
+			sMissionSys.AdvanceObjective(humanOperative.po, ObjectiveCommand::DEFEAT, 9999);
+			check(humanClient.sawText("They knew we were coming"), "Operative receives Ambush dialogue");
+			check(humanClient.sawText("Report to Ghost"), "Objective 4 (Ghost) active");
+
+			// Advance Obj 4 (TALK to 9012 Ghost) -> Complete Mission
+			humanClient.captured.clear();
+			sMissionSys.AdvanceObjective(humanOperative.po, ObjectiveCommand::TALK, 9012);
+			check(humanClient.sawText("bears the signature of the Merovingian"), "Operative receives Ghost debrief dialogue");
+			check(!sMissionSys.HasActiveMission(humanOperative.go), "Mission 10111 fully completes");
+			check(humanClient.sawText("[MISSION COMPLETE] Chapter 1.1: Intelligence Gathering"), "Operative receives Mission 10111 completion notification");
 		}
 
 		// ------------------------------------------------------------------
@@ -1581,10 +1617,10 @@ int RunCombatTestSuite()
 
 			// Sponsor 2000 is Tyndall (org 1 = Zion)
 			uint32 chosenFromSponsor = sMissionSys.GetAvailableStoryMission(humanOperative.po, 2000);
-			check(chosenFromSponsor == 99992, "GetAvailableStoryMission correctly aligns with Zion sponsor org faction (99992)");
+			check(chosenFromSponsor == 99992 || chosenFromSponsor == 10111, "GetAvailableStoryMission correctly aligns with Zion sponsor org faction (99992 or 10111)");
 
 			uint32 chosenFromOrg = sMissionSys.GetAvailableStoryMission(humanOperative.po, 1);
-			check(chosenFromOrg == 99992, "GetAvailableStoryMission correctly aligns with direct org ID 1 (99992)");
+			check(chosenFromOrg == 99992 || chosenFromOrg == 10111, "GetAvailableStoryMission correctly aligns with direct org ID 1 (99992 or 10111)");
 		}
 
 		// ====================================================================

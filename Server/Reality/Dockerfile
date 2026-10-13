@@ -26,7 +26,7 @@ RUN mkdir -p build && cd build && \
     cmake -G Ninja -DCMAKE_BUILD_TYPE=Release .. && \
     ninja Reality && \
     mkdir -p /app/Server/Reality/Binaries/Data && \
-    cp -rn /app/Server/Reality/Data/* /app/Server/Reality/Binaries/Data/ 2>/dev/null || true
+    cp -rf /app/Server/Reality/Data/* /app/Server/Reality/Binaries/Data/ 2>/dev/null || true
 
 # Expose Game and Auth Ports
 EXPOSE 10000/udp 10000/tcp 11000/tcp

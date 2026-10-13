@@ -98,7 +98,14 @@ void MissionSystem::AddMissionTemplate(const MissionTemplate& templ)
 
 void MissionSystem::LoadMissionsFromXML(const std::string& directoryPath)
 {
-    if (!std::filesystem::exists(directoryPath)) {
+    std::string dir = directoryPath;
+    if (dir.empty() || !std::filesystem::exists(dir)) dir = "Data/hd_dump/missions";
+    if (!std::filesystem::exists(dir)) dir = "mxoemu_live/Server/Reality/Data/hd_dump/missions";
+    if (!std::filesystem::exists(dir)) dir = "../../mxoemu_live/Server/Reality/Data/hd_dump/missions";
+    if (!std::filesystem::exists(dir)) dir = "../../Data/hd_dump/missions";
+    if (!std::filesystem::exists(dir)) dir = "../Data/hd_dump/missions";
+    if (!std::filesystem::exists(dir)) dir = "Data/missions";
+    if (!std::filesystem::exists(dir)) {
         ERROR_LOG(format("MissionSystem: Directory %1% does not exist.") % directoryPath);
         return;
     }
@@ -108,7 +115,7 @@ void MissionSystem::LoadMissionsFromXML(const std::string& directoryPath)
     // Hash function to generate deterministic ID from filename for now
     std::hash<std::string> hasher;
 
-    for (const auto& entry : std::filesystem::directory_iterator(directoryPath)) {
+    for (const auto& entry : std::filesystem::directory_iterator(dir)) {
         if (entry.path().extension() == ".xml") {
             try {
                 boost::property_tree::ptree pt;
@@ -486,9 +493,15 @@ void MissionSystem::LoadPlayerMissions(PlayerObject* player)
             (format("{c:00FF00}[MISSION RESTORED] %1%{/c}") % templ.title).str()));
         if (activeObjIndex < templ.objectives.size())
         {
+            std::string who;
+            for (const auto& npc : templ.npcs)
+            {
+                if (npc.idNpc == templ.objectives[activeObjIndex].targetNpcId) { who = npc.handle; break; }
+            }
             player->getClient().QueueCommand(std::make_shared<SystemChatMsg>(
-                (format("{c:00FFFF}[OBJECTIVE %1%/%2%] %3%{/c}")
-                    % (activeObjIndex + 1) % templ.objectives.size() % templ.objectives[activeObjIndex].description).str()));
+                (format("{c:00FFFF}[OBJECTIVE %1%/%2%] %3%%4%{/c}")
+                    % (activeObjIndex + 1) % templ.objectives.size() % templ.objectives[activeObjIndex].description
+                    % (who.empty() ? std::string() : (std::string(". ") + who + " is a few metres away."))).str()));
         }
     }
     else if (!hasActive && loadedCount == 0)
@@ -605,8 +618,8 @@ void MissionSystem::AdvanceObjective(PlayerObject* player, ObjectiveCommand comm
         expectedTargetGoId = state.spawnedNpcs[currentObj.targetNpcId];
     }
 
-    // Default check
-    if (currentObj.command == command && expectedTargetGoId == targetId)
+    // Default check (matches either runtime spawned GoId or canonical target idNpc)
+    if (currentObj.command == command && (expectedTargetGoId == targetId || currentObj.targetNpcId == targetId))
         objectiveMet = true;
 
     // Item 37: Assassination (targetCharUID check)
@@ -693,18 +706,32 @@ void MissionSystem::AdvanceObjective(PlayerObject* player, ObjectiveCommand comm
         // Objective met!
         INFO_LOG(format("Player %1% completed objective: %2%") % player->getHandle() % currentObj.description);
         
-        // Output dialog if it was a TALK action
-        if (command == ObjectiveCommand::TALK && !currentObj.dialog.empty() && currentObj.dialog != "NONE")
+        // Output dialog for mission events (NPC speech, dying words, or radio transmission)
+        if (!currentObj.dialog.empty() && currentObj.dialog != "NONE")
         {
-            // Simulate NPC saying the dialog
             sBotMgr.LogCombat((format("[Mission Dialog] NPC %1%: %2%") % targetId % currentObj.dialog).str());
+            if (!player->getClient().isBot())
+            {
+                std::string speakerName = "Contact";
+                for (const auto& npc : templ.npcs)
+                {
+                    if (npc.idNpc == currentObj.targetNpcId)
+                    {
+                        speakerName = npc.handle;
+                        break;
+                    }
+                }
+                player->getClient().QueueCommand(std::make_shared<SystemChatMsg>(
+                    (format("{c:FFFF55}[%1%] \"%2%\"{/c}") % speakerName % currentObj.dialog).str()
+                ));
+            }
         }
 
         if (currentObj.spawnAmbush) {
             // Item 40: Dynamic Spawns
             INFO_LOG(format("AMBUSH! Spawning enemies for player %1%") % player->getHandle());
             auto pos = player->getPosition();
-            sBotMgr.SpawnBot(2, pos.x + 2.0f, pos.y, pos.z + 2.0f, 0);
+            sBotMgr.SpawnBot(2, (float)pos.x + 200.0f, (float)pos.y, (float)pos.z + 200.0f, 0);
         }
 
         uint32 jumpMissionId = 0;
@@ -887,8 +914,17 @@ void MissionSystem::SendMissionObjectiveDialog(PlayerObject* player)
     if (state.currentObjectiveIndex < templ.objectives.size())
     {
         const MissionObjective& obj = templ.objectives[state.currentObjectiveIndex];
+        std::string who;
+        for (const auto& npc : templ.npcs)
+        {
+            if (npc.idNpc == obj.targetNpcId) { who = npc.handle; break; }
+        }
         player->getClient().QueueCommand(std::make_shared<SystemChatMsg>(
-            (format("{c:00FF00}[CONTRACT OBJECTIVE #%1%] %2%{/c}") % (state.currentObjectiveIndex + 1) % obj.description).str()
+            (format("{c:00FF00}[CONTRACT OBJECTIVE #%1%/%2%] %3%%4%{/c}")
+                % (state.currentObjectiveIndex + 1)
+                % templ.objectives.size()
+                % obj.description
+                % (who.empty() ? std::string() : (std::string(" (Target: ") + who + ")"))).str()
         ));
         if (obj.isTimed && obj.timeLimitSeconds > 0)
         {
