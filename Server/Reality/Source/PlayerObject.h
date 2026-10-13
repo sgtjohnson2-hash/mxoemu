@@ -292,6 +292,7 @@ public:
     uint32 getEquippedWeaponId() const { return m_equippedWeaponId; }
     void setEquippedWeaponId(uint32 id);
     void sendEquippedWeaponUpdate();
+    bool consumeFirearmAmmo();
     
     // Combat
     

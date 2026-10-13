@@ -1302,6 +1302,12 @@ CombatSystem::AttackResult CombatSystem::ResolveAttack(PlayerObject* attacker, P
         dmg *= 1.5f; // 50% more damage for off-hand
     }
 
+    // Phase 2: Gunner Ballistic Distance Drop-Off
+    if (!inInterlock && (move.dmgType == DAMAGE_RANGED || move.dmgType == DAMAGE_BALLISTIC) && move.range > 0.0f) {
+        double dist = attacker->getPosition().Distance(target->getPosition());
+        dmg *= ComputeBallisticDistanceMultiplier(dist, double(move.range), move.id);
+    }
+
     if (isBallistic) {
         sMatrixThreatHeatmap.RecordDisruption((float)attacker->getPosition().x, (float)attacker->getPosition().y, (float)attacker->getPosition().z, 8.0f, "Ballistic Fire");
     } else {
@@ -1455,6 +1461,35 @@ CombatSystem::AttackResult CombatSystem::ResolveAttack(PlayerObject* attacker, P
 	return res;
 }
 
+float CombatSystem::ComputeBallisticDistanceMultiplier(double dist, double maxRange, uint16 abilityId)
+{
+	if (maxRange <= 0.0)
+		maxRange = 3500.0;
+	// SniperShotAbility (505): Long-range precision scaling (+25% beyond 20m, -20% inside 5m)
+	if (abilityId == 505)
+	{
+		if (dist >= 2000.0)
+			return 1.25f;
+		if (dist < 500.0)
+			return 0.80f;
+		return 1.00f;
+	}
+	// PistolPointBlankAbility (499): Close-quarters +15% bonus within 5m
+	if (abilityId == 499 && dist <= 500.0)
+	{
+		return 1.15f;
+	}
+	// Optimal effective range up to 65% of maxRange: 100% damage
+	double optimalCutoff = maxRange * 0.65;
+	if (dist <= optimalCutoff)
+		return 1.00f;
+	if (dist >= maxRange)
+		return 0.60f;
+	// Smooth linear drop-off from 1.00x at 65% maxRange down to 0.60x at 100% maxRange
+	double t = (dist - optimalCutoff) / (maxRange - optimalCutoff);
+	return float(1.00 - 0.40 * t);
+}
+
 ILExchange CombatSystem::BuildExchange(const InterlockSession &session, PlayerObject* viewer,
 	PlayerObject* attacker, PlayerObject* defender, uint16 number,
 	uint32 attackerPreMove, uint32 defenderPreMove, uint32 mainMove,
@@ -1535,15 +1570,28 @@ uint32 CombatSystem::SelectInterlockMove(const InterlockSession &session, Player
 	// A Speed interrupt used to animate as a throw because the defender's Grab was enough.
 	uint8 attTac = TACTIC_NORMAL;
 	uint8 defTac = TACTIC_NORMAL;
+	uint8 attackerComboStep = 0;
 	if (attacker->getGoId() == session.goIdA)
 	{
 		attTac = session.tacticA;
 		defTac = session.tacticB;
+		attackerComboStep = session.comboStepA;
 	}
 	else if (attacker->getGoId() == session.goIdB)
 	{
 		attTac = session.tacticB;
 		defTac = session.tacticA;
+		attackerComboStep = session.comboStepB;
+	}
+
+	FightingStyle style = attacker->getFightingStyle();
+	if (attackerComboStep > 0 && style != FightingStyle::None && CombatAnimationMatrix::GetTotalMovesLoaded() > 0)
+	{
+		const ILDBMoveRecord* comboRec = CombatAnimationMatrix::FindMoveVariant(
+			style, attTac, defender->getFightingStyle(), defTac,
+			outcome, (attackerComboStep == 3), uint32(attackerComboStep) * 7 + session.exchangeNum);
+		if (comboRec && comboRec->moveId != 0)
+			return comboRec->moveId;
 	}
 
 	const bool fastInterrupt = outcome == InterlockExchangeOutcome::FastInterrupt
@@ -1564,7 +1612,6 @@ uint32 CombatSystem::SelectInterlockMove(const InterlockSession &session, Player
 	if (stanceCrush)
 		return 0x2367; // Hyperstrike / Stance Crush (retail capture)
 
-	FightingStyle style = attacker->getFightingStyle();
 	switch (style)
 	{
 		case FightingStyle::Karate:
@@ -1621,9 +1668,11 @@ void CombatSystem::SendInterlockExchange(InterlockSession &session, PlayerObject
 		outcome = InterlockExchangeOutcome::SpecialHit;
 	}
 
+	uint8 attackerComboStep = (attacker->getGoId() == session.goIdA) ? session.comboStepA
+		: ((attacker->getGoId() == session.goIdB) ? session.comboStepB : 0);
 	bool isFinisher = outcome != InterlockExchangeOutcome::Blocked
 		&& outcome != InterlockExchangeOutcome::Dodged
-		&& (defender->isDead() || defender->getCurrentHealth() == 0);
+		&& (defender->isDead() || defender->getCurrentHealth() == 0 || attackerComboStep == 3);
 
 	// The client plays whatever ILDB move id is in slot 2. The old hardcoded ids
 	// (0x2026 and three others) are one generic clip, so a block looked like a punch.
@@ -1635,7 +1684,7 @@ void CombatSystem::SendInterlockExchange(InterlockSession &session, PlayerObject
 		const ILDBMoveRecord* rec = CombatAnimationMatrix::FindMoveVariant(
 			attacker->getFightingStyle(), attackerTactic,
 			defender->getFightingStyle(), defenderTactic,
-			outcome, isFinisher, session.exchangeNum);
+			outcome, isFinisher, session.exchangeNum + uint32(attackerComboStep) * 7);
 		if (rec && rec->moveId != 0)
 		{
 			mainMove = rec->moveId;
@@ -1700,6 +1749,62 @@ CombatSystem::AttackResult CombatSystem::StrikeInterlock(InterlockSession &sessi
 	m_ilExchangeActive = exchangeDriven;
 	AttackResult res = ResolveAttack(attacker, target, move, attackerTactic, targetTactic, inInterlock, bypassBlock);
 	m_ilExchangeActive = false;
+
+	if (attacker && target)
+	{
+		uint8* comboStep = nullptr;
+		FightingStyle* lastStyle = nullptr;
+		if (attacker->getGoId() == session.goIdA)
+		{
+			comboStep = &session.comboStepA;
+			lastStyle = &session.lastStyleA;
+		}
+		else if (attacker->getGoId() == session.goIdB)
+		{
+			comboStep = &session.comboStepB;
+			lastStyle = &session.lastStyleB;
+		}
+
+		if (comboStep && lastStyle)
+		{
+			FightingStyle curStyle = attacker->getFightingStyle();
+			if (res.hit && !res.isBlocked && curStyle != FightingStyle::None)
+			{
+				if (*lastStyle != curStyle || *comboStep >= 3)
+					*comboStep = 1;
+				else
+					(*comboStep)++;
+				*lastStyle = curStyle;
+
+				if (*comboStep == 3 && res.damageTaken > 0)
+				{
+					uint16 bonusDmg = std::max<uint16>(1, uint16(res.damageTaken / 5)); // +20% 3-step combo finisher bonus
+					if (!target->isDead() && target->getCurrentHealth() > 0)
+					{
+						uint16 hpBeforeBonus = target->getCurrentHealth();
+						target->takeDamage(attacker->getGoId(), bonusDmg, 0, false);
+						uint16 hpAfterBonus = target->getCurrentHealth();
+						res.damageTaken += (hpBeforeBonus > hpAfterBonus) ? uint16(hpBeforeBonus - hpAfterBonus) : bonusDmg;
+					}
+					else
+					{
+						res.damageTaken += bonusDmg;
+					}
+					if (!attacker->getClient().isBot())
+					{
+						attacker->getClient().QueueCommand(std::make_shared<SystemChatMsg>(
+							"{c:00FF88}[MARTIAL ARTS] 3-Step Style Combo Finisher! (+20% damage){/c}"));
+					}
+				}
+			}
+			else
+			{
+				*comboStep = 0;
+				*lastStyle = curStyle;
+			}
+		}
+	}
+
 	if (exchangeDriven)
 		SendInterlockExchange(session, attacker, target, res, move, attackerTactic, targetTactic);
 	return res;
@@ -2081,39 +2186,9 @@ bool CombatSystem::RunFreeFireShot(FreeFireState &state)
 			else if (isDualWield)
 				firingAnim = 0x0EDD;
 
-			// Ammunition tracking: if weapon has ammo tracked
-			if (weapons[0]->getAmmoCount() > 0)
-			{
-				uint16 roundsToConsume = (isDualWield && weapons[0]->getAmmoCount() >= 2) ? 2 : 1;
-				weapons[0]->setAmmoCount(weapons[0]->getAmmoCount() - roundsToConsume);
-			}
-			else if (wpnTpl->maxAmmo > 0)
-			{
-				// Check for ammo clip in inventory to reload
-				auto inv = pA->getInventory();
-				uint32 ammoTplId = (wpnTpl->attackSpeed >= 2.0f) ? 1051 : 1050; // 5.56 rifle vs 9mm pistol
-				if (inv && inv->hasItemByTemplate(ammoTplId))
-				{
-					inv->consumeItemByTemplate(ammoTplId);
-					uint16 roundsToConsume = (isDualWield ? 2 : 1);
-					weapons[0]->setAmmoCount(wpnTpl->maxAmmo - roundsToConsume);
-					if (!pA->getClient().isBot())
-					{
-						pA->getClient().QueueCommand(std::make_shared<SystemChatMsg>(
-							"{c:00FF00}[RELOAD] Weapon reloaded with fresh ammunition clip.{/c}"));
-					}
-				}
-				else
-				{
-					// Out of ammunition
-					if (!pA->getClient().isBot())
-					{
-						pA->getClient().QueueCommand(std::make_shared<SystemChatMsg>(
-							"{c:FF5555}[OUT OF AMMO] *Click* - Weapon magazine empty! No ammunition clip in inventory.{/c}"));
-					}
-					return false; // Stop free fire
-				}
-			}
+			// Ammunition tracking & clip reload
+			if (!pA->consumeFirearmAmmo())
+				return false; // Stop free fire
 		}
 	}
 

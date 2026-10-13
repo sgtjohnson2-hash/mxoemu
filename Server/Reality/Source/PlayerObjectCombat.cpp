@@ -1007,7 +1007,7 @@ void PlayerObject::RPC_HandleAbilityLoad( ByteBuffer &srcCmd )
 			{
 				if (m_abilitySystem->loadAbility(abilityId, abilityLevel, slotId))
 				{
-					m_parent.QueueCommand(shared_ptr<AbilityLoadRspMsg>(new AbilityLoadRspMsg(abilityId, abilityLevel, slotId)));
+					m_parent.QueueCommand(shared_ptr<AbilityLoadRspMsg>(new AbilityLoadRspMsg(abilityId, abilityLevel, AbilitySystem::LOAD_RSP_TRAILER)));
 				}
 				else
 				{

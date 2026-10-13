@@ -114,6 +114,10 @@ struct InterlockSession
 	uint16 exchangeNum;		//last interlock exchange number sent (client plays only newer ones)
 	uint32 otherRefA = 0;	//opponent slot handle (view | spawn<<16) as A's client knows it
 	uint32 otherRefB = 0;	//opponent slot handle as B's client knows it
+	uint8 comboStepA = 0;	//1..3 Martial Arts style combo step for combatant A
+	uint8 comboStepB = 0;	//1..3 Martial Arts style combo step for combatant B
+	FightingStyle lastStyleA = FightingStyle::None;
+	FightingStyle lastStyleB = FightingStyle::None;
 };
 
 // Interlock move references (interlock database rez 0x24000B8B), from captured live exchanges
@@ -190,6 +194,7 @@ public:
 	static const CombatMove* DefaultMelee();
 	static const CombatMove* DefaultRanged();
 	static const CombatMove* GetDefaultStyleMove(PlayerObject* player);
+	static float ComputeBallisticDistanceMultiplier(double dist, double maxRange, uint16 abilityId = 0);
 
 	//pays XP / $Info / loot-advance for a kill; invoked from PlayerObject::die()
 	void AwardKill(PlayerObject* killer, PlayerObject* victim);

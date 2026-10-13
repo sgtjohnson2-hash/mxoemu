@@ -102,6 +102,7 @@ public:
 
     uint16 getTotalMemoryUsed() const;
     uint16 getMaxMemory() const;
+    void setMaxMemory(uint16 maxMem) { m_maxMemory = maxMem; }
 
     bool canCastAbility(uint16 abilityId) const;
     void onAbilityCast(uint16 abilityId);

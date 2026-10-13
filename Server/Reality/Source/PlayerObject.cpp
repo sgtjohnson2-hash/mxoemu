@@ -1408,6 +1408,51 @@ void PlayerObject::degradeEquippedWeapon(uint16 degradationAmount) {
 		}
 	}
 }
+
+bool PlayerObject::consumeFirearmAmmo()
+{
+	auto weapons = getEquippedWeapons();
+	if (weapons.empty())
+		return true;
+
+	const ItemTemplate* wpnTpl = sDataLoader.GetItemTemplate(weapons[0]->getTemplateId());
+	if (!wpnTpl || wpnTpl->type != ITEM_TYPE_WEAPON)
+		return true;
+
+	bool isDualWield = (wpnTpl->isDualWield || isDualWielding());
+	if (weapons[0]->getAmmoCount() > 0)
+	{
+		uint16 roundsToConsume = (isDualWield && weapons[0]->getAmmoCount() >= 2) ? 2 : 1;
+		weapons[0]->setAmmoCount(weapons[0]->getAmmoCount() - roundsToConsume);
+		return true;
+	}
+	else if (wpnTpl->maxAmmo > 0)
+	{
+		uint32 ammoTplId = (wpnTpl->attackSpeed >= 2.0f) ? 1051 : 1050; // 5.56 rifle vs 9mm pistol
+		if (m_inventorySystem && m_inventorySystem->hasItemByTemplate(ammoTplId))
+		{
+			m_inventorySystem->consumeItemByTemplate(ammoTplId);
+			uint16 roundsToConsume = (isDualWield ? 2 : 1);
+			weapons[0]->setAmmoCount(wpnTpl->maxAmmo - roundsToConsume);
+			if (!getClient().isBot())
+			{
+				getClient().QueueCommand(std::make_shared<SystemChatMsg>(
+					"{c:00FF00}[RELOAD] Weapon reloaded with fresh ammunition clip.{/c}"));
+			}
+			return true;
+		}
+		else
+		{
+			if (!getClient().isBot())
+			{
+				getClient().QueueCommand(std::make_shared<SystemChatMsg>(
+					"{c:FF5555}[OUT OF AMMO] *Click* - Weapon magazine empty! No ammunition clip in inventory.{/c}"));
+			}
+			return false;
+		}
+	}
+	return true;
+}
 void PlayerObject::addInfo(uint64 amount) { m_cash += amount; }
 void PlayerObject::removeInfo(uint64 amount) { if(m_cash >= amount) m_cash -= amount; }
 void PlayerObject::saveCashToDB()

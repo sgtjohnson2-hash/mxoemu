@@ -39,6 +39,7 @@
 #include "InventorySystem.h"
 #include "Item.h"
 #include "StatusEffectManager.h"
+#include "HackerSystem.h"
 #include "MissionSystem.h"
 #include "CraftingSystem.h"
 #include "LootManager.h"
@@ -2659,6 +2660,181 @@ int RunCombatTestSuite()
 					  resolvedRec.status == "RESOLVED" &&
 					  resolvedRec.adminNotes == "Fixed collision box in Richland",
 					"Resolved bug report persists status=RESOLVED and admin_notes");
+			}
+
+			// 20. Phase 2: Disciplines & Authentic Ability Mastery (Memory Capacity, Timed Casts, Ballistic Curve, Martial Arts Chains)
+			{
+				TestHumanClient p2Client;
+				Actor p2Human = makeHuman(&p2Client, 9100260, 10000.0, 10000.0);
+				auto abSys = p2Human.po->getAbilitySystem();
+				check(abSys != nullptr, "Phase 2 operative has valid AbilitySystem");
+				if (abSys)
+				{
+					// A. Dynamic Memory Capacity Budget (L * 10 + 100) & 0x80b2 LOAD_RSP_TRAILER (0x0208)
+					p2Human.po->setLevel(1);
+					check(abSys->getMaxMemory() == 110, "Level 1 operative has 110 dynamic MaxMemory (1 * 10 + 100)");
+					p2Human.po->setLevel(25);
+					check(abSys->getMaxMemory() == 350, "Level 25 operative dynamically scales to 350 MaxMemory (25 * 10 + 100)");
+					p2Human.po->setLevel(50);
+					check(abSys->getMaxMemory() == 600, "Level 50 operative dynamically scales to 600 MaxMemory (50 * 10 + 100)");
+
+					// Test RPC_HandleAbilityLoad (0x80ae) sends 0x80b2 with trailer 0x0208
+					ByteBuffer loadPkt;
+					loadPkt << (uint8)0x80 << (uint8)0xae;
+					loadPkt << (uint32)0;      // staticObjId
+					loadPkt << (uint16)0;      // unloadFlag
+					loadPkt << (uint16)1;      // loadFlag
+					loadPkt << (uint16)1;      // countAbilities
+					loadPkt << (uint8)0;       // 11th header pad byte
+					loadPkt << (uint16)5;      // slotId = 5
+					loadPkt << (uint16)57;     // abilityId = 57 (LogicBlast1)
+					loadPkt << (uint16)0;      // pad
+					loadPkt << (uint16)1;      // abilityLevel = 1
+					loadPkt << (uint8)0;       // pad
+					p2Client.captured.clear();
+					p2Human.po->HandleCommand(loadPkt);
+
+					bool sawTrailer0208 = false;
+					for (const auto& pkt : p2Client.captured)
+					{
+						if (pkt.size() == 8 && (uint8)pkt[0] == 0x80 && (uint8)pkt[1] == 0xb2)
+						{
+							uint16 rId = *reinterpret_cast<const uint16*>(&pkt[2]);
+							uint16 rLvl = *reinterpret_cast<const uint16*>(&pkt[4]);
+							uint16 rTrailer = *reinterpret_cast<const uint16*>(&pkt[6]);
+							if (rId == 57 && rLvl == 1 && rTrailer == AbilitySystem::LOAD_RSP_TRAILER)
+								sawTrailer0208 = true;
+						}
+					}
+					check(sawTrailer0208, "RPC_HandleAbilityLoad (0x80ae) replies with 0x80b2 carrying authentic 0x0208 trailer");
+				}
+
+				// B. Timed Cast Delay (CastBarMsg 0x80ac + ScheduleCastDelay) for Hacker, Coder, Soldier, and Spy
+				sHackerSystem.SetForceDelayedCast(true);
+				{
+					// 1) Hacker LogicBlast1 (id 57) delayed cast
+					Actor hackTgt = makeBot(9200261, 10100.0, 10000.0, 1, 100);
+					p2Human.po->setInnerStrength(200);
+					p2Client.captured.clear();
+					bool hCast = sCombatSys.UseAbility(p2Human.po, 57, hackTgt.go);
+					check(hCast, "Delayed Hacker LogicBlast1 (57) starts cast");
+					check(hackTgt.po->getCurrentHealth() == 100, "LogicBlast1 damage does NOT land at t=0s before cast completes");
+					sStatusEffectManager.Update(3.0f);
+					check(hackTgt.po->getCurrentHealth() == 55, "LogicBlast1 damage (45) lands after cast delay completes (100 -> 55 HP)");
+
+					// 2) Coder RestoreHealth1 (id 77) delayed cast
+					p2Human.po->setMaximumHealth(200);
+					p2Human.po->setCurrentHealth(100);
+					p2Human.po->setInnerStrength(200);
+					bool cCast = sCombatSys.UseAbility(p2Human.po, 77, p2Human.go);
+					check(cCast, "Delayed Coder RestoreHealth1 (77) starts cast");
+					check(p2Human.po->getCurrentHealth() == 100, "RestoreHealth1 heal does NOT land at t=0s before cast completes");
+					sStatusEffectManager.Update(3.0f);
+					check(p2Human.po->getCurrentHealth() == 160, "RestoreHealth1 heal (+60) lands after cast delay completes (100 -> 160 HP)");
+
+					// 3) Soldier PowerShot (id 14) delayed cast
+					Actor solTgt = makeBot(9200262, 10100.0, 10000.0, 1, 100);
+					p2Human.po->setInnerStrength(200);
+					bool sCast = sCombatSys.UseAbility(p2Human.po, 14, solTgt.go);
+					check(sCast, "Delayed Soldier PowerShot (14) starts cast");
+					check(solTgt.po->getCurrentHealth() == 100, "PowerShot damage does NOT land at t=0s before cast completes");
+					sStatusEffectManager.Update(3.0f);
+					check(solTgt.po->getCurrentHealth() == 50, "PowerShot damage (50) lands after cast delay completes (100 -> 50 HP)");
+
+					// 4) Spy PoisonKnife (id 146) delayed cast
+					Actor spyTgt = makeBot(9200263, 10050.0, 10000.0, 1, 100);
+					p2Human.po->setInnerStrength(200);
+					p2Human.po->setStealth(false);
+					bool spCast = sCombatSys.UseAbility(p2Human.po, 146, spyTgt.go);
+					check(spCast, "Delayed Spy PoisonKnife (146) starts cast");
+					check(spyTgt.po->getCurrentHealth() == 100, "PoisonKnife damage does NOT land at t=0s before cast completes");
+					sStatusEffectManager.Update(3.0f);
+					check(spyTgt.po->getCurrentHealth() < 100, "PoisonKnife damage lands after cast delay completes");
+				}
+				sHackerSystem.SetForceDelayedCast(false);
+
+				// C. Gunner Ballistic Distance Drop-Off & Shared Firearm Magazine Ammo Tracking
+				{
+					float cqbMult = CombatSystem::ComputeBallisticDistanceMultiplier(300.0, 3500.0, 499);
+					check(std::abs(cqbMult - 1.15f) < 0.01f, "PistolPointBlank (499) at 3m grants 1.15x CQB damage bonus");
+
+					float optMult = CombatSystem::ComputeBallisticDistanceMultiplier(1000.0, 3500.0, 14);
+					check(std::abs(optMult - 1.00f) < 0.01f, "Standard ballistic shot at 10m optimal range deals 1.00x damage");
+
+					float falloffMult = CombatSystem::ComputeBallisticDistanceMultiplier(3500.0, 3500.0, 14);
+					check(std::abs(falloffMult - 0.60f) < 0.01f, "Standard ballistic shot at 35m max range drops off to 0.60x damage");
+
+					float sniperLong = CombatSystem::ComputeBallisticDistanceMultiplier(5000.0, 8000.0, 505);
+					float sniperShort = CombatSystem::ComputeBallisticDistanceMultiplier(200.0, 8000.0, 505);
+					check(std::abs(sniperLong - 1.25f) < 0.01f && std::abs(sniperShort - 0.80f) < 0.01f,
+						"SniperShot (505) scales from 0.80x inside 5m to 1.25x beyond 20m");
+
+					// Verify Soldier ability consumes magazine ammo & auto-reloads from inventory clip
+					p2Human.po->getInventory()->clear();
+					p2Human.po->giveItem(1002); // Beretta 92FS (maxAmmo = 15)
+					p2Human.po->setEquippedWeaponId(1002);
+					auto eqW = p2Human.po->getEquippedWeapons();
+					check(!eqW.empty(), "Phase 2 operative equipped Beretta 92FS");
+					if (!eqW.empty())
+					{
+						eqW[0]->setAmmoCount(1);
+						Actor rangeTgt = makeBot(9200264, 10200.0, 10000.0, 1, 200);
+						p2Human.po->setInnerStrength(200);
+						bool shot1 = sCombatSys.UseAbility(p2Human.po, 14, rangeTgt.go);
+						check(shot1 && eqW[0]->getAmmoCount() == 0, "Soldier PowerShot decrements magazine ammo (1 -> 0)");
+
+						// Dry fire without clip fails with [OUT OF AMMO]
+						p2Client.captured.clear();
+						bool dryShot = sCombatSys.UseAbility(p2Human.po, 14, rangeTgt.go);
+						check(!dryShot && p2Client.sawText("[OUT OF AMMO]"),
+							"Soldier PowerShot fails with [OUT OF AMMO] when magazine is empty and no clip in inventory");
+
+						// Give 9mm clip (1050) -> PowerShot auto-reloads and fires
+						p2Human.po->giveItem(1050);
+						p2Client.captured.clear();
+						bool reloadShot = sCombatSys.UseAbility(p2Human.po, 14, rangeTgt.go);
+						check(reloadShot && eqW[0]->getAmmoCount() == 14 && p2Client.sawText("[RELOAD]"),
+							"Soldier PowerShot auto-reloads from 9mm clip (1050) to 14 rounds and fires");
+					}
+					p2Human.po->setEquippedWeaponId(0);
+					p2Human.po->getInventory()->clear();
+				}
+
+				// D. Martial Arts 3-Step Style Combo Chains (Kung Fu, Karate, Aikido)
+				{
+					Actor maDummy = makeBot(9200265, 10050.0, 10000.0, 1, 2000);
+					maDummy.po->setHandle("Dojo Combo Dummy");
+					InterlockSession maSession;
+					maSession.goIdA = p2Human.go;
+					maSession.goIdB = maDummy.go;
+					maSession.exchangeNum = 1;
+					maSession.tacticA = TACTIC_POWER;
+					maSession.tacticB = TACTIC_SPEED;
+
+					p2Human.po->setFightingStyle(FightingStyle::KungFu);
+					const CombatMove* kfMove = CombatSystem::GetMove(133); // KungFu1
+					if (!kfMove) kfMove = CombatSystem::DefaultMelee();
+
+					p2Client.captured.clear();
+					auto r1 = sCombatSys.StrikeInterlock(maSession, p2Human.po, maDummy.po, *kfMove, TACTIC_POWER, TACTIC_SPEED, true, false);
+					check(r1.hit && maSession.comboStepA == 1, "Kung Fu hit 1 advances InterlockSession comboStepA to Step 1");
+					uint32 mStep1 = sCombatSys.SelectInterlockMove(maSession, p2Human.po, maDummy.po, InterlockExchangeOutcome::NormalHit);
+
+					auto r2 = sCombatSys.StrikeInterlock(maSession, p2Human.po, maDummy.po, *kfMove, TACTIC_POWER, TACTIC_SPEED, true, false);
+					check(r2.hit && maSession.comboStepA == 2, "Kung Fu hit 2 advances InterlockSession comboStepA to Step 2");
+					uint32 mStep2 = sCombatSys.SelectInterlockMove(maSession, p2Human.po, maDummy.po, InterlockExchangeOutcome::NormalHit);
+
+					auto r3 = sCombatSys.StrikeInterlock(maSession, p2Human.po, maDummy.po, *kfMove, TACTIC_POWER, TACTIC_SPEED, true, false);
+					check(r3.hit && maSession.comboStepA == 3, "Kung Fu hit 3 advances InterlockSession comboStepA to Step 3 Finisher");
+					uint32 mStep3 = sCombatSys.SelectInterlockMove(maSession, p2Human.po, maDummy.po, InterlockExchangeOutcome::NormalHit);
+					check(p2Client.sawText("3-Step Style Combo Finisher!"), "Step 3 Finisher triggers +20% combo finisher bonus and notification");
+					check(mStep1 != 0 && mStep2 != 0 && mStep3 != 0 && (mStep1 != mStep2 || mStep2 != mStep3),
+						"SelectInterlockMove resolves distinct ILDB move IDs across 3-step Kung Fu combo chain");
+
+					// Blocking resets the attacker's combo chain
+					auto rBlocked = sCombatSys.StrikeInterlock(maSession, p2Human.po, maDummy.po, *kfMove, TACTIC_POWER, TACTIC_DEFENSE, true, false);
+					check(rBlocked.isBlocked && maSession.comboStepA == 0, "Blocked strike resets attacker comboStepA back to 0");
+				}
 			}
 		}
 	}

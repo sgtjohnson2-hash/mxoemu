@@ -11,6 +11,7 @@
 #include "BotManager.h"
 
 #include "DataLoader.h"
+#include "CombatSystem.h"
 
 createFileSingleton(HackerSystem);
 
@@ -19,6 +20,14 @@ HackerSystem::~HackerSystem() {}
 
 void HackerSystem::Initialize() {
     INFO_LOG("HackerSystem Initialized.");
+}
+
+bool HackerSystem::ShouldDelayCast(float castSec) const
+{
+    if (castSec <= 0.05f)
+        return false;
+    bool isLiveServer = GameServer::getSingletonPtr() && GameServer::getSingleton().isServerUp();
+    return isLiveServer || m_forceDelayedCast;
 }
 
 bool HackerSystem::ExecuteHackerAbility(PlayerObject* caster, uint16 abilityId, uint32 targetGoId, const AbilityTemplate* templ)
@@ -206,8 +215,7 @@ bool HackerSystem::ExecuteHackerAbility(PlayerObject* caster, uint16 abilityId, 
         }
     };
 
-    bool isLiveServer = GameServer::getSingletonPtr() && GameServer::getSingleton().isServerUp();
-    if (isLiveServer && castSec > 0.05f)
+    if (ShouldDelayCast(castSec))
     {
         sStatusEffectManager.ScheduleCastDelay(caster->getGoId(), target->getGoId(), abilityId, castSec, executePayload);
     }
@@ -315,127 +323,145 @@ bool HackerSystem::ExecuteCoderAbility(PlayerObject* caster, uint16 abilityId, u
                 % abilName % (target == caster ? "Self" : target->getHandle())).str()));
     }
 
-    // 5. Ability Payload Execution
-    if (abilityId == 77) // RestoreHealth1Ability
-    {
-        target->applyHeal(caster->getGoId(), 60, 0x01000060);
-    }
-    else if (abilityId == 80) // RestoreHealth2Ability
-    {
-        target->applyHeal(caster->getGoId(), 120, 0x01000060);
-    }
-    else if (abilityId == 234) // RestoreHealth3Ability
-    {
-        target->applyHeal(caster->getGoId(), 200, 0x01000060);
-    }
-    else if (abilityId == 46) // FastHealing1Ability
-    {
-        target->applyHeal(caster->getGoId(), 40, 0x01000060);
-    }
-    else if (abilityId == 169) // EmergencyRepairs1Ability
-    {
-        target->applyHeal(caster->getGoId(), 160, 0x01000060);
-    }
-    else if (abilityId == 56) // GroupRepairs1Ability
-    {
-        target->applyHeal(caster->getGoId(), 75, 0x01000060);
-        auto nearby = sSpatialGrid.GetClientsInRadius(caster->getPosition().x, caster->getPosition().z, 2000.0f);
-        for (GameClient* client : nearby)
+    // 5. Ability Payload Execution (Scheduled after castSec delay)
+    auto executePayload = [casterId = caster->getGoId(), targetId = target->getGoId(), abilityId, abilName, templ, casterLvl = caster->getLevel(), humanCaster]() {
+        PlayerObject* c = sObjMgr.getGOPtrSafe(casterId);
+        PlayerObject* tgt = sObjMgr.getGOPtrSafe(targetId);
+        if (!c || c->isDead() || !tgt) return;
+
+        bool isRevive = (abilityId == 375 || abilName.find("Revive") != std::string::npos);
+        if (!isRevive && tgt->isDead()) return;
+
+        if (abilityId == 77) // RestoreHealth1Ability
         {
-            if (client->GetPlayerGoId() != target->getGoId())
-            {
-                PlayerObject* po = sObjMgr.getGOPtrSafe(client->GetPlayerGoId());
-                if (po && !po->isDead())
-                {
-                    po->applyHeal(caster->getGoId(), 75, 0x01000060);
-                }
-            }
+            tgt->applyHeal(casterId, 60, 0x01000060);
         }
-    }
-    else if (abilityId == 50) // GroupRepairs2Ability
-    {
-        target->applyHeal(caster->getGoId(), 130, 0x01000060);
-        auto nearby = sSpatialGrid.GetClientsInRadius(caster->getPosition().x, caster->getPosition().z, 2000.0f);
-        for (GameClient* client : nearby)
+        else if (abilityId == 80) // RestoreHealth2Ability
         {
-            if (client->GetPlayerGoId() != target->getGoId())
-            {
-                PlayerObject* po = sObjMgr.getGOPtrSafe(client->GetPlayerGoId());
-                if (po && !po->isDead())
-                {
-                    po->applyHeal(caster->getGoId(), 130, 0x01000060);
-                }
-            }
+            tgt->applyHeal(casterId, 120, 0x01000060);
         }
-    }
-    else if (abilityId == 39) // BolsterHealth1Ability
-    {
-        sStatusEffectManager.ApplyEffect(target->getGoId(), EFFECT_BOLSTER_HEALTH, 300.0f, 1.0f, 100.0f, caster->getGoId());
-    }
-    else if (abilityId == 375) // ReviveRSIAbility
-    {
-        target->revive(caster->getGoId(), 0.5f);
-    }
-    else if (abilityId == 23) // DeflectCodeAbility
-    {
-        if (humanCaster)
+        else if (abilityId == 234) // RestoreHealth3Ability
         {
-            caster->getClient().QueueCommand(std::make_shared<SystemChatMsg>(
-                "{c:00FF00}[CODER] Passive Code Deflection algorithm active in RSI buffer.{/c}"));
+            tgt->applyHeal(casterId, 200, 0x01000060);
         }
-    }
-    else if (abilityId == 20) // FortifySimulacra1Ability
-    {
-        sStatusEffectManager.ApplyEffect(target->getGoId(), EFFECT_BOLSTER_HEALTH, 180.0f, 1.0f, 50.0f, caster->getGoId());
-        if (humanCaster)
+        else if (abilityId == 46) // FastHealing1Ability
         {
-            caster->getClient().QueueCommand(std::make_shared<SystemChatMsg>(
-                "{c:00FF00}[CODER] Fortifying target RSI construct with reinforced subroutine shielding.{/c}"));
+            tgt->applyHeal(casterId, 40, 0x01000060);
         }
-    }
-    else if (abilityId == 30) // RepairSimulacra1Ability
-    {
-        target->applyHeal(caster->getGoId(), 120, 0x01000060);
-        sStatusEffectManager.ApplyEffect(target->getGoId(), EFFECT_REGEN_HOT, 10.0f, 2.0f, 15.0f, caster->getGoId());
-        if (humanCaster)
+        else if (abilityId == 169) // EmergencyRepairs1Ability
         {
-            caster->getClient().QueueCommand(std::make_shared<SystemChatMsg>(
-                "{c:00FF00}[CODER] Performing diagnostic synthesis and repair on construct.{/c}"));
+            tgt->applyHeal(casterId, 160, 0x01000060);
         }
-    }
-    else
-    {
-        if (abilName.find("Revive") != std::string::npos)
+        else if (abilityId == 56) // GroupRepairs1Ability
         {
-            target->revive(caster->getGoId(), 0.5f);
-        }
-        else if (abilName.find("Group") != std::string::npos)
-        {
-            uint16 groupHeal = (templ && templ->valueFrom > 0) ? (templ->valueFrom + caster->getLevel() * 2) : 75;
-            target->applyHeal(caster->getGoId(), groupHeal, 0x01000060);
-            auto nearby = sSpatialGrid.GetClientsInRadius(caster->getPosition().x, caster->getPosition().z, 2000.0f);
+            tgt->applyHeal(casterId, 75, 0x01000060);
+            auto nearby = sSpatialGrid.GetClientsInRadius(c->getPosition().x, c->getPosition().z, 2000.0f);
             for (GameClient* client : nearby)
             {
-                if (client->GetPlayerGoId() != target->getGoId())
+                if (client->GetPlayerGoId() != targetId)
                 {
                     PlayerObject* po = sObjMgr.getGOPtrSafe(client->GetPlayerGoId());
                     if (po && !po->isDead())
                     {
-                        po->applyHeal(caster->getGoId(), groupHeal, 0x01000060);
+                        po->applyHeal(casterId, 75, 0x01000060);
                     }
                 }
             }
         }
-        else if (abilName.find("Bolster") != std::string::npos || abilName.find("Fortify") != std::string::npos)
+        else if (abilityId == 50) // GroupRepairs2Ability
         {
-            float bonus = (templ && templ->valueFrom > 0) ? float(templ->valueFrom) : 100.0f;
-            sStatusEffectManager.ApplyEffect(target->getGoId(), EFFECT_BOLSTER_HEALTH, 300.0f, 1.0f, bonus, caster->getGoId());
+            tgt->applyHeal(casterId, 130, 0x01000060);
+            auto nearby = sSpatialGrid.GetClientsInRadius(c->getPosition().x, c->getPosition().z, 2000.0f);
+            for (GameClient* client : nearby)
+            {
+                if (client->GetPlayerGoId() != targetId)
+                {
+                    PlayerObject* po = sObjMgr.getGOPtrSafe(client->GetPlayerGoId());
+                    if (po && !po->isDead())
+                    {
+                        po->applyHeal(casterId, 130, 0x01000060);
+                    }
+                }
+            }
+        }
+        else if (abilityId == 39) // BolsterHealth1Ability
+        {
+            sStatusEffectManager.ApplyEffect(targetId, EFFECT_BOLSTER_HEALTH, 300.0f, 1.0f, 100.0f, casterId);
+        }
+        else if (abilityId == 375) // ReviveRSIAbility
+        {
+            tgt->revive(casterId, 0.5f);
+        }
+        else if (abilityId == 23) // DeflectCodeAbility
+        {
+            if (humanCaster)
+            {
+                c->getClient().QueueCommand(std::make_shared<SystemChatMsg>(
+                    "{c:00FF00}[CODER] Passive Code Deflection algorithm active in RSI buffer.{/c}"));
+            }
+        }
+        else if (abilityId == 20) // FortifySimulacra1Ability
+        {
+            sStatusEffectManager.ApplyEffect(targetId, EFFECT_BOLSTER_HEALTH, 180.0f, 1.0f, 50.0f, casterId);
+            if (humanCaster)
+            {
+                c->getClient().QueueCommand(std::make_shared<SystemChatMsg>(
+                    "{c:00FF00}[CODER] Fortifying target RSI construct with reinforced subroutine shielding.{/c}"));
+            }
+        }
+        else if (abilityId == 30) // RepairSimulacra1Ability
+        {
+            tgt->applyHeal(casterId, 120, 0x01000060);
+            sStatusEffectManager.ApplyEffect(targetId, EFFECT_REGEN_HOT, 10.0f, 2.0f, 15.0f, casterId);
+            if (humanCaster)
+            {
+                c->getClient().QueueCommand(std::make_shared<SystemChatMsg>(
+                    "{c:00FF00}[CODER] Performing diagnostic synthesis and repair on construct.{/c}"));
+            }
         }
         else
         {
-            uint16 healAmt = (templ && templ->valueFrom > 0) ? (templ->valueFrom + caster->getLevel() * 3) : (50 + caster->getLevel() * 5);
-            target->applyHeal(caster->getGoId(), healAmt, 0x01000060);
+            if (isRevive)
+            {
+                tgt->revive(casterId, 0.5f);
+            }
+            else if (abilName.find("Group") != std::string::npos)
+            {
+                uint16 groupHeal = (templ && templ->valueFrom > 0) ? (templ->valueFrom + casterLvl * 2) : 75;
+                tgt->applyHeal(casterId, groupHeal, 0x01000060);
+                auto nearby = sSpatialGrid.GetClientsInRadius(c->getPosition().x, c->getPosition().z, 2000.0f);
+                for (GameClient* client : nearby)
+                {
+                    if (client->GetPlayerGoId() != targetId)
+                    {
+                        PlayerObject* po = sObjMgr.getGOPtrSafe(client->GetPlayerGoId());
+                        if (po && !po->isDead())
+                        {
+                            po->applyHeal(casterId, groupHeal, 0x01000060);
+                        }
+                    }
+                }
+            }
+            else if (abilName.find("Bolster") != std::string::npos || abilName.find("Fortify") != std::string::npos)
+            {
+                float bonus = (templ && templ->valueFrom > 0) ? float(templ->valueFrom) : 100.0f;
+                sStatusEffectManager.ApplyEffect(targetId, EFFECT_BOLSTER_HEALTH, 300.0f, 1.0f, bonus, casterId);
+            }
+            else
+            {
+                uint16 healAmt = (templ && templ->valueFrom > 0) ? (templ->valueFrom + casterLvl * 3) : (50 + casterLvl * 5);
+                tgt->applyHeal(casterId, healAmt, 0x01000060);
+            }
         }
+    };
+
+    if (ShouldDelayCast(castSec))
+    {
+        sStatusEffectManager.ScheduleCastDelay(caster->getGoId(), target->getGoId(), abilityId, castSec, executePayload);
+    }
+    else
+    {
+        executePayload();
     }
 
     return true;
@@ -509,6 +535,15 @@ bool HackerSystem::ExecuteSoldierAbility(PlayerObject* caster, uint16 abilityId,
         }
         return false;
     }
+
+    // Ranged firearm shots consume magazine ammo & auto-reload from clips when a weapon is equipped
+    const bool isMeleeButtOrWhip = (abilityId == 453 || abilityId == 501);
+    if (!isMeleeButtOrWhip && caster->getEquippedWeaponId() != 0)
+    {
+        if (!caster->consumeFirearmAmmo())
+            return false;
+    }
+
     caster->spendIS(isCost);
 
     // If caster was stealthed, firing breaks stealth
@@ -540,67 +575,89 @@ bool HackerSystem::ExecuteSoldierAbility(PlayerObject* caster, uint16 abilityId,
             (format("{c:FF4444}[SOLDIER] Executing %1% on %2%.{/c}") % abilName % target->getHandle()).str()));
     }
 
-    // 5. Ability Payload Execution
-    uint16 damage = 25;
-    uint32 hitFx = 0x280006DF;
-    if (abilityId == 14) // PowerShotAbility
+    // 5. Ability Payload Execution (Scheduled after castSec delay)
+    auto executePayload = [casterId = caster->getGoId(), targetId = target->getGoId(), abilityId, abilName, templ, maxRange, isMeleeButtOrWhip, casterLvl = caster->getLevel()]() {
+        PlayerObject* c = sObjMgr.getGOPtrSafe(casterId);
+        PlayerObject* tgt = sObjMgr.getGOPtrSafe(targetId);
+        if (!c || c->isDead() || !tgt || tgt->isDead()) return;
+
+        uint16 damage = 25;
+        uint32 hitFx = 0x280006DF;
+        if (abilityId == 14) // PowerShotAbility
+        {
+            damage = 50;
+        }
+        else if (abilityId == 126) // PistolDisarmingShotAbility
+        {
+            damage = 25;
+            sStatusEffectManager.ApplyEffect(targetId, EFFECT_DISARMED, 6.0f, 1.0f, 0.0f, casterId);
+            tgt->getClient().QueueCommand(std::make_shared<SystemChatMsg>("{c:FFAA00}[DISARMED] Your weapon has been disarmed!{/c}"));
+        }
+        else if (abilityId == 129) // HandgunsAbility
+        {
+            damage = 25;
+        }
+        else if (abilityId == 147) // RiflesAbility
+        {
+            damage = 40;
+        }
+        else if (abilityId == 453) // RifleButtSmashAbility
+        {
+            damage = 30;
+        }
+        else if (abilityId == 499) // PistolPointBlankAbility
+        {
+            damage = 45;
+        }
+        else if (abilityId == 501) // PistolWhipAbility
+        {
+            damage = 20;
+        }
+        else if (abilityId == 505) // SniperShotAbility
+        {
+            damage = 75;
+        }
+        else
+        {
+            damage = (templ && templ->valueFrom > 0) ? (templ->valueFrom + casterLvl * 3) : (30 + casterLvl * 4);
+            if (abilName.find("Sniper") != std::string::npos)
+            {
+                damage = static_cast<uint16>(damage * 2.2f);
+            }
+            else if (abilName.find("PointBlank") != std::string::npos)
+            {
+                damage = static_cast<uint16>(damage * 1.8f);
+            }
+            else if (abilName.find("Disarm") != std::string::npos)
+            {
+                sStatusEffectManager.ApplyEffect(targetId, EFFECT_DISARMED, 6.0f, 1.0f, 0.0f, casterId);
+                tgt->getClient().QueueCommand(std::make_shared<SystemChatMsg>("{c:FFAA00}[DISARMED] Your weapon has been disarmed!{/c}"));
+            }
+        }
+
+        if (c->isDualWielding())
+        {
+            damage = static_cast<uint16>(damage * 1.5f);
+        }
+
+        if (!isMeleeButtOrWhip)
+        {
+            double dist = c->getPosition().Distance(tgt->getPosition());
+            float distMult = CombatSystem::ComputeBallisticDistanceMultiplier(dist, maxRange, abilityId);
+            damage = static_cast<uint16>(std::max<float>(1.0f, std::round(float(damage) * distMult)));
+        }
+
+        tgt->takeDamage(casterId, damage, hitFx);
+    };
+
+    if (ShouldDelayCast(castSec))
     {
-        damage = 50;
-    }
-    else if (abilityId == 126) // PistolDisarmingShotAbility
-    {
-        damage = 25;
-        sStatusEffectManager.ApplyEffect(target->getGoId(), EFFECT_DISARMED, 6.0f, 1.0f, 0.0f, caster->getGoId());
-        target->getClient().QueueCommand(std::make_shared<SystemChatMsg>("{c:FFAA00}[DISARMED] Your weapon has been disarmed!{/c}"));
-    }
-    else if (abilityId == 129) // HandgunsAbility
-    {
-        damage = 25;
-    }
-    else if (abilityId == 147) // RiflesAbility
-    {
-        damage = 40;
-    }
-    else if (abilityId == 453) // RifleButtSmashAbility
-    {
-        damage = 30;
-    }
-    else if (abilityId == 499) // PistolPointBlankAbility
-    {
-        damage = 45;
-    }
-    else if (abilityId == 501) // PistolWhipAbility
-    {
-        damage = 20;
-    }
-    else if (abilityId == 505) // SniperShotAbility
-    {
-        damage = 75;
+        sStatusEffectManager.ScheduleCastDelay(caster->getGoId(), target->getGoId(), abilityId, castSec, executePayload);
     }
     else
     {
-        damage = (templ && templ->valueFrom > 0) ? (templ->valueFrom + caster->getLevel() * 3) : (30 + caster->getLevel() * 4);
-        if (abilName.find("Sniper") != std::string::npos)
-        {
-            damage = static_cast<uint16>(damage * 2.2f);
-        }
-        else if (abilName.find("PointBlank") != std::string::npos)
-        {
-            damage = static_cast<uint16>(damage * 1.8f);
-        }
-        else if (abilName.find("Disarm") != std::string::npos)
-        {
-            sStatusEffectManager.ApplyEffect(target->getGoId(), EFFECT_DISARMED, 6.0f, 1.0f, 0.0f, caster->getGoId());
-            target->getClient().QueueCommand(std::make_shared<SystemChatMsg>("{c:FFAA00}[DISARMED] Your weapon has been disarmed!{/c}"));
-        }
+        executePayload();
     }
-
-    if (caster->isDualWielding())
-    {
-        damage = static_cast<uint16>(damage * 1.5f);
-    }
-
-    target->takeDamage(caster->getGoId(), damage, hitFx);
     return true;
 }
 
@@ -698,116 +755,37 @@ bool HackerSystem::ExecuteSpyAbility(PlayerObject* caster, uint16 abilityId, uin
                 % abilName % (target == caster ? "Self" : target->getHandle())).str()));
     }
 
-    // 5. Ability Payload Execution
-    if (abilityId == 209) // StealthAbility
-    {
-        caster->setStealth(true);
-        sStatusEffectManager.ApplyEffect(caster->getGoId(), EFFECT_STEALTH, 60.0f, 1.0f, 0.0f, caster->getGoId());
-        if (humanCaster)
-        {
-            caster->getClient().QueueCommand(std::make_shared<SystemChatMsg>(
-                "{c:AA00FF}[SPY] Stealth cloak active. You are masked from sensory detection.{/c}"));
-        }
-    }
-    else if (abilityId == 293) // StealthCountermeasuresAbility
-    {
-        sStatusEffectManager.ApplyEffect(caster->getGoId(), EFFECT_ORACLE_PREMONITION_BOOST, 30.0f, 1.0f, 25.0f, caster->getGoId());
-        if (humanCaster)
-        {
-            caster->getClient().QueueCommand(std::make_shared<SystemChatMsg>(
-                "{c:AA00FF}[SPY] Countermeasures deployed. Evasion profile increased.{/c}"));
-        }
-    }
-    else if (abilityId == 146) // PoisonKnifeAbility
-    {
-        uint16 dmg = 25;
-        // Directional Backstab check: within 45 degrees of target's rear
-        LocationVector cPos = caster->getPosition();
-        LocationVector tPos = target->getPosition();
-        double dx = cPos.x - tPos.x;
-        double dz = cPos.z - tPos.z;
-        double dist = std::sqrt(dx * dx + dz * dz);
-        bool isBehind = false;
-        if (dist > 1.0)
-        {
-            double dirX = dx / dist;
-            double dirZ = dz / dist;
-            double fwdX = std::sin(tPos.rot);
-            double fwdZ = std::cos(tPos.rot);
-            double dot = dirX * fwdX + dirZ * fwdZ;
-            if (dot < -0.707) // Behind target within +/- 45 deg
-            {
-                isBehind = true;
-            }
-        }
+    // 5. Ability Payload Execution (Scheduled after castSec delay)
+    auto executePayload = [casterId = caster->getGoId(), targetId = target->getGoId(), abilityId, abilName, templ, casterLvl = caster->getLevel(), humanCaster]() {
+        PlayerObject* c = sObjMgr.getGOPtrSafe(casterId);
+        PlayerObject* tgt = sObjMgr.getGOPtrSafe(targetId);
+        if (!c || c->isDead() || !tgt || tgt->isDead()) return;
 
-        if (isBehind)
+        if (abilityId == 209) // StealthAbility
         {
-            dmg = static_cast<uint16>(dmg * 2.5f); // 2.5x Backstab multiplier
+            c->setStealth(true);
+            sStatusEffectManager.ApplyEffect(casterId, EFFECT_STEALTH, 60.0f, 1.0f, 0.0f, casterId);
             if (humanCaster)
             {
-                caster->getClient().QueueCommand(std::make_shared<SystemChatMsg>(
-                    "{c:FFFF00}[SPY] Tactical Backstab! 2.5x critical damage applied.{/c}"));
-            }
-        }
-        else if (caster->isStealthed())
-        {
-            dmg = static_cast<uint16>(dmg * 1.75f); // 1.75x Ambush critical strike
-            if (humanCaster)
-            {
-                caster->getClient().QueueCommand(std::make_shared<SystemChatMsg>(
-                    "{c:FFFF00}[SPY] Ambush critical strike! Concealment broken.{/c}"));
-            }
-        }
-        if (caster->isStealthed())
-        {
-            caster->setStealth(false);
-        }
-        target->takeDamage(caster->getGoId(), dmg, 0x280006DF);
-        sStatusEffectManager.ApplyEffect(target->getGoId(), EFFECT_VIRUS_DOT, 10.0f, 1.0f, 8.0f, caster->getGoId());
-        if (humanCaster)
-        {
-            caster->getClient().QueueCommand(std::make_shared<SystemChatMsg>(
-                (format("{c:AA00FF}[SPY] Poisoned blade inserted into %1%'s RSI.{/c}") % target->getHandle()).str()));
-        }
-    }
-    else if (abilityId == 283) // KnifeThrowerAbility
-    {
-        uint16 dmg = 30;
-        if (caster->isStealthed())
-        {
-            dmg = static_cast<uint16>(dmg * 1.5f); // 1.5x Ambush knife throw
-            caster->setStealth(false);
-            if (humanCaster)
-            {
-                caster->getClient().QueueCommand(std::make_shared<SystemChatMsg>(
-                    "{c:FFFF00}[SPY] Concealment dropped to throw combat dagger.{/c}"));
-            }
-        }
-        target->takeDamage(caster->getGoId(), dmg, 0x280006DF);
-        if (humanCaster)
-        {
-            caster->getClient().QueueCommand(std::make_shared<SystemChatMsg>(
-                (format("{c:AA00FF}[SPY] Thrown combat dagger impales %1%.{/c}") % target->getHandle()).str()));
-        }
-    }
-    else
-    {
-        if (abilName.find("Stealth") != std::string::npos || abilName.find("Cloak") != std::string::npos || abilName.find("Conceal") != std::string::npos)
-        {
-            caster->setStealth(true);
-            sStatusEffectManager.ApplyEffect(caster->getGoId(), EFFECT_STEALTH, 60.0f, 1.0f, 0.0f, caster->getGoId());
-            if (humanCaster)
-            {
-                caster->getClient().QueueCommand(std::make_shared<SystemChatMsg>(
+                c->getClient().QueueCommand(std::make_shared<SystemChatMsg>(
                     "{c:AA00FF}[SPY] Stealth cloak active. You are masked from sensory detection.{/c}"));
             }
         }
-        else
+        else if (abilityId == 293) // StealthCountermeasuresAbility
         {
-            uint16 dmg = (templ && templ->valueFrom > 0) ? (templ->valueFrom + caster->getLevel() * 3) : (25 + caster->getLevel() * 4);
-            LocationVector cPos = caster->getPosition();
-            LocationVector tPos = target->getPosition();
+            sStatusEffectManager.ApplyEffect(casterId, EFFECT_ORACLE_PREMONITION_BOOST, 30.0f, 1.0f, 25.0f, casterId);
+            if (humanCaster)
+            {
+                c->getClient().QueueCommand(std::make_shared<SystemChatMsg>(
+                    "{c:AA00FF}[SPY] Countermeasures deployed. Evasion profile increased.{/c}"));
+            }
+        }
+        else if (abilityId == 146) // PoisonKnifeAbility
+        {
+            uint16 dmg = 25;
+            // Directional Backstab check: within 45 degrees of target's rear
+            LocationVector cPos = c->getPosition();
+            LocationVector tPos = tgt->getPosition();
             double dx = cPos.x - tPos.x;
             double dz = cPos.z - tPos.z;
             double dist = std::sqrt(dx * dx + dz * dz);
@@ -819,37 +797,131 @@ bool HackerSystem::ExecuteSpyAbility(PlayerObject* caster, uint16 abilityId, uin
                 double fwdX = std::sin(tPos.rot);
                 double fwdZ = std::cos(tPos.rot);
                 double dot = dirX * fwdX + dirZ * fwdZ;
-                if (dot < -0.707) isBehind = true;
+                if (dot < -0.707) // Behind target within +/- 45 deg
+                {
+                    isBehind = true;
+                }
             }
 
             if (isBehind)
             {
-                dmg = static_cast<uint16>(dmg * 2.5f);
+                dmg = static_cast<uint16>(dmg * 2.5f); // 2.5x Backstab multiplier
                 if (humanCaster)
                 {
-                    caster->getClient().QueueCommand(std::make_shared<SystemChatMsg>(
+                    c->getClient().QueueCommand(std::make_shared<SystemChatMsg>(
                         "{c:FFFF00}[SPY] Tactical Backstab! 2.5x critical damage applied.{/c}"));
                 }
             }
-            else if (caster->isStealthed())
+            else if (c->isStealthed())
             {
-                dmg = static_cast<uint16>(dmg * 1.75f);
+                dmg = static_cast<uint16>(dmg * 1.75f); // 1.75x Ambush critical strike
                 if (humanCaster)
                 {
-                    caster->getClient().QueueCommand(std::make_shared<SystemChatMsg>(
+                    c->getClient().QueueCommand(std::make_shared<SystemChatMsg>(
                         "{c:FFFF00}[SPY] Ambush critical strike! Concealment broken.{/c}"));
                 }
             }
-            if (caster->isStealthed())
+            if (c->isStealthed())
             {
-                caster->setStealth(false);
+                c->setStealth(false);
             }
-            target->takeDamage(caster->getGoId(), dmg, 0x280006DF);
-            if (abilName.find("Poison") != std::string::npos)
+            tgt->takeDamage(casterId, dmg, 0x280006DF);
+            sStatusEffectManager.ApplyEffect(targetId, EFFECT_VIRUS_DOT, 10.0f, 1.0f, 8.0f, casterId);
+            if (humanCaster)
             {
-                sStatusEffectManager.ApplyEffect(target->getGoId(), EFFECT_VIRUS_DOT, 10.0f, 1.0f, 8.0f, caster->getGoId());
+                c->getClient().QueueCommand(std::make_shared<SystemChatMsg>(
+                    (format("{c:AA00FF}[SPY] Poisoned blade inserted into %1%'s RSI.{/c}") % tgt->getHandle()).str()));
             }
         }
+        else if (abilityId == 283) // KnifeThrowerAbility
+        {
+            uint16 dmg = 30;
+            if (c->isStealthed())
+            {
+                dmg = static_cast<uint16>(dmg * 1.5f); // 1.5x Ambush knife throw
+                c->setStealth(false);
+                if (humanCaster)
+                {
+                    c->getClient().QueueCommand(std::make_shared<SystemChatMsg>(
+                        "{c:FFFF00}[SPY] Concealment dropped to throw combat dagger.{/c}"));
+                }
+            }
+            tgt->takeDamage(casterId, dmg, 0x280006DF);
+            if (humanCaster)
+            {
+                c->getClient().QueueCommand(std::make_shared<SystemChatMsg>(
+                    (format("{c:AA00FF}[SPY] Thrown combat dagger impales %1%.{/c}") % tgt->getHandle()).str()));
+            }
+        }
+        else
+        {
+            if (abilName.find("Stealth") != std::string::npos || abilName.find("Cloak") != std::string::npos || abilName.find("Conceal") != std::string::npos)
+            {
+                c->setStealth(true);
+                sStatusEffectManager.ApplyEffect(casterId, EFFECT_STEALTH, 60.0f, 1.0f, 0.0f, casterId);
+                if (humanCaster)
+                {
+                    c->getClient().QueueCommand(std::make_shared<SystemChatMsg>(
+                        "{c:AA00FF}[SPY] Stealth cloak active. You are masked from sensory detection.{/c}"));
+                }
+            }
+            else
+            {
+                uint16 dmg = (templ && templ->valueFrom > 0) ? (templ->valueFrom + casterLvl * 3) : (25 + casterLvl * 4);
+                LocationVector cPos = c->getPosition();
+                LocationVector tPos = tgt->getPosition();
+                double dx = cPos.x - tPos.x;
+                double dz = cPos.z - tPos.z;
+                double dist = std::sqrt(dx * dx + dz * dz);
+                bool isBehind = false;
+                if (dist > 1.0)
+                {
+                    double dirX = dx / dist;
+                    double dirZ = dz / dist;
+                    double fwdX = std::sin(tPos.rot);
+                    double fwdZ = std::cos(tPos.rot);
+                    double dot = dirX * fwdX + dirZ * fwdZ;
+                    if (dot < -0.707) isBehind = true;
+                }
+
+                if (isBehind)
+                {
+                    dmg = static_cast<uint16>(dmg * 2.5f);
+                    if (humanCaster)
+                    {
+                        c->getClient().QueueCommand(std::make_shared<SystemChatMsg>(
+                            "{c:FFFF00}[SPY] Tactical Backstab! 2.5x critical damage applied.{/c}"));
+                    }
+                }
+                else if (c->isStealthed())
+                {
+                    dmg = static_cast<uint16>(dmg * 1.75f);
+                    if (humanCaster)
+                    {
+                        c->getClient().QueueCommand(std::make_shared<SystemChatMsg>(
+                            "{c:FFFF00}[SPY] Ambush critical strike! Concealment broken.{/c}"));
+                    }
+                }
+                if (c->isStealthed())
+                {
+                    c->setStealth(false);
+                }
+                tgt->takeDamage(casterId, dmg, 0x280006DF);
+                if (abilName.find("Poison") != std::string::npos)
+                {
+                    sStatusEffectManager.ApplyEffect(targetId, EFFECT_VIRUS_DOT, 10.0f, 1.0f, 8.0f, casterId);
+                }
+            }
+        }
+    };
+
+    if (ShouldDelayCast(castSec))
+    {
+        sStatusEffectManager.ScheduleCastDelay(caster->getGoId(), target->getGoId(), abilityId, castSec, executePayload);
+    }
+    else
+    {
+        executePayload();
     }
 
     return true;

@@ -19,8 +19,11 @@ public:
     bool ExecuteSoldierAbility(PlayerObject* caster, uint16 abilityId, uint32 targetGoId, const struct AbilityTemplate* templ);
     bool ExecuteSpyAbility(PlayerObject* caster, uint16 abilityId, uint32 targetGoId, const struct AbilityTemplate* templ);
 
-    // Legacy signatures
+    void SetForceDelayedCast(bool force) { m_forceDelayedCast = force; }
+    bool ShouldDelayCast(float castSec) const;
 
+private:
+    bool m_forceDelayedCast = false;
 };
 
 #define sHackerSystem Singleton<HackerSystem>::getSingleton()

@@ -22,12 +22,8 @@
 #include "DataLoader.h"
 #include <algorithm>
 
-AbilitySystem::AbilitySystem(PlayerObject* owner) : m_owner(owner), m_maxMemory(100)
+AbilitySystem::AbilitySystem(PlayerObject* owner) : m_owner(owner), m_maxMemory(0)
 {
-    if (m_owner)
-    {
-        m_maxMemory = m_owner->getLevel() * 10 + 100;
-    }
 }
 
 AbilitySystem::~AbilitySystem()
@@ -197,7 +193,11 @@ uint16 AbilitySystem::getTotalMemoryUsed() const
 
 uint16 AbilitySystem::getMaxMemory() const
 {
-    return m_maxMemory;
+    if (m_maxMemory > 0)
+        return m_maxMemory;
+    if (m_owner)
+        return uint16(m_owner->getLevel()) * 10 + 100;
+    return 100;
 }
 
 bool AbilitySystem::canCastAbility(uint16 abilityId) const
