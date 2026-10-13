@@ -769,10 +769,9 @@ void MissionSystem::AdvanceObjective(PlayerObject* player, ObjectiveCommand comm
                     player->addFactionReputation(templ.rewardFactionRep);
 
                 // Item 38: physical reward item
-                if (templ.rewardItemTemplateId > 0 && player->getInventory())
+                if (templ.rewardItemTemplateId > 0)
                 {
-                    auto item = std::make_shared<Item>(rand(), templ.rewardItemTemplateId);
-                    player->getInventory()->addItemAuto(item);
+                    player->giveItem(templ.rewardItemTemplateId);
                     INFO_LOG(format("Rewarded Item %1% to %2%") % templ.rewardItemTemplateId % player->getHandle());
                 }
 

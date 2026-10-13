@@ -352,7 +352,10 @@ const CombatMove* CombatSystem::DefaultMelee()
 
 const CombatMove* CombatSystem::DefaultRanged()
 {
-    return GetMove(2);
+    const CombatMove* m = GetMove(129); // HandgunsAbility
+    if (!m) m = GetMoveByName("HandgunsAbility");
+    if (!m) m = GetMove(14); // PowerShotAbility
+    return m;
 }
 
 const CombatMove* CombatSystem::GetDefaultStyleMove(PlayerObject* player)
@@ -498,7 +501,11 @@ void CombatSystem::Update()
 		}
 		if (!keepAlive) {
 			PlayerObject* pA = getPlayerSafe(it->attackerGoId);
-			if (pA) pA->setCombatStance(false);
+			if (pA) {
+				pA->setCombatStance(false);
+				if (pA->getInventory()) pA->getInventory()->saveToDB();
+				pA->saveDataToDB();
+			}
 			it = m_freefires.erase(it);
 			continue;
 		}
@@ -817,7 +824,7 @@ bool CombatSystem::RequestInterlock(uint32 attackerGoId, uint32 targetGoId, uint
 					std::vector<uint32> slots = BuildILSlots(otherViewWithSpawnId);
 					std::vector<ILExchange> opening;
 					opening.push_back(BuildExchange(session, sides[i].self, pA, pB, 1,
-						IL_MOVE_PRE, IL_MOVE_PRE, openMove, &openPair));
+						0, 0, openMove, &openPair));
 					sides[i].self->getClient().QueueState(std::make_shared<ILCombatStateMsg>(
 						ilViewId, ilPos, 1, slots, opening));
 				}
@@ -887,6 +894,19 @@ bool CombatSystem::RequestRangedCombat(uint32 attackerGoId, uint32 targetGoId, u
 		BotClient* botB = dynamic_cast<BotClient*>(&pB->getClient());
 		if (botB && botB->GetTargetGoId() == 0) {
 			botB->SetTargetGoId(attackerGoId);
+		}
+		// A second bot of that faction within about 25 m joins
+		auto nearbyAllies = sSpatialGrid.GetClientsInRadius(pB->getPosition().x, pB->getPosition().z, 2500.0f);
+		for (GameClient* gc : nearbyAllies) {
+			if (!gc || gc == &pB->getClient() || !gc->isBot()) continue;
+			BotClient* allyBot = dynamic_cast<BotClient*>(gc);
+			PlayerObject* allyPo = BotGetPlayer(gc->GetPlayerGoId());
+			if (allyBot && allyPo && !allyPo->isDead() && allyPo->getFaction() == pB->getFaction()) {
+				if (allyBot->GetTargetGoId() == 0 && allyPo->getInterlockPartner() == 0) {
+					allyBot->SetTargetGoId(attackerGoId);
+					break;
+				}
+			}
 		}
 	}
 	return true;
@@ -965,7 +985,11 @@ void CombatSystem::StopFreeFire(uint32 goId)
 	for (auto it = m_freefires.begin(); it != m_freefires.end(); ) {
 		if (it->attackerGoId == goId) {
 			PlayerObject* pA = getPlayerSafe(it->attackerGoId);
-			if (pA) pA->setCombatStance(false);
+			if (pA) {
+				pA->setCombatStance(false);
+				if (pA->getInventory()) pA->getInventory()->saveToDB();
+				pA->saveDataToDB();
+			}
 			it = m_freefires.erase(it);
 		} else {
 			++it;
@@ -1091,8 +1115,12 @@ CombatSystem::AttackResult CombatSystem::ResolveAttack(PlayerObject* attacker, P
     if (move.dmgType == DAMAGE_RANGED || move.dmgType == DAMAGE_BALLISTIC) {
         LocationVector aPos = attacker->getPosition();
         LocationVector tPos = target->getPosition();
+        bool isDojo = (attacker->m_lastDojoBotGoId != 0 || target->m_lastDojoBotGoId != 0 ||
+                       attacker->m_dojoOwnerGoId != 0 || target->m_dojoOwnerGoId != 0 ||
+                       attacker->getHandle().find("Dojo") != std::string::npos || target->getHandle().find("Dojo") != std::string::npos ||
+                       attacker->getHandle().find("Sparring") != std::string::npos || target->getHandle().find("Sparring") != std::string::npos);
         // Check line of sight through static building geometry at chest height (+100.0f)
-        bool hasLOS = sStaticObjMgr.CheckLineOfSight(aPos.x, aPos.y + 100.0f, aPos.z, tPos.x, tPos.y + 100.0f, tPos.z);
+        bool hasLOS = isDojo || sStaticObjMgr.CheckLineOfSight(aPos.x, aPos.y + 100.0f, aPos.z, tPos.x, tPos.y + 100.0f, tPos.z);
         if (!hasLOS) {
             res.hit = false;
             sMatrixThreatHeatmap.RecordDisruption((float)aPos.x, (float)aPos.y, (float)aPos.z, 5.0f, "Ballistic Impact on Building Cover");
@@ -1480,11 +1508,11 @@ ILExchange CombatSystem::BuildExchange(const InterlockSession &session, PlayerOb
 		static const uint32 capMoves[] = { 0x2026, 0x236D, 0x2367 };
 		moveResolved = capMoves[number % 3];
 	}
-	uint32 attMove = attackerPreMove ? attackerPreMove : IL_MOVE_PRE;
-	uint32 defMove = defenderPreMove ? defenderPreMove : IL_MOVE_PRE;
-	e.moves[0][0] = attMove; e.moves[0][1] = IL_MOVE_DATABASE;
-	e.moves[1][0] = defMove; e.moves[1][1] = IL_MOVE_DATABASE;
-	e.moves[2][0] = moveResolved; e.moves[2][1] = IL_MOVE_DATABASE;
+	uint32 attMove = attackerPreMove;
+	uint32 defMove = defenderPreMove;
+	e.moves[0][0] = attMove; e.moves[0][1] = attMove ? IL_MOVE_DATABASE : 0;
+	e.moves[1][0] = defMove; e.moves[1][1] = defMove ? IL_MOVE_DATABASE : 0;
+	e.moves[2][0] = moveResolved; e.moves[2][1] = moveResolved ? IL_MOVE_DATABASE : 0;
 	e.moves[3][0] = 0; e.moves[3][1] = 0;
 	e.moves[4][0] = 0; e.moves[4][1] = 0;
 
@@ -1654,7 +1682,7 @@ void CombatSystem::SendInterlockExchange(InterlockSession &session, PlayerObject
 
 		std::vector<ILExchange> ex;
 		ex.push_back(BuildExchange(session, sides[i].p, attacker, defender, session.exchangeNum,
-			IL_MOVE_PRE, IL_MOVE_PRE, mainMove, &pair));
+			0, 0, mainMove, &pair));
 		sides[i].p->getClient().QueueState(std::make_shared<ILCombatStateMsg>(
 			sides[i].view, session.ilPos, session.exchangeNum, slots, ex));
 	}
@@ -1718,6 +1746,85 @@ bool CombatSystem::RunInterlockRound(InterlockSession &session)
 	if (!IsServerDrivenBot(pB))
 		session.tacticB = (pB->getTactic() <= TACTIC_NORMAL) ? pB->getTactic() : uint8(TACTIC_NORMAL);
 
+	auto selectBotRoundMove = [&](PlayerObject* bot, PlayerObject* opponent, const CombatMove*& chosenMove)
+	{
+		uint32 faction = bot->getFaction();
+		if (faction == FACTION_ZION)
+		{
+			const CombatMove* m = GetMove(133);
+			if (m)
+			{
+				chosenMove = m;
+				uint16 cost = (m->isCost > 0) ? m->isCost : 10;
+				bot->spendIS(cost);
+				INFO_LOG(format("UseAbility: %1%:%2% uses %3% (requested id 133, move id 133) on target go %4% [interlocked=1 castTime=0]")
+					% bot->getHandle() % bot->getGoId() % m->name % opponent->getGoId());
+				return;
+			}
+		}
+		else if (faction == FACTION_MACHINES)
+		{
+			const CombatMove* m = GetMove(14);
+			if (m)
+			{
+				chosenMove = m;
+				uint16 cost = (m->isCost > 0) ? m->isCost : 15;
+				bot->spendIS(cost);
+				INFO_LOG(format("UseAbility: %1%:%2% uses %3% (requested id 14, move id 14) on target go %4% [interlocked=1 castTime=0]")
+					% bot->getHandle() % bot->getGoId() % m->name % opponent->getGoId());
+				return;
+			}
+		}
+		else if (faction == FACTION_MEROVINGIAN)
+		{
+			bool hurt = (bot->getMaximumHealth() > 0) && (bot->getCurrentHealth() < (bot->getMaximumHealth() * 3 / 4));
+			if (hurt)
+			{
+				const CombatMove* m = GetMove(5043);
+				if (!m) m = GetMoveByName("Patch Health");
+				uint16 cost = (m && m->isCost > 0) ? m->isCost : 25;
+				bot->spendIS(cost);
+				uint16 healAmt = (m && m->minDmg > 0.0f) ? (uint16)m->minDmg : 50;
+				bot->applyHeal(bot->getGoId(), healAmt);
+				INFO_LOG(format("UseAbility: %1%:%2% uses %3% (requested id 5043, move id 5043) on target go %4% [interlocked=1 castTime=0]")
+					% bot->getHandle() % bot->getGoId() % (m ? m->name : "Restore") % opponent->getGoId());
+			}
+			else
+			{
+				const CombatMove* m = GetMove(146);
+				if (!m) m = GetMoveByName("Poison knife");
+				if (m)
+				{
+					chosenMove = m;
+					uint16 cost = (m->isCost > 0) ? m->isCost : 10;
+					bot->spendIS(cost);
+					INFO_LOG(format("UseAbility: %1%:%2% uses %3% (requested id 146, move id 146) on target go %4% [interlocked=1 castTime=0]")
+						% bot->getHandle() % bot->getGoId() % m->name % opponent->getGoId());
+					return;
+				}
+			}
+		}
+
+		if (bot->getFightingStyle() == FightingStyle::KungFu) {
+			const uint16 kfMoves[] = { 133, 570, 574, 197, 198 };
+			uint16 selected = kfMoves[rand() % 5];
+			const CombatMove* m = GetMove(selected);
+			if (m) chosenMove = m;
+		} else if (bot->getFightingStyle() == FightingStyle::Karate) {
+			const uint16 karateMoves[] = { 132, 569, 573, 531, 197 };
+			uint16 selected = karateMoves[rand() % 5];
+			const CombatMove* m = GetMove(selected);
+			if (m) chosenMove = m;
+		} else if (bot->getFightingStyle() == FightingStyle::Aikido) {
+			const uint16 aikidoMoves[] = { 101, 296, 571, 572, 198 };
+			uint16 selected = aikidoMoves[rand() % 5];
+			const CombatMove* m = GetMove(selected);
+			if (m) chosenMove = m;
+		} else {
+			chosenMove = GetDefaultStyleMove(bot);
+		}
+	};
+
 	// Bot combat AI: update round tactics and discipline moves
 	if (IsServerDrivenBot(pA)) {
 		uint8 newTac = TACTIC_POWER;
@@ -1737,24 +1844,7 @@ bool CombatSystem::RunInterlockRound(InterlockSession &session)
 		session.tacticA = newTac;
 
 		if (session.queuedMoveA == 0 || session.queuedMoveA == 1) {
-			if (pA->getFightingStyle() == FightingStyle::KungFu) {
-				const uint16 kfMoves[] = { 133, 570, 574, 197, 198 };
-				uint16 selected = kfMoves[rand() % 5];
-				const CombatMove* m = GetMove(selected);
-				if (m) moveA = m;
-			} else if (pA->getFightingStyle() == FightingStyle::Karate) {
-				const uint16 karateMoves[] = { 132, 569, 573, 531, 197 };
-				uint16 selected = karateMoves[rand() % 5];
-				const CombatMove* m = GetMove(selected);
-				if (m) moveA = m;
-			} else if (pA->getFightingStyle() == FightingStyle::Aikido) {
-				const uint16 aikidoMoves[] = { 101, 296, 571, 572, 198 };
-				uint16 selected = aikidoMoves[rand() % 5];
-				const CombatMove* m = GetMove(selected);
-				if (m) moveA = m;
-			} else {
-				moveA = GetDefaultStyleMove(pA);
-			}
+			selectBotRoundMove(pA, pB, moveA);
 		}
 	}
 	if (IsServerDrivenBot(pB)) {
@@ -1775,24 +1865,7 @@ bool CombatSystem::RunInterlockRound(InterlockSession &session)
 		session.tacticB = newTac;
 
 		if (session.queuedMoveB == 0 || session.queuedMoveB == 1) {
-			if (pB->getFightingStyle() == FightingStyle::KungFu) {
-				const uint16 kfMoves[] = { 133, 570, 574, 197, 198 };
-				uint16 selected = kfMoves[rand() % 5];
-				const CombatMove* m = GetMove(selected);
-				if (m) moveB = m;
-			} else if (pB->getFightingStyle() == FightingStyle::Karate) {
-				const uint16 karateMoves[] = { 132, 569, 573, 531, 197 };
-				uint16 selected = karateMoves[rand() % 5];
-				const CombatMove* m = GetMove(selected);
-				if (m) moveB = m;
-			} else if (pB->getFightingStyle() == FightingStyle::Aikido) {
-				const uint16 aikidoMoves[] = { 101, 296, 571, 572, 198 };
-				uint16 selected = aikidoMoves[rand() % 5];
-				const CombatMove* m = GetMove(selected);
-				if (m) moveB = m;
-			} else {
-				moveB = GetDefaultStyleMove(pB);
-			}
+			selectBotRoundMove(pB, pA, moveB);
 		}
 	}
 
@@ -1963,7 +2036,31 @@ bool CombatSystem::RunFreeFireShot(FreeFireState &state)
 	if (pA->getCurrentHealth() == 0 || pB->getCurrentHealth() == 0)
 		return false;
 
-	const CombatMove* moveA = state.moveId ? GetMove(state.moveId) : DefaultRanged();
+	const CombatMove* moveA = state.moveId ? GetMove(state.moveId) : nullptr;
+	CombatMove synthesizedGunMove;
+	auto weapons = pA->getEquippedWeapons();
+	if (!moveA && !weapons.empty())
+	{
+		const ItemTemplate* wpnTpl = sDataLoader.GetItemTemplate(weapons[0]->getTemplateId());
+		if (wpnTpl && wpnTpl->type == ITEM_TYPE_WEAPON)
+		{
+			synthesizedGunMove.id = 129; // HandgunsAbility
+			synthesizedGunMove.name = wpnTpl->name;
+			synthesizedGunMove.dmgType = DAMAGE_RANGED;
+			synthesizedGunMove.minDmg = (float)wpnTpl->minDamage;
+			synthesizedGunMove.maxDmg = (float)wpnTpl->maxDamage;
+			synthesizedGunMove.minDmgPerLvl = 1.0f;
+			synthesizedGunMove.maxDmgPerLvl = 1.5f;
+			synthesizedGunMove.range = (wpnTpl->range > 0.0f) ? wpnTpl->range : 2500.0f;
+			synthesizedGunMove.hitFxId = 0x280006ea;
+			synthesizedGunMove.interlockOnly = false;
+			synthesizedGunMove.freefireOnly = true;
+			synthesizedGunMove.isCost = 0;
+			moveA = &synthesizedGunMove;
+		}
+	}
+	if (!moveA)
+		moveA = DefaultRanged();
 	if (!moveA)
 		return false;
 
@@ -1971,7 +2068,6 @@ bool CombatSystem::RunFreeFireShot(FreeFireState &state)
 	float shotRange = moveA->range;
 	uint16 firingAnim = 0x0EDF; // default pistol attack anim
 	bool isDualWield = false;
-	auto weapons = pA->getEquippedWeapons();
 	if (!weapons.empty())
 	{
 		const ItemTemplate* wpnTpl = sDataLoader.GetItemTemplate(weapons[0]->getTemplateId());

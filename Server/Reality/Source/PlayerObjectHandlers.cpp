@@ -609,6 +609,24 @@ void PlayerObject::ParsePlayerCommand( string theCmd )
 			m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FF0000}No valid target selected.{/c}"));
 			return;
 		}
+		bool isFirearm = false;
+		auto weapons = getEquippedWeapons();
+		if (!weapons.empty())
+		{
+			const ItemTemplate* wpnTpl = sDataLoader.GetItemTemplate(weapons[0]->getTemplateId());
+			if (wpnTpl && wpnTpl->type == ITEM_TYPE_WEAPON && (wpnTpl->range > 500.0f || wpnTpl->maxAmmo > 0))
+				isFirearm = true;
+		}
+
+		if (isFirearm && !iequals(command, "interlock"))
+		{
+			if (!sCombatSys.RequestRangedCombat(m_goId, m_targetGoId, 0))
+			{
+				m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FF0000}Ranged combat request failed.{/c}"));
+			}
+			return;
+		}
+
 		if (m_tactic == TACTIC_NORMAL)
 		{
 			m_tactic = TACTIC_POWER;
@@ -621,6 +639,37 @@ void PlayerObject::ParsePlayerCommand( string theCmd )
 		if (!sCombatSys.RequestInterlock(m_goId, m_targetGoId, clientTargetRef))
 		{
 			m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FF0000}Interlock request failed (out of range or already in combat).{/c}"));
+		}
+		return;
+	}
+	else if (iequals(command, "shoot") || iequals(command, "fire"))
+	{
+		if (m_targetGoId == 0)
+		{
+			float bestDistSq = 3500.0f * 3500.0f;
+			for (uint32 gid : sObjMgr.getAllGOIds())
+			{
+				PlayerObject* po = sObjMgr.getGOPtrSafe(gid);
+				if (po && po != this && !po->isDead())
+				{
+					float d = (float)m_pos.DistanceSq(po->getPosition());
+					if (d <= bestDistSq)
+					{
+						bestDistSq = d;
+						m_targetGoId = gid;
+					}
+				}
+			}
+		}
+		if (m_targetGoId == 0)
+		{
+			m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FF0000}No valid target to shoot.{/c}"));
+			return;
+		}
+
+		if (!sCombatSys.RequestRangedCombat(m_goId, m_targetGoId, 0))
+		{
+			m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FF0000}Ranged combat request failed.{/c}"));
 		}
 		return;
 	}
@@ -813,13 +862,127 @@ void PlayerObject::ParsePlayerCommand( string theCmd )
 			const AbilityTemplate* t = sDataLoader.GetAbilityTemplate(abId);
 			m_abilitySystem->loadAbility(abId, 1, slot);
 			m_parent.QueueCommand(make_shared<AbilityLoadRspMsg>(abId, 1, slot));
+			std::string abName = t ? t->name : "Ability";
+			if (abId == 133) abName = "Kung Fu";
 			m_parent.QueueCommand(make_shared<SystemChatMsg>(
-				(format("{c:00FF00}[ABILITY] Loaded %1% (ID %2%) into slot %3%.{/c}")
-					% (t ? t->name : "Ability") % abId % slot).str()));
+				(format("{c:00FF00}[ABILITY] %1% loaded into memory (ID %2%, slot %3%).{/c}")
+					% abName % abId % slot).str()));
 		}
 		else
 		{
 			m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FF0000}Usage: &loadability <abilityId> [slot]{/c}"));
+		}
+		return;
+	}
+	else if (iequals(command, "cast") || iequals(command, "useability"))
+	{
+		uint16 abId = 0;
+		cmdStream >> abId;
+		if (abId == 0 && m_abilitySystem)
+		{
+			for (const auto& pair : m_abilitySystem->getLoadedAbilities())
+			{
+				abId = pair.first;
+				break;
+			}
+		}
+		if (abId == 0)
+		{
+			m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FF0000}Usage: &cast <abilityId>{/c}"));
+			return;
+		}
+
+		uint32 targetGoId = m_targetGoId;
+		if (targetGoId == 0 && m_ilPartner != 0) targetGoId = m_ilPartner;
+		if (targetGoId == 0)
+		{
+			auto nearby = sSpatialGrid.GetClientsInRadius(m_pos.x, m_pos.z, 2500.0f);
+			for (GameClient* gc : nearby)
+			{
+				if (gc && gc->GetPlayerGoId() != 0 && gc->GetPlayerGoId() != m_goId)
+				{
+					targetGoId = gc->GetPlayerGoId();
+					break;
+				}
+			}
+		}
+
+		ByteBuffer dummy;
+		dummy << uint16(abId);
+		uint16 targetViewId = (targetGoId != 0) ? sObjMgr.getViewForGO(&m_parent, targetGoId) : uint16(0);
+		dummy << targetViewId;
+		dummy.rpos(0);
+		RPC_HandleAbilityUse(dummy);
+		return;
+	}
+	else if (iequals(command, "equip") || iequals(command, "wield"))
+	{
+		string arg;
+		cmdStream >> arg;
+		if (arg.empty())
+		{
+			if (m_equippedWeaponId != 0)
+			{
+				const Item* it = m_inventorySystem ? m_inventorySystem->getItemByGoId(m_equippedWeaponId).get() : nullptr;
+				const ItemTemplate* tpl = it ? sDataLoader.GetItemTemplate(it->getTemplateId()) : nullptr;
+				std::string wName = tpl ? tpl->name : "Weapon";
+				m_parent.QueueCommand(make_shared<SystemChatMsg>(
+					(format("{c:00FF00}Currently equipped: [%1%] (GOID %2%, Ammo: %3%){/c}")
+						% wName % m_equippedWeaponId % (it ? it->getAmmoCount() : 0)).str()));
+			}
+			else
+			{
+				m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FFFF00}No weapon currently equipped. Use &equip <slot|pistol|name>{/c}"));
+			}
+			return;
+		}
+
+		shared_ptr<Item> targetItem = nullptr;
+		char* endp = nullptr;
+		long slotNum = std::strtol(arg.c_str(), &endp, 10);
+		if (endp != arg.c_str() && *endp == '\0' && slotNum >= 1 && slotNum <= 255)
+		{
+			targetItem = m_inventorySystem ? m_inventorySystem->getItemBySlot((uint8)slotNum) : nullptr;
+		}
+
+		if (!targetItem && m_inventorySystem)
+		{
+			for (auto item : m_inventorySystem->getAllItems())
+			{
+				if (!item) continue;
+				const ItemTemplate* tpl = sDataLoader.GetItemTemplate(item->getTemplateId());
+				if (!tpl) continue;
+				if (iequals(arg, "pistol") || iequals(arg, "gun") || iequals(arg, "beretta"))
+				{
+					if (tpl->type == ITEM_TYPE_WEAPON && (tpl->range > 500.0f || tpl->maxAmmo > 0))
+					{
+						targetItem = item;
+						break;
+					}
+				}
+				else if (tpl->name.find(arg) != std::string::npos || std::to_string(tpl->templateId) == arg)
+				{
+					targetItem = item;
+					break;
+				}
+			}
+		}
+
+		if (targetItem)
+		{
+			setEquippedWeaponId(targetItem->getGoId());
+			saveDataToDB();
+			if (m_inventorySystem) m_inventorySystem->saveToDB();
+			const ItemTemplate* tpl = sDataLoader.GetItemTemplate(targetItem->getTemplateId());
+			std::string wName = tpl ? tpl->name : "Weapon";
+			m_parent.QueueCommand(make_shared<SystemChatMsg>(
+				(format("{c:00FF00}[EQUIP] Equipped [%1%] in primary weapon slot (Ammo: %2%).{/c}")
+					% wName % targetItem->getAmmoCount()).str()));
+		}
+		else
+		{
+			m_parent.QueueCommand(make_shared<SystemChatMsg>(
+				(format("{c:FF0000}[EQUIP] Item '%1%' not found in inventory.{/c}") % arg).str()));
 		}
 		return;
 	}

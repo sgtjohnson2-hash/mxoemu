@@ -226,11 +226,14 @@ bool StaticObjectManager::RayAABBIntersect(const StaticAABB& box, float ox, floa
     if (tmax < 0.0f || tmin > tmax)
         return false;
 
-    // The muzzle is inside this volume. It is not cover between the shooter and the target.
-    if (tmin < 0.0f)
+    // t is a parameter in [0.0, 1.0] from (ox, oy, oz) to (tx, ty, tz).
+    // An obstacle is only valid cover if it lies strictly between shooter and target,
+    // not enclosing the shooter (muzzle) and not enclosing the target.
+    float marginT = (rayLength > 100.0f) ? (100.0f / rayLength) : 0.05f;
+    if (tmin <= marginT || tmax >= (1.0f - marginT))
         return false;
 
-    return tmin <= rayLength;
+    return (tmin < 1.0f && tmax > 0.0f);
 }
 
 bool StaticObjectManager::CheckLineOfSight(float x1, float y1, float z1, float x2, float y2, float z2) const
