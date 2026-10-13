@@ -180,7 +180,10 @@ void PlayerObject::loadFromDB( bool updatePos )
 		{
 			uint8 style = field[20].GetUInt8();
 			if (style <= (uint8)FightingStyle::Karate)
+			{
 				m_fightingStyle = (FightingStyle)style;
+				INFO_LOG(format("Character %1% loaded saved fighting style %2%") % m_handle % uint32(m_fightingStyle));
+			}
 		}
 		m_equippedWeaponId = field[21].GetUInt32();
 

@@ -741,6 +741,39 @@ bool CombatSystem::RequestInterlock(uint32 attackerGoId, uint32 targetGoId, uint
 			{ pB, pA, &session.ilViewIdB },
 		};
 
+		static std::atomic<uint32> s_openingExchangeSeed(0);
+		uint32 openVariant = (++s_openingExchangeSeed * 17) + (rand() % 13);
+		uint32 openMove = 0;
+		InterlockAnimPair openPair;
+		if (sConfig.GetBoolDefault("Interlock.UseDynamicILDB", true))
+		{
+			const ILDBMoveRecord* openRec = CombatAnimationMatrix::FindMoveVariant(
+				pA->getFightingStyle(), session.tacticA,
+				pB->getFightingStyle(), session.tacticB,
+				InterlockExchangeOutcome::NormalHit, false, openVariant);
+			if (openRec && openRec->moveId != 0)
+			{
+				openMove = openRec->moveId;
+				openPair.attackerAnimId = openRec->aggrAnim;
+				openPair.defenderAnimId = openRec->defeAnim;
+				openPair.contactDelaySeconds = (openRec->aggrDur > 0) ? ((float)openRec->aggrDur / 1000.0f) : 0.50f;
+			}
+		}
+		if (openMove == 0)
+		{
+			openMove = SelectInterlockMove(session, pA, pB, InterlockExchangeOutcome::NormalHit);
+			openPair = CombatAnimationMatrix::GetDynamicAnimationPair(
+				pA->getFightingStyle(), session.tacticA,
+				pB->getFightingStyle(), session.tacticB,
+				InterlockExchangeOutcome::NormalHit, false
+			);
+		}
+		INFO_LOG(format("Interlock exchange 1: %1% (style %2%) -> %3% (style %4%) move 0x%5$04X (contact %6%ms, outcome 1, HP %7% / %8%)")
+			% pA->getHandle() % (uint32)pA->getFightingStyle()
+			% pB->getHandle() % (uint32)pB->getFightingStyle() % openMove
+			% int32(openPair.contactDelaySeconds * 1000.0f)
+			% pA->getCurrentHealth() % pB->getCurrentHealth());
+
 		for (int i = 0; i < 2; i++)
 		{
 			try
@@ -782,36 +815,9 @@ bool CombatSystem::RequestInterlock(uint32 attackerGoId, uint32 targetGoId, uint
 					if (sConfig.GetBoolDefault("Interlock.HudRpcs", true))
 						sides[i].self->getClient().QueueCommand(std::make_shared<CombatTargetMsg>(otherViewWithSpawnId));
 					std::vector<uint32> slots = BuildILSlots(otherViewWithSpawnId);
-					// The opening used to be one hardcoded clip. Use the same ILDB move the
-					// later rounds use, and fall back if the database is not loaded.
-					uint32 openMove = 0;
-					InterlockAnimPair openPair;
-					if (sConfig.GetBoolDefault("Interlock.UseDynamicILDB", true))
-					{
-						const ILDBMoveRecord* openRec = CombatAnimationMatrix::FindMoveVariant(
-							pA->getFightingStyle(), session.tacticA,
-							pB->getFightingStyle(), session.tacticB,
-							InterlockExchangeOutcome::NormalHit, false, 1);
-						if (openRec && openRec->moveId != 0)
-						{
-							openMove = openRec->moveId;
-							openPair.attackerAnimId = openRec->aggrAnim;
-							openPair.defenderAnimId = openRec->defeAnim;
-							openPair.contactDelaySeconds = (openRec->aggrDur > 0) ? ((float)openRec->aggrDur / 1000.0f) : 0.50f;
-						}
-					}
-					if (openMove == 0)
-					{
-						openMove = SelectInterlockMove(session, pA, pB, InterlockExchangeOutcome::NormalHit);
-						openPair = CombatAnimationMatrix::GetDynamicAnimationPair(
-							pA->getFightingStyle(), session.tacticA,
-							pB->getFightingStyle(), session.tacticB,
-							InterlockExchangeOutcome::NormalHit, false
-						);
-					}
 					std::vector<ILExchange> opening;
 					opening.push_back(BuildExchange(session, sides[i].self, pA, pB, 1,
-						0, 0, openMove, &openPair));
+						IL_MOVE_PRE, IL_MOVE_PRE, openMove, &openPair));
 					sides[i].self->getClient().QueueState(std::make_shared<ILCombatStateMsg>(
 						ilViewId, ilPos, 1, slots, opening));
 				}
@@ -1474,7 +1480,7 @@ ILExchange CombatSystem::BuildExchange(const InterlockSession &session, PlayerOb
 		static const uint32 capMoves[] = { 0x2026, 0x236D, 0x2367 };
 		moveResolved = capMoves[number % 3];
 	}
-	uint32 attMove = attackerPreMove ? attackerPreMove : IL_MOVE_OPEN_ATTACKER_PRE;
+	uint32 attMove = attackerPreMove ? attackerPreMove : IL_MOVE_PRE;
 	uint32 defMove = defenderPreMove ? defenderPreMove : IL_MOVE_PRE;
 	e.moves[0][0] = attMove; e.moves[0][1] = IL_MOVE_DATABASE;
 	e.moves[1][0] = defMove; e.moves[1][1] = IL_MOVE_DATABASE;
@@ -1648,7 +1654,7 @@ void CombatSystem::SendInterlockExchange(InterlockSession &session, PlayerObject
 
 		std::vector<ILExchange> ex;
 		ex.push_back(BuildExchange(session, sides[i].p, attacker, defender, session.exchangeNum,
-			0, 0, mainMove, &pair));
+			IL_MOVE_PRE, IL_MOVE_PRE, mainMove, &pair));
 		sides[i].p->getClient().QueueState(std::make_shared<ILCombatStateMsg>(
 			sides[i].view, session.ilPos, session.exchangeNum, slots, ex));
 	}

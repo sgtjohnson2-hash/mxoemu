@@ -650,21 +650,25 @@ void PlayerObject::ParsePlayerCommand( string theCmd )
 		if (iequals(styleStr, "kungfu") || iequals(styleStr, "wushu"))
 		{
 			setFightingStyle(FightingStyle::KungFu);
+			saveDataToDB();
 			m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:00FF00}[MARTIAL ARTS] Fighting style set to Kung Fu (Wushu).{/c}"));
 		}
 		else if (iequals(styleStr, "karate"))
 		{
 			setFightingStyle(FightingStyle::Karate);
+			saveDataToDB();
 			m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:00FF00}[MARTIAL ARTS] Fighting style set to Karate.{/c}"));
 		}
 		else if (iequals(styleStr, "aikido"))
 		{
 			setFightingStyle(FightingStyle::Aikido);
+			saveDataToDB();
 			m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:00FF00}[MARTIAL ARTS] Fighting style set to Aikido.{/c}"));
 		}
 		else if (iequals(styleStr, "street") || iequals(styleStr, "selfdefense") || iequals(styleStr, "brawl"))
 		{
 			setFightingStyle(FightingStyle::None);
+			saveDataToDB();
 			m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:00FF00}[MARTIAL ARTS] Fighting style set to Self-Defense / Close Combat.{/c}"));
 		}
 		else
