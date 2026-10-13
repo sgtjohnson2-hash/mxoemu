@@ -1370,7 +1370,8 @@ void PlayerObject::ParsePlayerCommand( string theCmd )
 			botPo->setMaximumHealth((uint16)hpF);
 			botPo->setCurrentHealth((uint16)hpF);
 			botPo->setDamageScale(dmgScale);
-			botPo->m_despawnOnDeath = true;
+			// Stands back up after the takedown (normal 8 s respawn); "&dojo leave" dismisses it.
+			botPo->m_dojoOwnerGoId = m_goId;
 
 			if (botName.find("Agent") != std::string::npos) {
 				botPo->setAgentAppearance();
@@ -1521,9 +1522,29 @@ void PlayerObject::ParsePlayerCommand( string theCmd )
 			}
 			m_parent.QueueCommand(make_shared<SystemChatMsg>((format("{c:00FF00}Dojo: Cleared and despawned %1% bots.{/c}") % killed).str()));
 		}
+		else if (iequals(subCommand, "leave") || iequals(subCommand, "dismiss"))
+		{
+			// Dismiss only the sparring partners this player summoned (dead or alive).
+			std::vector<uint32> mine;
+			for (uint32 id : sObjMgr.getAllGOIds()) {
+				PlayerObject* p = sObjMgr.getGOPtrSafe(id);
+				if (p && p != this && p->getClient().isBot() && p->m_dojoOwnerGoId == m_goId)
+					mine.push_back(id);
+			}
+			for (uint32 id : mine) {
+				sCombatSys.RemoveCombatant(id);
+				sBotMgr.DespawnBot(id);
+			}
+			if (std::find(mine.begin(), mine.end(), m_lastDojoBotGoId) != mine.end())
+				m_lastDojoBotGoId = 0;
+			INFO_LOG(format("Dojo leave: %1% dismissed %2% sparring partner(s)") % m_handle % mine.size());
+			m_parent.QueueCommand(make_shared<SystemChatMsg>(mine.empty()
+				? std::string("{c:FFFF00}Dojo: you have no sparring partners to dismiss.{/c}")
+				: (format("{c:00FF00}Dojo: %1% sparring partner(s) left.{/c}") % mine.size()).str()));
+		}
 		else
 		{
-			m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FF0000}Usage: &dojo <1v1 | group | clear>{/c}"));
+			m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FF0000}Usage: &dojo <1v1 [style] [hp] | group | leave | clear>{/c}"));
 		}
 		return;
 	}

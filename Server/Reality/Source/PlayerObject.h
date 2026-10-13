@@ -384,6 +384,9 @@ public:
     // Summoned sparring partners (dojo) leave after they are beaten instead of standing back
     // up in place 8 s later at half health.
     bool m_despawnOnDeath = false;
+    // goId of the player who summoned this bot with &dojo (0 = not a dojo partner). Dojo partners
+    // stand back up after a takedown like any bot; "&dojo leave" removes the caller's partners.
+    uint32 m_dojoOwnerGoId = 0;
     
     std::string m_crewName;
     std::string m_factionName;
