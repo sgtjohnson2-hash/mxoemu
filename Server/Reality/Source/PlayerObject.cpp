@@ -275,6 +275,9 @@ void PlayerObject::initGoId(uint32 theGoId)
 		m_parent.QueueCommand(make_shared<SystemChatMsg>(
 			(format("{c:00FF00}[Operator] Welcome to the real world, %1%. Your signal is locked in. Training begins now. Check your mission log for instructions.{/c}") % m_handle).str()
 		));
+		m_parent.QueueCommand(make_shared<SystemChatMsg>(
+			"{c:00FFCC}[System] Spot a bug or glitch? Type &bug <description> (or /bug <description>) in chat to save a ticket to the server database.{/c}"
+		));
 
 		// m_abilitySystem used to be declared but never created, so the loadout was never sent
 		if (!m_abilitySystem) {

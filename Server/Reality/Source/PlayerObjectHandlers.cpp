@@ -57,6 +57,337 @@
 #include <boost/algorithm/string.hpp>
 using boost::iequals;
 
+namespace
+{
+	std::mutex s_bugReportMutex;
+	std::vector<BugReportRecord> s_bugReports;
+	uint32 s_nextBugId = 1;
+
+	std::string ClassifyBugCategory(const std::string& rawText, const std::string& explicitCategory)
+	{
+		if (!explicitCategory.empty())
+		{
+			std::string up = explicitCategory;
+			boost::to_upper(up);
+			return up;
+		}
+		std::string low = rawText;
+		boost::to_lower(low);
+		if (low.find("interlock") != std::string::npos || low.find("combat") != std::string::npos ||
+			low.find("attack") != std::string::npos || low.find("tactic") != std::string::npos ||
+			low.find("damage") != std::string::npos || low.find("fight") != std::string::npos ||
+			low.find("stance") != std::string::npos || low.find("shoot") != std::string::npos)
+		{
+			return "COMBAT";
+		}
+		if (low.find("mission") != std::string::npos || low.find("contact") != std::string::npos ||
+			low.find("quest") != std::string::npos || low.find("objective") != std::string::npos ||
+			low.find("contract") != std::string::npos || low.find("operator") != std::string::npos)
+		{
+			return "MISSION";
+		}
+		if (low.find("ui") != std::string::npos || low.find("hud") != std::string::npos ||
+			low.find("window") != std::string::npos || low.find("button") != std::string::npos ||
+			low.find("chat") != std::string::npos || low.find("camera") != std::string::npos ||
+			low.find("compass") != std::string::npos || low.find("hotbar") != std::string::npos)
+		{
+			return "UI";
+		}
+		if (low.find("vendor") != std::string::npos || low.find("item") != std::string::npos ||
+			low.find("inventory") != std::string::npos || low.find("locker") != std::string::npos ||
+			low.find("vault") != std::string::npos || low.find("craft") != std::string::npos ||
+			low.find("buy") != std::string::npos || low.find("sell") != std::string::npos)
+		{
+			return "ECONOMY";
+		}
+		if (low.find("ability") != std::string::npos || low.find("cast") != std::string::npos ||
+			low.find("loadout") != std::string::npos || low.find("hacker") != std::string::npos ||
+			low.find("coder") != std::string::npos || low.find("style") != std::string::npos ||
+			low.find("discipline") != std::string::npos)
+		{
+			return "ABILITY";
+		}
+		if (low.find("stuck") != std::string::npos || low.find("floor") != std::string::npos ||
+			low.find("door") != std::string::npos || low.find("hardline") != std::string::npos ||
+			low.find("spawn") != std::string::npos || low.find("pavement") != std::string::npos ||
+			low.find("collision") != std::string::npos || low.find("wall") != std::string::npos ||
+			low.find("floating") != std::string::npos)
+		{
+			return "WORLD";
+		}
+		return "GENERAL";
+	}
+}
+
+uint32 PlayerObject::SubmitBugReport(const std::string& rawText, const std::string& explicitCategory)
+{
+	std::string description = rawText;
+	boost::trim(description);
+	if (description.empty())
+		return 0;
+	if (description.size() > 2000)
+		description.resize(2000);
+
+	std::string category = ClassifyBugCategory(description, explicitCategory);
+
+	BugReportRecord rec;
+	rec.charId = getCharacterUID();
+	rec.handle = m_handle.empty() ? "Unknown" : m_handle;
+	rec.category = category;
+	rec.description = description;
+	rec.district = (m_district == 0) ? 1 : m_district;
+	rec.x = m_pos.x;
+	rec.y = m_pos.y;
+	rec.z = m_pos.z;
+	rec.rot = m_pos.rot;
+	rec.targetGoId = m_targetGoId;
+	rec.fightingStyle = static_cast<uint8>(m_fightingStyle);
+	rec.level = (m_lvl == 0) ? 1 : m_lvl;
+	rec.hp = m_healthC;
+	rec.maxHp = m_healthM;
+	rec.status = "OPEN";
+	rec.createdAt = "just now";
+
+	if (Database_Main != nullptr && !sDatabase.m_isMockMode)
+	{
+		try
+		{
+			std::string escHandle = sDatabase.EscapeString(rec.handle);
+			std::string escCat = sDatabase.EscapeString(rec.category);
+			std::string escDesc = sDatabase.EscapeString(rec.description);
+			format insertSql = format(
+				"INSERT INTO `bug_reports` (`char_id`, `handle`, `category`, `description`, `district`, `x`, `y`, `z`, `rot`, `target_go_id`, `fighting_style`, `level`, `hp`, `max_hp`, `status`) "
+				"VALUES ('%1%', '%2%', '%3%', '%4%', '%5%', '%6%', '%7%', '%8%', '%9%', '%10%', '%11%', '%12%', '%13%', '%14%', 'OPEN')")
+				% rec.charId % escHandle % escCat % escDesc
+				% uint32(rec.district) % rec.x % rec.y % rec.z % rec.rot
+				% rec.targetGoId % uint32(rec.fightingStyle) % uint32(rec.level)
+				% uint32(rec.hp) % uint32(rec.maxHp);
+			sDatabase.WaitExecute(insertSql);
+
+			scoped_ptr<QueryResult> idRes(sDatabase.Query(
+				format("SELECT `id`, `created_at` FROM `bug_reports` WHERE `char_id` = '%1%' ORDER BY `id` DESC LIMIT 1") % rec.charId));
+			if (idRes != NULL)
+			{
+				Field* f = idRes->Fetch();
+				rec.id = f[0].GetUInt32();
+				if (f[1].GetString())
+					rec.createdAt = f[1].GetString();
+			}
+		}
+		catch (...)
+		{
+			WARNING_LOG("BugReport: Database insert exception; falling back to in-memory record.");
+		}
+	}
+
+	{
+		std::lock_guard<std::mutex> lock(s_bugReportMutex);
+		if (rec.id == 0)
+		{
+			rec.id = s_nextBugId++;
+		}
+		else if (rec.id >= s_nextBugId)
+		{
+			s_nextBugId = rec.id + 1;
+		}
+		s_bugReports.push_back(rec);
+	}
+
+	INFO_LOG(format("BugReport: Ticket #%1% [%2%] saved for %3% (charId=%4%, dist=%5%, pos=%6$.1f,%7$.1f,%8$.1f, target=%9%): %10%")
+		% rec.id % rec.category % rec.handle % rec.charId % uint32(rec.district)
+		% rec.x % rec.y % rec.z % rec.targetGoId % rec.description);
+
+	std::string dName = (rec.district == 1) ? "Richland" : ((rec.district == 2) ? "Downtown" : ((rec.district == 3) ? "International" : "The Slums"));
+	m_parent.QueueCommand(make_shared<SystemChatMsg>(
+		(format("{c:00FF00}[BUG REPORT #%1% SAVED]{/c} {c:00FFFF}[%2%]{/c} Logged to server database (%3% X=%4$.0f Y=%5$.0f Z=%6$.0f): \"%7%\"")
+			% rec.id % rec.category % dName % rec.x % rec.y % rec.z % rec.description).str()
+	));
+
+	std::string adminAlert = (format("{c:FFFF00}[BUG ALERT #%1%]{/c} {c:00FFFF}[%2%]{/c} %3% (%4%): %5%")
+		% rec.id % rec.category % rec.handle % dName % rec.description).str();
+	auto allIds = sObjMgr.getAllGOIds();
+	for (auto gid : allIds)
+	{
+		PlayerObject* p = sObjMgr.getGOPtrSafe(gid);
+		if (p && p != this && p->isAdmin() && !p->getClient().isBot())
+		{
+			p->getClient().QueueCommand(make_shared<SystemChatMsg>(adminAlert));
+		}
+	}
+
+	return rec.id;
+}
+
+std::vector<BugReportRecord> PlayerObject::GetBugReports(uint32 limit, const std::string& statusFilter)
+{
+	if (limit == 0) limit = 20;
+	if (limit > 100) limit = 100;
+
+	std::string filterUpper = statusFilter;
+	boost::trim(filterUpper);
+	boost::to_upper(filterUpper);
+
+	if (Database_Main != nullptr && !sDatabase.m_isMockMode)
+	{
+		try
+		{
+			std::string sql = "SELECT `id`, `char_id`, `handle`, `category`, `description`, `district`, `x`, `y`, `z`, `rot`, "
+				"`target_go_id`, `fighting_style`, `level`, `hp`, `max_hp`, `status`, COALESCE(`admin_notes`, ''), `created_at` "
+				"FROM `bug_reports`";
+			if (!filterUpper.empty())
+			{
+				sql += " WHERE `status` = '" + sDatabase.EscapeString(filterUpper) + "'";
+			}
+			sql += " ORDER BY `id` DESC LIMIT " + std::to_string(limit);
+
+			scoped_ptr<QueryResult> res(sDatabase.Query(sql));
+			std::vector<BugReportRecord> out;
+			if (res != NULL)
+			{
+				do
+				{
+					Field* f = res->Fetch();
+					BugReportRecord r;
+					r.id = f[0].GetUInt32();
+					r.charId = f[1].GetUInt64();
+					r.handle = f[2].GetString() ? f[2].GetString() : "";
+					r.category = f[3].GetString() ? f[3].GetString() : "GENERAL";
+					r.description = f[4].GetString() ? f[4].GetString() : "";
+					r.district = f[5].GetUInt8();
+					r.x = f[6].GetDouble();
+					r.y = f[7].GetDouble();
+					r.z = f[8].GetDouble();
+					r.rot = f[9].GetDouble();
+					r.targetGoId = f[10].GetUInt32();
+					r.fightingStyle = f[11].GetUInt8();
+					r.level = f[12].GetUInt8();
+					r.hp = f[13].GetUInt16();
+					r.maxHp = f[14].GetUInt16();
+					r.status = f[15].GetString() ? f[15].GetString() : "OPEN";
+					r.adminNotes = f[16].GetString() ? f[16].GetString() : "";
+					r.createdAt = f[17].GetString() ? f[17].GetString() : "";
+					out.push_back(r);
+				} while (res->NextRow());
+			}
+			return out;
+		}
+		catch (...)
+		{
+			WARNING_LOG("BugReport: Database query exception in GetBugReports; using in-memory store.");
+		}
+	}
+
+	std::vector<BugReportRecord> out;
+	std::lock_guard<std::mutex> lock(s_bugReportMutex);
+	for (auto it = s_bugReports.rbegin(); it != s_bugReports.rend() && out.size() < limit; ++it)
+	{
+		if (!filterUpper.empty() && !iequals(it->status, filterUpper))
+			continue;
+		out.push_back(*it);
+	}
+	return out;
+}
+
+bool PlayerObject::GetBugReportById(uint32 ticketId, BugReportRecord& outRecord)
+{
+	if (ticketId == 0)
+		return false;
+
+	if (Database_Main != nullptr && !sDatabase.m_isMockMode)
+	{
+		try
+		{
+			format sql = format(
+				"SELECT `id`, `char_id`, `handle`, `category`, `description`, `district`, `x`, `y`, `z`, `rot`, "
+				"`target_go_id`, `fighting_style`, `level`, `hp`, `max_hp`, `status`, COALESCE(`admin_notes`, ''), `created_at` "
+				"FROM `bug_reports` WHERE `id` = '%1%' LIMIT 1") % ticketId;
+			scoped_ptr<QueryResult> res(sDatabase.Query(sql));
+			if (res != NULL)
+			{
+				Field* f = res->Fetch();
+				outRecord.id = f[0].GetUInt32();
+				outRecord.charId = f[1].GetUInt64();
+				outRecord.handle = f[2].GetString() ? f[2].GetString() : "";
+				outRecord.category = f[3].GetString() ? f[3].GetString() : "GENERAL";
+				outRecord.description = f[4].GetString() ? f[4].GetString() : "";
+				outRecord.district = f[5].GetUInt8();
+				outRecord.x = f[6].GetDouble();
+				outRecord.y = f[7].GetDouble();
+				outRecord.z = f[8].GetDouble();
+				outRecord.rot = f[9].GetDouble();
+				outRecord.targetGoId = f[10].GetUInt32();
+				outRecord.fightingStyle = f[11].GetUInt8();
+				outRecord.level = f[12].GetUInt8();
+				outRecord.hp = f[13].GetUInt16();
+				outRecord.maxHp = f[14].GetUInt16();
+				outRecord.status = f[15].GetString() ? f[15].GetString() : "OPEN";
+				outRecord.adminNotes = f[16].GetString() ? f[16].GetString() : "";
+				outRecord.createdAt = f[17].GetString() ? f[17].GetString() : "";
+				return true;
+			}
+		}
+		catch (...) {}
+	}
+
+	std::lock_guard<std::mutex> lock(s_bugReportMutex);
+	for (const auto& r : s_bugReports)
+	{
+		if (r.id == ticketId)
+		{
+			outRecord = r;
+			return true;
+		}
+	}
+	return false;
+}
+
+bool PlayerObject::UpdateBugReportStatus(uint32 ticketId, const std::string& newStatus, const std::string& adminNotes)
+{
+	if (ticketId == 0 || newStatus.empty())
+		return false;
+
+	std::string statusUpper = newStatus;
+	boost::trim(statusUpper);
+	boost::to_upper(statusUpper);
+
+	bool updatedDb = false;
+	if (Database_Main != nullptr && !sDatabase.m_isMockMode)
+	{
+		try
+		{
+			std::string escStatus = sDatabase.EscapeString(statusUpper);
+			std::string escNotes = sDatabase.EscapeString(adminNotes);
+			format sql = format("UPDATE `bug_reports` SET `status` = '%1%', `admin_notes` = '%2%' WHERE `id` = '%3%'")
+				% escStatus % escNotes % ticketId;
+			updatedDb = sDatabase.WaitExecute(sql);
+		}
+		catch (...) {}
+	}
+
+	bool updatedMem = false;
+	{
+		std::lock_guard<std::mutex> lock(s_bugReportMutex);
+		for (auto& r : s_bugReports)
+		{
+			if (r.id == ticketId)
+			{
+				r.status = statusUpper;
+				if (!adminNotes.empty())
+					r.adminNotes = adminNotes;
+				updatedMem = true;
+				break;
+			}
+		}
+	}
+
+	if (updatedDb || updatedMem)
+	{
+		INFO_LOG(format("BugReport: Ticket #%1% status updated to %2% (notes: %3%)") % ticketId % statusUpper % adminNotes);
+		return true;
+	}
+	return false;
+}
+
 void PlayerObject::RPC_NullHandle( ByteBuffer &srcCmd )
 {
 	return;
@@ -529,6 +860,11 @@ void PlayerObject::ParseAdminCommand( string theCmd )
                 if (p) p->getClient().QueueCommand(std::make_shared<SystemChatMsg>(bountyMsg));
             }
         }
+        return;
+    }
+    else if (iequals(command, "bug") || iequals(command, "bugs") || iequals(command, "report"))
+    {
+        ParsePlayerCommand(theCmd);
         return;
     }
 	else
@@ -2654,6 +2990,201 @@ void PlayerObject::ParsePlayerCommand( string theCmd )
             return;
         }
     }
+    else if (iequals(command, "bugs"))
+    {
+        string filterArg;
+        cmdStream >> filterArg;
+        uint32 limit = 10;
+        string statusFilter = "";
+        if (!filterArg.empty())
+        {
+            if (iequals(filterArg, "open") || iequals(filterArg, "resolved") || iequals(filterArg, "closed") || iequals(filterArg, "all"))
+            {
+                statusFilter = filterArg;
+            }
+            else
+            {
+                try { limit = static_cast<uint32>(std::stoul(filterArg)); } catch (...) { limit = 10; }
+            }
+        }
+        auto reports = PlayerObject::GetBugReports(limit, statusFilter);
+        if (reports.empty())
+        {
+            m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FFFF00}[BUG TRACKER] No matching bug reports in database. Submit one with &bug <description> or /bug <description>.{/c}"));
+            return;
+        }
+        m_parent.QueueCommand(make_shared<SystemChatMsg>((format("{c:00FF00}=== SERVER BUG REPORTS (%1% shown) ==={/c}") % reports.size()).str()));
+        for (const auto& r : reports)
+        {
+            std::string dName = (r.district == 1) ? "Richland" : ((r.district == 2) ? "Downtown" : ((r.district == 3) ? "International" : "The Slums"));
+            std::string noteSuffix = r.adminNotes.empty() ? "" : (format(" {c:AAAAAA}[Note: %1%]{/c}") % r.adminNotes).str();
+            m_parent.QueueCommand(make_shared<SystemChatMsg>(
+                (format("{c:00FFFF}[#%1%]{/c} {c:FFFF55}[%2%|%3%]{/c} {c:00FF00}%4%{/c} (%5%): %6%%7%")
+                    % r.id % r.status % r.category % r.handle % dName % r.description % noteSuffix).str()
+            ));
+        }
+        return;
+    }
+    else if (iequals(command, "bug") || iequals(command, "report"))
+    {
+        string rest;
+        std::getline(cmdStream, rest);
+        boost::trim(rest);
+
+        if (rest.empty() || iequals(rest, "help"))
+        {
+            m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:00FF00}=== IN-GAME BUG REPORT SYSTEM ==={/c}"));
+            m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:00FFFF}&bug <description> | /bug <description>{/c} - Save a bug report with your live telemetry to the server database"));
+            m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:00FFFF}&bugs [open|resolved|all] | /bugs{/c} - Check recent bug reports saved on the server"));
+            m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:00FFFF}&bug view <id> | /bug view <id>{/c} - View full details & coordinates of bug report #<id>"));
+            m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:00FFFF}&bug resolve <id> [notes]{/c} - Mark bug #<id> as RESOLVED in database"));
+            return;
+        }
+
+        std::stringstream subStream(rest);
+        string subCmd;
+        subStream >> subCmd;
+
+        if (iequals(subCmd, "list"))
+        {
+            string filterArg;
+            subStream >> filterArg;
+            uint32 limit = 10;
+            string statusFilter = "";
+            if (!filterArg.empty())
+            {
+                if (iequals(filterArg, "open") || iequals(filterArg, "resolved") || iequals(filterArg, "closed") || iequals(filterArg, "all"))
+                    statusFilter = filterArg;
+                else
+                {
+                    try { limit = static_cast<uint32>(std::stoul(filterArg)); } catch (...) { limit = 10; }
+                }
+            }
+            auto reports = PlayerObject::GetBugReports(limit, statusFilter);
+            if (reports.empty())
+            {
+                m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FFFF00}[BUG TRACKER] No matching bug reports in database.{/c}"));
+                return;
+            }
+            m_parent.QueueCommand(make_shared<SystemChatMsg>((format("{c:00FF00}=== SERVER BUG REPORTS (%1% shown) ==={/c}") % reports.size()).str()));
+            for (const auto& r : reports)
+            {
+                std::string dName = (r.district == 1) ? "Richland" : ((r.district == 2) ? "Downtown" : ((r.district == 3) ? "International" : "The Slums"));
+                std::string noteSuffix = r.adminNotes.empty() ? "" : (format(" {c:AAAAAA}[Note: %1%]{/c}") % r.adminNotes).str();
+                m_parent.QueueCommand(make_shared<SystemChatMsg>(
+                    (format("{c:00FFFF}[#%1%]{/c} {c:FFFF55}[%2%|%3%]{/c} {c:00FF00}%4%{/c} (%5%): %6%%7%")
+                        % r.id % r.status % r.category % r.handle % dName % r.description % noteSuffix).str()
+                ));
+            }
+            return;
+        }
+        else if (iequals(subCmd, "view") || iequals(subCmd, "check") || iequals(subCmd, "info") || iequals(subCmd, "show"))
+        {
+            uint32 reportId = 0;
+            subStream >> reportId;
+            if (reportId == 0)
+            {
+                m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FFFF00}Usage: &bug view <id> (or /bug view <id>){/c}"));
+                return;
+            }
+            BugReportRecord rec;
+            if (!PlayerObject::GetBugReportById(reportId, rec))
+            {
+                m_parent.QueueCommand(make_shared<SystemChatMsg>((format("{c:FF5555}[BUG TRACKER] Bug report #%1% not found in database.{/c}") % reportId).str()));
+                return;
+            }
+            std::string dName = (rec.district == 1) ? "Richland" : ((rec.district == 2) ? "Downtown" : ((rec.district == 3) ? "International" : "The Slums"));
+            m_parent.QueueCommand(make_shared<SystemChatMsg>(
+                (format("{c:00FF00}=== BUG REPORT #%1% [%2%] ==={/c}") % rec.id % rec.status).str()
+            ));
+            m_parent.QueueCommand(make_shared<SystemChatMsg>(
+                (format("{c:00FFFF}Reporter:{/c} %1% (CharID %2%, Lv.%3%, Style 0x%4$X, HP %5%/%6%)")
+                    % rec.handle % rec.charId % (int)rec.level % rec.fightingStyle % rec.hp % rec.maxHp).str()
+            ));
+            m_parent.QueueCommand(make_shared<SystemChatMsg>(
+                (format("{c:00FFFF}Location:{/c} %1% [District %2%] (X=%3$.1f, Y=%4$.1f, Z=%5$.1f, Rot=%6%) | TargetGoID=%7%")
+                    % dName % rec.district % rec.x % rec.y % rec.z % (int)rec.rot % rec.targetGoId).str()
+            ));
+            m_parent.QueueCommand(make_shared<SystemChatMsg>(
+                (format("{c:00FFFF}Category:{/c} %1% | {c:00FFFF}Logged:{/c} %2%") % rec.category % rec.createdAt).str()
+            ));
+            m_parent.QueueCommand(make_shared<SystemChatMsg>(
+                (format("{c:00FFFF}Description:{/c} %1%") % rec.description).str()
+            ));
+            if (!rec.adminNotes.empty())
+            {
+                m_parent.QueueCommand(make_shared<SystemChatMsg>(
+                    (format("{c:FFFF55}Notes:{/c} %1%") % rec.adminNotes).str()
+                ));
+            }
+            return;
+        }
+        else if (iequals(subCmd, "resolve") || iequals(subCmd, "close") || iequals(subCmd, "reopen") || iequals(subCmd, "status"))
+        {
+            uint32 reportId = 0;
+            subStream >> reportId;
+            if (reportId == 0)
+            {
+                m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FFFF00}Usage: &bug resolve <id> [notes] | &bug status <id> <OPEN|RESOLVED|CLOSED> [notes]{/c}"));
+                return;
+            }
+            string newStatus = "RESOLVED";
+            if (iequals(subCmd, "close")) newStatus = "CLOSED";
+            else if (iequals(subCmd, "reopen")) newStatus = "OPEN";
+            else if (iequals(subCmd, "status"))
+            {
+                subStream >> newStatus;
+                if (newStatus.empty()) newStatus = "RESOLVED";
+            }
+            string notes;
+            std::getline(subStream, notes);
+            boost::trim(notes);
+
+            if (PlayerObject::UpdateBugReportStatus(reportId, newStatus, notes))
+            {
+                m_parent.QueueCommand(make_shared<SystemChatMsg>(
+                    (format("{c:00FF00}[BUG TRACKER] Bug report #%1% updated to status [%2%] in server database.{/c}")
+                        % reportId % boost::to_upper_copy(newStatus)).str()
+                ));
+            }
+            else
+            {
+                m_parent.QueueCommand(make_shared<SystemChatMsg>(
+                    (format("{c:FF5555}[BUG TRACKER] Failed to update bug report #%1% (check ID).{/c}") % reportId).str()
+                ));
+            }
+            return;
+        }
+
+        SubmitBugReport(rest);
+        return;
+    }
+    else if (iequals(command, "help") || iequals(command, "?"))
+    {
+        m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:00FF00}=== THE MATRIX ONLINE COMMANDS ==={/c}"));
+        m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:00FF00}&bug <description> | /bug <description>{/c} - Save a bug report to the server database"));
+        m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:00FF00}&bugs | /bugs | &bug view <id>{/c} - Check saved bug reports in the database"));
+        m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:00FFFF}/attack | &attack{/c} - Engage selected target in melee interlock"));
+        m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:00FFFF}/tactic <power|speed|grab|block>{/c} - Set combat martial arts tactic"));
+        m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:00FFFF}/withdraw | &withdraw{/c} - Disengage from interlock"));
+        m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:00FFFF}/style <kungfu|karate|aikido|street>{/c} - Switch martial arts discipline style"));
+        m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:00FFFF}/loadability <id>{/c} - Load ability onto memory track"));
+        m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:00FFFF}/target{/c} - Target nearest hostile operative"));
+        m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FFFF55}/clock{/c} - Current Matrix time & circadian cycle"));
+        m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FFFF55}/heat{/c} - Local disruption heat & security tier"));
+        m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FFFF55}/district <slums|dt|it|richland>{/c} - Fast district transit"));
+        m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FFFF55}/who{/c} - Online operatives census"));
+        m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FFFF55}/stats{/c} - Operator combat, HP & location telemetry"));
+        m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FFFF55}/hardlines{/c} - Nearest Hardline phone booth beacon"));
+        m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FFFF55}/stuck{/c} - Recover operative to nearest safe Hardline"));
+        m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FFFF55}/jackout | /exit{/c} - Cleanly disconnect from the Matrix"));
+        m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FFFF55}/vendor | /shop{/c} - Connect to nearest Hardline vendor"));
+        m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FFFF55}/craft <id> | /craft list{/c} - Coder ability blueprint compilation"));
+        m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FFFF55}/org <create|leave>{/c} - Syndicate organization management"));
+        m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FFFF55}/dojo <1v1|clear|leave>{/c} - Sparring partner construct"));
+        m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FFFF55}/contact <list|call <name>>{/c} - Uplink with canonical mission contacts"));
+        return;
+    }
 	else
 	{
 		m_parent.QueueCommand(make_shared<SystemChatMsg>((format("Unrecognized server command %1%")%command).str()));
@@ -2674,6 +3205,21 @@ void PlayerObject::RPC_HandleChat( ByteBuffer &srcCmd )
 
 	if (!theMessage.length())
 		return;
+
+	if ((theMessage[0] == '?' || theMessage[0] == '!') &&
+		(boost::istarts_with(theMessage.substr(1), "bug") || boost::istarts_with(theMessage.substr(1), "report")))
+	{
+		INFO_LOG(format("(%1%) %2%:%3% bug command: %4%") % m_parent.Address() % m_handle % m_goId % theMessage);
+		ParsePlayerCommand(theMessage.substr(1));
+		return;
+	}
+	if (boost::istarts_with(theMessage, "bug:") || boost::istarts_with(theMessage, "report:"))
+	{
+		size_t colonPos = theMessage.find(':');
+		string desc = (colonPos != string::npos) ? theMessage.substr(colonPos + 1) : "";
+		ParsePlayerCommand("bug " + desc);
+		return;
+	}
 
 	if (m_isAdmin && theMessage[0] == '!')
 	{
@@ -2697,8 +3243,8 @@ void PlayerObject::RPC_HandleChat( ByteBuffer &srcCmd )
 									  boost::istarts_with(theMessage, "/overwrite") ||
 									  boost::istarts_with(theMessage, "/agentstrike") ||
 									  boost::istarts_with(theMessage, "/agent") ||
-									  									  boost::istarts_with(theMessage, "/craft") ||
-									  									  									  boost::istarts_with(theMessage, "/org") ||
+									  boost::istarts_with(theMessage, "/craft") ||
+									  boost::istarts_with(theMessage, "/org") ||
 									  boost::istarts_with(theMessage, "/crew") ||
 									  boost::istarts_with(theMessage, "/mission") ||
 									  boost::istarts_with(theMessage, "/contract") ||
@@ -2706,11 +3252,14 @@ void PlayerObject::RPC_HandleChat( ByteBuffer &srcCmd )
 									  boost::istarts_with(theMessage, "/spar") ||
 									  boost::istarts_with(theMessage, "/hardline") ||
 									  boost::istarts_with(theMessage, "/hardlines") ||
-									  									  									  boost::istarts_with(theMessage, "/tension") ||
+									  boost::istarts_with(theMessage, "/tension") ||
 									  boost::istarts_with(theMessage, "/outbreak") ||
 									  boost::istarts_with(theMessage, "/contact") ||
 									  boost::istarts_with(theMessage, "/contacts") ||
-									  boost::istarts_with(theMessage, "/dojo"))))
+									  boost::istarts_with(theMessage, "/dojo") ||
+									  boost::istarts_with(theMessage, "/bug") ||
+									  boost::istarts_with(theMessage, "/bugs") ||
+									  boost::istarts_with(theMessage, "/report"))))
 	{
 		INFO_LOG(format("(%1%) %2%:%3% chat command: %4%") % m_parent.Address() % m_handle % m_goId % theMessage);
 		ParsePlayerCommand(theMessage.substr(1));
@@ -3074,6 +3623,8 @@ void PlayerObject::RPC_HandleChat( ByteBuffer &srcCmd )
 
     if (boost::iequals(theMessage, "/help") || boost::iequals(theMessage, "/?")) {
         m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:00FF00}=== THE MATRIX ONLINE COMMANDS ==={/c}"));
+        m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:00FF00}&bug <description> | /bug <description>{/c} - Save a bug report to the server database"));
+        m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:00FF00}&bugs | /bugs | &bug view <id>{/c} - Check saved bug reports in the database"));
         m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:00FFFF}/attack | &attack{/c} - Engage selected target in melee interlock"));
         m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:00FFFF}/tactic <power|speed|grab|block>{/c} - Set combat martial arts tactic"));
         m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:00FFFF}/withdraw | &withdraw{/c} - Disengage from interlock"));

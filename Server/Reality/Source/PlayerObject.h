@@ -48,6 +48,28 @@ struct HardlineNode
 	int factionTag = 0;
 };
 
+struct BugReportRecord
+{
+	uint32 id = 0;
+	uint64 charId = 0;
+	std::string handle;
+	std::string category = "GENERAL";
+	std::string description;
+	uint8 district = 1;
+	double x = 0.0;
+	double y = 0.0;
+	double z = 0.0;
+	double rot = 0.0;
+	uint32 targetGoId = 0;
+	uint8 fightingStyle = 0;
+	uint8 level = 1;
+	uint16 hp = 0;
+	uint16 maxHp = 0;
+	std::string status = "OPEN";
+	std::string adminNotes;
+	std::string createdAt;
+};
+
 class PlayerObject : public IGO
 {
 public:
@@ -294,6 +316,12 @@ public:
     static const HardlineNode* GetNearestHardline(uint32 districtId, double x, double z);
     static const std::map<std::pair<uint32, uint32>, HardlineNode>& GetHardlineDirectory() { return s_hardlineDirectory; }
     static size_t GetTotalHardlines() { return s_hardlineDirectory.size(); }
+
+    // In-Game Bug Reporting System (persisted to MariaDB `bug_reports`)
+    uint32 SubmitBugReport(const std::string& rawText, const std::string& explicitCategory = "");
+    static std::vector<BugReportRecord> GetBugReports(uint32 limit = 20, const std::string& statusFilter = "");
+    static bool GetBugReportById(uint32 ticketId, BugReportRecord& outRecord);
+    static bool UpdateBugReportStatus(uint32 ticketId, const std::string& newStatus, const std::string& adminNotes = "");
 
     // LootManager
     void addInformation(uint32 amount) { m_cash += amount; }

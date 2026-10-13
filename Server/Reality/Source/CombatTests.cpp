@@ -2591,6 +2591,75 @@ int RunCombatTestSuite()
 				check(followerBot->GetCrewLeaderId() != leaderPo->getGoId(),
 					"Follower detects deceased leader and updates crew hierarchy (dynamic succession)");
 			}
+
+			// 19. Verify In-Game Bug Reporting & Server Database Persistence (&bug, /bug, &bugs, &bug view, &bug resolve)
+			{
+				TestHumanClient bugClient;
+				Actor reporter = makeHuman(&bugClient, 9100250, 17052.0, 2400.0);
+				reporter.po->setHandle("BugHunterQA");
+				reporter.po->setAdmin(true);
+
+				// Submit via &bug (works directly in retail 7.6005 chat box without client slash interception)
+				ByteBuffer bugCmd1;
+				bugCmd1 << (uint8)0x28 << (uint8)0x10 << (uint16)swap16(8) << (uint32)0;
+				bugCmd1.writeString("&bug Interlock animation hitch when blocking karate kick");
+				bugClient.captured.clear();
+				reporter.po->HandleCommand(bugCmd1);
+				check(bugClient.sawText("[BUG REPORT #") && bugClient.sawText("SAVED]"),
+					"&bug <description> saves bug report and confirms ticket ID to player");
+
+				// Submit via /bug
+				ByteBuffer bugCmd2;
+				bugCmd2 << (uint8)0x28 << (uint8)0x10 << (uint16)swap16(8) << (uint32)0;
+				bugCmd2.writeString("/bug [WORLD] Richland hardline phone booth collision offset");
+				bugClient.captured.clear();
+				reporter.po->HandleCommand(bugCmd2);
+				check(bugClient.sawText("[BUG REPORT #") && bugClient.sawText("WORLD"),
+					"/bug [WORLD] <description> parses explicit category and saves ticket");
+
+				auto allBugs = PlayerObject::GetBugReports(10, "");
+				check(allBugs.size() >= 2, "PlayerObject::GetBugReports returns saved bug reports");
+
+				uint32 latestId = allBugs.front().id;
+				BugReportRecord fetched;
+				check(PlayerObject::GetBugReportById(latestId, fetched),
+					"PlayerObject::GetBugReportById retrieves specific bug ticket by ID");
+				check(fetched.handle == "BugHunterQA" && fetched.category == "WORLD",
+					"Saved bug report preserves reporter handle, category, and telemetry");
+
+				// List via &bugs
+				ByteBuffer listCmd;
+				listCmd << (uint8)0x28 << (uint8)0x10 << (uint16)swap16(8) << (uint32)0;
+				listCmd.writeString("&bugs");
+				bugClient.captured.clear();
+				reporter.po->HandleCommand(listCmd);
+				check(bugClient.sawText("SERVER BUG REPORTS") && bugClient.sawText("BugHunterQA"),
+					"&bugs lists saved bug reports in chat");
+
+				// View details via &bug view <id>
+				ByteBuffer viewCmd;
+				viewCmd << (uint8)0x28 << (uint8)0x10 << (uint16)swap16(8) << (uint32)0;
+				viewCmd.writeString("&bug view " + std::to_string(latestId));
+				bugClient.captured.clear();
+				reporter.po->HandleCommand(viewCmd);
+				check(bugClient.sawText("BUG REPORT #" + std::to_string(latestId)) && bugClient.sawText("Location:"),
+					"&bug view <id> displays full reporter and coordinate telemetry");
+
+				// Resolve ticket via &bug resolve <id> <notes>
+				ByteBuffer resolveCmd;
+				resolveCmd << (uint8)0x28 << (uint8)0x10 << (uint16)swap16(8) << (uint32)0;
+				resolveCmd.writeString("&bug resolve " + std::to_string(latestId) + " Fixed collision box in Richland");
+				bugClient.captured.clear();
+				reporter.po->HandleCommand(resolveCmd);
+				check(bugClient.sawText("updated to status [RESOLVED]"),
+					"&bug resolve <id> <notes> marks ticket RESOLVED");
+
+				BugReportRecord resolvedRec;
+				check(PlayerObject::GetBugReportById(latestId, resolvedRec) &&
+					  resolvedRec.status == "RESOLVED" &&
+					  resolvedRec.adminNotes == "Fixed collision box in Richland",
+					"Resolved bug report persists status=RESOLVED and admin_notes");
+			}
 		}
 	}
 	catch (const std::exception& e)
