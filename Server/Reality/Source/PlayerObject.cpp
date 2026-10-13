@@ -300,6 +300,17 @@ void PlayerObject::initGoId(uint32 theGoId)
 
 PlayerObject::~PlayerObject()
 {
+	// leaving mid-duel used to leave the partner stuck "dueling" a player who is gone
+	if (m_duelPartnerGoId != 0)
+	{
+		try
+		{
+			PlayerObject* partner = sObjMgr.getGOPtrSafe(m_duelPartnerGoId);
+			if (partner && partner->getDuelPartner() == m_goId)
+				partner->clearDuel();
+		}
+		catch (...) {}
+	}
 	if (m_spawnedInWorld == true)
 	{
 		//commit position changes

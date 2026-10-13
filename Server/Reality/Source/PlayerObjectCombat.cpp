@@ -510,7 +510,9 @@ void PlayerObject::die( uint32 killerGoId )
 	if (m_isDead)
 		return;
 
-	if (isDueling())
+	// A duel ends without a death only when the duel partner lands the blow. It used to heal
+	// the loser to full whoever killed them, so duelists were immune to NPCs and third parties.
+	if (isDueling() && killerGoId != 0 && killerGoId == getDuelPartner())
 	{
 		uint32 partnerId = getDuelPartner();
 		PlayerObject* partner = sObjMgr.getGOPtrSafe(partnerId);
@@ -542,6 +544,13 @@ void PlayerObject::die( uint32 killerGoId )
 		
 		INFO_LOG(format("Duel: Sparring match concluded between %1% and %2%. Winner: %3%") % m_handle % partnerName % partnerName);
 		return;
+	}
+	if (isDueling())
+	{
+		// killed by someone else: the duel is over, and this is a real death
+		PlayerObject* partner = sObjMgr.getGOPtrSafe(getDuelPartner());
+		clearDuel();
+		if (partner) partner->clearDuel();
 	}
 
 	m_isDead = true;

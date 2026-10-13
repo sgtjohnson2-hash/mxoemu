@@ -330,6 +330,7 @@ int RunCombatTestSuite()
 		// ---------------------------------------------------------------- unknown ability (H2)
 		{
 			Actor target = makeBot(9200001, 10150.0, 10000.0);
+			target.po->setFactionName("Machines"); // a human may only fight another faction (Combat.FactionRules)
 			humanClient.captured.clear();
 			bool ok = sCombatSys.UseAbility(human.po, 9999, target.go);
 			check(humanClient.sawText("not implemented on this server yet"), "unknown ability gives the player chat feedback");
@@ -418,6 +419,24 @@ int RunCombatTestSuite()
 			human.po->HandleCommand(withdraw);
 			check(!sCombatSys.IsInterlocked(human.go), "client 0x42 setting 4 (HUD Withdraw) leaves the interlock");
 			sCombatSys.EndInterlock(human.go, false);
+		}
+
+		// ---------------------------------------------------------------- who a human may attack (audit 2026-10-13)
+		{
+			Actor contact = makeBot(9200201, 10120.0, 10000.0);
+			contact.po->setFactionName("FRIENDLY");
+			Actor hostile = makeBot(9200202, 10140.0, 10000.0);
+			hostile.po->setFactionName("HOSTILE");
+			Actor civ = makeBot(9200203, 10160.0, 10000.0);
+			civ.po->setFactionName("Civilian");
+			std::string why;
+			check(!sCombatSys.CanAttack(human.po, contact.po, &why) && !why.empty(), "a human can't attack a friendly mission contact");
+			check(sCombatSys.CanAttack(human.po, hostile.po), "a human can attack a HOSTILE mission target");
+			check(!sCombatSys.CanAttack(human.po, civ.po), "a human can't attack a civilian");
+			check(!sCombatSys.CanAttack(human.po, human.po), "nobody can attack themselves");
+			check(sCombatSys.CanAttack(contact.po, human.po), "bot AI is not restricted by the faction rules");
+			check(!sCombatSys.RequestInterlock(human.go, contact.go) && !sCombatSys.IsInterlocked(human.go),
+				"RequestInterlock on a friendly contact is refused");
 		}
 
 		// ---------------------------------------------------------------- kill reward (H1) + death timer (M2)
@@ -1574,7 +1593,9 @@ int RunCombatTestSuite()
 			check(sCombatSys.RunFreeFireShot(ffState), "RunFreeFireShot executes dual-wield burst");
 			check(dualWpns[0]->getAmmoCount() == 8, "Dual-wield consumes 2 rounds per volley (10 -> 8)");
 
-			// 4. Static Vendor Buying (Opcode 0x810e)
+			// 4. Static Vendor Buying (Opcode 0x810e). Vendor 33333 is not a real vendor, so this
+			// legacy block buys as an admin (admins skip the vendor-proximity rule).
+			humanOperative.po->setAdmin(true);
 			humanOperative.po->addInfo(5000);
 			uint64 cashBeforeBuy = humanOperative.po->getInfo();
 			ByteBuffer buyCmd;
@@ -1602,6 +1623,19 @@ int RunCombatTestSuite()
 			humanClient.captured.clear();
 			humanOperative.po->HandleCommand(sellEquippedCmd);
 			check(humanClient.sawText("Cannot sell an equipped weapon"), "RPC_HandleVendorSell rejects selling active equipped weapon");
+			humanOperative.po->setAdmin(false);
+
+			// 6b. A non-admin can't buy or sell away from a vendor (audit 2026-10-13)
+			humanOperative.po->setDistrict(1);
+			humanOperative.po->setPosition(LocationVector(900000.0, 572.0, 900000.0));
+			humanClient.captured.clear();
+			{ ByteBuffer b; b << (uint8)0x81 << (uint8)0x0e << (uint32)1050 << (uint32)33333; humanOperative.po->HandleCommand(b); }
+			check(humanClient.sawText("No vendor nearby sells that item") && !humanClient.sawText("[VENDOR] Purchased"),
+				"0x810e away from any vendor is refused");
+			humanClient.captured.clear();
+			{ ByteBuffer b; b << (uint8)0x81 << (uint8)0x11 << (uint32)1050 << (uint32)33333; humanOperative.po->HandleCommand(b); }
+			check(humanClient.sawText("You need to be at a vendor to sell") && !humanClient.sawText("[VENDOR] Sold"),
+				"0x8111 away from any vendor is refused");
 
 			// 7. Contact Sponsor Mission Faction Alignment
 			sMissionSys.LoadSponsorsFromXML("Data/hd_dump/sponsors.xml");
@@ -1884,8 +1918,10 @@ int RunCombatTestSuite()
 			humanOperative.po->HandleCommand(marketCmd);
 			check(humanClient.sawText("[VENDOR] Connected to"), "RPC_HandleMarketOpen connects operative to nearest district vendor");
 
-			// 5. Vendor Buying (0x810e) with server-authoritative Info Bits deduction
+			// 5. Vendor Buying (0x810e) with server-authoritative Info Bits deduction, standing at the vendor
 			uint32 testTpl = testVendor->inventoryTemplates[0];
+			humanOperative.po->setDistrict((uint8)testVendor->districtId);
+			humanOperative.po->setPosition(LocationVector(testVendor->x, testVendor->y, testVendor->z));
 			humanOperative.po->addInfo(5000);
 			uint64 startBits = humanOperative.po->getInfo();
 			ByteBuffer buyCmd;
@@ -1946,6 +1982,15 @@ int RunCombatTestSuite()
 			tpCmd << (uint8)49; // dest HL (MaraNorthWest)
 			while (tpCmd.size() < 14) tpCmd << (uint8)0;
 			tpCmd << (uint8)1; // dest district
+			// away from any hardline: refused
+			humanOperative.po->setDistrict(1);
+			humanOperative.po->setPosition(LocationVector(maraCentral->x + 50000.0, maraCentral->y, maraCentral->z + 50000.0));
+			humanClient.captured.clear();
+			{ ByteBuffer far(tpCmd); humanOperative.po->HandleCommand(far); }
+			check(humanClient.sawText("You need to be at a hardline to use it") && !humanClient.sawText("[HARDLINE] Transferred"),
+				"0x818e away from a hardline is refused (no teleport from anywhere)");
+			// standing at MaraCentral: allowed
+			humanOperative.po->setPosition(LocationVector(maraCentral->x, maraCentral->y, maraCentral->z));
 			humanClient.captured.clear();
 			humanOperative.po->HandleCommand(tpCmd);
 			check(humanClient.sawText("[HARDLINE] Transferred to MaraNorthWest"), "HandleCommand(0x818e) teleports operative to MaraNorthWest");
@@ -2280,10 +2325,17 @@ int RunCombatTestSuite()
 
 			ByteBuffer hlTpCmd;
 			hlTpCmd << (uint8)0x28 << (uint8)0x10 << (uint16)swap16(8) << (uint32)0;
-			hlTpCmd.writeString("/hardline tp 1 1");
+			hlTpCmd.writeString("/hardline tp 1 152"); // MaraCentral; (1,1) does not exist
+			// the hardline UI only works at a hardline: stand at one
+			{
+				const HardlineNode* hl = PlayerObject::GetNearestHardline(1, operativeA.po->getPosition().x, operativeA.po->getPosition().z);
+				if (hl) { operativeA.po->setDistrict(1); operativeA.po->setPosition(LocationVector(hl->x, hl->y, hl->z)); }
+			}
+			sCombatSys.StopFreeFire(operativeA.go);
+			sCombatSys.EndInterlock(operativeA.go, false);
 			humanClient.captured.clear();
 			operativeA.po->HandleCommand(hlTpCmd);
-			check(humanClient.sawText("[HARDLINE] Transferred to") || humanClient.sawText("You want to go to Hardline:1"),
+			check(humanClient.sawText("[HARDLINE] Transferred to"),
 				"/hardline tp initiates authentic hardline network transit");
 		}
 

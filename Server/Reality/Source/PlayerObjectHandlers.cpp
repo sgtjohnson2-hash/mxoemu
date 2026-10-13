@@ -893,7 +893,9 @@ void PlayerObject::ParsePlayerCommand( string theCmd )
 		static const char* devCommands[] = {
 			"discipline", "class", "loadability", "learn", "dojo", "loadout", "botdebug", "giveitem",
 			"claimhl", "send", "sendCmd", "socket", "bullettime", "gotoPos", "incX", "incY", "incZ",
-			"goThru", "random", "update", "gotoPlayer", "go", "bottest", "overwrite", "agentstrike", "agent", NULL };
+			"goThru", "random", "update", "gotoPlayer", "go", "bottest", "overwrite", "agentstrike", "agent",
+			// world-state and free-movement commands any player could run (audit 2026-10-13)
+			"tension", "outbreak", "glitch", "anomaly", "choosepill", "subway", NULL };
 		for (int i = 0; devCommands[i] != NULL; i++)
 		{
 			if (iequals(command, devCommands[i]) && !m_isAdmin)
@@ -3226,7 +3228,24 @@ void PlayerObject::RPC_HandleChat( ByteBuffer &srcCmd )
 		ParseAdminCommand(theMessage.substr(1));
 		return;
 	}
-	else if (theMessage[0] == '&' ||
+
+	// Slash commands that start world crises, sabotage substations, or move/teleport the player
+	// anywhere were open to every player (audit 2026-10-13). Admins only.
+	if (!m_isAdmin && theMessage[0] == '/')
+	{
+		static const char* adminSlash[] = { "/crisis", "/sabotage", "/repair", "/district", "/teleport", "/tp ",
+			"/tension", "/outbreak", "/glitch", "/anomaly", NULL };
+		for (int i = 0; adminSlash[i] != NULL; i++)
+		{
+			if (boost::istarts_with(theMessage, adminSlash[i]))
+			{
+				m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FF0000}That command is restricted to admins.{/c}"));
+				return;
+			}
+		}
+	}
+
+	if (theMessage[0] == '&' ||
 			 (theMessage[0] == '/' && (boost::istarts_with(theMessage, "/attack") ||
 									  boost::istarts_with(theMessage, "/interlock") ||
 									  boost::istarts_with(theMessage, "/tactic") ||
@@ -4026,16 +4045,18 @@ void PlayerObject::RPC_HandleDynamicObjInteraction( ByteBuffer &srcCmd )
     }
     else
     {
-        // Item 120: Archives & Data Fragments
+        // (removed, audit 2026-10-13) object type 0x1234 paid 500 info per click, and any
+        // unmapped dynamic object with interaction 2/3 gave a random item from the whole item
+        // database plus 50 info, repeatable forever. Neither came from the game. Kept behind
+        // World.LegacyFreeLoot = 1 for anyone who relied on it while testing.
+        static const bool s_legacyFreeLoot = sConfig.GetBoolDefault("World.LegacyFreeLoot", false);
+        if (!s_legacyFreeLoot) return;
         if (objType == 0x1234) {
             m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:00FFFF}You collected an Archive Data Fragment! Gained 500 Info.{/c}"));
             addInformation(500);
             return;
         }
-
-        // Item 47: Crafting Nodes
-        // If targetGoId is not a character (or no specific target found), treat as a node extraction
-        if (interaction == 2 || interaction == 3) // Example interaction ids for use
+        if (interaction == 2 || interaction == 3)
         {
             if (getInventory()) {
                 const auto& allItems = sDataLoader.GetAllItems();
@@ -4070,8 +4091,8 @@ void PlayerObject::RPC_HandleStaticObjInteraction( ByteBuffer &srcCmd )
 		% int(interaction);
 
 	INFO_LOG( debugStr );
-
-	m_parent.QueueCommand(make_shared<SystemChatMsg>(debugStr.str()));
+	if (m_isAdmin)
+		m_parent.QueueCommand(make_shared<SystemChatMsg>(debugStr.str()));
 
 	// Check if this static object is an authentic vendor (or NPC vendor interaction)
 	const HardlineVendor* vendor = sEconomySys.GetHardlineVendor(staticObjId);
@@ -4122,7 +4143,8 @@ void PlayerObject::RPC_HandleStaticObjInteraction( ByteBuffer &srcCmd )
 		LocationVector loc = this->getPosition();
 
 		scoped_ptr<QueryResult> resultDoorExists(sDatabase.Query(format("SELECT * FROM `doors` WHERE `DistrictId`='%1%' And `DoorId`='%2%' Limit 1") % (int)getDistrict() % staticObjId));
-		if (resultDoorExists == NULL)
+		// Only admins record new doors; any player used to write rows into the live doors table.
+		if (resultDoorExists == NULL && m_isAdmin)
 		{
 			m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FFFF00}You are using a door not in the database yet, lets add it{/c}"));	
 			format sqlDoorInsert = 
@@ -4389,7 +4411,36 @@ void PlayerObject::RPC_HandleHardlineTeleport( ByteBuffer &srcCmd )
 		% (int)districtYouAreIn 
 		% (int)hardlineYouAreUsing;
 
-	m_parent.QueueCommand(make_shared<SystemChatMsg>(debugMsg.str()));
+	DEBUG_LOG(format("(%1%) %2%: %3%") % m_parent.Address() % m_handle % debugMsg.str());
+
+	// The hardline UI only opens at a hardline. Without these checks anyone could jump to any
+	// hardline from anywhere, mid-fight or while dead (0x818e and &hardline tp both land here).
+	if (!m_isAdmin)
+	{
+		if (isDead() || getCurrentHealth() == 0)
+		{
+			m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FF0000}You can't use a hardline while down.{/c}"));
+			return;
+		}
+		if (sCombatSys.IsInterlocked(m_goId) || sCombatSys.IsFreeFiring(m_goId))
+		{
+			m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FF0000}You can't jack out of a fight.{/c}"));
+			return;
+		}
+		const double useRange = sConfig.GetFloatDefault("Hardline.UseRange", 800.0f);
+		bool atHardline = false;
+		for (const auto& kv : GetHardlineDirectory())
+		{
+			if (kv.second.districtId != m_district) continue;
+			const double dx = kv.second.x - m_pos.x, dz = kv.second.z - m_pos.z;
+			if (dx * dx + dz * dz <= useRange * useRange) { atHardline = true; break; }
+		}
+		if (!atHardline)
+		{
+			m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FF0000}You need to be at a hardline to use it.{/c}"));
+			return;
+		}
+	}
 
 	double newX = 0.0, newY = 0.0, newZ = 0.0, newRot = 0.0;
 	string newlocationName = "";
@@ -4574,6 +4625,22 @@ void PlayerObject::RPC_HandleMarketOpen(ByteBuffer& srcCmd)
 		));
 	}
 }
+// true when a vendor of the player's district stands within Vendor.UseRange; with an item id,
+// that vendor must also stock the item
+bool PlayerObject::IsNearVendor(uint32 itemTemplateId) const
+{
+	const double range = sConfig.GetFloatDefault("Vendor.UseRange", 1500.0f);
+	for (const auto& v : sEconomySys.GetVendorsForDistrict(m_district))
+	{
+		const double dx = v.x - m_pos.x, dz = v.z - m_pos.z;
+		if (dx * dx + dz * dz > range * range) continue;
+		if (itemTemplateId == 0) return true;
+		for (uint32 t : v.inventoryTemplates)
+			if (t == itemTemplateId) return true;
+	}
+	return false;
+}
+
 void PlayerObject::RPC_HandleVendorBuy(ByteBuffer& srcCmd)
 {
 	if (srcCmd.remaining() < 4) return;
@@ -4581,6 +4648,14 @@ void PlayerObject::RPC_HandleVendorBuy(ByteBuffer& srcCmd)
 	uint32 vendorGoId = 0;
 	if (srcCmd.remaining() >= 4)
 		vendorGoId = srcCmd.read<uint32>();
+
+	// Any item template could be bought from anywhere (audit 2026-10-13). A purchase now needs
+	// a vendor in this district within Vendor.UseRange that stocks the item. Admins bypass.
+	if (!m_isAdmin && !IsNearVendor(itemTemplateId))
+	{
+		m_parent.QueueCommand(std::make_shared<SystemChatMsg>("{c:FF4444}[VENDOR] No vendor nearby sells that item.{/c}"));
+		return;
+	}
 
 	const ItemTemplate* tpl = sDataLoader.GetItemTemplate(itemTemplateId);
 	uint32 cost = tpl && tpl->value > 0 ? tpl->value : sEconomySys.GetItemPrice(itemTemplateId);
@@ -4626,6 +4701,12 @@ void PlayerObject::RPC_HandleVendorSell(ByteBuffer& srcCmd)
 		vendorGoId = srcCmd.read<uint32>();
 
 	if (!m_inventorySystem) return;
+
+	if (!m_isAdmin && !IsNearVendor())
+	{
+		m_parent.QueueCommand(std::make_shared<SystemChatMsg>("{c:FF4444}[VENDOR] You need to be at a vendor to sell.{/c}"));
+		return;
+	}
 
 	// Locate item by GoId first, then by TemplateId
 	auto item = m_inventorySystem->getItemByGoId(itemId);

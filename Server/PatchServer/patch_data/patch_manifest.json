@@ -5,11 +5,11 @@
   "gameServer": "15.204.82.250:10000",
   "patchServer": "http://15.204.82.250",
   "launcher": {
-    "version": "1.2.1",
+    "version": "1.3.2",
     "minVersion": "1.0.0",
     "url": "/launcher/ZionLauncher.exe",
     "filename": "ZionLauncher.exe",
-    "notes": "Operative Selector & quick-load support"
+    "notes": "Fixes false missing-file errors on fresh installs; downloads the Zion hook and server key automatically"
   },
   "clientPackage": {
     "filename": "MxO_Client.7z",

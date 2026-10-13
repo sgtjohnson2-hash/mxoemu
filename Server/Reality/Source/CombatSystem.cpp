@@ -527,9 +527,12 @@ void CombatSystem::Update()
 		for (const auto& e : ends)
 			EndInterlock(e.first, e.second);
 	}
-	// Phase 3: Matrix Threat Heatmap Diffusion & Escalation Tick
+	// Threat heatmap escalation. Not from the original game: every hit adds heat, and about two
+	// hits into any fight it spawned Transit Police, then SWAT, then Agent teams with server-wide
+	// alerts (bot-vs-bot fights fed it too). Off unless World.ThreatEscalation = 1.
 	static uint32 lastHeatmapTickMs = 0;
-	if (currTime - lastHeatmapTickMs >= 1000) {
+	static const bool s_threatEscalation = sConfig.GetBoolDefault("World.ThreatEscalation", false);
+	if (s_threatEscalation && currTime - lastHeatmapTickMs >= 1000) {
 		float dtSeconds = (lastHeatmapTickMs == 0) ? 1.0f : (float)(currTime - lastHeatmapTickMs) / 1000.0f;
 		sMatrixThreatHeatmap.Update(dtSeconds, currTime);
 		lastHeatmapTickMs = currTime;
@@ -575,6 +578,35 @@ bool CombatSystem::GetInterlockSessionCopy(uint32 goId, InterlockSession& outSes
 	return false;
 }
 
+bool CombatSystem::CanAttack(PlayerObject* attacker, PlayerObject* target, std::string* why) const
+{
+	auto no = [why](const char* r) { if (why) *why = r; return false; };
+	if (!attacker || !target) return no("No valid target.");
+	if (attacker == target) return no("You can't attack yourself.");
+	// Only human attackers are checked: bot AI picks its own enemies, and tester bots fight
+	// whatever their missions send them at.
+	if (attacker->getClient().isBot()) return true;
+	if (!sConfig.GetBoolDefault("Combat.FactionRules", true)) return true;
+
+	const std::string& tf = target->getFactionName();
+	if (target->getClient().isBot())
+	{
+		if (tf == "HOSTILE") return true;              // mission targets
+		if (attacker->m_lastDojoBotGoId == target->getGoId()) return true;
+		if (tf == "FRIENDLY") return no("That is a friendly contact.");
+		if (tf == "Civilian" || target->getHandle().find("Civilian") != std::string::npos)
+			return no("You can't attack civilians.");
+		if (target->getFaction() != FACTION_NONE && target->getFaction() == attacker->getFaction())
+			return no("That is one of your own faction.");
+		return true;
+	}
+	// player vs player: duel partners, or opposing factions
+	if (attacker->isDueling() && attacker->getDuelPartner() == target->getGoId()) return true;
+	if (target->getTrueFaction() == attacker->getTrueFaction())
+		return no("You can only fight players of your own faction in a duel.");
+	return true;
+}
+
 bool CombatSystem::RequestInterlock(uint32 attackerGoId, uint32 targetGoId, uint32 clientTargetRef)
 {
 	std::lock_guard<std::recursive_mutex> lock(m_combatMutex);
@@ -603,6 +635,14 @@ bool CombatSystem::RequestInterlock(uint32 attackerGoId, uint32 targetGoId, uint
 		INFO_LOG(format("RequestInterlock %1% -> %2% refused: %3%") % attackerGoId % targetGoId
 			% ((!pA || !pB) ? "attacker or target not found" : "attacker or target is dead"));
 		return false;
+	}
+	{
+		std::string why;
+		if (!CanAttack(pA, pB, &why)) {
+			INFO_LOG(format("RequestInterlock %1% -> %2% refused: %3%") % attackerGoId % targetGoId % why);
+			pA->getClient().QueueCommand(std::make_shared<SystemChatMsg>("{c:FF4444}" + why + "{/c}"));
+			return false;
+		}
 	}
 	{
 		float interlockDist = pA->getPosition().Distance(pB->getPosition());
@@ -852,12 +892,35 @@ bool CombatSystem::RequestInterlock(uint32 attackerGoId, uint32 targetGoId, uint
 bool CombatSystem::RequestRangedCombat(uint32 attackerGoId, uint32 targetGoId, uint16 moveId)
 {
 	std::lock_guard<std::recursive_mutex> lock(m_combatMutex);
-	if (IsFreeFiring(attackerGoId)) return false;
 	if (IsInterlocked(attackerGoId)) return false; //no shooting out of an interlock
+	// Already firing: switch target and/or fire the requested special next. This used to fail
+	// ("Can't engage that target"), so a player had to withdraw to change target, and every
+	// ranged ability used while firing was silently dropped (audit 2026-10-13).
+	if (IsFreeFiring(attackerGoId))
+	{
+		PlayerObject* tgt = getPlayerSafe(targetGoId);
+		if (!tgt || tgt->isDead() || tgt->getCurrentHealth() == 0) return false;
+		if (!CanAttack(getPlayerSafe(attackerGoId), tgt)) return false;
+		for (auto& ff : m_freefires)
+		{
+			if (ff.attackerGoId != attackerGoId) continue;
+			ff.targetGoId = targetGoId;
+			ff.moveId = moveId;
+			ff.outOfRangeShots = 0;
+		}
+		return true;
+	}
 
 	PlayerObject* pA = getPlayerSafe(attackerGoId);
 	PlayerObject* pB = getPlayerSafe(targetGoId);
 	if (!pA || !pB || pA->isDead() || pB->isDead()) return false;
+	{
+		std::string why;
+		if (!CanAttack(pA, pB, &why)) {
+			pA->getClient().QueueCommand(std::make_shared<SystemChatMsg>("{c:FF4444}" + why + "{/c}"));
+			return false;
+		}
+	}
 
 	pA->ensureEntityKnown(pB);
 	pB->ensureEntityKnown(pA);
@@ -2140,6 +2203,9 @@ bool CombatSystem::RunFreeFireShot(FreeFireState &state)
 	// The shot that emptied the bar already landed. Do not keep firing for the takedown window.
 	if (pA->getCurrentHealth() == 0 || pB->getCurrentHealth() == 0)
 		return false;
+	// Pulled into close combat: the gun loop ends (it kept firing during the interlock).
+	if (IsInterlocked(state.attackerGoId))
+		return false;
 
 	const CombatMove* moveA = state.moveId ? GetMove(state.moveId) : nullptr;
 	CombatMove synthesizedGunMove;
@@ -2196,14 +2262,23 @@ bool CombatSystem::RunFreeFireShot(FreeFireState &state)
 	float dist = float(pA->getPosition().Distance(pB->getPosition()));
 	if (shotRange > 0 && dist > shotRange)
 	{
-		if (state.shotCount % 3 == 0 && !pA->getClient().isBot())
+		// It used to loop forever, repeating this line. Give the player a few shots to close
+		// in, then stop firing.
+		state.outOfRangeShots++;
+		state.shotCount++;
+		if (state.outOfRangeShots >= 4)
 		{
+			if (!pA->getClient().isBot())
+				pA->getClient().QueueCommand(std::make_shared<SystemChatMsg>(
+					"{c:FFFF00}[COMBAT] Target is out of range. You stop firing.{/c}"));
+			return false;
+		}
+		if (state.outOfRangeShots == 1 && !pA->getClient().isBot())
 			pA->getClient().QueueCommand(std::make_shared<SystemChatMsg>(
 				"{c:FFFF00}[COMBAT] Target is out of firearm range.{/c}"));
-		}
-		state.shotCount++;
 		return true;
 	}
+	state.outOfRangeShots = 0;
 
 	state.shotCount++;
 
@@ -2220,7 +2295,11 @@ bool CombatSystem::RunFreeFireShot(FreeFireState &state)
 		// Second volley for dual-wielding handguns
 		ResolveAttack(pA, pB, *moveA, pA->getTactic(), pB->getTactic());
 	}
-	return !pB->isDead();
+	// A ranged ability is one special shot. It used to become the move for every following
+	// shot (Inner Strength paid once, the special repeated forever).
+	if (state.moveId != 0)
+		state.moveId = 0;
+	return !pB->isDead() && pB->getCurrentHealth() > 0;
 }
 
 bool CombatSystem::ResolveSingleAttack(uint32 attackerGoId, uint32 targetGoId, uint16 moveId, bool inInterlock)

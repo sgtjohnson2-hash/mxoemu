@@ -279,11 +279,20 @@ void StatusEffectManager::ApplyEffect(uint32 targetGoId, EffectType type, float 
         }
     }
     
-    // V16: Diminishing Returns logic
-    if (target) {
-        float resistance = target->GetCCResistance();
+    // Diminishing returns on crowd control only. It used to apply to every effect and never
+    // reset: after about 7 effects of any kind (heals, buffs, stealth, DoTs) every new effect had
+    // zero or negative duration for the rest of the session. Now: CC effects only, capped at
+    // 75%, and it resets 15 s after the last CC landed.
+    const bool isCC = (type == EFFECT_STUN || type == EFFECT_SNARE || type == EFFECT_CODE_FREEZE
+        || type == EFFECT_DISARMED || type == EFFECT_UI_LAG);
+    if (target && isCC) {
+        const uint32 nowMs = getMSTime();
+        if (nowMs - target->m_lastCCMs > 15000)
+            target->SetCCResistance(0.0f);
+        float resistance = std::min(target->GetCCResistance(), 0.75f);
         duration = duration * (1.0f - resistance);
-        target->AddCCResistance(0.15f); // 15% DR per effect
+        target->SetCCResistance(std::min(resistance + 0.15f, 0.75f));
+        target->m_lastCCMs = nowMs;
     }
     
     StatusEffect newEffect;

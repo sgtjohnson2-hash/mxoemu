@@ -76,6 +76,20 @@ static void SpawnCurrentObjectiveNpc(PlayerObject* player, MissionTemplate& temp
     {
         if (npc.idNpc != obj.targetNpcId) continue;
         MissionNpc placed = PlaceMissionNpcNearPlayer(npc, player, 0);
+        // A mission is offered at the player's level, so its hostiles are too. Unanchored
+        // targets were all spawned at level 8: a level-1 tester died to the first target of
+        // Chapter 1.1 twice and had to abort (BOTTEST finding). XML levels are capped at
+        // player level + Missions.HostileLevelMargin (default 2).
+        if (placed.type == "HOSTILE")
+        {
+            const int pl = std::max<int>(1, player->getLevel());
+            const int margin = sConfig.GetIntDefault("Missions.HostileLevelMargin", 2);
+            int lvl = npc.anchored ? std::min<int>(int(npc.level), pl + margin) : pl;
+            if (lvl < 1) lvl = 1;
+            placed.level = uint32(lvl);
+            if (!npc.anchored)
+                placed.maxHP = uint32(60 + 12 * lvl);
+        }
         uint32 npcGoId = sBotMgr.SpawnMissionBot(placed, player->getClient().m_instanceId);
         if (npcGoId != 0)
         {
@@ -563,7 +577,33 @@ void MissionSystem::AssignMission(PlayerObject* player, uint32 missionId)
     // Stored only now: the copy used to be taken before spawnedNpcs was filled, so mission
     // NPC goIds were never recorded and TALK/DEFEAT objectives could never match.
     m_activeMissions[player->getGoId()] = state;
-    
+
+    // Courier items. A GIVE objective consumes its item, but 36 of the 47 mission XMLs give
+    // nothing beforehand (e.g. chap4_2 "Hack the terminal", item 1001), so the step could never
+    // advance (BOTTEST finding). Hand those items over at accept, the way retail courier
+    // missions did; items that an earlier LOOT step drops are left to that step.
+    if (player->getInventory())
+    {
+        std::set<uint32> handedOut;
+        for (size_t i = 0; i < templ.objectives.size(); ++i)
+        {
+            const MissionObjective& o = templ.objectives[i];
+            if (o.command != ObjectiveCommand::GIVE || o.requiredItem.empty()) continue;
+            uint32 itemId = 0;
+            try { itemId = std::stoul(o.requiredItem, nullptr, 16); } catch (...) {}
+            if (itemId == 0) continue;
+            bool lootedEarlier = false;
+            for (size_t j = 0; j < i; ++j)
+                if (templ.objectives[j].command == ObjectiveCommand::LOOT && templ.objectives[j].requiredItem == o.requiredItem)
+                    lootedEarlier = true;
+            if (lootedEarlier) continue;
+            // one per GIVE step; the first step may reuse an item left over from an abort
+            if (!handedOut.count(itemId) && player->getInventory()->hasItemByTemplate(itemId)) { handedOut.insert(itemId); continue; }
+            player->getInventory()->addItemAuto(std::make_shared<Item>(rand(), itemId));
+            handedOut.insert(itemId);
+        }
+    }
+
     // Notify player
     if (!player->getClient().isBot())
     {

@@ -415,6 +415,8 @@ public:
     // goId of the player who summoned this bot with &dojo (0 = not a dojo partner). Dojo partners
     // stand back up after a takedown like any bot; "&dojo leave" removes the caller's partners.
     uint32 m_dojoOwnerGoId = 0;
+    bool IsNearVendor(uint32 itemTemplateId = 0) const;
+    uint32 m_lastCCMs = 0; // when the last crowd-control effect landed (diminishing returns reset)
     
     std::string m_crewName;
     std::string m_factionName;

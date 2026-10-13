@@ -138,6 +138,7 @@ struct FreeFireState
 	uint16 moveId;
 	uint32 nextShotTime;	//ms timestamp (getMSTime)
 	uint32 shotCount;
+	uint32 outOfRangeShots = 0; //consecutive shots skipped because the target was out of range
 };
 
 class CombatSystem : public Singleton<CombatSystem>
@@ -154,6 +155,9 @@ public:
 
 	//combat requests (from client RPCs, chat commands and bot AI)
 	bool RequestInterlock(uint32 attackerGoId, uint32 targetGoId, uint32 clientTargetRef = 0);
+	// Who a human may attack (Combat.FactionRules, default on). Bots are not restricted here.
+	// why gets a short player-facing reason when the answer is no.
+	bool CanAttack(PlayerObject* attacker, PlayerObject* target, std::string* why = nullptr) const;
 	bool RequestRangedCombat(uint32 attackerGoId, uint32 targetGoId, uint16 moveId=0);
 	void SetTactic(uint32 goId, uint8 tactic);
 	void QueueAbility(uint32 goId, uint16 moveId);

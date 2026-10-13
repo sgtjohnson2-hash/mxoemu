@@ -11,9 +11,9 @@
     <PlatformTarget>x86</PlatformTarget>
     <RuntimeIdentifier>win-x86</RuntimeIdentifier>
     <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
-    <Version>1.2.1</Version>
-    <AssemblyVersion>1.2.1.0</AssemblyVersion>
-    <FileVersion>1.2.1.0</FileVersion>
+    <Version>1.3.2</Version>
+    <AssemblyVersion>1.3.2.0</AssemblyVersion>
+    <FileVersion>1.3.2.0</FileVersion>
   </PropertyGroup>
 
   <ItemGroup>
@@ -22,6 +22,8 @@
   </ItemGroup>
 
   <ItemGroup>
+    <EmbeddedResource Include="7z.exe" LogicalName="ZionLauncher.7z.exe" />
+    <EmbeddedResource Include="7z.dll" LogicalName="ZionLauncher.7z.dll" />
     <None Include="click.wav">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
