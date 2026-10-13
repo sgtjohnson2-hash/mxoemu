@@ -45,13 +45,10 @@
 #include "AI/MatrixThreatHeatmap.h"
 #include "EconomySystem.h"
 #include "FactionWarManager.h"
-#include "VehicleSystem.h"
 #include "AgentPossessionManager.h"
 #include "AI/PedestrianEcology.h"
 #include "SocketSystem.h"
-#include "HovercraftFlightSystem.h"
 #include "Config.h"
-#include "LoadingConstruct.h"
 #include "OrganizationManager.h"
 #include "Timer.h"
 #include <iostream>
@@ -1788,17 +1785,17 @@ int RunCombatTestSuite()
 			float heatLvl = sMatrixThreatHeatmap.GetHeat(testX, testZ);
 			check(heatLvl >= 30.0f, "Heatmap recorded +30.0 threat at test coordinates");
 
-			EscalationTier tier1 = sMatrixThreatHeatmap.GetTier(testX, testZ);
-			check(tier1 == ESCALATION_TIER_1_POLICE, "Threat >= 25 resolves to ESCALATION_TIER_1_POLICE");
+			HeatTier tier1 = sMatrixThreatHeatmap.GetTier(testX, testZ);
+			check(tier1 == HEAT_TIER_1_LOW, "Threat >= 25 resolves to HEAT_TIER_1_LOW");
 
-			// 2. High disruption escalates to SWAT (>= 60) and Agent Overwrite (>= 110)
+			// 2. High disruption escalates to elevated (>= 60) and high (>= 110)
 			sMatrixThreatHeatmap.RecordDisruption(testX, testY, testZ, 40.0f, "Heavy Melee Interlock");
-			EscalationTier tier2 = sMatrixThreatHeatmap.GetTier(testX, testZ);
-			check(tier2 == ESCALATION_TIER_2_SWAT, "Threat >= 60 resolves to ESCALATION_TIER_2_SWAT");
+			HeatTier tier2 = sMatrixThreatHeatmap.GetTier(testX, testZ);
+			check(tier2 == HEAT_TIER_2_ELEVATED, "Threat >= 60 resolves to HEAT_TIER_2_ELEVATED");
 
 			sMatrixThreatHeatmap.RecordDisruption(testX, testY, testZ, 60.0f, "Agent Wire-Fu Breach");
-			EscalationTier tier3 = sMatrixThreatHeatmap.GetTier(testX, testZ);
-			check(tier3 == ESCALATION_TIER_3_AGENT_TAKEOVER, "Threat >= 110 resolves to ESCALATION_TIER_3_AGENT_TAKEOVER");
+			HeatTier tier3 = sMatrixThreatHeatmap.GetTier(testX, testZ);
+			check(tier3 == HEAT_TIER_3_HIGH, "Threat >= 110 resolves to HEAT_TIER_3_HIGH");
 
 			// 3. Escalation response simulation tick
 			uint32 curMs = getMSTime();
@@ -2014,14 +2011,7 @@ int RunCombatTestSuite()
 			sFactionWarMgr.AdvanceNodeCapture(152, FACTION_ZION, 0.70f, humanOperative.po);
 			check(sFactionWarMgr.getControllingFaction(152) == FACTION_ZION, "Hardline 152 captured by Zion operative");
 
-			// 4. City Traffic Simulation & Active Vehicles
-			sVehicleSys.Initialize();
-			check(sVehicleSys.GetActiveVehicleCount() > 0, "VehicleSystem initialized active city vehicular fleet");
-			size_t initialVehicles = sVehicleSys.GetActiveVehicleCount();
-			sVehicleSys.Tick(1000);
-			check(sVehicleSys.GetActiveVehicleCount() == initialVehicles, "VehicleSystem maintains active fleet consistency during simulation tick");
-			const auto& vehicles = sVehicleSys.GetVehicles();
-			check(!vehicles.empty() && vehicles[0].y == 572.0f, "Simulated vehicle clamped flush to authentic street pavement (572.0f)");
+
 		}
 
 		// ============================================================
@@ -2122,69 +2112,6 @@ int RunCombatTestSuite()
 			humanOperative.po->clearMaskFaction();
 			check(humanOperative.po->getFaction() == FACTION_ZION, "Player getFaction() reverts to FACTION_ZION after clearing mask");
 
-			// SECTION 24: Marketplace List Protocol (0x8125) & MegaCity Exchange
-			std::cout << "--- Section 24: Marketplace List Protocol (0x8125) & Exchange ---" << std::endl;
-
-			// 1. Direct MarketplaceListReplyMsg protocol verification
-			std::vector<MarketItemEntry> testEntries;
-			MarketItemEntry me1;
-			me1.templateId = 903;
-			me1.instanceData = 0;
-			me1.marketplaceId = 12345;
-			me1.sellingPrice = 8000;
-			me1.organizationId = 3;
-			me1.timePostedGMT = 1248518928;
-			me1.playerIsSelling = 0;
-			testEntries.push_back(me1);
-
-			MarketplaceListReplyMsg mpMsg(testEntries);
-			const ByteBuffer& mpBuf = mpMsg.toBuf();
-			check(mpBuf.size() == 2 + 2 + 6 + 2 + 23, "MarketplaceListReplyMsg has exact 35-byte length for 1 item");
-			check((uint8)mpBuf.contents()[0] == (uint8)0x81 && (uint8)mpBuf.contents()[1] == (uint8)0x25, "Opcode is swap16(0x8125)");
-			check((uint8)mpBuf.contents()[2] == 0x09 && (uint8)mpBuf.contents()[3] == 0x00, "List offset is uint16(9)");
-			check((uint8)mpBuf.contents()[10] == 23 && (uint8)mpBuf.contents()[11] == 0x00, "Payload length is uint16(23)");
-			check((uint8)mpBuf.contents()[12] == 0x00, "Item 0 starts with 0x00 separator prefix");
-
-			// 2. RPC_HandleMarketListItems (opcode 0x8124) client request dispatch
-			ByteBuffer mpReqCmd;
-			mpReqCmd << (uint8)0x81 << (uint8)0x24;
-			humanClient.captured.clear();
-			humanOperative.po->HandleCommand(mpReqCmd);
-			check(humanClient.sawText("[MARKETPLACE]"), "RPC_HandleMarketListItems emits [MARKETPLACE] system notification");
-			bool saw8125 = false;
-			for (const auto& pkt : humanClient.captured) {
-				if (pkt.size() >= 2 && (uint8)pkt[0] == 0x81 && (uint8)pkt[1] == 0x25) {
-					saw8125 = true;
-					break;
-				}
-			}
-			check(saw8125, "RPC_HandleMarketListItems dispatched opcode 0x8125 (MarketplaceListReplyMsg)");
-
-			// 3. /market and &market chat slash command execution
-			ByteBuffer marketChatCmd;
-			marketChatCmd << (uint8)0x28 << (uint8)0x10 << (uint16)swap16(8) << (uint32)0;
-			marketChatCmd.writeString("/market");
-			humanClient.captured.clear();
-			humanOperative.po->HandleCommand(marketChatCmd);
-			check(humanClient.sawText("[MARKETPLACE]"), "/market chat command triggers marketplace catalog retrieval");
-
-			// 4. Player listing creation via /market sell
-			humanOperative.po->giveItem(10101);
-			uint64 listingId = sEconomySys.ListVendorItem(humanOperative.po, 10101, 15000);
-			check(listingId > 0, "ListVendorItem creates valid listing ID");
-			auto activeListings = sEconomySys.GetActiveListings();
-			check(!activeListings.empty(), "GetActiveListings returns non-empty listing catalog");
-
-			// 5. Player marketplace purchase (atomic peer-to-peer settlement)
-			TestHumanClient buyerClient;
-			Actor buyerOperative = makeHuman(&buyerClient, 9100108, 17048.0, 2400.0);
-			buyerOperative.po->addInfo(20000);
-			uint64 buyerPreBits = buyerOperative.po->getInfo();
-			uint64 sellerPreBits = humanOperative.po->getInfo();
-			bool buySuccess = sEconomySys.PurchaseVendorItem(buyerOperative.po, listingId);
-			check(buySuccess, "PurchaseVendorItem successfully executes purchase of player listing");
-			check(buyerOperative.po->getInfo() == buyerPreBits - 15000, "PurchaseVendorItem deducted exact 15,000 $Info from buyer");
-			check(humanOperative.po->getInfo() == sellerPreBits + 15000, "PurchaseVendorItem credited exact 15,000 $Info to seller");
 		}
 
 		// Section 25: Phase H Systems — Coder Blueprints, Hovercraft Flight & Organization Syndicates
@@ -2213,24 +2140,6 @@ int RunCombatTestSuite()
 				"/craft 101 synthesizes Health Stim Patch");
 			check(humanOperative.po->getInfo() == preInfo - 100,
 				"Crafting deducted 100 $Info for Health Stim Patch");
-
-			// 3. /hovercraft telemetry query
-			ByteBuffer hoverCmd;
-			hoverCmd << (uint8)0x28 << (uint8)0x10 << (uint16)swap16(8) << (uint32)0;
-			hoverCmd.writeString("/hovercraft");
-			humanClient.captured.clear();
-			humanOperative.po->HandleCommand(hoverCmd);
-			check(humanClient.sawText("[Hovercraft Flight] Ship: Nebuchadnezzar"),
-				"/hovercraft queries Zion hovercraft flight simulation and reports Nebuchadnezzar");
-
-			// 4. /construct white void telemetry query
-			ByteBuffer constructCmd;
-			constructCmd << (uint8)0x28 << (uint8)0x10 << (uint16)swap16(8) << (uint32)0;
-			constructCmd.writeString("/construct");
-			humanClient.captured.clear();
-			humanOperative.po->HandleCommand(constructCmd);
-			check(humanClient.sawText("[Loading Construct] Mode: White Void"),
-				"/construct reports Loading Construct white void state and weapon loadouts");
 
 			// 5. /org create and /org leave
 			ByteBuffer orgCreateCmd;
@@ -2346,30 +2255,6 @@ int RunCombatTestSuite()
 		// =========================================================================
 		std::cout << "\n=== SECTION 27: Phase J Systems (Glitch Anomalies, Tension & Contact Quests) ===" << std::endl;
 		{
-			// 1. WeatherSystem Glitch Anomaly Triggering & Queries
-			sWeatherSys.TriggerGlitchAnomaly(0.75f, 180000, WeatherSystem::GLITCH_SPOON_BEND, "Construct Perception Rift");
-			check(sWeatherSys.IsGlitchActive(), "WeatherSystem confirms glitch anomaly is active");
-			check(sWeatherSys.GetActiveGlitchType() == WeatherSystem::GLITCH_SPOON_BEND, "Glitch type is GLITCH_SPOON_BEND");
-			check(sWeatherSys.GetGlitchRemainingMs() > 0, "Glitch remaining time is positive");
-			check(sWeatherSys.GetGlitchTypeName(WeatherSystem::GLITCH_SPOON_BEND) == "Spoon Bending (Reality Distortion)",
-				"GetGlitchTypeName correctly maps spoon bend name");
-
-			// Clear and verify equilibrium
-			sWeatherSys.ClearGlitchAnomaly();
-			check(!sWeatherSys.IsGlitchActive(), "WeatherSystem confirms glitch anomaly cleared to equilibrium");
-			check(sWeatherSys.GetActiveGlitchType() == WeatherSystem::GLITCH_NONE, "Active glitch type reset to GLITCH_NONE");
-
-			// 2. WeatherSystem Anomaly Types (Neon Flicker, Code Drizzle, Spatial Tear, Déjà Vu)
-			sWeatherSys.TriggerGlitchAnomaly(0.70f, 120000, WeatherSystem::GLITCH_NEON_FLICKER, "Downtown Substation Strobe");
-			check(sWeatherSys.GetActiveGlitchType() == WeatherSystem::GLITCH_NEON_FLICKER, "GLITCH_NEON_FLICKER triggered");
-			sWeatherSys.TriggerGlitchAnomaly(0.90f, 120000, WeatherSystem::GLITCH_CODE_DRIZZLE, "International Cascading Glyphs");
-			check(sWeatherSys.GetActiveGlitchType() == WeatherSystem::GLITCH_CODE_DRIZZLE, "GLITCH_CODE_DRIZZLE triggered");
-			sWeatherSys.TriggerGlitchAnomaly(1.0f, 120000, WeatherSystem::GLITCH_SPATIAL_TEAR, "Slums Physical Tear");
-			check(sWeatherSys.GetActiveGlitchType() == WeatherSystem::GLITCH_SPATIAL_TEAR, "GLITCH_SPATIAL_TEAR triggered");
-			sWeatherSys.TriggerGlitchAnomaly(0.80f, 120000, WeatherSystem::GLITCH_CAT_DEJAVU, "Matrix Code Change");
-			check(sWeatherSys.GetActiveGlitchType() == WeatherSystem::GLITCH_CAT_DEJAVU, "GLITCH_CAT_DEJAVU triggered");
-			sWeatherSys.ClearGlitchAnomaly();
-
 			// 3. Faction War District Tension Queries
 			uint32 hotspotDist = sFactionWarMgr.GetHighestTensionDistrict();
 			check(hotspotDist >= 1 && hotspotDist <= 4, "GetHighestTensionDistrict returns valid district ID (1-4)");
@@ -2410,15 +2295,7 @@ int RunCombatTestSuite()
 			check(sMissionSys.HasCompletedContactQuest(op.po->getCharId(), 1001),
 				"HasCompletedContactQuest confirms quest 1001 is finished");
 
-			// 6. Slash Command Routing for /glitch, /tension, /contact
-			ByteBuffer glitchCmd;
-			glitchCmd << (uint8)0x28 << (uint8)0x10 << (uint16)swap16(8) << (uint32)0;
-			glitchCmd.writeString("/glitch spoon");
-			clientA.captured.clear();
-			op.po->HandleCommand(glitchCmd);
-			check(clientA.sawText("[GLITCH] Reality distortion triggered") || clientA.sawText("Spoon Bending"),
-				"/glitch spoon chat command triggers reality distortion");
-
+			// 6. Slash Command Routing for /tension, /contact
 			ByteBuffer tensionCmd;
 			tensionCmd << (uint8)0x28 << (uint8)0x10 << (uint16)swap16(8) << (uint32)0;
 			tensionCmd.writeString("/tension");

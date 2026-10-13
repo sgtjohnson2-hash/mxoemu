@@ -7,21 +7,20 @@
 #include <string>
 #include <mutex>
 
-enum EscalationTier : uint8 {
-    ESCALATION_TIER_NONE = 0,
-    ESCALATION_TIER_1_POLICE = 1,        // Heat 25 - 60: Transit Police
-    ESCALATION_TIER_2_SWAT = 2,          // Heat 60 - 110: SWAT tactical breach
-    ESCALATION_TIER_3_AGENT_TAKEOVER = 3,// Heat 110 - 180: Agent overwrites civilian
-    ESCALATION_TIER_4_MULTI_AGENT = 4,   // Heat 180 - 260: Multi-Agent tactical hunt
-    ESCALATION_TIER_5_SMITH_OUTBREAK = 5 // Heat > 260: Smith viral replication cascade
+// Combat disruption heat bands. Server-side only: they set how scared nearby civilians get
+// (PedestrianEcology fear floor). Nothing is spawned and nothing is sent to clients.
+enum HeatTier : uint8 {
+    HEAT_TIER_NONE = 0,
+    HEAT_TIER_1_LOW = 1,      // Heat 25 - 60
+    HEAT_TIER_2_ELEVATED = 2, // Heat 60 - 110
+    HEAT_TIER_3_HIGH = 3,     // Heat 110 - 180
+    HEAT_TIER_4_SEVERE = 4    // Heat >= 180
 };
 
 struct DisruptionCell {
     float heat = 0.0f;
     float peakHeat = 0.0f;
     uint32 lastIncidentMs = 0;
-    uint8 escalationTier = 0;
-    uint32 lastSpawnMs = 0;
     float lastY = 572.0f;
 };
 
@@ -38,10 +37,9 @@ public:
 
     // Queries
     float GetHeat(float worldX, float worldZ) const;
-    EscalationTier GetTier(float worldX, float worldZ) const;
-    EscalationTier GetActiveTier(float worldX, float worldZ) const;
+    HeatTier GetTier(float worldX, float worldZ) const;
 
-    // Simulation tick (diffusion, exponential decay, escalation dispatch)
+    // Simulation tick (diffusion, exponential decay)
     void Update(float dtSeconds, uint32 currentMs);
 
     // Manual or sabotage modifiers (e.g. sabotaged relay doubles heat tolerance)
@@ -52,7 +50,6 @@ public:
 private:
     void WorldToGrid(float wx, float wz, int& gx, int& gz) const;
     void GridToWorld(int gx, int gz, float& wx, float& wz) const;
-    void TriggerEscalationResponse(int gx, int gz, EscalationTier tier, uint32 currentMs);
 
     static constexpr int GRID_WIDTH = 100;
     static constexpr int GRID_DEPTH = 100;

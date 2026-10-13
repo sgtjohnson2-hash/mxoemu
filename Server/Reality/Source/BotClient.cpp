@@ -21,10 +21,8 @@
 #include "SniffDump.h"
 #include "AI/PedestrianEcology.h"
 #include "AI/RVO2Steering.h"
-#include "AI/SentientMajorCharacters.h"
 #include "AI/CoverSystem.h"
 #include "AI/SensoryPerceptionSystem.h"
-#include "BackdoorNetwork.h"
 #include "BotTester.h"
 #include <cmath>
 #include <fstream>
@@ -423,7 +421,7 @@ void BotClient::UpdateBotAI(float deltaSeconds)
         float dz = m_evacTarget.z - (float)myPos.z;
         float dist = std::sqrt(dx * dx + dz * dz);
         if (dist <= 300.0f) {
-            sBackdoorNetwork.ExecuteCivilianJackout(me->getGoId(), 0);
+            sPedestrianEcology.ExecuteCivilianJackout(me->getGoId());
             return;
         }
         float evacSpeed = 8.5f;
@@ -431,16 +429,6 @@ void BotClient::UpdateBotAI(float deltaSeconds)
         dz /= dist;
         MoveTo((float)myPos.x + dx * evacSpeed * deltaSeconds * 100.0f, (float)myPos.y, (float)myPos.z + dz * evacSpeed * deltaSeconds * 100.0f);
         return;
-    }
-
-    // 1b. Sentient Major Characters Logic (Morpheus, Merovingian, Trinity)
-    std::string botHandle = me->getHandle();
-    if (botHandle.find("Morpheus") != std::string::npos) {
-        sSentientCharacters.ProcessMorpheusStance(this, me);
-    } else if (botHandle.find("Merovingian") != std::string::npos) {
-        sSentientCharacters.ProcessMerovingianCombat(this, me);
-    } else if (botHandle.find("Trinity") != std::string::npos) {
-        sSentientCharacters.ProcessTrinityCombat(this, me);
     }
 
     float healthPct = float(me->getCurrentHealth()) / float(me->getMaximumHealth());
@@ -530,15 +518,8 @@ void BotClient::UpdateBotAI(float deltaSeconds)
                     cycle.Tick(this);
                 }
                 
-                // Update Theory of Mind & Combat Memory
+                // Update Theory of Mind
                 m_tomSolver.UpdateState(std::to_string(m_targetGoId), -0.05f, 0.1f);
-                if (rand() % 10 == 0) {
-                    MemoryNode mem;
-                    mem.text = (format("In combat with %1%") % target->getHandle()).str();
-                    mem.importance = 0.7f;
-                    mem.timestamp = double(currentTime);
-                    m_memoryStream.AddMemory(mem);
-                }
             } else {
                 m_targetGoId = 0;
             }
@@ -585,13 +566,13 @@ void BotClient::UpdateBotAI(float deltaSeconds)
     } else if (optimal.name == "USE_HACKER_ABILITY") {
         if (currentTime >= m_nextActionTime && m_targetGoId != 0) {
             uint32 virusId = 1;
-            sHackerSystem.CompileProgram(me, virusId, m_targetGoId);
-            sHackerSystem.ExecuteProgram(me, virusId, m_targetGoId);
+            const AbilityTemplate* t = sDataLoader.GetAbilityTemplate((uint16)virusId);
+            sHackerSystem.ExecuteHackerAbility(me, (uint16)virusId, m_targetGoId, t);
             m_nextActionTime = currentTime + 3000;
         }
     } else if (optimal.name == "LOOT_TARGET") {
         if (currentTime >= m_nextActionTime && m_targetGoId != 0) {
-            sHackerSystem.ExtractSourceCode(me, m_targetGoId);
+            me->restoreIS(25);
             me->awardCombatExperience(500);
             m_targetGoId = 0;
             m_nextActionTime = currentTime + 1000;

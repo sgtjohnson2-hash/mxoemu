@@ -17,7 +17,7 @@
 createFileSingleton(EconomySystem);
 
 EconomySystem::EconomySystem()
-    : m_nextListingId(1), m_nextLockerEntryId(1)
+    : m_nextLockerEntryId(1)
 {
     InitializeHardlineVendors();
 }
@@ -54,22 +54,6 @@ void EconomySystem::Initialize()
             } while (lockRes->NextRow());
         }
 
-        scoped_ptr<QueryResult> tradeRes(sDatabase.Query("SELECT `listingId`, `sellerId`, `templateId`, `infoPrice` FROM `trade_listings` WHERE `isActive` = 1"));
-        if (tradeRes)
-        {
-            do
-            {
-                Field* f = tradeRes->Fetch();
-                VendorListing l;
-                l.listingId = f[0].GetUInt64();
-                l.sellerId = f[1].GetUInt32();
-                l.templateId = f[2].GetUInt32();
-                l.infoPrice = f[3].GetUInt32();
-                l.isActive = true;
-                m_activeListings[l.listingId] = l;
-                if (l.listingId >= m_nextListingId) m_nextListingId = l.listingId + 1;
-            } while (tradeRes->NextRow());
-        }
     }
     catch (...)
     {
@@ -133,160 +117,6 @@ uint32 EconomySystem::GetItemPrice(uint32 templateId) const
         default:
             return 250;
     }
-}
-
-uint64 EconomySystem::ListVendorItem(PlayerObject* seller, uint32 templateId, uint32 price)
-{
-    if (!seller) return 0;
-
-    std::lock_guard<std::recursive_mutex> lock(m_transactionMutex);
-
-    if (seller->getInventory())
-    {
-        if (!seller->getInventory()->consumeItemByTemplate(templateId))
-        {
-            sBotMgr.LogCombat("Listing failed: Seller does not possess the item to list.");
-            return 0;
-        }
-    }
-
-    uint64 id = m_nextListingId++;
-
-    VendorListing listing;
-    listing.listingId = id;
-    listing.sellerId = seller->getGoId();
-    listing.templateId = templateId;
-    listing.infoPrice = price;
-    listing.isActive = true;
-
-    m_activeListings[id] = listing;
-
-    if (Database_Main != nullptr)
-    {
-        try
-        {
-            PreparedStatement stmt("INSERT INTO `trade_listings` (`listingId`, `sellerId`, `templateId`, `infoPrice`, `isActive`) VALUES (?0, ?1, ?2, ?3, 1)");
-            stmt.SetUInt64(0, id);
-            stmt.SetUInt64(1, seller->getCharacterUID());
-            stmt.SetUInt32(2, templateId);
-            stmt.SetUInt32(3, price);
-            sDatabase.ExecutePrepared(&stmt);
-        }
-        catch (...) {}
-    }
-
-    INFO_LOG(format("Player %1% listed item %2% for %3% Info") % seller->getHandle() % templateId % price);
-    return id;
-}
-
-bool EconomySystem::PurchaseVendorItem(PlayerObject* buyer, uint64 listingId)
-{
-    if (!buyer) return false;
-
-    std::lock_guard<std::recursive_mutex> lock(m_transactionMutex);
-    auto it = m_activeListings.find(listingId);
-    if (it == m_activeListings.end() || !it->second.isActive)
-    {
-        return false;
-    }
-
-    VendorListing& listing = it->second;
-
-    if (buyer->getInfo() < listing.infoPrice)
-    {
-        sBotMgr.LogCombat("Purchase failed: Insufficient Information currency.");
-        return false;
-    }
-
-    if (buyer->getInventory() && buyer->getInventory()->getFirstFreeSlot() == 0)
-    {
-        sBotMgr.LogCombat("Purchase failed: Buyer inventory is full.");
-        return false;
-    }
-
-    // ACID-safe atomic settlement
-    buyer->removeInfo(listing.infoPrice);
-    buyer->saveCashToDB();
-    buyer->giveItem(listing.templateId);
-    if (buyer->getInventory() && !buyer->getClient().isBot()) {
-        buyer->getInventory()->saveToDB();
-    }
-    listing.isActive = false;
-
-    PlayerObject* sellerObj = sObjMgr.getGOPtrSafe(listing.sellerId);
-    if (sellerObj)
-    {
-        sellerObj->addInfo(listing.infoPrice);
-        sellerObj->saveCashToDB();
-    }
-
-    if (Database_Main != nullptr)
-    {
-        try
-        {
-            PreparedStatement stmt("UPDATE `trade_listings` SET `isActive` = 0 WHERE `listingId` = ?0");
-            stmt.SetUInt64(0, listingId);
-            sDatabase.ExecutePrepared(&stmt);
-        }
-        catch (...) {}
-    }
-
-    INFO_LOG(format("Player %1% purchased listing %2% (Item %3%)") % buyer->getHandle() % listingId % listing.templateId);
-    return true;
-}
-
-bool EconomySystem::CancelListing(PlayerObject* seller, uint64 listingId)
-{
-    if (!seller) return false;
-
-    std::lock_guard<std::recursive_mutex> lock(m_transactionMutex);
-    auto it = m_activeListings.find(listingId);
-    if (it == m_activeListings.end() || !it->second.isActive)
-    {
-        return false;
-    }
-
-    if (it->second.sellerId != seller->getGoId())
-    {
-        return false; // Unauthorized cancel
-    }
-
-    if (seller->getInventory() && seller->getInventory()->getFirstFreeSlot() == 0)
-    {
-        sBotMgr.LogCombat("Cancel listing failed: Seller inventory is full.");
-        return false;
-    }
-
-    it->second.isActive = false;
-    seller->giveItem(it->second.templateId);
-    if (seller->getInventory() && !seller->getClient().isBot()) {
-        seller->getInventory()->saveToDB();
-    }
-
-    if (Database_Main != nullptr)
-    {
-        try
-        {
-            PreparedStatement stmt("UPDATE `trade_listings` SET `isActive` = 0 WHERE `listingId` = ?0");
-            stmt.SetUInt64(0, listingId);
-            sDatabase.ExecutePrepared(&stmt);
-        }
-        catch (...) {}
-    }
-
-    INFO_LOG(format("Player %1% cancelled listing %2%") % seller->getHandle() % listingId);
-    return true;
-}
-
-std::vector<VendorListing> EconomySystem::GetActiveListings() const
-{
-    std::lock_guard<std::recursive_mutex> lock(m_transactionMutex);
-    std::vector<VendorListing> active;
-    for (const auto& pair : m_activeListings)
-    {
-        if (pair.second.isActive) active.push_back(pair.second);
-    }
-    return active;
 }
 
 bool EconomySystem::AtomicTradeTransfer(PlayerObject* buyer, PlayerObject* seller, uint32 itemTemplateId, uint32 price)

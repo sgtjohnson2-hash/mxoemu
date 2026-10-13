@@ -20,9 +20,7 @@ public:
     bool ExecuteSpyAbility(PlayerObject* caster, uint16 abilityId, uint32 targetGoId, const struct AbilityTemplate* templ);
 
     // Legacy signatures
-    bool CompileProgram(PlayerObject* hacker, uint32 programId, uint32 targetGoId);
-    bool ExecuteProgram(PlayerObject* hacker, uint32 programId, uint32 targetGoId);
-    bool ExtractSourceCode(PlayerObject* hacker, uint32 targetGoId);
+
 };
 
 #define sHackerSystem Singleton<HackerSystem>::getSingleton()

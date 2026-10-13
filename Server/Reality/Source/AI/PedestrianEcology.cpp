@@ -9,11 +9,9 @@
 #include "BehaviorTree.h"
 #include "AI/TheoryOfMind.h"
 #include "AI/MatrixThreatHeatmap.h"
-#include "RadioDispatchSystem.h"
 #include "BotManager.h"
-#include "SmithVirusCascade.h"
 #include "GameServer.h"
-#include "BackdoorNetwork.h"
+#include "MessageTypes.h"
 #include <cmath>
 #include <algorithm>
 
@@ -132,10 +130,8 @@ void PedestrianEcology::Initialize()
         "Someone near the station had their face glitch and ripple into a dark suit...",
         "They're multiplying. Don't look them in the eyes or you become one of them...",
         "I saw an entire crowd turn their heads in perfect synchronization. Something is terribly wrong.",
-        "The transit police fired on one of those identical men and the bullets just flattened on his skin.",
         "There are men in dark glasses watching every phone booth... don't answer them.",
         "A guy in Morrell collapsed, and when he stood up, he wasn't him anymore—he was that agent.",
-        "They're sealing off the streets... I heard it over a transit police scanner.",
         "Unnatural faces in the crowd. Look closely at people's reflections in the glass windows.",
         "The subway turnstiles are being guarded by identical agents standing shoulder to shoulder."
     };
@@ -148,8 +144,7 @@ void PedestrianEcology::Initialize()
         "SUBWAY! GET UNDERGROUND RIGHT NOW!",
         "THE WHOLE STREET TURNED INTO HIM! RUN!",
         "PLEASE NO! SOMEONE STOP THEM! AAAAAGH!",
-        "HE JUST REACHED INTO HIM AND REWROTE HIM! RUN!",
-        "THE POLICE CAN'T STOP THEM! THEY'RE INEVITABLE!"
+        "HE JUST REACHED INTO HIM AND REWROTE HIM! RUN!"
     };
 
     // Tier 2 Evasion Whispers & Rejections
@@ -161,32 +156,27 @@ void PedestrianEcology::Initialize()
         "Stay back! Don't talk to anyone... they're watching every corner."
     };
 
-    {
-        std::lock_guard<std::recursive_mutex> lock(m_cordonMutex);
-        m_tacticalCordons.clear();
-    }
-
     INFO_LOG(format("PedestrianEcology Initialized with %1% POIs, %2% ambient rumors, and %3% outbreak rumors across 4 districts.") 
              % m_pois.size() % m_rumorPool.size() % m_outbreakRumors.size());
 }
 
-PointOfInterest PedestrianEcology::GetCircadianTarget(float currentX, float currentZ, WeatherSystem::CircadianPeriod period, const BotPersonality& personality) const
+PointOfInterest PedestrianEcology::GetCircadianTarget(float currentX, float currentZ, CircadianPeriod period, const BotPersonality& personality) const
 {
     POIType targetType = POI_OFFICE_COMMERCIAL;
 
     switch (period) {
-        case WeatherSystem::PERIOD_COMMUTE_MORNING:
-        case WeatherSystem::PERIOD_COMMUTE_EVENING:
+        case PERIOD_COMMUTE_MORNING:
+        case PERIOD_COMMUTE_EVENING:
             targetType = POI_SUBWAY_TRANSIT;
             break;
-        case WeatherSystem::PERIOD_WORK:
+        case PERIOD_WORK:
             if (personality.conscientiousness > 0.4f) {
                 targetType = POI_OFFICE_COMMERCIAL;
             } else {
                 targetType = POI_DINER_RESTAURANT; // Slacking off at the diner
             }
             break;
-        case WeatherSystem::PERIOD_LEISURE:
+        case PERIOD_LEISURE:
             if (personality.extraversion > 0.6f && personality.openness > 0.5f) {
                 targetType = POI_NIGHTCLUB_BAR;
             } else if (personality.extraversion > 0.3f) {
@@ -195,7 +185,7 @@ PointOfInterest PedestrianEcology::GetCircadianTarget(float currentX, float curr
                 targetType = POI_PARK_BENCH; // Quiet park bench for introverts
             }
             break;
-        case WeatherSystem::PERIOD_REST_NIGHT:
+        case PERIOD_REST_NIGHT:
             if (personality.neuroticism > 0.7f || personality.conscientiousness > 0.5f) {
                 targetType = POI_RESIDENTIAL_APARTMENT;
             } else {
@@ -460,15 +450,15 @@ void PedestrianEcology::UpdateCivilianFear(BotClient* bot, PlayerObject* me, flo
 
     // 1. Threat Heatmap influence
     float localHeat = sMatrixThreatHeatmap.GetHeat(pos.x, pos.z);
-    EscalationTier tier = sMatrixThreatHeatmap.GetTier(pos.x, pos.z);
+    HeatTier tier = sMatrixThreatHeatmap.GetTier(pos.x, pos.z);
     if (localHeat > 20.0f) {
         fearDelta += (localHeat * 0.0012f) * deltaSeconds * (0.8f + personality.neuroticism * 0.6f);
     }
     float minFearFloor = 0.0f;
-    if (tier == ESCALATION_TIER_1_POLICE) minFearFloor = 0.20f;
-    else if (tier == ESCALATION_TIER_2_SWAT) minFearFloor = 0.35f;
-    else if (tier == ESCALATION_TIER_3_AGENT_TAKEOVER) minFearFloor = 0.55f;
-    else if (tier >= ESCALATION_TIER_4_MULTI_AGENT) minFearFloor = 0.80f;
+    if (tier == HEAT_TIER_1_LOW) minFearFloor = 0.20f;
+    else if (tier == HEAT_TIER_2_ELEVATED) minFearFloor = 0.35f;
+    else if (tier == HEAT_TIER_3_HIGH) minFearFloor = 0.55f;
+    else if (tier >= HEAT_TIER_4_SEVERE) minFearFloor = 0.80f;
 
     // 2. Proximity Threat Scanning
     auto nearbyClients = sSpatialGrid.GetClientsInRadius(pos.x, pos.z);
@@ -542,7 +532,7 @@ void PedestrianEcology::UpdateCivilian(BotClient* bot, float deltaSeconds)
 
         if (dist <= 300.0f) {
             // Reached the evacuation Hardline! Jack out safely!
-            sBackdoorNetwork.ExecuteCivilianJackout(me->getGoId(), 0);
+            ExecuteCivilianJackout(me->getGoId());
             return;
         }
 
@@ -581,7 +571,7 @@ void PedestrianEcology::ExecuteTier0Normal(BotClient* bot, PlayerObject* me, flo
     LocationVector pos = me->getPosition();
     uint32 now = getMSTime();
 
-    WeatherSystem::CircadianPeriod currentPeriod = sWeatherSys.GetCircadianPeriod();
+    CircadianPeriod currentPeriod = GetCircadianPeriod();
     PointOfInterest targetPOI = GetCircadianTarget(pos.x, pos.z, currentPeriod, personality);
 
     float toPdx = targetPOI.x - pos.x;
@@ -667,14 +657,6 @@ void PedestrianEcology::ExecuteTier1Uneasy(BotClient* bot, PlayerObject* me, flo
             bot->Emote(41);
         }
     }
-
-    // 911 Call Escalation
-    if (bot->GetFearLevel() >= 0.40f && (now - bot->GetLastDistressCallTime() > 45000)) {
-        bot->SetLastDistressCallTime(now);
-        uint32 districtId = sMatrixThreatHeatmap.GetDistrictAt(pos.x, pos.z);
-        sRadioDispatchSystem.Report911Call(districtId, pos.x, pos.z,
-            (format("Bizarre disturbance! Men in black suits multiplying near %1%") % targetPOI.name).str());
-    }
 }
 
 void PedestrianEcology::ExecuteTier2Alarm(BotClient* bot, PlayerObject* me, float deltaSeconds)
@@ -753,27 +735,8 @@ void PedestrianEcology::ExecuteTier3Panic(BotClient* bot, PlayerObject* me, floa
     LocationVector pos = me->getPosition();
     uint32 now = getMSTime();
 
-    uint32 districtId = sMatrixThreatHeatmap.GetDistrictAt(pos.x, pos.z);
-    bool cordonActive = IsCordonActive(districtId);
-
-    // Target Shelter: Subway unless cordoned, else Commercial/Residential building
-    PointOfInterest dest;
-    PointOfInterest nearestSubway = GetNearestSubway(pos.x, pos.z);
-
-    if (cordonActive) {
-        // Subway is cordoned! Check if near subway and intercept
-        if (CheckCordonInterception(bot, me, nearestSubway.x, nearestSubway.z, 500.0f)) {
-            if (now - bot->GetLastWhisperTime() > 8000) {
-                bot->SetLastWhisperTime(now);
-                bot->Say("The subway is sealed! The police locked the gates! We're trapped!");
-            }
-            bot->SetLocomotionAnimation(0); // Cower / freeze
-            return;
-        }
-        dest = GetNearestPOI(pos.x, pos.z, POI_OFFICE_COMMERCIAL);
-    } else {
-        dest = nearestSubway;
-    }
+    // Target shelter: the nearest subway entrance
+    PointOfInterest dest = GetNearestSubway(pos.x, pos.z);
 
     // Sprint fleeing speed scaled by neuroticism
     float dx = dest.x - pos.x;
@@ -809,192 +772,41 @@ void PedestrianEcology::ExecuteTier3Panic(BotClient* bot, PlayerObject* me, floa
     }
 }
 
-void PedestrianEcology::DeployTacticalCordon(uint32 districtId)
+float PedestrianEcology::GetMatrixHour() const
 {
-    // World.InventedEscalation (default 0): the heat -> police/SWAT/Agent escalation, its radio
-    // chatter and its SWAT_Tactical_* bots have no retail source (no HDS file, no client.dll
-    // reference, no capture). GEMINI.md guardrail: no fake systems. Off unless explicitly enabled.
-    if (!sConfig.GetBoolDefault("World.InventedEscalation", false))
-        return;
-    std::lock_guard<std::recursive_mutex> lock(m_cordonMutex);
-    auto it = m_tacticalCordons.find(districtId);
-    if (it != m_tacticalCordons.end() && it->second.active) {
-        return; // Already deployed
-    }
-
-    // Find subway station in this district
-    PointOfInterest subwayTarget;
-    bool found = false;
-    for (const auto& poi : m_pois) {
-        if (poi.districtId == districtId && poi.type == POI_SUBWAY_TRANSIT) {
-            subwayTarget = poi;
-            found = true;
-            break;
-        }
-    }
-    if (!found) {
-        subwayTarget = GetNearestSubway(0.0f, 0.0f);
-    }
-
-    TacticalCordonPoint cordon;
-    cordon.districtId = districtId;
-    cordon.x = subwayTarget.x;
-    cordon.y = subwayTarget.y;
-    cordon.z = subwayTarget.z;
-    cordon.name = subwayTarget.name;
-    cordon.active = true;
-    cordon.deployedMs = getMSTime();
-
-    // Spawn SWAT Breachers & Barricade units around the subway entrance
-    auto botLead = sBotMgr.SpawnSingleBot(cordon.x, cordon.y, cordon.z + 200.0f, FACTION_MACHINES);
-    if (botLead) {
-        PlayerObject* po = BotGetPlayer(botLead->GetPlayerGoId());
-        if (po) {
-            po->setHandle("SWAT_Tactical_Lead");
-            po->setLevel(45);
-            po->setMaximumHealth(3500);
-            po->setCurrentHealth(3500);
-            cordon.cordonBotGoIds.push_back(po->getGoId());
-            botLead->Say((format("SWAT Tactical Lead: Perimeter cordon deployed at %1%. Subway concourse is quarantined by Machine Order.") % cordon.name).str());
-        }
-    }
-
-    auto botBreacher = sBotMgr.SpawnSingleBot(cordon.x - 250.0f, cordon.y, cordon.z + 150.0f, FACTION_MACHINES);
-    if (botBreacher) {
-        PlayerObject* po = BotGetPlayer(botBreacher->GetPlayerGoId());
-        if (po) {
-            po->setHandle("SWAT_Cordon_Breacher");
-            po->setLevel(40);
-            po->setMaximumHealth(3000);
-            po->setCurrentHealth(3000);
-            cordon.cordonBotGoIds.push_back(po->getGoId());
-            botBreacher->Say("SWAT Breacher: Barricade in position. Turn back all civilian traffic!");
-        }
-    }
-
-    auto botGuard = sBotMgr.SpawnSingleBot(cordon.x + 250.0f, cordon.y, cordon.z + 150.0f, FACTION_MACHINES);
-    if (botGuard) {
-        PlayerObject* po = BotGetPlayer(botGuard->GetPlayerGoId());
-        if (po) {
-            po->setHandle("SWAT_Perimeter_Guard");
-            po->setLevel(40);
-            po->setMaximumHealth(3000);
-            po->setCurrentHealth(3000);
-            cordon.cordonBotGoIds.push_back(po->getGoId());
-        }
-    }
-
-    auto botBarricade = sBotMgr.SpawnSingleBot(cordon.x, cordon.y, cordon.z + 350.0f, FACTION_MACHINES);
-    if (botBarricade) {
-        PlayerObject* po = BotGetPlayer(botBarricade->GetPlayerGoId());
-        if (po) {
-            po->setHandle("Police_Cruiser_Barricade");
-            po->setLevel(35);
-            po->setMaximumHealth(2500);
-            po->setCurrentHealth(2500);
-            cordon.cordonBotGoIds.push_back(po->getGoId());
-        }
-    }
-
-    m_tacticalCordons[districtId] = cordon;
-
-    // Broadcast scanner announcement
-    sRadioDispatchSystem.BroadcastCordonOrder(districtId, cordon.name);
-    INFO_LOG(format("PedestrianEcology: Tactical Perimeter Cordon active at %1% (District %2%)") 
-             % cordon.name % districtId);
+    uint32 now = getMSTime();
+    if (m_clockStartMs == 0) m_clockStartMs = now;
+    // 1 in-game hour = 5 real minutes (300,000 ms); the day starts at 08:00
+    float elapsedHours = (float)(now - m_clockStartMs) / 300000.0f;
+    float h = std::fmod(8.0f + elapsedHours, 24.0f);
+    if (h < 0.0f) h += 24.0f;
+    return h;
 }
 
-bool PedestrianEcology::IsCordonActive(uint32 districtId) const
+CircadianPeriod PedestrianEcology::GetCircadianPeriod() const
 {
-    std::lock_guard<std::recursive_mutex> lock(m_cordonMutex);
-    auto it = m_tacticalCordons.find(districtId);
-    return (it != m_tacticalCordons.end()) ? it->second.active : false;
+    float h = GetMatrixHour();
+    if (h >= 6.0f && h < 8.0f) return PERIOD_COMMUTE_MORNING;
+    if (h >= 8.0f && h < 17.0f) return PERIOD_WORK;
+    if (h >= 17.0f && h < 18.0f) return PERIOD_COMMUTE_EVENING;
+    if (h >= 18.0f && h < 22.0f) return PERIOD_LEISURE;
+    return PERIOD_REST_NIGHT;
 }
 
-void PedestrianEcology::SetCordonActive(uint32 districtId, bool active)
+bool PedestrianEcology::ExecuteCivilianJackout(uint32 entityGoId)
 {
-    std::lock_guard<std::recursive_mutex> lock(m_cordonMutex);
-    m_tacticalCordons[districtId].active = active;
-}
+    PlayerObject* po = sObjMgr.getGOPtrSafe(entityGoId);
+    if (!po || po->isDead()) return false;
 
-bool PedestrianEcology::CheckCordonInterception(BotClient* bot, PlayerObject* me, float subwayX, float subwayZ, float radius)
-{
-    if (!bot || !me) return false;
-    LocationVector pos = me->getPosition();
-    float dx = pos.x - subwayX;
-    float dz = pos.z - subwayZ;
-    float dist = std::sqrt(dx * dx + dz * dz);
+    LocationVector pos = po->getPosition();
+    sGame.BroadcastNear((float)pos.x, (float)pos.z, 2000.0f, std::make_shared<JackoutEffectMsg>(entityGoId, true)->toBuf(), false);
 
-    if (dist < radius) {
-        if (dist > 1.0f) {
-            dx /= dist;
-            dz /= dist;
-        } else {
-            dx = 1.0f;
-            dz = 0.0f;
-        }
-
-        // Push civilian back 600 units away from subway
-        float bounceX = pos.x + dx * 600.0f;
-        float bounceZ = pos.z + dz * 600.0f;
-        bot->MoveTo(bounceX, pos.y, bounceZ);
-
-        uint32 now = getMSTime();
-        if (now - bot->GetLastWhisperTime() > 5000) {
-            bot->SetLastWhisperTime(now);
-            const char* swatWarnings[] = {
-                "SWAT Breacher: HALT! Subway is locked down under Machine Quarantine! Turn around!",
-                "SWAT Tactical Lead: Nobody enters the transit concourse! Fall back inside the sector!",
-                "SWAT Guard: Quarantine line active! Return to your homes immediately!"
-            };
-            bot->Say(swatWarnings[rand() % 3]);
-        }
-        return true;
-    }
-    return false;
-}
-
-bool PedestrianEcology::BreachTacticalCordon(uint32 districtId, uint32 rescuerSquadId)
-{
-    std::lock_guard<std::recursive_mutex> lock(m_cordonMutex);
-    auto it = m_tacticalCordons.find(districtId);
-    if (it == m_tacticalCordons.end() || !it->second.active) {
-        return false;
+    auto bot = sBotMgr.GetBotByGOID(entityGoId);
+    if (bot) {
+        bot->Invalidate();
     }
 
-    TacticalCordonPoint& cordon = it->second;
-    cordon.active = false;
-
-    // Disorient SWAT cordon guards with EMP disruption canisters
-    for (uint32 botId : cordon.cordonBotGoIds) {
-        PlayerObject* po = BotGetPlayer(botId);
-        if (po && !po->isDead()) {
-            po->takeDamage(0, 500, 0); // EMP shock damage
-            auto bot = sBotMgr.GetBotByGOID(botId);
-            if (bot) {
-                bot->SetTargetGoId(0);
-                bot->Say("SWAT Officer: EMP canister! Optics jammed— our barricade line is collapsing!");
-            }
-        }
-    }
-
-    std::string announcement = (format("[TACTICAL BREACH] Zion Strike Squad %1% breached SWAT cordon at %2%! Subway evacuation corridor OPEN!")
-                                % rescuerSquadId % cordon.name).str();
-    sBotMgr.LogCombat(announcement);
-    INFO_LOG(format("PedestrianEcology: %1%") % announcement);
-
-    RadioTransmission tx;
-    tx.transmissionId = 88888;
-    tx.tenCode = "10-99-BREACH";
-    tx.unitCallsign = "SWAT Tactical Net";
-    tx.districtName = sRadioDispatchSystem.ResolveDistrictName(districtId);
-    tx.locationAddress = cordon.name;
-    tx.threatHeatLevel = 190.0f;
-    tx.escalationTier = 4;
-    tx.timestampMs = getMSTime();
-    tx.squelchToneActive = true;
-    tx.chatterText = "[*STATIC*] MAYDAY! SWAT cordon overrun by Zion strike team at " + cordon.name + "! Subway concourse turnstiles breached!";
-    sRadioDispatchSystem.BroadcastDispatch(tx);
-
+    po->die(0); // despawn from the Matrix
+    INFO_LOG(format("PedestrianEcology: civilian %1% jacked out at its evacuation hardline") % entityGoId);
     return true;
 }

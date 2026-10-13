@@ -18,7 +18,6 @@
 #include "BotManager.h"
 #include "BotClient.h"
 #include "FactionWarManager.h"
-#include "AdaptiveMusicSystem.h"
 #include "Database/AsyncDatabase.h"
 #include <mutex>
 #include <boost/algorithm/string.hpp>
@@ -359,8 +358,6 @@ void PlayerObject::takeDamage( uint32 attackerGoId, uint16 damage, uint32 fxId, 
 			bot->SetTargetGoId(attackerGoId);
 	}
 
-	// Notify Adaptive Music System of combat intensity (threat level)
-	sAdaptiveMusicSystem.registerThreat(m_goId, actualDamage * 2, getMSTime());
 
 	//health change + hit FX: other clients get the other-view layout,
 	//the victim's own client gets the self-view layout (HUD bar + FX)
@@ -605,7 +602,6 @@ void PlayerObject::die( uint32 killerGoId )
         } catch (...) {}
     }
     
-	sAdaptiveMusicSystem.clearThreat(m_goId, getMSTime());
 
 	//(removed: setOnlineStatus(false) flagged dead players offline in the DB/friends list, and a
 	//jackout beam was used as a "downed" visual; the IsDead attribute above is the death state)

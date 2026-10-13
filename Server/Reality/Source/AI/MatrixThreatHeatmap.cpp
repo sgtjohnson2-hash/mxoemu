@@ -5,11 +5,6 @@
 #include "ObjectMgr.h"
 #include "PlayerObject.h"
 #include "SpatialGrid.h"
-#include "WeatherSystem.h"
-#include "GameServer.h"
-#include "RadioDispatchSystem.h"
-#include "PedestrianEcology.h"
-#include "SmithVirusCascade.h"
 #include <cmath>
 #include <algorithm>
 
@@ -34,8 +29,6 @@ void MatrixThreatHeatmap::Initialize()
         cell.heat = 0.0f;
         cell.peakHeat = 0.0f;
         cell.lastIncidentMs = 0;
-        cell.escalationTier = 0;
-        cell.lastSpawnMs = 0;
     }
     std::fill(m_diffuseBuffer.begin(), m_diffuseBuffer.end(), 0.0f);
     m_sabotagedDistricts.clear();
@@ -113,7 +106,7 @@ float MatrixThreatHeatmap::GetHeat(float worldX, float worldZ) const
     return m_grid[gz * GRID_WIDTH + gx].heat;
 }
 
-EscalationTier MatrixThreatHeatmap::GetTier(float worldX, float worldZ) const
+HeatTier MatrixThreatHeatmap::GetTier(float worldX, float worldZ) const
 {
     int gx, gz;
     WorldToGrid(worldX, worldZ, gx, gz);
@@ -122,20 +115,11 @@ EscalationTier MatrixThreatHeatmap::GetTier(float worldX, float worldZ) const
     uint32 districtId = GetDistrictAt(worldX, worldZ);
     float thresholdMultiplier = IsDistrictSabotaged(districtId) ? 2.5f : 1.0f;
 
-    if (heat >= 260.0f * thresholdMultiplier) return ESCALATION_TIER_5_SMITH_OUTBREAK;
-    if (heat >= 180.0f * thresholdMultiplier) return ESCALATION_TIER_4_MULTI_AGENT;
-    if (heat >= 110.0f * thresholdMultiplier) return ESCALATION_TIER_3_AGENT_TAKEOVER;
-    if (heat >= 60.0f * thresholdMultiplier) return ESCALATION_TIER_2_SWAT;
-    if (heat >= 25.0f * thresholdMultiplier) return ESCALATION_TIER_1_POLICE;
-    return ESCALATION_TIER_NONE;
-}
-
-EscalationTier MatrixThreatHeatmap::GetActiveTier(float worldX, float worldZ) const
-{
-    int gx, gz;
-    WorldToGrid(worldX, worldZ, gx, gz);
-    std::lock_guard<std::recursive_mutex> lock(m_mutex);
-    return (EscalationTier)m_grid[gz * GRID_WIDTH + gx].escalationTier;
+    if (heat >= 180.0f * thresholdMultiplier) return HEAT_TIER_4_SEVERE;
+    if (heat >= 110.0f * thresholdMultiplier) return HEAT_TIER_3_HIGH;
+    if (heat >= 60.0f * thresholdMultiplier) return HEAT_TIER_2_ELEVATED;
+    if (heat >= 25.0f * thresholdMultiplier) return HEAT_TIER_1_LOW;
+    return HEAT_TIER_NONE;
 }
 
 void MatrixThreatHeatmap::Update(float dtSeconds, uint32 currentMs)
@@ -168,288 +152,10 @@ void MatrixThreatHeatmap::Update(float dtSeconds, uint32 currentMs)
         }
     }
 
-    // 2. Exponential Decay & 5-Tier Escalation Evaluation
+    // 2. Exponential Decay
     float decayFactor = std::exp(-decayRate * dtSeconds);
 
-    for (int gz = 0; gz < GRID_DEPTH; ++gz) {
-        for (int gx = 0; gx < GRID_WIDTH; ++gx) {
-            int idx = gz * GRID_WIDTH + gx;
-            DisruptionCell& cell = m_grid[idx];
-
-            cell.heat = std::max(0.0f, m_diffuseBuffer[idx] * decayFactor);
-
-            float wx, wz;
-            GridToWorld(gx, gz, wx, wz);
-            uint32 districtId = GetDistrictAt(wx, wz);
-            // Sabotaged district doubles tolerance (surveillance offline)
-            float thresholdMultiplier = IsDistrictSabotaged(districtId) ? 2.5f : 1.0f;
-
-            // Determine Target Escalation Tier
-            EscalationTier targetTier = ESCALATION_TIER_NONE;
-            if (cell.heat >= 260.0f * thresholdMultiplier) targetTier = ESCALATION_TIER_5_SMITH_OUTBREAK;
-            else if (cell.heat >= 180.0f * thresholdMultiplier) targetTier = ESCALATION_TIER_4_MULTI_AGENT;
-            else if (cell.heat >= 110.0f * thresholdMultiplier) targetTier = ESCALATION_TIER_3_AGENT_TAKEOVER;
-            else if (cell.heat >= 60.0f * thresholdMultiplier) targetTier = ESCALATION_TIER_2_SWAT;
-            else if (cell.heat >= 25.0f * thresholdMultiplier) targetTier = ESCALATION_TIER_1_POLICE;
-
-            if (targetTier > (EscalationTier)cell.escalationTier) {
-                // Trigger escalation response if cooldown has expired (30 seconds)
-                if (currentMs - cell.lastSpawnMs >= 30000) {
-                    cell.escalationTier = (uint8)targetTier;
-                    cell.lastSpawnMs = currentMs;
-                    TriggerEscalationResponse(gx, gz, targetTier, currentMs);
-                }
-            } else if (cell.heat < 15.0f * thresholdMultiplier) {
-                cell.escalationTier = (uint8)ESCALATION_TIER_NONE;
-            }
-        }
+    for (int idx = 0; idx < GRID_WIDTH * GRID_DEPTH; ++idx) {
+        m_grid[idx].heat = std::max(0.0f, m_diffuseBuffer[idx] * decayFactor);
     }
-}
-
-void MatrixThreatHeatmap::TriggerEscalationResponse(int gx, int gz, EscalationTier tier, uint32 currentMs)
-{
-    // World.InventedEscalation (default 0): the heat -> police/SWAT/Agent escalation, its radio
-    // chatter and its SWAT_Tactical_* bots have no retail source (no HDS file, no client.dll
-    // reference, no capture). GEMINI.md guardrail: no fake systems. Off unless explicitly enabled.
-    if (!sConfig.GetBoolDefault("World.InventedEscalation", false))
-        return;
-    float wx, wz;
-    GridToWorld(gx, gz, wx, wz);
-
-    // Resolve authentic pavement elevation (Y = 572.0f or nearby operative height)
-    float wy = m_grid[gz * GRID_WIDTH + gx].lastY;
-    if (wy < 200.0f) {
-        wy = 572.0f; // Megacity street pavement elevation
-    }
-    auto nearby = sSpatialGrid.GetClientsInRadius(wx, wz);
-    for (GameClient* gc : nearby) {
-        PlayerObject* p = BotGetPlayer(gc->GetPlayerGoId());
-        if (p && p->getY() > 200.0f) {
-            wy = (float)p->getY();
-            break;
-        }
-    }
-
-    // Broadcast procedural police radio chatter for heat escalation
-    uint32 districtId = GetDistrictAt(wx, wz);
-    float currentHeat = m_grid[gz * GRID_WIDTH + gx].heat;
-    RadioTransmission dispatchTx;
-    sRadioDispatchSystem.GenerateDispatchCall(districtId, currentHeat, (int)tier, wx, wz, dispatchTx);
-
-    std::string tierName;
-    switch (tier) {
-        case ESCALATION_TIER_1_POLICE: {
-            tierName = "Tier 1: Transit Police";
-            auto bot = sBotMgr.SpawnSingleBot(wx, wy, wz, FACTION_MACHINES);
-            if (bot) {
-                PlayerObject* po = BotGetPlayer(bot->GetPlayerGoId());
-                if (po) {
-                    po->setHandle("Transit_Police_Officer");
-                    po->setLevel(25);
-                    po->setLootTableId(2); // Midtown / Police Table
-                    bot->Say("Transit Police: Freeze! Cease physical altercation and submit to query!");
-                }
-            }
-            break;
-        }
-        case ESCALATION_TIER_2_SWAT: {
-            tierName = "Tier 2: SWAT Tactical Breach";
-            auto bot1 = sBotMgr.SpawnSingleBot(wx, wy, wz, FACTION_MACHINES);
-            auto bot2 = sBotMgr.SpawnSingleBot(wx + 200.0f, wy, wz + 200.0f, FACTION_MACHINES);
-            if (bot1) {
-                PlayerObject* po1 = BotGetPlayer(bot1->GetPlayerGoId());
-                if (po1) {
-                    po1->setHandle("SWAT_Tactical_Lead");
-                    po1->setLevel(40);
-                    po1->setMaximumHealth(2500);
-                    po1->setCurrentHealth(2500);
-                    po1->setLootTableId(2); // SWAT Table
-                    bot1->Say("SWAT Tactical: Code 4 breach in progress! Clear the engagement zone!");
-                }
-            }
-            if (bot2) {
-                PlayerObject* po2 = BotGetPlayer(bot2->GetPlayerGoId());
-                if (po2) {
-                    po2->setHandle("SWAT_Tactical_Breacher");
-                    po2->setLevel(40);
-                    po2->setMaximumHealth(2500);
-                    po2->setCurrentHealth(2500);
-                    po2->setLootTableId(2); // SWAT Table
-                }
-            }
-            break;
-        }
-        case ESCALATION_TIER_3_AGENT_TAKEOVER: {
-            tierName = "Tier 3: Agent Overwrite";
-            // Search for nearby civilian or police to overwrite
-            bool overwritten = false;
-
-            for (GameClient* gc : nearby) {
-                if (!gc->isBot()) continue;
-                BotClient* targetBot = dynamic_cast<BotClient*>(gc);
-                if (!targetBot || targetBot->isAgent()) continue;
-
-                PlayerObject* po = BotGetPlayer(targetBot->GetPlayerGoId());
-                if (!po || po->isDead()) continue;
-
-                // Transmogrify host into Agent!
-                targetBot->setAgent(true);
-                targetBot->SetFaction(FACTION_MACHINES);
-                po->setFactionName("Machines");
-                po->setHandle("Agent_Johnson");
-                po->setRsiHex("6e060040"); // Suit & dark glasses
-                po->setLevel(50);
-                po->setMaximumHealth(4000);
-                po->setCurrentHealth(4000);
-                po->setLootTableId(4); // Agent Boss Table
-
-                targetBot->Say("Agent Johnson: Anomaly detected at coordinates. Stand down. Your code has been revoked.");
-                overwritten = true;
-                break;
-            }
-
-            if (!overwritten) {
-                // Direct spawn
-                auto bot = sBotMgr.SpawnSingleBot(wx, wy, wz, FACTION_MACHINES);
-                if (bot) {
-                    bot->setAgent(true);
-                    PlayerObject* po = BotGetPlayer(bot->GetPlayerGoId());
-                    if (po) {
-                        po->setHandle("Agent_Jackson");
-                        po->setRsiHex("6e060040");
-                        po->setLevel(50);
-                        po->setMaximumHealth(4000);
-                        po->setCurrentHealth(4000);
-                        po->setLootTableId(4); // Agent Boss Table
-                        bot->Say("Agent Jackson: You have been traced, anomaly. Terminating.");
-                    }
-                }
-            }
-
-            // Machine System Agent Gray commandeers municipal channels & deploys cordon
-            sRadioDispatchSystem.TriggerAgentOverride("Agent Gray", "All municipal frequencies commandeered under Machine Directive 101. Initiate immediate sector quarantine.", districtId);
-            sPedestrianEcology.DeployTacticalCordon(districtId);
-            sPedestrianEcology.SpreadRumorFearAura(wx, wz, 0.35f, 2000.0f);
-            sWeatherSys.TriggerGlitchAnomaly(0.65f, 180000, WeatherSystem::GLITCH_NEON_FLICKER, "Agent Overwrite Hotspot");
-            INFO_LOG("MatrixThreatHeatmap: Escalation Tier 3 triggered neon flicker glitch anomaly");
-            break;
-        }
-        case ESCALATION_TIER_4_MULTI_AGENT: {
-            tierName = "Tier 4: Multi-Agent Convergence";
-            // Spawn Multi-Agent strike trio
-            const char* agentNames[] = {"Agent_Smith", "Agent_Brown", "Agent_Jones"};
-            for (int i = 0; i < 3; ++i) {
-                float spawnOffset = (i == 0) ? 0.0f : (i == 1 ? 500.0f : -500.0f);
-                auto bot = sBotMgr.SpawnSingleBot(wx + spawnOffset, wy, wz + spawnOffset, FACTION_MACHINES);
-                if (bot) {
-                    bot->setAgent(true);
-                    PlayerObject* po = BotGetPlayer(bot->GetPlayerGoId());
-                    if (po) {
-                        po->setHandle(agentNames[i]);
-                        po->setRsiHex("6e060040");
-                        po->setLevel(50);
-                        po->setMaximumHealth(4500);
-                        po->setCurrentHealth(4500);
-                        po->setLootTableId(4); // Agent Boss Table
-                    }
-                }
-            }
-
-            // Machine System Agent Pace overrides dispatch & reinforces cordon
-            sRadioDispatchSystem.TriggerAgentOverride("Agent Pace", "Tactical perimeter cordons active at all transit nodes. Terminate or detain any anomaly attempting breach.", districtId);
-            sPedestrianEcology.DeployTacticalCordon(districtId);
-            sPedestrianEcology.SpreadRumorFearAura(wx, wz, 0.45f, 2500.0f);
-            sWeatherSys.TriggerGlitchAnomaly(0.85f, 240000, WeatherSystem::GLITCH_CODE_DRIZZLE, "Multi-Agent Quarantine Zone");
-            INFO_LOG("MatrixThreatHeatmap: Escalation Tier 4 triggered code drizzle glitch anomaly");
-
-            // Citywide broadcast
-            std::string alert = "{c:FF0000}[System Trace Alert] Massive disruption detected! Multi-Agent Hunt Team converging on coordinates!{/c}";
-            auto allGOs = sObjMgr.getAllGOIds();
-            for (auto goId : allGOs) {
-                PlayerObject* p = sObjMgr.getGOPtr(goId);
-                if (p && !p->getClient().isBot()) {
-                    p->getClient().QueueCommand(msgBaseClassPtr(new SystemChatMsg(alert)));
-                }
-            }
-            break;
-        }
-        case ESCALATION_TIER_5_SMITH_OUTBREAK: {
-            tierName = "Tier 5: Smith Viral Cascading Outbreak";
-            // Massive rogue virus outbreak!
-            int infectionCount = 0;
-
-            for (GameClient* gc : nearby) {
-                if (!gc->isBot()) continue;
-                BotClient* targetBot = dynamic_cast<BotClient*>(gc);
-                if (!targetBot) continue;
-
-                PlayerObject* po = BotGetPlayer(targetBot->GetPlayerGoId());
-                if (!po || po->isDead()) continue;
-
-                // Infect into Smith clone!
-                targetBot->setAgent(true);
-                targetBot->SetFaction(FACTION_MACHINES);
-                po->setFactionName("Machines");
-                po->setHandle("Agent_Smith_Clone");
-                po->setRsiHex("6e060040");
-                po->setLevel(50);
-                po->setMaximumHealth(5000);
-                po->setCurrentHealth(5000);
-                po->setLootTableId(4); // Agent Boss Table
-
-                sSmithCascade.InfectEntity(po->getGoId(), 0, districtId);
-
-                if (infectionCount == 0) {
-                    targetBot->Say("Agent Smith: Hear that, Mr. Anderson? That is the sound of inevitability.");
-                } else {
-                    targetBot->Say("Agent Smith: More... it is inevitable.");
-                }
-                infectionCount++;
-                if (infectionCount >= 5) break; // Infect up to 5 hosts
-            }
-
-            if (infectionCount == 0) {
-                // Direct spawn if no nearby hosts
-                auto bot = sBotMgr.SpawnSingleBot(wx, wy, wz, FACTION_MACHINES);
-                if (bot) {
-                    bot->setAgent(true);
-                    PlayerObject* po = BotGetPlayer(bot->GetPlayerGoId());
-                    if (po) {
-                        po->setHandle("Agent_Smith_Clone");
-                        po->setRsiHex("6e060040");
-                        po->setLevel(50);
-                        po->setMaximumHealth(5000);
-                        po->setCurrentHealth(5000);
-                        po->setLootTableId(4); // Agent Boss Table
-                        sSmithCascade.InfectEntity(po->getGoId(), 0, districtId);
-                        bot->Say("Agent Smith: Hear that, Mr. Anderson? That is the sound of inevitability.");
-                    }
-                }
-            }
-
-            // Machine System Agent Skinner declares full Martial Law and seals all transit hubs
-            sRadioDispatchSystem.TriggerAgentOverride("Agent Skinner", "Contagion vector confirmed. Megacity Martial Law enacted. All transit hubs sealed indefinitely.", districtId);
-            sPedestrianEcology.DeployTacticalCordon(districtId);
-            sPedestrianEcology.SpreadRumorFearAura(wx, wz, 0.65f, 3500.0f);
-
-            // Trigger environmental spatial tear glitch
-            sWeatherSys.TriggerGlitchAnomaly(1.0f, 300000, WeatherSystem::GLITCH_SPATIAL_TEAR, "Smith Viral Outbreak Singularity");
-            INFO_LOG("MatrixThreatHeatmap: Escalation Tier 5 triggered spatial tear glitch anomaly");
-
-            // Global Radio Free Zion urgent broadcast
-            std::string alert = "{c:FFFF00}[Radio Free Zion] CRITICAL THREAT: Rogue Smith virus cascading outbreak active! EVACUATE TO THE NEAREST HARDLINE!{/c}";
-            auto allGOs = sObjMgr.getAllGOIds();
-            for (auto goId : allGOs) {
-                PlayerObject* p = sObjMgr.getGOPtr(goId);
-                if (p && !p->getClient().isBot()) {
-                    p->getClient().QueueCommand(msgBaseClassPtr(new SystemChatMsg(alert)));
-                }
-            }
-            break;
-        }
-        default: break;
-    }
-
-    INFO_LOG(format("MatrixThreatHeatmap: ESCALATION [%1%] triggered at grid (%2%, %3%) coordinates (%4%, %5%)") 
-             % tierName % gx % gz % wx % wz);
 }

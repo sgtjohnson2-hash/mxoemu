@@ -10,7 +10,6 @@
 #include "AI/QTable.h"
 #include "AI/BotPersonality.h"
 #include "AI/TheoryOfMind.h"
-#include "AI/MemoryStreamCuller.h"
 #include "AI/GOAPPlanner.h"
 class BehaviorNode;
 class TesterBrain;
@@ -126,7 +125,6 @@ public:
     ActiveInferenceSolver& GetActiveInferenceSolver() { return m_activeInference; }
     const SomaticMarkers& GetSomaticMarkers() const { return m_somatic; }
     TheoryOfMindSolver& GetTheoryOfMindSolver() { return m_tomSolver; }
-    MemoryStreamCuller& GetMemoryStreamCuller() { return m_memoryStream; }
 
     uint32 GetCrewLeaderId() const { return m_crewLeaderId; }
     void SetCrewLeaderId(uint32 id) { m_crewLeaderId = id; }
@@ -183,7 +181,6 @@ private:
     const BotPersonality* m_personality;
     TheoryOfMindSolver m_tomSolver;
 
-    MemoryStreamCuller m_memoryStream;
     std::vector<std::pair<float, float>> m_pathWaypoints;
     int m_currentWaypointIndex;
 

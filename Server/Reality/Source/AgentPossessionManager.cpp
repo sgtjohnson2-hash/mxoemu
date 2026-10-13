@@ -1,12 +1,11 @@
 #include "AgentPossessionManager.h"
-#include "RedpillAwakeningSystem.h"
 #include "Log.h"
 #include "GameServer.h"
 #include "BotManager.h"
 #include "ObjectMgr.h"
 #include "PlayerObject.h"
-#include "CityLifeManager.h"
 #include "MessageTypes.h"
+#include "SpatialGrid.h"
 #include <algorithm>
 #include <cmath>
 #include <iostream>
@@ -151,20 +150,19 @@ bool AgentPossessionManager::TriggerEmergencyIntervention(const LocationVector& 
     float bestDistSq = 250000.0f; // 500m radius
 
     if (Has3DWorldSupport()) {
-        if (CityLifeManager::getSingletonPtr()) {
-            for (const auto& pair : sCityLifeMgr.GetAllCitizens()) {
-                const auto& c = pair.second;
-                if (c.botGoId == 0 || IsEntityPossessed(c.botGoId)) continue;
-                if (auto po = sObjMgr.getGOPtrSafe(c.botGoId)) {
-                    if (po->isDead()) continue;
-                    float dx = (float)(po->getPosition().x - pos.x);
-                    float dz = (float)(po->getPosition().z - pos.z);
-                    float dSq = dx * dx + dz * dz;
-                    if (dSq < bestDistSq) {
-                        bestDistSq = dSq;
-                        bestCandidateGoId = c.botGoId;
-                    }
-                }
+        auto nearbyClients = sSpatialGrid.GetClientsInRadius(pos.x, pos.z, 50000.0f);
+        for (GameClient* gc : nearbyClients) {
+            if (!gc || !gc->isBot()) continue;
+            uint32 botGoId = gc->GetPlayerGoId();
+            if (botGoId == 0 || IsEntityPossessed(botGoId)) continue;
+            PlayerObject* po = sObjMgr.getGOPtrSafe(botGoId);
+            if (!po || po->isDead() || po->getFactionName() != "Civilian") continue;
+            float dx = (float)(po->getPosition().x - pos.x);
+            float dz = (float)(po->getPosition().z - pos.z);
+            float dSq = dx * dx + dz * dz;
+            if (dSq < bestDistSq) {
+                bestDistSq = dSq;
+                bestCandidateGoId = botGoId;
             }
         }
     }
@@ -314,9 +312,6 @@ void RunAgentPossessionTestSuite()
     AgentPossessionManager& agentMgr = sAgentPossessionMgr;
     agentMgr.Initialize();
 
-    RedpillAwakeningSystem& redpillSys = sRedpillAwakeningSystem;
-    redpillSys.Initialize();
-
     int passedCount = 0;
     int failedCount = 0;
 
@@ -402,98 +397,8 @@ void RunAgentPossessionTestSuite()
         TEST_ASSERT(!agentMgr.IsEntityPossessed(8001), "Civilian GoID is no longer marked possessed after demorph");
     }
 
-    // 6. Redpill Awakening & Anomaly Dissonance Tracking
-    {
-        uint32 potId = redpillSys.RegisterCivilianPotential(5050, "Morpheus Candidate", 1, AwakeningVector3(100.0f, 0.0f, 100.0f));
-        TEST_ASSERT(potId != 0, "RegisterCivilianPotential returns valid potential ID");
-
-        const CivilianPotential* p = redpillSys.GetPotential(potId);
-        TEST_ASSERT(p != nullptr, "Registered potential can be retrieved");
-        if (p) {
-            TEST_ASSERT(p->state == POTENTIAL_UNAWARE, "Initial potential state is POTENTIAL_UNAWARE");
-            TEST_ASSERT(p->systemDisbeliefPercent == 10.0f, "Initial disbelief starts at baseline 10%");
-        }
-
-        // Trigger Deja Vu Black Cat (+25%)
-        redpillSys.TriggerMatrixAnomaly(potId, ANOMALY_DEJA_VU_BLACK_CAT);
-        p = redpillSys.GetPotential(potId);
-        if (p) {
-            TEST_ASSERT(p->dejaVuCatOccurrences == 1, "Deja vu black cat occurrence counted");
-            TEST_ASSERT(p->systemDisbeliefPercent == 35.0f, "Disbelief increased to 35% after black cat anomaly");
-        }
-
-        // Trigger Inverted Raindrops (+15%)
-        redpillSys.TriggerMatrixAnomaly(potId, ANOMALY_INVERTED_RAINDROPS);
-        p = redpillSys.GetPotential(potId);
-        if (p) {
-            TEST_ASSERT(p->systemDisbeliefPercent == 50.0f, "Disbelief increased to 50% after inverted raindrops");
-        }
-
-        // Trigger Wireframe Flicker (+30%) -> Total 80% >= 70% threshold -> Awakens!
-        redpillSys.TriggerMatrixAnomaly(potId, ANOMALY_WIREFRAME_FLICKER);
-        p = redpillSys.GetPotential(potId);
-        if (p) {
-            TEST_ASSERT(p->systemDisbeliefPercent == 80.0f, "Disbelief increased to 80% after wireframe flicker");
-            TEST_ASSERT(p->state == POTENTIAL_AWAKENED, "Potential reaches POTENTIAL_AWAKENED state at >= 70% disbelief");
-        }
-    }
-
-    // 7. Matrix Combat Proximity Awakenings
-    {
-        uint32 bystanderId = redpillSys.RegisterCivilianPotential(5051, "Subway Commuter", 1, AwakeningVector3(500.0f, 0.0f, 500.0f));
-        redpillSys.ExposeCivilianToCombatEvent(500.0f, 500.0f, 100.0f);
-        const CivilianPotential* p = redpillSys.GetPotential(bystanderId);
-        if (p) {
-            TEST_ASSERT(p->systemDisbeliefPercent == 35.0f, "Combat exposure adds disbelief based on event intensity");
-        }
-    }
-
-    // 8. Escort & Hardline Extraction Sequence
-    {
-        uint32 extractTargetId = redpillSys.RegisterCivilianPotential(5052, "Awakened Hacker", 1, AwakeningVector3(1000.0f, 0.0f, 1000.0f));
-        // Force awaken
-        redpillSys.TriggerMatrixAnomaly(extractTargetId, ANOMALY_WIREFRAME_FLICKER);
-        redpillSys.TriggerMatrixAnomaly(extractTargetId, ANOMALY_WIREFRAME_FLICKER);
-
-        bool escortStarted = redpillSys.BeginEscort(extractTargetId, 9001, 12);
-        TEST_ASSERT(escortStarted, "BeginEscort successfully activates escort for awakened potential");
-
-        const CivilianPotential* p = redpillSys.GetPotential(extractTargetId);
-        if (p) {
-            TEST_ASSERT(p->state == POTENTIAL_ESCORT_ACTIVE, "Potential state transitions to POTENTIAL_ESCORT_ACTIVE");
-            TEST_ASSERT(p->assignedEscortPlayerGoId == 9001, "Assigned escort player GoID tracked");
-            TEST_ASSERT(p->targetHardlineId == 12, "Target hardline ID tracked");
-        }
-
-        // Test extraction attempt too far from hardline (> 300 units)
-        bool farExtraction = redpillSys.CheckHardlineExtraction(extractTargetId, 2000.0f, 2000.0f);
-        TEST_ASSERT(!farExtraction, "Extraction fails when distance to hardline exceeds 300 units");
-
-        // Test extraction at hardline position (dist <= 300 units)
-        bool nearExtraction = redpillSys.CheckHardlineExtraction(extractTargetId, 1050.0f, 1050.0f);
-        TEST_ASSERT(nearExtraction, "Extraction succeeds when close to hardline telephone");
-
-        p = redpillSys.GetPotential(extractTargetId);
-        if (p) {
-            TEST_ASSERT(p->state == POTENTIAL_EXTRACTED_SAFE, "Civilian potential marked POTENTIAL_EXTRACTED_SAFE");
-        }
-        TEST_ASSERT(redpillSys.GetTotalExtracted() >= 1, "Total extracted redpills counter incremented");
-    }
-
-    // 9. Mobil Ave Smuggling Operations
-    {
-        uint32 contractId = redpillSys.CreateSmugglingContract("Ghost Operator Memory Disk", 30000);
-        TEST_ASSERT(contractId != 0, "CreateSmugglingContract registers Mobil Ave contraband contract");
-
-        bool completed = redpillSys.CompleteSmugglingContract(contractId);
-        TEST_ASSERT(completed, "CompleteSmugglingContract successfully redeems contract");
-
-        bool doubleComplete = redpillSys.CompleteSmugglingContract(contractId);
-        TEST_ASSERT(!doubleComplete, "Double completion of contract is prevented");
-    }
-
     std::cout << "\n------------------------------------------------------------" << std::endl;
-    std::cout << "  AGENT POSSESSION & REDPILL AWAKENING TESTS COMPLETE" << std::endl;
+    std::cout << "  AGENT POSSESSION TESTS COMPLETE" << std::endl;
     std::cout << "  PASSED: " << passedCount << " | FAILED: " << failedCount << std::endl;
     std::cout << "------------------------------------------------------------\n" << std::endl;
 

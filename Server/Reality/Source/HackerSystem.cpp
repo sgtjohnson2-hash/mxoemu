@@ -441,21 +441,7 @@ bool HackerSystem::ExecuteCoderAbility(PlayerObject* caster, uint16 abilityId, u
     return true;
 }
 
-bool HackerSystem::CompileProgram(PlayerObject* hacker, uint32 programId, uint32 targetGoId) {
-    const AbilityTemplate* t = sDataLoader.GetAbilityTemplate((uint16)programId);
-    return ExecuteHackerAbility(hacker, (uint16)programId, targetGoId, t);
-}
 
-bool HackerSystem::ExecuteProgram(PlayerObject* hacker, uint32 programId, uint32 targetGoId) {
-    const AbilityTemplate* t = sDataLoader.GetAbilityTemplate((uint16)programId);
-    return ExecuteHackerAbility(hacker, (uint16)programId, targetGoId, t);
-}
-
-bool HackerSystem::ExtractSourceCode(PlayerObject* hacker, uint32 targetGoId) {
-    if (!hacker) return false;
-    hacker->restoreIS(25);
-    return true;
-}
 
 bool HackerSystem::ExecuteSoldierAbility(PlayerObject* caster, uint16 abilityId, uint32 targetGoId, const AbilityTemplate* templ)
 {

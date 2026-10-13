@@ -36,14 +36,7 @@ enum ShardDistrictId : uint32
     DISTRICT_RICHLAND  = 4
 };
 
-struct VendorListing
-{
-    uint64 listingId;
-    uint32 sellerId;     // Character ID of the seller
-    uint32 templateId;   // Item template ID being sold
-    uint32 infoPrice;    // Price in Info
-    bool isActive;
-};
+
 
 struct LockerItem
 {
@@ -83,11 +76,7 @@ public:
     bool HandleBuyRequest(PlayerObject* player, uint32 vendorId, uint32 itemId);
     bool HandleSellRequest(PlayerObject* player, uint32 vendorId, uint32 itemId);
 
-    // Asynchronous Player Market Methods (Protected by ACID Mutex)
-    uint64 ListVendorItem(PlayerObject* seller, uint32 templateId, uint32 price);
-    bool PurchaseVendorItem(PlayerObject* buyer, uint64 listingId);
-    bool CancelListing(PlayerObject* seller, uint64 listingId);
-    std::vector<VendorListing> GetActiveListings() const;
+
 
     // ACID-Safe Atomic Trade Transfer (Item + Currency)
     bool AtomicTradeTransfer(PlayerObject* buyer, PlayerObject* seller, uint32 itemTemplateId, uint32 price);
@@ -110,9 +99,7 @@ public:
 
 private:
     mutable std::recursive_mutex m_transactionMutex;
-    uint64 m_nextListingId;
     uint64 m_nextLockerEntryId;
-    std::map<uint64, VendorListing> m_activeListings;
     std::map<uint64, std::vector<LockerItem>> m_playerLockers; // Key: (charId << 32) | hardlineId
     std::map<uint32, HardlineVendor> m_hardlineVendors;
 };

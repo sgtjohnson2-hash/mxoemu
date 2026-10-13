@@ -3,7 +3,6 @@
 
 #include "Common.h"
 #include "Singleton.h"
-#include "WeatherSystem.h"
 #include "AI/BotPersonality.h"
 #include <string>
 #include <vector>
@@ -40,15 +39,14 @@ enum CivilianFearTier : uint8 {
     CIV_TIER_PANIC_STAMPEDE = 3     // Fear >= 0.80: Flee to subways/buildings, distress cries, stampede
 };
 
-struct TacticalCordonPoint {
-    uint32 districtId{1};
-    float x{0.0f};
-    float y{95.0f};
-    float z{0.0f};
-    std::string name;
-    bool active{false};
-    uint32 deployedMs{0};
-    std::vector<uint32> cordonBotGoIds;
+// Civilian day/night routine clock (moved here from the previous weather module, which was its
+// only other owner). 1 in-game hour = 5 real minutes; the day starts at 08:00 on first use.
+enum CircadianPeriod {
+    PERIOD_REST_NIGHT = 0,      // 22:00 - 06:00 (rest in apartments/shelter)
+    PERIOD_COMMUTE_MORNING = 1, // 06:00 - 08:00 (rush hour to subways/work)
+    PERIOD_WORK = 2,            // 08:00 - 17:00 (offices, commerce, terminals)
+    PERIOD_COMMUTE_EVENING = 3, // 17:00 - 18:00 (commute from work)
+    PERIOD_LEISURE = 4          // 18:00 - 22:00 (diners, clubs, parks)
 };
 
 class PedestrianEcology : public Singleton<PedestrianEcology> {
@@ -59,10 +57,14 @@ public:
     void Initialize();
 
     // Query POIs based on circadian routine and personality
-    PointOfInterest GetCircadianTarget(float currentX, float currentZ, WeatherSystem::CircadianPeriod period, const BotPersonality& personality) const;
+    PointOfInterest GetCircadianTarget(float currentX, float currentZ, CircadianPeriod period, const BotPersonality& personality) const;
     PointOfInterest GetNearestPOI(float currentX, float currentZ, POIType type) const;
     PointOfInterest GetNearestSubway(float currentX, float currentZ) const;
     PointOfInterest GetNearestShelter(float currentX, float currentZ) const;
+
+    // Civilian routine clock
+    float GetMatrixHour() const;
+    CircadianPeriod GetCircadianPeriod() const;
 
     // Smart object behavioral affordance interaction
     void InteractWithPOI(BotClient* bot, PlayerObject* me, const PointOfInterest& poi);
@@ -84,13 +86,9 @@ public:
     void ExecuteTier2Alarm(BotClient* bot, PlayerObject* me, float deltaSeconds);
     void ExecuteTier3Panic(BotClient* bot, PlayerObject* me, float deltaSeconds);
 
-    // Tactical Perimeter Cordon & SWAT containment
-    void DeployTacticalCordon(uint32 districtId);
-    bool IsCordonActive(uint32 districtId) const;
-    void SetCordonActive(uint32 districtId, bool active);
-    bool CheckCordonInterception(BotClient* bot, PlayerObject* me, float subwayX, float subwayZ, float radius = 500.0f);
-    bool BreachTacticalCordon(uint32 districtId, uint32 rescuerSquadId = 0);
-    const std::map<uint32, TacticalCordonPoint>& GetCordons() const { return m_tacticalCordons; }
+    // An evacuating civilian that reached its hardline jacks out: real JackoutEffectMsg to
+    // nearby clients, then the bot despawns.
+    bool ExecuteCivilianJackout(uint32 entityGoId);
 
     const std::vector<PointOfInterest>& GetAllPOIs() const { return m_pois; }
 
@@ -102,8 +100,7 @@ private:
     std::vector<std::string> m_outbreakRumors;
     std::vector<std::string> m_panicCries;
     std::vector<std::string> m_evasionWhispers;
-    std::map<uint32, TacticalCordonPoint> m_tacticalCordons;
-    mutable std::recursive_mutex m_cordonMutex;
+    mutable uint32 m_clockStartMs{0};
 };
 
 #define sPedestrianEcology PedestrianEcology::getSingleton()

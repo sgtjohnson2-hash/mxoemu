@@ -27,7 +27,6 @@
 #include "MissionSystem.h"
 #include "FactionWarManager.h"
 #include "OrganizationManager.h"
-#include "WeatherSystem.h"
 #include "BotManager.h"
 #include "SocketSystem.h"
 #include "CraftingSystem.h"
@@ -50,35 +49,8 @@
 #include "InventorySystem.h"
 #include "Item.h"
 #include "ItemSerializer.h"
-#include "WorldDirector.h"
-#include "LogisticsManager.h"
 #include "AI/MatrixThreatHeatmap.h"
-#include "HovercraftFlightSystem.h"
-#include "FrankCastleManager.h"
-#include "LoadingConstruct.h"
-#include "BackdoorNetwork.h"
-#include "OracleDialogueTree.h"
-#include "OracleSanctuarySystem.h"
-#include "OracleCookieSystem.h"
-#include "OracleVisionSimulacra.h"
 #include "StatusEffectManager.h"
-#include "NeuralVoiceSystem.h"
-#include "RadioDispatchSystem.h"
-#include "APUCombatSystem.h"
-#include "RedpillAwakeningSystem.h"
-#include "MachineCitySystem.h"
-#include "FreewayCombatSystem.h"
-#include "MobilAveRailSystem.h"
-#include "CyberdeckHackingSystem.h"
-#include "ClubHelRaidSystem.h"
-#include "PodHarvestSystem.h"
-#include "OrbitalSatelliteSystem.h"
-#include "SourceCodeCompilerSystem.h"
-#include "UnderworldManager.h"
-#include "CityLifeManager.h"
-#include "EmergentPoliceManager.h"
-#include "MafiaEcosystemManager.h"
-#include "ExileChateauManager.h"
 #include "AgentPossessionManager.h"
 #include "AI/PedestrianEcology.h"
 
@@ -271,29 +243,6 @@ void PlayerObject::ParseAdminCommand( string theCmd )
     else if (iequals(command, "dojo"))
     {
         ParsePlayerCommand(theCmd);
-        return;
-    }
-    else if (iequals(command, "frank") || iequals(command, "frankStatus") || iequals(command, "punisher"))
-    {
-        m_parent.QueueCommand(make_shared<SystemChatMsg>(sFrankCastleMgr.GenerateStatusReport()));
-        return;
-    }
-    else if (iequals(command, "frankHuntAgent"))
-    {
-        sFrankCastleMgr.ScanForAgentsAndThreats();
-        m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:00FF00}[Frank Castle] Tactical radar scan initiated. Hunting nearby Agents.{/c}"));
-        return;
-    }
-    else if (iequals(command, "frankTakeSafehouse"))
-    {
-        uint32 shId = 1;
-        cmdStream >> shId;
-        bool res = sFrankCastleMgr.CaptureSafehouse(shId);
-        if (res) {
-            m_parent.QueueCommand(make_shared<SystemChatMsg>((format("{c:00FF00}[Frank Castle] Safehouse %1% captured.{/c}") % shId).str()));
-        } else {
-            m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FF0000}[Frank Castle] Safehouse ID not found.{/c}"));
-        }
         return;
     }
 	else if (iequals(command, "teleportAll") || iequals(command, "bringAll"))
@@ -560,12 +509,7 @@ void PlayerObject::ParseAdminCommand( string theCmd )
     {
         string subCmd;
         cmdStream >> subCmd;
-        if (iequals(subCmd, "weather")) {
-            float intensity = 0.5f;
-            if (!cmdStream.eof()) cmdStream >> intensity;
-            sWeatherSys.TriggerGlitchAnomaly(intensity, 600000); // 10 mins
-            m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:00FF00}Triggered Weather Glitch Anomaly.{/c}"));
-        } else if (iequals(subCmd, "spawn")) {
+        if (iequals(subCmd, "spawn")) {
             string factionStr = "Machines";
             if (!cmdStream.eof()) cmdStream >> factionStr;
             int faction = FACTION_MACHINES;
@@ -584,147 +528,6 @@ void PlayerObject::ParseAdminCommand( string theCmd )
                 PlayerObject* p = sObjMgr.getGOPtr(id);
                 if (p) p->getClient().QueueCommand(std::make_shared<SystemChatMsg>(bountyMsg));
             }
-        }
-        return;
-    }
-    else if (iequals(command, "frank") || iequals(command, "punisher") || iequals(command, "frankstatus"))
-    {
-        string subCmd;
-        cmdStream >> subCmd;
-        if (iequals(subCmd, "status") || subCmd.empty()) {
-            m_parent.QueueCommand(make_shared<SystemChatMsg>(sFrankCastleMgr.GenerateStatusReport()));
-        } else if (iequals(subCmd, "hunt")) {
-            sFrankCastleMgr.ScanForAgentsAndThreats();
-            m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:00FF00}Admin: Triggered Agent scan for Frank Castle.{/c}"));
-        } else if (iequals(subCmd, "safehouse")) {
-            uint32 shId = 0;
-            cmdStream >> shId;
-            if (shId == 0) {
-                m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FF0000}Usage: !frank safehouse <id>{/c}"));
-            } else {
-                bool res = sFrankCastleMgr.CaptureSafehouse(shId);
-                m_parent.QueueCommand(make_shared<SystemChatMsg>((format("{c:00FF00}Admin: Frank Castle safehouse capture result: %1%{/c}") % (res ? "Success" : "Failed")).str()));
-            }
-        } else if (iequals(subCmd, "respawn")) {
-            sFrankCastleMgr.TriggerFieldSurgeryAndRespawn();
-            m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:00FF00}Admin: Frank Castle field surgery & respawn triggered.{/c}"));
-        } else if (iequals(subCmd, "xp")) {
-            uint64 xp = 10000;
-            cmdStream >> xp;
-            sFrankCastleMgr.AwardExperience(xp);
-            m_parent.QueueCommand(make_shared<SystemChatMsg>((format("{c:00FF00}Admin: Awarded %1% XP to Frank Castle. Current Level: %2%{/c}") % xp % (uint32)sFrankCastleMgr.GetLevel()).str()));
-        } else {
-            m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FF0000}Usage: !frank <status | hunt | safehouse <id> | respawn | xp <amount>>{/c}"));
-        }
-        return;
-    }
-    else if (iequals(command, "inspect") || iequals(command, "bio") ||
-             iequals(command, "social") || iequals(command, "love") || iequals(command, "friendships") ||
-             iequals(command, "memories") || iequals(command, "memory") || iequals(command, "socialstats") ||
-             iequals(command, "family") || iequals(command, "household") ||
-             iequals(command, "dreams") || iequals(command, "dream") || iequals(command, "aspiration") ||
-             iequals(command, "career") || iequals(command, "job") || iequals(command, "vocation") ||
-             iequals(command, "life") || iequals(command, "lifedossier") || iequals(command, "dossier") ||
-             iequals(command, "lifestats") || iequals(command, "familystats") ||
-             iequals(command, "emergentlife") || iequals(command, "emergentlifestyle") ||
-             iequals(command, "awakening") || iequals(command, "epiphany") ||
-             iequals(command, "gossip") || iequals(command, "rumors") ||
-             iequals(command, "socialcircles") || iequals(command, "circles"))
-    {
-        m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FF0000}[System] Subsystem offline.{/c}"));
-        return;
-    }
-    else if (iequals(command, "underworld") || iequals(command, "syndicate"))
-    {
-        string subCmd;
-        cmdStream >> subCmd;
-        if (iequals(subCmd, "bosses")) {
-            m_parent.QueueCommand(make_shared<SystemChatMsg>(sUnderworldMgr.GenerateBossHierarchyReport()));
-        } else if (iequals(subCmd, "turf")) {
-            m_parent.QueueCommand(make_shared<SystemChatMsg>(sUnderworldMgr.GenerateTurfGridReport()));
-        } else if (iequals(subCmd, "crimes")) {
-            m_parent.QueueCommand(make_shared<SystemChatMsg>(sUnderworldMgr.GenerateEmergentCrimesReport()));
-        } else if (iequals(subCmd, "precincts")) {
-            m_parent.QueueCommand(make_shared<SystemChatMsg>(sUnderworldMgr.GeneratePolicePrecinctsReport()));
-        } else {
-            m_parent.QueueCommand(make_shared<SystemChatMsg>(sUnderworldMgr.GenerateUnderworldStatusReport()));
-        }
-        return;
-    }
-    else if (iequals(command, "police") || iequals(command, "swat"))
-    {
-        string subCmd;
-        cmdStream >> subCmd;
-        if (iequals(subCmd, "squads")) {
-            m_parent.QueueCommand(make_shared<SystemChatMsg>(sEmergentPoliceMgr.GenerateTacticalSquadsReport()));
-        } else if (iequals(subCmd, "overwatch") || iequals(subCmd, "snipers")) {
-            m_parent.QueueCommand(make_shared<SystemChatMsg>(sEmergentPoliceMgr.GenerateOverwatchReport()));
-        } else if (iequals(subCmd, "roadblocks")) {
-            m_parent.QueueCommand(make_shared<SystemChatMsg>(sEmergentPoliceMgr.GenerateRoadblocksReport()));
-        } else if (iequals(subCmd, "ia") || iequals(subCmd, "stings")) {
-            m_parent.QueueCommand(make_shared<SystemChatMsg>(sEmergentPoliceMgr.GenerateIAStingsReport()));
-        } else {
-            m_parent.QueueCommand(make_shared<SystemChatMsg>(sEmergentPoliceMgr.GeneratePoliceSWATReport()));
-        }
-        return;
-    }
-    else if (iequals(command, "citylife") || iequals(command, "simulation"))
-    {
-        string subCmd;
-        cmdStream >> subCmd;
-        if (iequals(subCmd, "demo") || iequals(subCmd, "demographics")) {
-            m_parent.QueueCommand(make_shared<SystemChatMsg>(sCityLifeMgr.GenerateDemographicsReport()));
-        } else if (iequals(subCmd, "transit") || iequals(subCmd, "subway") || iequals(subCmd, "traffic")) {
-            m_parent.QueueCommand(make_shared<SystemChatMsg>(sCityLifeMgr.GenerateTransitReport()));
-        } else if (iequals(subCmd, "commerce") || iequals(subCmd, "shops")) {
-            m_parent.QueueCommand(make_shared<SystemChatMsg>(sCityLifeMgr.GenerateCommerceReport()));
-        } else {
-            m_parent.QueueCommand(make_shared<SystemChatMsg>(sCityLifeMgr.GenerateCityLifeStatusReport()));
-        }
-        return;
-    }
-    else if (iequals(command, "emergent") || iequals(command, "affordances"))
-    {
-        m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FF0000}[System] Subsystem offline.{/c}"));
-        return;
-    }
-    else if (iequals(command, "mafia") || iequals(command, "commission") || iequals(command, "pizzo"))
-    {
-        string subCmd;
-        cmdStream >> subCmd;
-        if (iequals(subCmd, "commission")) {
-            m_parent.QueueCommand(make_shared<SystemChatMsg>(sMafiaMgr.GenerateCommissionReport()));
-        } else if (iequals(subCmd, "pizzo")) {
-            m_parent.QueueCommand(make_shared<SystemChatMsg>(sMafiaMgr.GeneratePizzoExtortionReport()));
-        } else if (iequals(subCmd, "marcone")) {
-            m_parent.QueueCommand(make_shared<SystemChatMsg>(sMafiaMgr.GenerateFamilyDossier(MafiaFamilyId::MarconeFamily)));
-        } else if (iequals(subCmd, "valenti")) {
-            m_parent.QueueCommand(make_shared<SystemChatMsg>(sMafiaMgr.GenerateFamilyDossier(MafiaFamilyId::ValentiFamily)));
-        } else if (iequals(subCmd, "scarlotti")) {
-            m_parent.QueueCommand(make_shared<SystemChatMsg>(sMafiaMgr.GenerateFamilyDossier(MafiaFamilyId::ScarlottiSyndicate)));
-        } else if (iequals(subCmd, "triad") || iequals(subCmd, "chenwu")) {
-            m_parent.QueueCommand(make_shared<SystemChatMsg>(sMafiaMgr.GenerateFamilyDossier(MafiaFamilyId::ChenWuTriad)));
-        } else if (iequals(subCmd, "bratva") || iequals(subCmd, "petrov")) {
-            m_parent.QueueCommand(make_shared<SystemChatMsg>(sMafiaMgr.GenerateFamilyDossier(MafiaFamilyId::PetrovBratva)));
-        } else {
-            m_parent.QueueCommand(make_shared<SystemChatMsg>(sMafiaMgr.GenerateMafiaWorldReport()));
-        }
-        return;
-    }
-    else if (iequals(command, "exile") || iequals(command, "chateau") || iequals(command, "clubhel") || iequals(command, "backdoor"))
-    {
-        string subCmd;
-        cmdStream >> subCmd;
-        if (iequals(subCmd, "clubhel") || iequals(subCmd, "hel")) {
-            m_parent.QueueCommand(make_shared<SystemChatMsg>(sExileMgr.GenerateClubHelStatusReport()));
-        } else if (iequals(subCmd, "backdoor") || iequals(subCmd, "doors") || iequals(subCmd, "portals")) {
-            m_parent.QueueCommand(make_shared<SystemChatMsg>(sExileMgr.GenerateBackdoorCorridorsReport()));
-        } else if (iequals(subCmd, "mobil") || iequals(subCmd, "train") || iequals(subCmd, "limbo")) {
-            m_parent.QueueCommand(make_shared<SystemChatMsg>(sExileMgr.GenerateMobilAveLimboReport()));
-        } else if (iequals(subCmd, "bestiary") || iequals(subCmd, "vampires") || iequals(subCmd, "monsters")) {
-            m_parent.QueueCommand(make_shared<SystemChatMsg>(sExileMgr.GenerateSupernaturalBestiaryReport()));
-        } else {
-            m_parent.QueueCommand(make_shared<SystemChatMsg>(sExileMgr.GenerateExileCourtReport()));
         }
         return;
     }
@@ -754,8 +557,7 @@ void PlayerObject::ParsePlayerCommand( string theCmd )
 		static const char* devCommands[] = {
 			"discipline", "class", "loadability", "learn", "dojo", "loadout", "botdebug", "giveitem",
 			"claimhl", "send", "sendCmd", "socket", "bullettime", "gotoPos", "incX", "incY", "incZ",
-			"goThru", "random", "update", "gotoPlayer", "go", "frank", "punisher", "underworld",
-			"syndicate", "police", "swat", "citylife", "simulation", "emergent", "bottest", "overwrite", "agentstrike", "agent", NULL };
+			"goThru", "random", "update", "gotoPlayer", "go", "bottest", "overwrite", "agentstrike", "agent", NULL };
 		for (int i = 0; devCommands[i] != NULL; i++)
 		{
 			if (iequals(command, devCommands[i]) && !m_isAdmin)
@@ -1963,13 +1765,6 @@ void PlayerObject::ParsePlayerCommand( string theCmd )
                 
                 sFactionWarMgr.captureNode(closestId, getFaction());
                 
-                // Living History: Record hardline captured & propagate gossip
-                sWorldDirector.RecordHardlineCaptured(m_parent.GetCharacterId(), getHandle(), getFaction());
-                sWorldDirector.PropagatePlayerDeedGossip(
-                    (format("%1% captured strategic hardline %2% for their faction!") % getHandle() % closestId).str(),
-                    bestLoc.x, bestLoc.z
-                );
-                
                 m_parent.QueueCommand(make_shared<SystemChatMsg>((format("{c:00FF00}Hardline %1% claimed for your faction!{/c}") % closestId).str()));
                 
                 // Item 30: Trigger Faction Defenders
@@ -2272,127 +2067,6 @@ void PlayerObject::ParsePlayerCommand( string theCmd )
 		}
 		return;
 	}	
-    else if (iequals(command, "frank") || iequals(command, "punisher") || iequals(command, "frankstatus"))
-    {
-        string subCmd;
-        cmdStream >> subCmd;
-        if (iequals(subCmd, "hunt")) {
-            sFrankCastleMgr.ScanForAgentsAndThreats();
-            m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:00FF00}Frank Castle notified. Tactical agent sweep initiated.{/c}"));
-        } else if (iequals(subCmd, "safehouse")) {
-            uint32 shId = 0;
-            cmdStream >> shId;
-            if (shId == 0) {
-                m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FF0000}Usage: &frank safehouse <1-5>{/c}"));
-            } else {
-                sFrankCastleMgr.CommandDeployToSafehouse(shId);
-                m_parent.QueueCommand(make_shared<SystemChatMsg>((format("{c:00FF00}Dispatched tactical deployment order to Safehouse #%1%.{/c}") % shId).str()));
-            }
-        } else {
-            m_parent.QueueCommand(make_shared<SystemChatMsg>(sFrankCastleMgr.GenerateStatusReport()));
-        }
-        return;
-    }
-    else if (iequals(command, "inspect") || iequals(command, "bio") ||
-             iequals(command, "social") || iequals(command, "love") || iequals(command, "friendships") ||
-             iequals(command, "memories") || iequals(command, "memory") || iequals(command, "socialstats") ||
-             iequals(command, "family") || iequals(command, "household") ||
-             iequals(command, "dreams") || iequals(command, "dream") || iequals(command, "aspiration") ||
-             iequals(command, "career") || iequals(command, "job") || iequals(command, "vocation") ||
-             iequals(command, "life") || iequals(command, "lifedossier") || iequals(command, "dossier") ||
-             iequals(command, "lifestats") || iequals(command, "familystats") ||
-             iequals(command, "emergentlife") || iequals(command, "emergentlifestyle") ||
-             iequals(command, "awakening") || iequals(command, "epiphany") ||
-             iequals(command, "gossip") || iequals(command, "rumors") ||
-             iequals(command, "socialcircles") || iequals(command, "circles"))
-    {
-        m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FF0000}[System] Subsystem offline.{/c}"));
-        return;
-    }
-    else if (iequals(command, "underworld") || iequals(command, "syndicate"))
-    {
-        m_parent.QueueCommand(make_shared<SystemChatMsg>(sUnderworldMgr.GenerateUnderworldStatusReport()));
-        return;
-    }
-    else if (iequals(command, "police") || iequals(command, "swat"))
-    {
-        m_parent.QueueCommand(make_shared<SystemChatMsg>(sEmergentPoliceMgr.GeneratePoliceSWATReport()));
-        return;
-    }
-    else if (iequals(command, "citylife") || iequals(command, "simulation"))
-    {
-        m_parent.QueueCommand(make_shared<SystemChatMsg>(sCityLifeMgr.GenerateCityLifeStatusReport()));
-        return;
-    }
-    else if (iequals(command, "emergent"))
-    {
-        m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FF0000}[System] Subsystem offline.{/c}"));
-        return;
-    }
-    else if (iequals(command, "market") || iequals(command, "marketplace"))
-    {
-        string sub;
-        cmdStream >> sub;
-        if (sub.empty() || iequals(sub, "list"))
-        {
-            ByteBuffer dummy;
-            RPC_HandleMarketListItems(dummy);
-            return;
-        }
-        else if (iequals(sub, "sell"))
-        {
-            uint32 tplId = 0, price = 0;
-            cmdStream >> tplId >> price;
-            if (tplId > 0 && price > 0)
-            {
-                uint64 listingId = sEconomySys.ListVendorItem(this, tplId, price);
-                if (listingId > 0)
-                {
-                    m_parent.QueueCommand(make_shared<SystemChatMsg>(
-                        (format("{c:00FFCC}[MARKETPLACE] Listed item %1% on Exchange for %2% $Info (Listing ID: %3%){/c}")
-                         % tplId % price % listingId).str()
-                    ));
-                    INFO_LOG(format("Marketplace: Player %1% listed item %2% for %3% $Info (Listing %4%)")
-                             % m_handle % tplId % price % listingId);
-                }
-                else
-                {
-                    m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FF4444}Usage: /market sell <templateId> <price>{/c}"));
-                }
-            }
-            else
-            {
-                m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FF4444}Usage: /market sell <templateId> <price>{/c}"));
-            }
-            return;
-        }
-        else if (iequals(sub, "buy"))
-        {
-            uint64 listingId = 0;
-            cmdStream >> listingId;
-            if (listingId > 0)
-            {
-                bool ok = sEconomySys.PurchaseVendorItem(this, listingId);
-                if (ok)
-                {
-                    m_parent.QueueCommand(make_shared<SystemChatMsg>(
-                        (format("{c:00FF00}[MARKETPLACE] Successfully purchased listing ID %1%!{/c}") % listingId).str()
-                    ));
-                }
-                else
-                {
-                    m_parent.QueueCommand(make_shared<SystemChatMsg>(
-                        (format("{c:FF4444}[MARKETPLACE] Purchase failed for listing ID %1% (insufficient funds, full inventory, or invalid listing).{/c}") % listingId).str()
-                    ));
-                }
-            }
-            else
-            {
-                m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FF4444}Usage: /market buy <listingId>{/c}"));
-            }
-            return;
-        }
-    }
     else if (iequals(command, "craft") || iequals(command, "compile"))
     {
         string sub;
@@ -2436,34 +2110,6 @@ void PlayerObject::ParsePlayerCommand( string theCmd )
             return;
         }
     }
-    else if (iequals(command, "hovercraft") || iequals(command, "ship"))
-    {
-        if (sHovercraftFlightSys.GetShipCount() == 0) {
-            sHovercraftFlightSys.SpawnHovercraft(HOVERCRAFT_NEBUCHADNEZZAR, FlightVector3(0.0f, 400.0f, 0.0f), "Nebuchadnezzar");
-        }
-        auto ship = sHovercraftFlightSys.GetHovercraft(1);
-        auto emp = sHovercraftFlightSys.GetEMPSystem();
-        auto uplink = sHovercraftFlightSys.CalculateUplinkTelemetry(1);
-        m_parent.QueueCommand(make_shared<SystemChatMsg>(
-            (format("{c:00FFCC}[Hovercraft Flight] Ship: %1% | Pos: (%2$.0f, %3$.0f, %4$.0f) | Hull: %5$.0f%% | EMP: %6$.1f%% (%7%) | Carrier: %8% (Strength: %9$.2f){/c}")
-             % (ship ? ship->name : "Nebuchadnezzar") % (ship ? ship->position.x : 0.0f) % (ship ? ship->position.y : 0.0f) % (ship ? ship->position.z : 0.0f)
-             % (ship ? ship->hullIntegrity : 100.0f) % emp.chargePercent % (emp.isReady ? "READY" : "CHARGING") % uplink.statusText % uplink.signalStrength).str()
-        ));
-        INFO_LOG(format("Hovercraft: Dispatched flight telemetry for ship %1% to %2%") % (ship ? ship->name : "Nebuchadnezzar") % m_handle);
-        return;
-    }
-    else if (iequals(command, "construct") || iequals(command, "whitevoid"))
-    {
-        size_t weapons = sLoadingConstruct.GetTotalAvailableWeapons();
-        size_t dummies = sLoadingConstruct.GetDummyCount();
-        float dilation = sLoadingConstruct.GetTimeDilation();
-        m_parent.QueueCommand(make_shared<SystemChatMsg>(
-            (format("{c:FFFFFF}[Loading Construct] Mode: White Void | Available Weapons: %1% | Sparring Dummies: %2% | Time Dilation: %3$.2fx{/c}")
-             % weapons % dummies % dilation).str()
-        ));
-        INFO_LOG(format("Construct: Dispatched Loading Construct telemetry to %1%") % m_handle);
-        return;
-    }
     else if (iequals(command, "org") || iequals(command, "crew"))
     {
         string sub;
@@ -2480,7 +2126,7 @@ void PlayerObject::ParsePlayerCommand( string theCmd )
                 m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FF0000}You are already in an Organization.{/c}"));
                 return;
             }
-            uint32 newOrgId = sOrgMgr.createOrganization(orgName, m_goId);
+            uint32 newOrgId = sOrgMgr.createOrganization(orgName, getCharId());
             m_orgId = newOrgId;
             m_parent.QueueCommand(make_shared<SystemChatMsg>((format("{c:00FF00}[ORGANIZATION] '%1%' created successfully (Org ID: %2%).{/c}") % orgName % newOrgId).str()));
             INFO_LOG(format("Organization: Player %1% created organization '%2%' (ID %3%)") % m_handle % orgName % newOrgId);
@@ -2492,7 +2138,7 @@ void PlayerObject::ParsePlayerCommand( string theCmd )
                 m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FF0000}You are not in an Organization.{/c}"));
                 return;
             }
-            if (sOrgMgr.leaveOrganization(m_orgId, m_goId)) {
+            if (sOrgMgr.leaveOrganization(m_orgId, getCharId())) {
                 m_orgId = 0;
                 m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:00FF00}[ORGANIZATION] You have left the Organization.{/c}"));
                 INFO_LOG(format("Organization: Player %1% left organization") % m_handle);
@@ -2673,77 +2319,6 @@ void PlayerObject::ParsePlayerCommand( string theCmd )
                 INFO_LOG(format("HardlineDirectory: Player %1% queried total hardlines (%2%)") % m_handle % total);
                 m_parent.QueueCommand(make_shared<SystemChatMsg>((format("{c:00FFCC}[HARDLINE] Total Matrix Hardlines: %1%{/c}") % total).str()));
             }
-            return;
-        }
-    }
-    else if (iequals(command, "glitch") || iequals(command, "anomaly"))
-    {
-        string sub;
-        cmdStream >> sub;
-        if (sub.empty() || iequals(sub, "status"))
-        {
-            bool active = sWeatherSys.IsGlitchActive();
-            auto type = sWeatherSys.GetActiveGlitchType();
-            std::string typeName = sWeatherSys.GetGlitchTypeName(type);
-            float intensity = sWeatherSys.GetGlitchIntensity();
-            uint32 remSec = sWeatherSys.GetGlitchRemainingMs() / 1000;
-            std::string desc = sWeatherSys.GetActiveGlitchDesc();
-            if (active) {
-                m_parent.QueueCommand(make_shared<SystemChatMsg>(
-                    (format("{c:00FF00}[GLITCH ANOMALY ACTIVE] Type: %1% | Intensity: %2$.0f%% | Remaining: %3%s | Origin: %4%{/c}")
-                        % typeName % (intensity * 100.0f) % remSec % (desc.empty() ? "District Hotspot" : desc)).str()
-                ));
-            } else {
-                m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:00FFCC}[Matrix Environment] Reality stability 100%. No active glitch anomaly detected.{/c}"));
-            }
-            INFO_LOG(format("GlitchAnomaly: Player %1% queried glitch status (active: %2%)") % m_handle % (active ? "yes" : "no"));
-            return;
-        }
-        else if (iequals(sub, "spoon"))
-        {
-            sWeatherSys.TriggerGlitchAnomaly(0.75f, 180000, WeatherSystem::GLITCH_SPOON_BEND, "Construct Perception Rift");
-            m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:00FF00}[GLITCH] Reality distortion triggered: Spoon Bending anomaly active. Do not try and bend the spoon; realize the truth.{/c}"));
-            INFO_LOG(format("GlitchAnomaly: Player %1% triggered GLITCH_SPOON_BEND") % m_handle);
-            return;
-        }
-        else if (iequals(sub, "neon"))
-        {
-            sWeatherSys.TriggerGlitchAnomaly(0.70f, 180000, WeatherSystem::GLITCH_NEON_FLICKER, "Municipal Power Fluctuations");
-            m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:00FF00}[GLITCH] Municipal grid voltage dropped: Neon flicker anomaly cascading across streetlights.{/c}"));
-            INFO_LOG(format("GlitchAnomaly: Player %1% triggered GLITCH_NEON_FLICKER") % m_handle);
-            return;
-        }
-        else if (iequals(sub, "code") || iequals(sub, "rain"))
-        {
-            sWeatherSys.TriggerGlitchAnomaly(0.90f, 240000, WeatherSystem::GLITCH_CODE_DRIZZLE, "Digital Code Rain Cascading");
-            m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:00FF00}[GLITCH] Digital code rain drizzle active. Matrix green glyph cascade saturates the construct.{/c}"));
-            INFO_LOG(format("GlitchAnomaly: Player %1% triggered GLITCH_CODE_DRIZZLE") % m_handle);
-            return;
-        }
-        else if (iequals(sub, "tear"))
-        {
-            sWeatherSys.TriggerGlitchAnomaly(1.0f, 300000, WeatherSystem::GLITCH_SPATIAL_TEAR, "Spatial Geometry Tear");
-            m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:00FF00}[GLITCH] Spatial tearing detected at local coordinates. Geometry and physics rendering stutter.{/c}"));
-            INFO_LOG(format("GlitchAnomaly: Player %1% triggered GLITCH_SPATIAL_TEAR") % m_handle);
-            return;
-        }
-        else if (iequals(sub, "dejavu") || iequals(sub, "cat"))
-        {
-            sWeatherSys.TriggerGlitchAnomaly(0.80f, 180000, WeatherSystem::GLITCH_CAT_DEJAVU, "Déjà Vu Perception Shift");
-            m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:00FF00}[GLITCH] Déjà vu: A black cat walked past, then another that looked just like it. A change was made in the Matrix.{/c}"));
-            INFO_LOG(format("GlitchAnomaly: Player %1% triggered GLITCH_CAT_DEJAVU") % m_handle);
-            return;
-        }
-        else if (iequals(sub, "clear"))
-        {
-            sWeatherSys.ClearGlitchAnomaly();
-            m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:00FFCC}[GLITCH] Environmental matrix cleared. Reality restored to equilibrium.{/c}"));
-            INFO_LOG(format("GlitchAnomaly: Player %1% cleared glitch anomaly") % m_handle);
-            return;
-        }
-        else
-        {
-            m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FFFF00}Usage: /glitch [status|spoon|neon|code|tear|dejavu|clear]{/c}"));
             return;
         }
     }
@@ -2955,11 +2530,8 @@ void PlayerObject::RPC_HandleChat( ByteBuffer &srcCmd )
 									  boost::istarts_with(theMessage, "/overwrite") ||
 									  boost::istarts_with(theMessage, "/agentstrike") ||
 									  boost::istarts_with(theMessage, "/agent") ||
-									  boost::istarts_with(theMessage, "/market") ||
-									  boost::istarts_with(theMessage, "/craft") ||
-									  boost::istarts_with(theMessage, "/hovercraft") ||
-									  boost::istarts_with(theMessage, "/construct") ||
-									  boost::istarts_with(theMessage, "/org") ||
+									  									  boost::istarts_with(theMessage, "/craft") ||
+									  									  									  boost::istarts_with(theMessage, "/org") ||
 									  boost::istarts_with(theMessage, "/crew") ||
 									  boost::istarts_with(theMessage, "/mission") ||
 									  boost::istarts_with(theMessage, "/contract") ||
@@ -2967,9 +2539,7 @@ void PlayerObject::RPC_HandleChat( ByteBuffer &srcCmd )
 									  boost::istarts_with(theMessage, "/spar") ||
 									  boost::istarts_with(theMessage, "/hardline") ||
 									  boost::istarts_with(theMessage, "/hardlines") ||
-									  boost::istarts_with(theMessage, "/glitch") ||
-									  boost::istarts_with(theMessage, "/anomaly") ||
-									  boost::istarts_with(theMessage, "/tension") ||
+									  									  									  boost::istarts_with(theMessage, "/tension") ||
 									  boost::istarts_with(theMessage, "/outbreak") ||
 									  boost::istarts_with(theMessage, "/contact") ||
 									  boost::istarts_with(theMessage, "/contacts") ||
@@ -3055,7 +2625,7 @@ void PlayerObject::RPC_HandleChat( ByteBuffer &srcCmd )
             m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FF0000}You are already in an Organization.{/c}"));
             return;
         }
-        uint32 newOrgId = sOrgMgr.createOrganization(orgName, m_goId);
+        uint32 newOrgId = sOrgMgr.createOrganization(orgName, getCharId());
         m_orgId = newOrgId;
         m_parent.QueueCommand(make_shared<SystemChatMsg>((format("{c:00FF00}Organization '%1%' created successfully.{/c}") % orgName).str()));
         // Note: Broadcast visual tag update here when packet mapped
@@ -3069,7 +2639,7 @@ void PlayerObject::RPC_HandleChat( ByteBuffer &srcCmd )
             return;
         }
         Organization* org = sOrgMgr.getOrganization(m_orgId);
-        if (!org || org->leaderId != m_goId) {
+        if (!org || org->leaderId != getCharId()) {
             m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FF0000}Only the Organization Leader can invite.{/c}"));
             return;
         }
@@ -3081,7 +2651,7 @@ void PlayerObject::RPC_HandleChat( ByteBuffer &srcCmd )
                     m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FF0000}Target is already in an Organization.{/c}"));
                     return;
                 }
-                if (sOrgMgr.joinOrganization(m_orgId, p->getGoId())) {
+                if (sOrgMgr.joinOrganization(m_orgId, p->getCharId())) {
                     p->setOrgId(m_orgId);
                     p->getClient().QueueCommand(make_shared<SystemChatMsg>((format("{c:00FF00}You have been recruited into Organization '%1%'.{/c}") % org->name).str()));
                     m_parent.QueueCommand(make_shared<SystemChatMsg>((format("{c:00FF00}%1% has joined the Organization.{/c}") % p->getHandle()).str()));
@@ -3098,7 +2668,7 @@ void PlayerObject::RPC_HandleChat( ByteBuffer &srcCmd )
             m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FF0000}You are not in an Organization.{/c}"));
             return;
         }
-        if (sOrgMgr.leaveOrganization(m_orgId, m_goId)) {
+        if (sOrgMgr.leaveOrganization(m_orgId, getCharId())) {
             m_orgId = 0;
             m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:00FF00}You have left the Organization.{/c}"));
             // Note: Broadcast visual tag update here when packet mapped
@@ -3299,18 +2869,21 @@ void PlayerObject::RPC_HandleChat( ByteBuffer &srcCmd )
         return;
     }
 
-    // Matrix Emergence Commands
+    // Matrix Environment Commands
     if (boost::iequals(theMessage, "/clock")) {
-        std::string timeStr = sWeatherSys.GetTimeString();
-        WeatherSystem::CircadianPeriod period = sWeatherSys.GetCircadianPeriod();
+        float h = sPedestrianEcology.GetMatrixHour();
+        int hour = (int)h;
+        int minute = (int)((h - hour) * 60.0f);
+        CircadianPeriod period = sPedestrianEcology.GetCircadianPeriod();
         std::string desc;
         switch (period) {
-            case WeatherSystem::PERIOD_COMMUTE_MORNING: desc = "Morning Commute"; break;
-            case WeatherSystem::PERIOD_WORK: desc = "Work Hours"; break;
-            case WeatherSystem::PERIOD_COMMUTE_EVENING: desc = "Evening Commute"; break;
-            case WeatherSystem::PERIOD_LEISURE: desc = "Evening Leisure"; break;
-            case WeatherSystem::PERIOD_REST_NIGHT: desc = "Night Rest"; break;
+            case PERIOD_COMMUTE_MORNING: desc = "Morning Commute"; break;
+            case PERIOD_WORK: desc = "Work Hours"; break;
+            case PERIOD_COMMUTE_EVENING: desc = "Evening Commute"; break;
+            case PERIOD_LEISURE: desc = "Evening Leisure"; break;
+            case PERIOD_REST_NIGHT: desc = "Night Rest"; break;
         }
+        std::string timeStr = (format("%02d:%02d") % hour % minute).str();
         m_parent.QueueCommand(make_shared<SystemChatMsg>(
             (format("{c:55FF55}[Matrix Clock] Time: %1% | Cycle: %2%{/c}") % timeStr % desc).str()
         ));
@@ -3321,777 +2894,38 @@ void PlayerObject::RPC_HandleChat( ByteBuffer &srcCmd )
         float hx = getPosition().x;
         float hz = getPosition().z;
         float heat = sMatrixThreatHeatmap.GetHeat(hx, hz);
-        EscalationTier tier = sMatrixThreatHeatmap.GetTier(hx, hz);
+        HeatTier tier = sMatrixThreatHeatmap.GetTier(hx, hz);
         uint32 dId = sMatrixThreatHeatmap.GetDistrictAt(hx, hz);
         std::string dName = (dId == 1) ? "Richland" : ((dId == 2) ? "Downtown" : ((dId == 3) ? "International" : "The Slums"));
         bool sabotaged = sMatrixThreatHeatmap.IsDistrictSabotaged(dId);
         m_parent.QueueCommand(make_shared<SystemChatMsg>(
-            (format("{c:FFFF55}[Heatmap] District: %1% (ID %2%) | Heat: %3$.1f | Escalation Tier: %4% | Sabotaged: %5%{/c}") 
+            (format("{c:FFFF55}[Heatmap] District: %1% (ID %2%) | Heat: %3$.1f | Heat Tier: %4% | Sabotaged: %5%{/c}") 
              % dName % dId % heat % (int)tier % (sabotaged ? "YES" : "NO")).str()
         ));
         return;
     }
 
-    if (boost::iequals(theMessage, "/rep")) {
-        CharacterReputation rep = sWorldDirector.GetReputation(m_parent.GetCharacterId(), getHandle());
-        m_parent.QueueCommand(make_shared<SystemChatMsg>(
-            (format("{c:00FFFF}[Living History] Notoriety: %1% | Zion: %2$.1f | Machine: %3$.1f | Mero: %4$.1f | Agents Defeated: %5% | Hardlines: %6%{/c}")
-             % rep.notoriety % rep.zionStanding % rep.machineStanding % rep.meroStanding % rep.agentsDefeated % rep.hardlinesCaptured).str()
-        ));
-        return;
-    }
-
-    if (boost::iequals(theMessage, "/crisis")) {
-        const ActiveCrisis* crisis = sWorldDirector.GetCurrentCrisis();
-        if (crisis) {
-            uint32 elapsedSec = (getMSTime() - crisis->startTimeMs) / 1000;
-            uint32 totalSec = crisis->durationMs / 1000;
-            m_parent.QueueCommand(make_shared<SystemChatMsg>(
-                (format("{c:FF5555}[Crisis Active] '%1%': %2% (Elapsed: %3%s / %4%s){/c}") 
-                 % crisis->title % crisis->description % elapsedSec % totalSec).str()
-            ));
-        } else {
-            m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:55FF55}[The Oracle] The Matrix is currently in equilibrium. No active crisis.{/c}"));
-        }
-        return;
-    }
-
-    if (theMessage.length() >= 7 && boost::iequals(theMessage.substr(0, 7), "/crisis")) {
-        std::stringstream ss(theMessage.substr(7));
-        std::string subCmd;
-        ss >> subCmd;
-        if (boost::iequals(subCmd, "trigger")) {
-            int cType = 1;
-            ss >> cType;
-            sWorldDirector.TriggerCrisis((WorldCrisisType)std::clamp(cType, 1, 4));
-            m_parent.QueueCommand(make_shared<SystemChatMsg>((format("{c:FF8800}Triggered crisis type %1%{/c}") % cType).str()));
-            return;
-        }
-    }
-
-    if (boost::iequals(theMessage, "/substations")) {
-        const auto& subs = sLogisticsMgr.GetAllSubstations();
-        m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:00FFCC}--- DISTRICT RELAY SUBSTATIONS ---{/c}"));
-        for (const auto& pair : subs) {
-            const auto& s = pair.second;
-            std::string status = s.isSabotaged ? "{c:FF0000}SABOTAGED{/c}" : "{c:00FF00}ONLINE{/c}";
-            m_parent.QueueCommand(make_shared<SystemChatMsg>(
-                (format("Substation %1% [%2%]: HP %.0f/%.0f | Status: %3%") % s.substationId % s.name % s.health % s.maxHealth % status).str()
-            ));
-        }
-        return;
-    }
-
-    if (theMessage.length() >= 9 && boost::iequals(theMessage.substr(0, 9), "/sabotage")) {
-        std::stringstream ss(theMessage.substr(9));
-        uint32 subId = 1;
-        ss >> subId;
-        bool ok = sLogisticsMgr.DamageSubstation(subId, 1500.0f, m_goId);
-        if (ok) {
-            m_parent.QueueCommand(make_shared<SystemChatMsg>((format("{c:FF0000}Substation %1% damaged/sabotaged!{/c}") % subId).str()));
-        } else {
-            m_parent.QueueCommand(make_shared<SystemChatMsg>((format("{c:FF0000}Failed to sabotage substation %1%. Check ID.{/c}") % subId).str()));
-        }
-        return;
-    }
-
-    if (theMessage.length() >= 7 && boost::iequals(theMessage.substr(0, 7), "/repair")) {
-        std::stringstream ss(theMessage.substr(7));
-        uint32 subId = 1;
-        ss >> subId;
-        sLogisticsMgr.RepairSubstation(subId, 1000.0f);
-        m_parent.QueueCommand(make_shared<SystemChatMsg>((format("{c:00FF00}Substation %1% repaired.{/c}") % subId).str()));
-        return;
-    }
-
     if (boost::iequals(theMessage, "/help") || boost::iequals(theMessage, "/?")) {
-        m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:00FF00}=== THE MATRIX ONLINE: REMASTER COMMANDS ==={/c}"));
+        m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:00FF00}=== THE MATRIX ONLINE COMMANDS ==={/c}"));
         m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:00FFFF}/attack | &attack{/c} - Engage selected target in melee interlock"));
         m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:00FFFF}/tactic <power|speed|grab|block>{/c} - Set combat martial arts tactic"));
         m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:00FFFF}/withdraw | &withdraw{/c} - Disengage from interlock"));
+        m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:00FFFF}/style <kungfu|karate|aikido|street>{/c} - Switch martial arts discipline style"));
+        m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:00FFFF}/loadability <id>{/c} - Load ability onto memory track"));
+        m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:00FFFF}/target{/c} - Target nearest hostile operative"));
         m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FFFF55}/clock{/c} - Current Matrix time & circadian cycle"));
-        m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FFFF55}/heat{/c} - Threat heatmap & law enforcement tier"));
-        m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FFFF55}/rep{/c} - Player notoriety & faction standing"));
-        m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FFFF55}/crisis{/c} - Active world crisis events"));
-        m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FFFF55}/substations{/c} - District relay substation statuses"));
-        m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FFFF55}/sabotage <id> | /repair <id>{/c} - Substation warfare"));
+        m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FFFF55}/heat{/c} - Local disruption heat & security tier"));
         m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FFFF55}/district <slums|dt|it|richland>{/c} - Fast district transit"));
-        m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FFFF55}/who{/c} - Online players & active construct census"));
-        m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FFFF55}/stats{/c} - Operator combat, HP & location stats"));
+        m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FFFF55}/who{/c} - Online operatives census"));
+        m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FFFF55}/stats{/c} - Operator combat, HP & location telemetry"));
         m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FFFF55}/hardlines{/c} - Nearest Hardline phone booth beacon"));
-        m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FFFF55}/stuck{/c} - Recover operator to nearest safe Hardline"));
-        m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FFFF55}/hovercraft{/c} - Zion hovercraft flight, EMP & broadcast link"));
-        m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FFFF55}/construct{/c} - Infinite Loading Construct sandbox"));
-        m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FFFF55}/dojo{/c} - Oriental sparring dojo destruction status"));
-        m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FFFF55}/backdoors{/c} - Non-Euclidean Hallway of Doors network"));
-        m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FFFF55}/source{/c} - The Architect's Chamber & Two Doors"));
-        m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FFFF55}/tts <persona> <text>{/c} - 24kHz Neural TTS voice synthesis"));
-        m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FFFF55}/dispatch{/c} - Police radio scanner dispatch"));
-        m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FFFF55}/vr{/c} - OpenXR VR 6-DOF & bullet-dodge evasion"));
-        m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FFFF55}/apu{/c} - Zion APU walker mechanics & Dock defense status"));
-        m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FFFF55}/gunship{/c} - Bell 212 gunship & Megacity destruction"));
-        m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FFFF55}/redpill{/c} - Civilian awakening & Matrix glitch tracking"));
-        m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FFFF55}/webrtc{/c} - WebGPU thin-client & AR operator audio link"));
-        m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FFFF55}/prophecy{/c} - On-device neural LLM & daily newspapers"));
-        m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FFFF55}/zerone{/c} - Machine City 01 & Deus Ex Machina collective"));
-        m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FFFF55}/freeway{/c} - 101 Freeway loop & rooftop wire-fu combat"));
-        m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FFFF55}/mobilave{/c} - Mobil Ave purgatory loop & smuggling rails"));
-        m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FFFF55}/codevision{/c} - Green digital rain shader & cyberdecks"));
-        m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FFFF55}/federation{/c} - Shard federation mesh & peace protocol"));
-        m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FFFF55}/clubhel{/c} - Chateau estate & Club Hel anti-gravity shootout"));
-        m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FFFF55}/podfields{/c} - Real-world battery towers & Harvester machine AI"));
-        m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FFFF55}/orbital{/c} - Orbital satellite mesh & kinetic lance strikes"));
-        m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FFFF55}/codecompile{/c} - In-engine JIT script compiler & custom katas"));
-        m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FFFF55}/reboot{/c} - Matrix 7.0 Prime Program reboot & Singularity"));
-        return;
-    }
-
-    if (boost::iequals(theMessage, "/district")) {
-        // ... handled below
-    }
-
-    if (boost::iequals(theMessage, "/hovercraft")) {
-        if (sHovercraftFlightSys.GetShipCount() == 0) {
-            sHovercraftFlightSys.SpawnHovercraft(HOVERCRAFT_NEBUCHADNEZZAR, FlightVector3(0.0f, 400.0f, 0.0f), "Nebuchadnezzar");
-        }
-        auto ship = sHovercraftFlightSys.GetHovercraft(1);
-        auto emp = sHovercraftFlightSys.GetEMPSystem();
-        auto uplink = sHovercraftFlightSys.CalculateUplinkTelemetry(1);
-        m_parent.QueueCommand(make_shared<SystemChatMsg>(
-            (format("{c:00FFCC}[Hovercraft Flight] Ship: %1% | Pos: (%2$.0f, %3$.0f, %4$.0f) | Hull: %5$.0f%% | EMP: %6$.1f%% (%7%) | Carrier: %8% (Strength: %9$.2f){/c}")
-             % (ship ? ship->name : "Nebuchadnezzar") % (ship ? ship->position.x : 0.0f) % (ship ? ship->position.y : 0.0f) % (ship ? ship->position.z : 0.0f)
-             % (ship ? ship->hullIntegrity : 100.0f) % emp.chargePercent % (emp.isReady ? "READY" : "CHARGING") % uplink.statusText % uplink.signalStrength).str()
-        ));
-        return;
-    }
-
-    if (boost::iequals(theMessage, "/construct")) {
-        size_t weapons = sLoadingConstruct.GetTotalAvailableWeapons();
-        size_t dummies = sLoadingConstruct.GetDummyCount();
-        float dilation = sLoadingConstruct.GetTimeDilation();
-        m_parent.QueueCommand(make_shared<SystemChatMsg>(
-            (format("{c:FFFFFF}[Loading Construct] Mode: White Void | Available Weapons: %1% | Sparring Dummies: %2% | Time Dilation: %.2fx{/c}")
-             % weapons % dummies % dilation).str()
-        ));
-        return;
-    }
-
-    if (boost::iequals(theMessage, "/dojo")) {
-        size_t pillars = sLoadingConstruct.GetPillarCount();
-        size_t shattered = sLoadingConstruct.GetShatteredPillarCount();
-        size_t destroyedShoji = sLoadingConstruct.GetDestroyedShojiCount();
-        float integrity = sLoadingConstruct.GetDojoStructuralIntegrityPercent();
-        m_parent.QueueCommand(make_shared<SystemChatMsg>(
-            (format("{c:FFCC00}[Oriental Dojo] Pillars: %1% (%2% shattered) | Shoji Screens: 12 (%3% destroyed) | Structural Integrity: %.1f%%{/c}")
-             % pillars % shattered % destroyedShoji % integrity).str()
-        ));
-        return;
-    }
-
-    if (boost::iequals(theMessage, "/backdoors")) {
-        size_t portals = sBackdoorNetwork.GetPortalCount();
-        uint32 transits = sBackdoorNetwork.GetTotalTransits();
-        m_parent.QueueCommand(make_shared<SystemChatMsg>(
-            (format("{c:00FF00}[Hallway of Doors] Active Portals: %1% | Transits: %2% | Access: Keymaker Cryptographic Keys{/c}")
-             % portals % transits).str()
-        ));
-        return;
-    }
-
-    if (boost::iequals(theMessage, "/source")) {
-        m_parent.QueueCommand(make_shared<SystemChatMsg>(
-            "{c:00FFFF}[The Architect's Chamber] Subsystem offline.{/c}"
-        ));
-        return;
-    }
-
-    if (boost::iequals(theMessage, "/oracle") || (theMessage.length() >= 7 && boost::iequals(theMessage.substr(0, 7), "/oracle"))) {
-        uint32 charId = static_cast<uint32>(this->getCharId());
-        std::string sub = (theMessage.length() > 7) ? theMessage.substr(7) : "";
-        boost::trim(sub);
-
-        if (!sub.empty() && isdigit(sub[0])) {
-            // Player selected an option number: /oracle <optionId>
-            uint32 optId = 0;
-            try {
-                optId = static_cast<uint32>(std::stoul(sub));
-            } catch (const std::exception&) {
-                m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FF5555}[The Oracle] That is not a valid choice right now. Type /oracle to see available options.{/c}"));
-                return;
-            }
-            std::string reply;
-            uint32 audioFx = 0;
-            bool ok = sOracleDialogue.SelectDialogueOption(charId, optId, reply, audioFx);
-            if (ok) {
-                float valence = sOracleDialogue.GetFaithValence(charId);
-                const auto* nextNode = sOracleDialogue.GetCurrentNode(charId);
-                std::stringstream replySs;
-                replySs << "{c:FFB300}[The Oracle] \"" << reply << "\"{/c}\n"
-                        << "{c:00FFCC}(Faith Valence: " << std::fixed << std::setprecision(2) << valence << "){/c}";
-                if (audioFx > 0) {
-                    replySs << "\n{c:AAAAAA}[Audio FX 0x" << std::hex << std::uppercase << audioFx << " triggered]{/c}";
-                }
-                if (nextNode && !nextNode->isTerminal && !nextNode->options.empty()) {
-                    replySs << "\n{c:FFFF55}Available Choices:{/c}";
-                    for (const auto& opt : nextNode->options) {
-                        replySs << "\n{c:FFFF88}  [" << opt.optionId << "] " << opt.playerChoiceText << "{/c}";
-                    }
-                    replySs << "\n{c:00FF88}Respond with: /oracle <optionId>{/c}";
-                } else {
-                    replySs << "\n{c:00FF88}[Dialogue Encounter Concluded]{/c}";
-                }
-                m_parent.QueueCommand(make_shared<SystemChatMsg>(replySs.str()));
-            } else {
-                m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FF5555}[The Oracle] That is not a valid choice right now. Type /oracle to see available options.{/c}"));
-            }
-            return;
-        }
-
-        // No option given: show or start encounter
-        if (!sOracleDialogue.HasActiveEncounter(charId)) {
-            sOracleDialogue.StartEncounter(charId);
-        }
-
-        const auto* node = sOracleDialogue.GetCurrentNode(charId);
-        float valence = sOracleDialogue.GetFaithValence(charId);
-        size_t totalNodes = sOracleDialogue.GetTotalDialogueNodes();
-        std::stringstream ss;
-        ss << "{c:FFB300}[The Oracle's Kitchen] Dialogue Nodes: " << totalNodes
-           << " | Faith Valence: " << std::fixed << std::setprecision(2) << valence
-           << " | Tone: " << (node ? node->emotionalTone : "Maternal") << "{/c}\n"
-           << "{c:FFFF88}\"" << (node ? node->oracleSpeech : "Have another cookie, darling.") << "\"{/c}";
-
-        if (node && !node->options.empty()) {
-            ss << "\n{c:FFFF55}Available Choices:{/c}";
-            for (const auto& opt : node->options) {
-                ss << "\n{c:FFFF88}  [" << opt.optionId << "] " << opt.playerChoiceText << "{/c}";
-            }
-            ss << "\n{c:00FF88}Select by typing: /oracle <optionId>{/c}";
-        }
-        m_parent.QueueCommand(make_shared<SystemChatMsg>(ss.str()));
-        return;
-    }
-
-    if (boost::iequals(theMessage, "/bake") || (theMessage.length() >= 5 && boost::iequals(theMessage.substr(0, 5), "/bake"))) {
-        uint32 charId = static_cast<uint32>(this->getCharId());
-        std::string sub = (theMessage.length() > 5) ? theMessage.substr(5) : "";
-        boost::trim(sub);
-
-        if (sub.empty() || boost::iequals(sub, "list") || boost::iequals(sub, "recipes")) {
-            std::stringstream ss;
-            ss << "{c:FFB300}[Oracle's Memory Bakery - Recipes]{/c}\n";
-            for (const auto& pair : sOracleCookie.GetAllRecipes()) {
-                const auto& r = pair.second;
-                ss << "{c:FFFF88}* [" << r.cookieId << "] " << r.name << "{/c} - " << r.description << "\n"
-                   << "  {c:00FFCC}Requires: ";
-                for (const auto& req : r.requiredFragments) {
-                    const auto* def = sOracleCookie.GetFragmentDefinition(req.first);
-                    ss << (def ? def->name : "Fragment") << " x" << req.second << " ";
-                }
-                ss << "{/c} | {c:FFAA00}Effect: " << r.metaphysicalEffect << "{/c}\n";
-            }
-            ss << "{c:00FF88}Commands: /bake craft <id|name> | /cookie eat <id|name> | /bake inventory{/c}";
-            m_parent.QueueCommand(make_shared<SystemChatMsg>(ss.str()));
-            return;
-        }
-
-        if (boost::istarts_with(sub, "craft ") || boost::istarts_with(sub, "bake ")) {
-            std::string targetName = sub.substr(sub.find(' ') + 1);
-            boost::trim(targetName);
-            const CookieRecipe* r = nullptr;
-            if (!targetName.empty() && isdigit(targetName[0])) {
-                try {
-                    r = sOracleCookie.GetRecipe(static_cast<OracleCookieId>(std::stoul(targetName)));
-                } catch (const std::exception&) {
-                    r = nullptr;
-                }
-            } else {
-                r = sOracleCookie.FindRecipeByName(targetName);
-            }
-
-            if (!r) {
-                m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FF5555}[Memory Bakery] Unknown cookie recipe. Type /bake list to view available recipes.{/c}"));
-                return;
-            }
-
-            std::string bakeResult;
-            bool ok = sOracleCookie.Bake(charId, r->cookieId, bakeResult);
-            m_parent.QueueCommand(make_shared<SystemChatMsg>(
-                (format("{c:%1%}[Memory Bakery] %2%{/c}") % (ok ? "FFB300" : "FF5555") % bakeResult).str()
-            ));
-            return;
-        }
-
-        if (boost::iequals(sub, "inventory") || boost::iequals(sub, "pouch")) {
-            const auto* pouch = sOracleCookie.GetPouch(charId);
-            std::stringstream ss;
-            ss << "{c:FFB300}[Memory Bakery Pouch - Operative " << charId << "]{/c}\n"
-               << "{c:FFFF88}--- Data Fragments ---{/c}\n";
-            for (const auto& fPair : sOracleCookie.GetAllFragmentDefinitions()) {
-                uint32 count = sOracleCookie.GetFragmentCount(charId, fPair.first);
-                ss << "  " << fPair.second.name << ": " << count << "\n";
-            }
-            ss << "{c:FFFF88}--- Baked Cookies ---{/c}\n";
-            for (const auto& rPair : sOracleCookie.GetAllRecipes()) {
-                uint32 count = sOracleCookie.GetCookieCount(charId, rPair.first);
-                ss << "  " << rPair.second.name << ": " << count << "\n";
-            }
-            m_parent.QueueCommand(make_shared<SystemChatMsg>(ss.str()));
-            return;
-        }
-
-        if (boost::iequals(sub, "grant") || boost::iequals(sub, "starter")) {
-            sOracleCookie.GrantStarterKit(charId);
-            m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FFB300}[Memory Bakery] Starter data fragment pouch granted (Sugar, Flour, Spices, Yeast, Cocoa, Salt).{/c}"));
-            return;
-        }
-
-        m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:00FF88}Usage: /bake list | /bake craft <name|id> | /bake inventory | /bake grant{/c}"));
-        return;
-    }
-
-    if (boost::iequals(theMessage, "/cookie") || (theMessage.length() >= 7 && boost::iequals(theMessage.substr(0, 7), "/cookie"))) {
-        uint32 charId = static_cast<uint32>(this->getCharId());
-        std::string sub = (theMessage.length() > 7) ? theMessage.substr(7) : "";
-        boost::trim(sub);
-
-        if (sub.empty() || boost::iequals(sub, "status")) {
-            const auto* enc = sOracleDialogue.GetEncounterState(charId);
-            float valence = sOracleDialogue.GetFaithValence(charId);
-            bool hasIntuition = sStatusEffectManager.HasEffect(getGoId(), EFFECT_ORACLE_INTUITION) ||
-                                sStatusEffectManager.HasEffect(charId, EFFECT_ORACLE_INTUITION);
-            std::string decisionStr = (enc && enc->cookieDecision == COOKIE_DECISION_ACCEPTED) ? "ACCEPTED" :
-                                      ((enc && enc->cookieDecision == COOKIE_DECISION_REFUSED) ? "REFUSED" : "PENDING");
-            std::stringstream cookieSs;
-            cookieSs << "{c:FFB300}[Oracle Cookie Status] Decision: " << decisionStr
-                     << " | Faith Valence: " << std::fixed << std::setprecision(2) << valence
-                     << " | Seraphic Intuition: " << (hasIntuition ? "ACTIVE" : "INACTIVE") << "{/c}\n"
-                     << "{c:00FF88}Usage: /cookie accept | /cookie refuse | /cookie eat <name|id>{/c}";
-            m_parent.QueueCommand(make_shared<SystemChatMsg>(cookieSs.str()));
-            return;
-        }
-
-        if (boost::istarts_with(sub, "eat ")) {
-            std::string cookieName = sub.substr(4);
-            boost::trim(cookieName);
-            const CookieRecipe* r = nullptr;
-            if (!cookieName.empty() && isdigit(cookieName[0])) {
-                try {
-                    r = sOracleCookie.GetRecipe(static_cast<OracleCookieId>(std::stoul(cookieName)));
-                } catch (const std::exception&) {
-                    r = nullptr;
-                }
-            } else {
-                r = sOracleCookie.FindRecipeByName(cookieName);
-            }
-            if (!r) {
-                m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FF5555}[Oracle Cookie] Unknown cookie. Type /bake list to see available baked cookies.{/c}"));
-                return;
-            }
-            std::string consumeMsg;
-            bool ok = sOracleCookie.ConsumeCookie(charId, r->cookieId, this, consumeMsg);
-            m_parent.QueueCommand(make_shared<SystemChatMsg>(
-                (format("{c:%1%}[Oracle Cookie] %2%{/c}") % (ok ? "FFB300" : "FF5555") % consumeMsg).str()
-            ));
-            return;
-        }
-
-        OracleCookieChoice choice = (boost::iequals(sub, "refuse") || boost::iequals(sub, "no") || boost::iequals(sub, "decline")) 
-                                     ? COOKIE_DECISION_REFUSED : COOKIE_DECISION_ACCEPTED;
-        std::string consequence;
-        sOracleDialogue.ExecuteCookieChoice(charId, choice, consequence, true, getGoId());
-        m_parent.QueueCommand(make_shared<SystemChatMsg>(
-            (format("{c:FFB300}[Oracle Cookie Choice] %1%{/c}") % consequence).str()
-        ));
-        return;
-    }
-
-    if (boost::iequals(theMessage, "/seraph") || (theMessage.length() >= 7 && boost::iequals(theMessage.substr(0, 7), "/seraph")) ||
-        boost::iequals(theMessage, "/trial") || (theMessage.length() >= 6 && boost::iequals(theMessage.substr(0, 6), "/trial"))) {
-        uint32 charId = static_cast<uint32>(this->getCharId());
-        std::string sub = "";
-        if (theMessage.length() >= 7 && boost::iequals(theMessage.substr(0, 7), "/seraph")) {
-            sub = (theMessage.length() > 7) ? theMessage.substr(7) : "";
-        } else if (theMessage.length() >= 6 && boost::iequals(theMessage.substr(0, 6), "/trial")) {
-            sub = (theMessage.length() > 6) ? theMessage.substr(6) : "";
-        }
-        boost::trim(sub);
-
-        if (sub.empty() || boost::iequals(sub, "status")) {
-            const auto* duel = sOracleSanctuary.GetSeraphDuelState(charId);
-            bool passed = sOracleSanctuary.HasPassedSeraphTrial(charId);
-            std::stringstream ss;
-            ss << "{c:FFB300}[Seraph Trial Status - NPC 9101]{/c}\n"
-               << "Clearance: " << (passed ? "{c:00FF88}PASSED (Inner Sanctum Open){/c}" : "{c:FF5555}PENDING (Threshold Blocked){/c}") << "\n";
-            if (duel) {
-                ss << "Seraph HP: " << std::fixed << std::setprecision(0) << duel->currentHealth << " / " << duel->maxHealth
-                   << " | Successful Interlocks: " << duel->interlocksCompleted << "/3\n";
-            }
-            ss << "{c:00FF88}Usage: /seraph trial (Commence duel) | /seraph strike <damage> [counter]{/c}";
-            m_parent.QueueCommand(make_shared<SystemChatMsg>(ss.str()));
-            return;
-        }
-
-        if (boost::iequals(sub, "trial") || boost::iequals(sub, "start") || boost::iequals(sub, "challenge")) {
-            std::string trialMsg;
-            sOracleSanctuary.StartSeraphTrial(charId, this, trialMsg);
-            m_parent.QueueCommand(make_shared<SystemChatMsg>(
-                (format("{c:FFB300}[Seraph Trial] %1%{/c}") % trialMsg).str()
-            ));
-            return;
-        }
-
-        if (boost::istarts_with(sub, "strike ")) {
-            std::stringstream ss(sub.substr(7));
-            float dmg = 1000.0f;
-            bool isCounter = false;
-            if (!(ss >> dmg) || std::isnan(dmg) || std::isinf(dmg) || dmg < 0.0f) {
-                dmg = 1000.0f;
-            }
-            dmg = std::clamp(dmg, 0.0f, 50000.0f);
-            std::string flag;
-            if (ss >> flag && (boost::iequals(flag, "counter") || boost::iequals(flag, "interlock") || flag == "1")) {
-                isCounter = true;
-            }
-            std::string dialogue;
-            bool yielded = false;
-            sOracleSanctuary.ProcessSeraphDuelHit(charId, dmg, isCounter, dialogue, yielded);
-            m_parent.QueueCommand(make_shared<SystemChatMsg>(
-                (format("{c:%1%}[Seraph Trial Duel] %2%{/c}") % (yielded ? "00FF88" : "FFB300") % dialogue).str()
-            ));
-            return;
-        }
-
-        if (boost::iequals(sub, "reset")) {
-            sOracleSanctuary.ResetSeraphTrial(charId);
-            m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:00FF88}[Seraph Trial] Duel progress reset for character.{/c}"));
-            return;
-        }
-    }
-
-    if (boost::iequals(theMessage, "/vision") || (theMessage.length() >= 7 && boost::iequals(theMessage.substr(0, 7), "/vision"))) {
-        uint32 charId = static_cast<uint32>(this->getCharId());
-        std::string sub = (theMessage.length() > 7) ? theMessage.substr(7) : "";
-        boost::trim(sub);
-
-        if (sub.empty() || boost::iequals(sub, "list")) {
-            std::stringstream ss;
-            ss << "{c:FFB300}[Interactive Prophetic Vision Flashbacks - Visions of the Unmade]{/c}\n";
-            for (const auto& pair : sOracleVision.GetAllDefinitions()) {
-                const auto& v = pair.second;
-                bool completed = sOracleVision.HasCompletedSimulacrum(charId, v.id);
-                ss << "{c:FFFF88}* [" << v.id << "] " << v.title << "{/c} (" << v.historicalEra << ")\n"
-                   << "  Location: " << v.location << " | Completed: " << (completed ? "{c:00FF88}YES{/c}" : "{c:AAAAAA}NO{/c}") << "\n"
-                   << "  {c:00FFCC}Rewards: Fragment " << v.rewardFragmentId << " x" << v.rewardFragmentCount
-                   << " | Faith Shift: " << std::showpos << v.faithValenceShift << std::noshowpos << "{/c}\n";
-            }
-            ss << "{c:00FF88}Usage: /vision start <1-4|name> | /vision status | /vision end{/c}";
-            m_parent.QueueCommand(make_shared<SystemChatMsg>(ss.str()));
-            return;
-        }
-
-        if (boost::istarts_with(sub, "start ") || boost::istarts_with(sub, "trigger ")) {
-            std::string query = sub.substr(sub.find(' ') + 1);
-            boost::trim(query);
-            const VisionSimulacrumDef* def = nullptr;
-            if (!query.empty() && isdigit(query[0])) {
-                try {
-                    def = sOracleVision.GetSimulacrumDef(static_cast<SimulacrumId>(std::stoul(query)));
-                } catch (const std::exception&) {
-                    def = nullptr;
-                }
-            } else {
-                def = sOracleVision.FindSimulacrumByName(query);
-            }
-
-            if (!def) {
-                m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FF5555}[Prophetic Vision] Unknown simulacrum. Type /vision list to see available visions.{/c}"));
-                return;
-            }
-
-            std::string narrative;
-            sOracleVision.StartTrance(charId, def->id, this, narrative);
-            return;
-        }
-
-        if (boost::iequals(sub, "end") || boost::iequals(sub, "stop")) {
-            std::string endMsg;
-            sOracleVision.EndTrance(charId, this, endMsg);
-            m_parent.QueueCommand(make_shared<SystemChatMsg>((format("{c:FFB300}[Prophetic Vision] %1%{/c}") % endMsg).str()));
-            return;
-        }
-
-        if (boost::iequals(sub, "status")) {
-            const auto* state = sOracleVision.GetTranceState(charId);
-            bool inTrance = sOracleVision.IsInTrance(charId);
-            std::stringstream ss;
-            ss << "{c:FFB300}[Prophetic Vision Status - Operative " << charId << "]{/c}\n"
-               << "Active Trance: " << (inTrance ? "IN PROGRESS" : "IDLE") << "\n"
-               << "Completed Simulacra: " << (state ? state->completedSimulacra.size() : 0) << " / 4\n";
-            m_parent.QueueCommand(make_shared<SystemChatMsg>(ss.str()));
-            return;
-        }
-    }
-
-    if (boost::iequals(theMessage, "/skybox") || (theMessage.length() >= 7 && boost::iequals(theMessage.substr(0, 7), "/skybox"))) {
-        std::string sub = (theMessage.length() > 7) ? theMessage.substr(7) : "";
-        boost::trim(sub);
-
-        if (sub.empty() || boost::iequals(sub, "status")) {
-            auto curState = sOracleSanctuary.GetCurrentSkyboxState();
-            auto pal = sOracleSanctuary.GetSkyboxPalette(curState);
-            std::stringstream ss;
-            ss << "{c:FFB300}[Sati's Living Environmental Canvas]{/c}\n"
-               << "Active State: " << pal.name << " (State ID: " << static_cast<int>(curState) << ")\n"
-               << "Primary Tone: " << pal.primaryHex << " | Accent: " << pal.accentHex << " | Ambient: " << pal.ambientHex << "\n"
-               << "{c:FFFF88}\"" << pal.description << "\"{/c}\n"
-               << "{c:00FF88}Usage: /skybox set <0=Zion|1=Machine|2=Merovingian|3=Sunrise>{/c}";
-            m_parent.QueueCommand(make_shared<SystemChatMsg>(ss.str()));
-            return;
-        }
-
-        if (boost::istarts_with(sub, "set ")) {
-            std::string stateStr = sub.substr(4);
-            boost::trim(stateStr);
-            int sid = -1;
-            try {
-                sid = std::stoi(stateStr);
-            } catch (const std::exception&) {
-                sid = -1;
-            }
-            if (sid >= 0 && sid <= 3) {
-                sOracleSanctuary.SetSkyboxState(static_cast<SatiSkyboxState>(sid));
-                auto pal = sOracleSanctuary.GetSkyboxPalette(static_cast<SatiSkyboxState>(sid));
-                m_parent.QueueCommand(make_shared<SystemChatMsg>(
-                    (format("{c:FFB300}[Sati's Skybox] Horizon shifted to %1% (%2%).{/c}") % pal.name % pal.primaryHex).str()
-                ));
-            } else {
-                m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FF5555}[Sati's Skybox] Invalid state ID. Use 0=Zion, 1=Machine, 2=Merovingian, 3=Sunrise.{/c}"));
-            }
-            return;
-        }
-    }
-
-    if (boost::iequals(theMessage, "/sanctuary") || (theMessage.length() >= 10 && boost::iequals(theMessage.substr(0, 10), "/sanctuary"))) {
-        std::string sub = (theMessage.length() > 10) ? theMessage.substr(10) : "";
-        boost::trim(sub);
-
-        auto pos = this->getPosition();
-        std::string curSanctuaryName;
-        bool inSanctuary = sOracleSanctuary.IsInSanctuary(pos.x, pos.y, pos.z, curSanctuaryName);
-
-        if (sub.empty() && inSanctuary) {
-            uint32 charId = static_cast<uint32>(this->getCharId());
-            if (curSanctuaryName == "Park East Bench") {
-                sOracleSanctuary.TriggerSatiSunrise(charId, this);
-            }
-            m_parent.QueueCommand(make_shared<SystemChatMsg>(
-                (format("{c:00FF88}[Sanctuary Active] You are within the serene threshold of %1%.{/c}") % curSanctuaryName).str()
-            ));
-            return;
-        }
-
-        std::string targetEnclave = sub.empty() ? "Tenement Kitchen" : sub;
-        sOracleSanctuary.TeleportToSanctuary(this, targetEnclave);
-        return;
-    }
-
-    if (theMessage.length() >= 4 && boost::iequals(theMessage.substr(0, 4), "/tts")) {
-        std::stringstream ss(theMessage.substr(4));
-        std::string personaStr;
-        ss >> personaStr;
-        std::string text;
-        std::getline(ss, text);
-        if (text.empty()) text = "Welcome to the Desert of the Real.";
-        while (!text.empty() && text.front() == ' ') text.erase(0, 1);
-
-        VoicePersona p = VOICE_PERSONA_MORPHEUS;
-        if (boost::iequals(personaStr, "oracle")) p = VOICE_PERSONA_ORACLE;
-        else if (boost::iequals(personaStr, "smith")) p = VOICE_PERSONA_AGENT_SMITH;
-        else if (boost::iequals(personaStr, "merovingian") || boost::iequals(personaStr, "mero")) p = VOICE_PERSONA_MEROVINGIAN;
-
-        SynthesizedAudioClip clip;
-        bool ok = sNeuralVoiceSystem.SynthesizeContactVoice(p, text, clip);
-        if (ok) {
-            auto prof = sNeuralVoiceSystem.GetVoiceProfile(p);
-            m_parent.QueueCommand(make_shared<SystemChatMsg>(
-                (format("{c:55FF55}[Neural TTS] Synthesized %1%ms 24kHz audio for %2%: '%3%'{/c}")
-                 % clip.durationMs % (prof ? prof->displayName : "Contact") % text).str()
-            ));
-        }
-        return;
-    }
-
-    if (boost::iequals(theMessage, "/dispatch")) {
-        m_parent.QueueCommand(make_shared<SystemChatMsg>(
-            "{c:AAAAAA}[Police Radio Dispatch] Scanner frequency offline.{/c}"
-        ));
-        return;
-    }
-
-    if (boost::iequals(theMessage, "/vr")) {
-        m_parent.QueueCommand(make_shared<SystemChatMsg>(
-            "{c:00FFCC}[OpenXR VR Pipeline] Subsystem offline.{/c}"
-        ));
-        return;
-    }
-
-    if (boost::iequals(theMessage, "/apu")) {
-        auto apu = sAPUCombatSystem.GetAPU(1);
-        auto log = sAPUCombatSystem.GetLogistics();
-        size_t apuCount = sAPUCombatSystem.GetActiveAPUCount();
-        size_t breaches = sAPUCombatSystem.GetActiveBreachCount();
-        m_parent.QueueCommand(make_shared<SystemChatMsg>(
-            (format("{c:FFCC00}[Zion APU Walker] Unit: %1% (%2%) | Ammo: L:%3% R:%4% | Barrel Temp: L:%5$.1fC R:%6$.1fC | Pressure: %7$.0f PSI | Breaches: %8% | Defense Grid: %9$.0f%%{/c}")
-             % (apu ? apu->pilotHandle : "Unassigned") % (apu && apu->isMounted ? "MOUNTED" : "UNMANNED")
-             % (apu ? apu->leftArm.ammoRoundsRemaining : 0) % (apu ? apu->rightArm.ammoRoundsRemaining : 0)
-             % (apu ? apu->leftArm.barrelTempCelsius : 25.0f) % (apu ? apu->rightArm.barrelTempCelsius : 25.0f)
-             % (apu ? apu->hydraulicPressurePsi : 3000.0f) % breaches % log.defenseGridAllocationPercent).str()
-        ));
-        return;
-    }
-
-    if (boost::iequals(theMessage, "/gunship")) {
-        m_parent.QueueCommand(make_shared<SystemChatMsg>(
-            "{c:00FFCC}[Megacity Gunship] Subsystem offline.{/c}"
-        ));
-        return;
-    }
-
-    if (boost::iequals(theMessage, "/redpill")) {
-        size_t total = sRedpillAwakeningSystem.GetPotentialCount();
-        size_t awakened = sRedpillAwakeningSystem.GetAwakenedCount();
-        size_t extracted = sRedpillAwakeningSystem.GetTotalExtracted();
-        auto pot = sRedpillAwakeningSystem.GetPotential(1);
-        m_parent.QueueCommand(make_shared<SystemChatMsg>(
-            (format("{c:55FF55}[Redpill Awakening] Tracked Potentials: %1% | Awakened: %2% | Extracted: %3% | Target: %4% (Disbelief: %5$.1f%%, Deja Vu: %6%){/c}")
-             % total % awakened % extracted % (pot ? pot->civilianName : "None")
-             % (pot ? pot->systemDisbeliefPercent : 0.0f) % (pot ? pot->dejaVuCatOccurrences : 0)).str()
-        ));
-        return;
-    }
-
-    if (boost::iequals(theMessage, "/webrtc")) {
-        m_parent.QueueCommand(make_shared<SystemChatMsg>(
-            "{c:00FF99}[WebGPU Bridge] Subsystem offline.{/c}"
-        ));
-        return;
-    }
-
-    if (boost::iequals(theMessage, "/prophecy")) {
-        m_parent.QueueCommand(make_shared<SystemChatMsg>(
-            "{c:FF55FF}[Neural Prophecy Engine] Subsystem offline.{/c}"
-        ));
-        return;
-    }
-
-    if (boost::iequals(theMessage, "/zerone")) {
-        auto deus = sMachineCitySystem.GetDeusState();
-        size_t severed = sMachineCitySystem.GetSeveredTetherCount();
-        size_t bps = sMachineCitySystem.GetTotalBlueprintCount();
-        m_parent.QueueCommand(make_shared<SystemChatMsg>(
-            (format("{c:FF9900}[Zero-One Machine City] Deus Ex Machina: Phase %1% | Emotional State: %2% | Drones: %3% | Shield: %4$.0f%% | Tethers Severed: %5%/4 | Blueprints: %6% | Truce: %7%{/c}")
-             % (int)deus.currentPhase % (int)deus.emotionalState % deus.swarmDroneCount
-             % deus.vortexShieldIntegrity % severed % bps % (deus.peaceTreatyRatified ? "RATIFIED" : "PENDING")).str()
-        ));
-        return;
-    }
-
-    if (boost::iequals(theMessage, "/freeway")) {
-        size_t vCount = sFreewayCombatSystem.GetVehicleCount();
-        size_t duels = sFreewayCombatSystem.GetActiveRoofDuelCount();
-        auto escort = sFreewayCombatSystem.GetEscortState();
-        bool twin1Phased = sFreewayCombatSystem.IsTwinPhased(1);
-        m_parent.QueueCommand(make_shared<SystemChatMsg>(
-            (format("{c:00CCFF}[101 Freeway Chase] Vehicles: %1% | Rooftop Duels: %2% | Keymaker Escort: %3$.1f%% (HP: %4$.0f) | Twins Phase: %5%{/c}")
-             % vCount % duels % escort.progressPercent % escort.escortHealth % (twin1Phased ? "ETHEREAL" : "SOLID")).str()
-        ));
-        return;
-    }
-
-    if (boost::iequals(theMessage, "/mobilave")) {
-        auto train = sMobilAveRailSystem.GetTrain();
-        auto boss = sMobilAveRailSystem.GetTrainmanState();
-        size_t smuggleRuns = sMobilAveRailSystem.GetActiveSmuggleRunCount();
-        m_parent.QueueCommand(make_shared<SystemChatMsg>(
-            (format("{c:FFFF55}[Mobil Ave Station] Train #%1% [%2%mph]: %3% | Destination: %4% | Smuggling Runs: %5% | Trainman HP: %6$.0f (Time Dilation: %7$.2fx){/c}")
-             % train.trainId % train.speedMph % (sMobilAveRailSystem.IsTrainDocked() ? "DOCKED" : (train.isHazardActive ? "EXPRESS HAZARD" : "IN TRANSIT"))
-             % train.destinationShard % smuggleRuns % boss.health % boss.timeDilationFactor).str()
-        ));
-        return;
-    }
-
-    if (boost::iequals(theMessage, "/codevision")) {
-        auto cv = sCyberdeckHackingSystem.GetCodeVisionConfig();
-        size_t termCount = sCyberdeckHackingSystem.GetTerminalCount();
-        size_t compCount = sCyberdeckHackingSystem.GetCompromisedTerminalCount();
-        CyberdeckHardware deck;
-        bool hasDeck = sCyberdeckHackingSystem.GetDeck(1, deck);
-        m_parent.QueueCommand(make_shared<SystemChatMsg>(
-            (format("{c:00FF00}[Code Vision & Cyberdeck] Green Rain: %1% (Density: %2$.1f, Speed: %3$.1f) | Terminals: %4% (%5% compromised) | Rig: %6% (%7%MB, %8$.1fGHz){/c}")
-             % (cv.isEnabled ? "ACTIVE" : "OFF") % cv.glyphDensity % cv.rainVelocity
-             % termCount % compCount % (hasDeck ? deck.deckModel : "None") % (hasDeck ? deck.installedRamMb : 0) % (hasDeck ? deck.busSpeedGhz : 0.0f)).str()
-        ));
-        return;
-    }
-
-    if (boost::iequals(theMessage, "/federation")) {
-        m_parent.QueueCommand(make_shared<SystemChatMsg>(
-            "{c:CC99FF}[Shard Federation] Subsystem offline.{/c}"
-        ));
-        return;
-    }
-
-    if (boost::iequals(theMessage, "/clubhel")) {
-        auto chateau = sClubHelRaidSystem.GetChateauState();
-        size_t exiles = sClubHelRaidSystem.GetActiveExileCount();
-        m_parent.QueueCommand(make_shared<SystemChatMsg>(
-            (format("{c:FF3366}[Club Hel & Chateau] Exiles Active: %1% | Grand Staircase HP: %2$.0f%% | Statues Shattered: %3%/6 | Secret Cellar: %4% | Persephone Vault: %5%{/c}")
-             % exiles % chateau.grandStaircaseIntegrity % chateau.destroyedStatues
-             % (chateau.secretCellarUnlocked ? "UNLOCKED" : "LOCKED")
-             % (chateau.persephoneVaultOpen ? "OPEN" : "SEALED")).str()
-        ));
-        return;
-    }
-
-    if (boost::iequals(theMessage, "/podfields")) {
-        auto tower = sPodHarvestSystem.GetTowerState();
-        size_t activePods = sPodHarvestSystem.GetActivePodCount();
-        m_parent.QueueCommand(make_shared<SystemChatMsg>(
-            (format("{c:FF6600}[Power Plant Battery Tower] Active Pods: %1% (Total Grid: %2%) | Output: %3$.1f MW | Copper-Tops Rescued: %4% | Purged: %5%{/c}")
-             % activePods % tower.totalPodsCount % tower.totalEnergyOutputMw % tower.rescuedHumanCount % tower.purgedHumanCount).str()
-        ));
-        return;
-    }
-
-    if (boost::iequals(theMessage, "/orbital")) {
-        size_t sats = sOrbitalSatelliteSystem.GetSatelliteCount();
-        size_t pirate = sOrbitalSatelliteSystem.GetPirateTransponderCount();
-        bool beamActive = sOrbitalSatelliteSystem.IsSolarBeamActive();
-        auto strike = sOrbitalSatelliteSystem.GetLatestStrike();
-        m_parent.QueueCommand(make_shared<SystemChatMsg>(
-            (format("{c:33CCFF}[Orbital Satellite Mesh] Satellites: %1% (%2% pirate relays) | Solar Recharge Beam: %3% | Kinetic Lance: %4% (Last Energy: %5$.1f GJ){/c}")
-             % sats % pirate % (beamActive ? "LOCKED (150 MW)" : "STANDBY")
-             % (strike.isDischarged ? "DISCHARGED" : "READY") % strike.impactKineticEnergyGj).str()
-        ));
-        return;
-    }
-
-    if (boost::iequals(theMessage, "/codecompile")) {
-        auto tele = sSourceCodeCompilerSystem.GetTelemetry();
-        size_t blocks = sSourceCodeCompilerSystem.GetCompiledBlockCount();
-        size_t katas = sSourceCodeCompilerSystem.GetCustomKataCount();
-        m_parent.QueueCommand(make_shared<SystemChatMsg>(
-            (format("{c:00FF66}[JIT Code Compiler] Compiled Blocks: %1% | Custom Katas: %2% | Avg Latency: %3$.2fms | Sanitized Execs: %4% | Rejected Exploits: %5%{/c}")
-             % blocks % katas % tele.averageCompilationTimeMs % tele.sanitizedExecutions % tele.rejectedExploits).str()
-        ));
-        return;
-    }
-
-    if (boost::iequals(theMessage, "/reboot")) {
-        m_parent.QueueCommand(make_shared<SystemChatMsg>(
-            "{c:FFD700}[Matrix Reboot Engine] Subsystem offline.{/c}"
-        ));
+        m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FFFF55}/stuck{/c} - Recover operative to nearest safe Hardline"));
+        m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FFFF55}/jackout | /exit{/c} - Cleanly disconnect from the Matrix"));
+        m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FFFF55}/vendor | /shop{/c} - Connect to nearest Hardline vendor"));
+        m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FFFF55}/craft <id> | /craft list{/c} - Coder ability blueprint compilation"));
+        m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FFFF55}/org <create|leave>{/c} - Syndicate organization management"));
+        m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FFFF55}/dojo <1v1|clear|leave>{/c} - Sparring partner construct"));
+        m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FFFF55}/contact <list|call <name>>{/c} - Uplink with canonical mission contacts"));
         return;
     }
 
@@ -4240,61 +3074,6 @@ void PlayerObject::RPC_HandleChat( ByteBuffer &srcCmd )
     }
 
     // Authentic Marketplace Chat Commands (/market, &market, /market list, /market sell, /market buy)
-    if (boost::iequals(theMessage, "/market") || boost::iequals(theMessage, "&market") ||
-        boost::iequals(theMessage, "/market list") || boost::iequals(theMessage, "&market list") ||
-        boost::iequals(theMessage, "/marketplace") || boost::iequals(theMessage, "&marketplace")) {
-        ByteBuffer dummy;
-        RPC_HandleMarketListItems(dummy);
-        return;
-    }
-
-    if (boost::istarts_with(theMessage, "/market sell ") || boost::istarts_with(theMessage, "&market sell ") ||
-        boost::istarts_with(theMessage, "/market list ") || boost::istarts_with(theMessage, "&market list ")) {
-        std::string args = theMessage.substr(theMessage.find(" ") + 1);
-        if (args.find("sell ") == 0) args = args.substr(5);
-        else if (args.find("list ") == 0) args = args.substr(5);
-        boost::trim(args);
-        std::vector<std::string> parts;
-        boost::split(parts, args, boost::is_any_of(" "), boost::token_compress_on);
-        if (parts.size() >= 2) {
-            try {
-                uint32 tplId = std::stoul(parts[0]);
-                uint32 price = std::stoul(parts[1]);
-                uint64 listingId = sEconomySys.ListVendorItem(this, tplId, price);
-                m_parent.QueueCommand(make_shared<SystemChatMsg>(
-                    (format("{c:00FFCC}[MARKETPLACE] Listed item %1% on Exchange for %2% $Info (Listing ID: %3%){/c}")
-                        % tplId % price % listingId).str()
-                ));
-            } catch (...) {
-                m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FF4444}Usage: /market sell <templateId> <price>{/c}"));
-            }
-        } else {
-            m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FF4444}Usage: /market sell <templateId> <price>{/c}"));
-        }
-        return;
-    }
-
-    if (boost::istarts_with(theMessage, "/market buy ") || boost::istarts_with(theMessage, "&market buy ")) {
-        std::string arg = theMessage.substr(theMessage.find("buy ") + 4);
-        boost::trim(arg);
-        try {
-            uint64 listingId = std::stoull(arg);
-            bool ok = sEconomySys.PurchaseVendorItem(this, listingId);
-            if (ok) {
-                m_parent.QueueCommand(make_shared<SystemChatMsg>(
-                    (format("{c:00FF00}[MARKETPLACE] Successfully purchased listing ID %1%!{/c}") % listingId).str()
-                ));
-            } else {
-                m_parent.QueueCommand(make_shared<SystemChatMsg>(
-                    (format("{c:FF4444}[MARKETPLACE] Purchase failed for listing ID %1% (insufficient funds, full inventory, or invalid listing).{/c}") % listingId).str()
-                ));
-            }
-        } catch (...) {
-            m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FF4444}Usage: /market buy <listingId>{/c}"));
-        }
-        return;
-    }
-
     if (boost::iequals(theMessage, "/jackout") || boost::iequals(theMessage, "/exit")) {
         ByteBuffer dummy;
         RPC_HandleJackoutRequest(dummy);
@@ -4355,21 +3134,6 @@ void PlayerObject::RPC_HandleChat( ByteBuffer &srcCmd )
         }
     }
 
-    if (boost::iequals(theMessage, "/slmstats")) {
-        m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:00FFCC}[SLM Dialogue Engine] Subsystem offline.{/c}"));
-        return;
-    }
-
-    if (theMessage.length() >= 10 && (boost::iequals(theMessage.substr(0, 10), "/epistemic") || boost::iequals(theMessage.substr(0, 10), "!epistemic"))) {
-        m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:00FFCC}[Epistemic Horizon] Subsystem offline.{/c}"));
-        return;
-    }
-
-    if (theMessage.length() >= 9 && (boost::iequals(theMessage.substr(0, 9), "/dialogue") || boost::iequals(theMessage.substr(0, 9), "!dialogue"))) {
-        m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:00FFCC}[SLM Dialogue Engine] Subsystem offline.{/c}"));
-        return;
-    }
-
     // Item 43: Director Mode Possession Chat Reroute
     if (m_possessingBotId != 0) {
         auto bot = sBotMgr.GetBotByGOID(m_possessingBotId);
@@ -4383,13 +3147,7 @@ void PlayerObject::RPC_HandleChat( ByteBuffer &srcCmd )
 	m_parent.QueueCommand(make_shared<SystemChatMsg>((format("You said %1%") % theMessage).str()));
 	sGame.AnnounceCommand(&m_parent,make_shared<PlayerChatMsg>(m_handle,theMessage));
 
-    // Dynamic Contextual Local NPC Chat Response (Phase 14)
-    std::string npcReply, npcName;
-    if (sNeuralVoiceSystem.ProcessLocalChatSay(m_goId, theMessage, getPosition().x, getPosition().z, npcReply, npcName)) {
-        m_parent.QueueCommand(make_shared<SystemChatMsg>(
-            (format("{c:AAAAAA}[Local] %1% murmurs: \"%2%\"{/c}") % npcName % npcReply).str()
-        ));
-    }
+
 }
 
 void PlayerObject::RPC_HandleWhisper( ByteBuffer &srcCmd )
@@ -5067,62 +3825,6 @@ void PlayerObject::RPC_HandleJackoutFinished( ByteBuffer &srcCmd )
 	DEBUG_LOG(msg);
 	m_parent.Invalidate();
 }
-void PlayerObject::RPC_HandleMarketListItems(ByteBuffer& srcCmd)
-{
-	DEBUG_LOG(format("(%1%) %2%:%3% RPC_HandleMarketListItems") % m_parent.Address() % m_handle % m_goId);
-	auto listings = sEconomySys.GetActiveListings();
-	if (listings.empty())
-	{
-		// Authentic retail seed items so the marketplace is always populated:
-		// 903: Foot Wear (8,000 $Info) - authentic retail HDS capture
-		// 10101: Dual Berettas (15,000 $Info)
-		// 10102: Onyx Trenchcoat (25,000 $Info)
-		// 10103: Dark Shades (5,000 $Info)
-		// 10105: Polished Berettas (18,000 $Info)
-		static const std::vector<std::pair<uint32, uint32>> seedCatalog = {
-			{ 903, 8000 },
-			{ 10101, 15000 },
-			{ 10102, 25000 },
-			{ 10103, 5000 },
-			{ 10105, 18000 }
-		};
-		for (const auto& seed : seedCatalog)
-		{
-			VendorListing l;
-			l.listingId = static_cast<uint64>(seed.first);
-			l.sellerId = 0;
-			l.templateId = seed.first;
-			l.infoPrice = seed.second;
-			l.isActive = true;
-			listings.push_back(l);
-		}
-	}
-
-	std::vector<MarketItemEntry> entries;
-	entries.reserve(listings.size());
-	uint32 now = static_cast<uint32>(time(nullptr));
-	for (const auto& l : listings)
-	{
-		MarketItemEntry entry;
-		entry.templateId = l.templateId;
-		entry.instanceData = 0;
-		entry.marketplaceId = static_cast<uint32>(l.listingId);
-		entry.sellingPrice = l.infoPrice;
-		entry.organizationId = 3;
-		entry.timePostedGMT = now;
-		entry.playerIsSelling = (m_goId != 0 && l.sellerId == m_goId) ? 1 : 0;
-		entries.push_back(entry);
-	}
-
-	m_parent.QueueCommand(std::make_shared<MarketplaceListReplyMsg>(entries));
-	m_parent.QueueCommand(std::make_shared<SystemChatMsg>(
-		(format("{c:00FFCC}[MARKETPLACE] %1% active item listing(s) retrieved from MegaCity Exchange.{/c}")
-			% entries.size()).str()
-	));
-	INFO_LOG(format("Marketplace: Dispatched %1% active listings (opcode 0x8125) to %2% (GoID %3%)")
-		% entries.size() % m_handle % m_goId);
-}
-
 void PlayerObject::RPC_HandleMarketOpen(ByteBuffer& srcCmd)
 {
 	DEBUG_LOG(format("(%1%) %2%:%3% RPC_HandleMarketOpen") % m_parent.Address() % m_handle % m_goId);

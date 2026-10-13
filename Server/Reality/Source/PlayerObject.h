@@ -349,7 +349,6 @@ private:
 	void RPC_HandleItemMoveSlot( ByteBuffer &srcCmd );
 	void RPC_HandleItemUnmountRSI( ByteBuffer &srcCmd );
 	void RPC_HandleItemMountRSI( ByteBuffer &srcCmd );
-	void RPC_HandleMarketListItems(ByteBuffer &srcCmd);
 	void RPC_HandleMarketOpen(ByteBuffer &srcCmd);
 	void RPC_HandleCloseCombatRequest( ByteBuffer &srcCmd );
 	void RPC_HandleRangeCombatRequest( ByteBuffer &srcCmd );

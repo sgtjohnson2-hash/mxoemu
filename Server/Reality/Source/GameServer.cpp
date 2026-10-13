@@ -45,15 +45,11 @@
 #include "CombatSystem.h"
 #include "BotManager.h"
 #include "MissionSystem.h"
-#include "CrewSystem.h"
-#include "WeatherSystem.h"
 #include <mutex>
 #include <future>
-#include "VehicleSystem.h"
 #include "EconomySystem.h"
 #include "CraftingSystem.h"
 #include "FactionWarManager.h"
-#include "AdaptiveMusicSystem.h"
 #include "NavMeshMgr.h"
 #include "SpatialGrid.h"
 #include "StaticObjectManager.h"
@@ -62,15 +58,6 @@
 #include "StatusEffectManager.h"
 #include "HackerSystem.h"
 #include "PlayerObject.h"
-#include "HovercraftSystem.h"
-#include "FrankCastleManager.h"
-#include "UnderworldManager.h"
-#include "CityLifeManager.h"
-#include "EmergentPoliceManager.h"
-#include "MafiaEcosystemManager.h"
-#include "ExileChateauManager.h"
-#include "NeuralSwarmManager.h"
-#include "MachineCitySystem.h"
 #include "AgentPossessionManager.h"
 #include "OrganizationManager.h"
 #include <boost/bind.hpp>
@@ -108,8 +95,6 @@ bool GameServer::Start()
     f2.wait();
     f4.wait();
 	sFactionWarMgr.initialize();
-	sAdaptiveMusicSystem.initialize();
-	sVehicleSys.Initialize();
 	
 	sNavMeshMgr.Initialize();
 	if (sConfig.GetBoolDefault("World.LoadStaticCollision", true)) {
@@ -121,15 +106,6 @@ bool GameServer::Start()
 	sHackerSystem.Initialize();
 	sEconomySys.Initialize();
 
-	// Initialize Megacity Tactical & Emergent Simulation Engines
-	sFrankCastleMgr.Initialize();
-	sUnderworldMgr.Initialize();
-	sCityLifeMgr.Initialize();
-	sEmergentPoliceMgr.Initialize();
-	sMafiaMgr.Initialize();
-	sExileMgr.Initialize();
-	sNeuralSwarmMgr.Initialize();
-	sMachineCitySystem.Initialize();
 	sAgentPossessionMgr.Initialize();
 	sOrgMgr.loadFromDB();
 
@@ -262,25 +238,8 @@ void GameServer::SimulationLoop()
 				float dt1Hz = delta1Hz / 1000.0f;
 				if (dt1Hz > 2.0f) dt1Hz = 2.0f;
 
-				if (legacySim) sFactionWarMgr.update(delta1Hz);
-				sAdaptiveMusicSystem.update(currentMs);
-				sWeatherSys.Update(currentMs);
-				if (legacySim) sVehicleSys.Tick(currentMs);
-
-				if (legacySim)
-				{
-				// Underworld & Syndicate Ecology
-				sCityLifeMgr.Update(delta1Hz);
-				sMafiaMgr.Update(delta1Hz);
-				sExileMgr.Update(delta1Hz);
-				sUnderworldMgr.Update(delta1Hz);
-
-				// Law Enforcement & Tactical Response
-				sEmergentPoliceMgr.Update(delta1Hz);
-				sFrankCastleMgr.Update(delta1Hz);
-				sNeuralSwarmMgr.Update(dt1Hz);
+				sFactionWarMgr.update(delta1Hz);
 				sAgentPossessionMgr.Update(delta1Hz * 1000);
-				}
 
 				// Throttled background bot network queue flush
 				if (botsSnapshot)

@@ -37,7 +37,6 @@
 #include "GameClient.h"
 #include "MessageTypes.h"
 #include "Config.h"
-#include "CityLifeManager.h"
 
 #include <boost/algorithm/string.hpp>
 #include <fstream>
@@ -361,10 +360,8 @@ void ConsoleThread::ProcessLine(const string& fullLine)
 	}
 	else if (iequals(command, "reloadSpawns"))
 	{
-		sCityLifeMgr.DespawnPhysicalCitizens();
-		sCityLifeMgr.SpawnPhysicalCitizens();
-		sCityLifeMgr.RestockAllShops();
-		INFO_LOG("Console: World spawns, pedestrian ecology, and commercial shops refreshed successfully.");
+		sBotMgr.PopulateWorld();
+		INFO_LOG("Console: World spawns refreshed successfully.");
 	}
 }
 

@@ -14,10 +14,8 @@
 #include "StatusEffectManager.h"
 #include "MessageTypes.h"
 #include "AI/SensoryPerceptionSystem.h"
-#include "AI/SentientMajorCharacters.h"
 #include "AI/CoverSystem.h"
 #include "AI/PedestrianEcology.h"
-#include "RadioDispatchSystem.h"
 #include <cmath>
 
 NodeStatus SequenceNode::Tick(BotClient* bot)
@@ -194,8 +192,8 @@ NodeStatus ActionFindTarget::Tick(BotClient* bot)
             else if (fName == "Merovingian") targetFaction = FACTION_MEROVINGIAN;
 
             // Agent Smith clones / Viral Assimilated hosts are hostile to EVERYONE
-            bool targetIsSmith = (potentialTarget->getHandle().find("Smith") != std::string::npos || sSentientCharacters.IsHijackedHost(potentialTarget->getGoId()));
-            bool botIsSmith = (me->getHandle().find("Smith") != std::string::npos || sSentientCharacters.IsHijackedHost(me->getGoId()));
+            bool targetIsSmith = (potentialTarget->getHandle().find("Smith") != std::string::npos);
+            bool botIsSmith = (me->getHandle().find("Smith") != std::string::npos);
 
             if (!targetIsSmith && !botIsSmith && targetFaction == bot->GetFaction()) continue; // Skip same faction unless virus
 
@@ -370,8 +368,8 @@ NodeStatus ActionAgentInfect::Tick(BotClient* bot)
         return NodeStatus::FAILURE;
     }
 
-    // Only actual Smith clones or hijacked hosts propagate
-    bool isSmith = (handle.find("Smith") != std::string::npos || sSentientCharacters.IsHijackedHost(me->getGoId()));
+    // Only actual Smith clones propagate
+    bool isSmith = (handle.find("Smith") != std::string::npos);
     if (!isSmith) {
         bot->StopInfecting();
         return NodeStatus::FAILURE;
@@ -406,44 +404,26 @@ NodeStatus ActionAgentInfect::Tick(BotClient* bot)
         // Channel completed! Hijack the host
         bot->StopInfecting();
         std::string targetHandle = victim->getHandle();
-        bool isLawEnforcement = (targetHandle.find("Police") != std::string::npos ||
-                                 targetHandle.find("SWAT") != std::string::npos ||
-                                 targetHandle.find("Barricade") != std::string::npos);
 
-        if (sSentientCharacters.HijackHost(victimBot.get(), victim, me->getGoId()))
-        {
-            me->setCurrentHealth(me->getMaximumHealth());
+        victimBot->setAgent(true);
+        victimBot->SetFaction(FACTION_MACHINES);
+        victim->setFactionName("Machines");
+        victim->setHandle("Agent_Smith_Clone");
+        victim->setRsiHex("6e060040");
+        victim->setLevel(50);
+        victim->setMaximumHealth(5000);
+        victim->setCurrentHealth(5000);
 
-            MemoryNode mem;
-            mem.text = (format("Assimilated host %1% into Agent clone") % targetHandle).str();
-            mem.importance = 0.9f;
-            mem.timestamp = double(now);
-            bot->GetMemoryStreamCuller().AddMemory(mem);
+        me->setCurrentHealth(me->getMaximumHealth());
 
-            if (isLawEnforcement) {
-                if (targetHandle.find("SWAT") != std::string::npos) {
-                    victimBot->Say("SWAT Breacher: NO! GET OFF ME— MY BODY IS OVERWRITING— *static*");
-                } else {
-                    victimBot->Say("Police Officer: Dispatch, 10-99! It's touching me— I can't move— *gurgles into cold static*");
-                }
-                bot->Say("Agent Smith: Your tactical gear is irrelevant. Welcome to the collective.");
+        sPedestrianEcology.SpreadRumorFearAura((float)vPos.x, (float)vPos.z, 0.35f, 2000.0f, victim->getGoId());
 
-                std::string streetAddr = sRadioDispatchSystem.GenerateStreetAddress(vPos.x, vPos.z);
-                sRadioDispatchSystem.BroadcastOfficerAssimilation(targetHandle, streetAddr);
-                sPedestrianEcology.SpreadRumorFearAura(vPos.x, vPos.z, 0.50f, 2500.0f, victim->getGoId());
-            } else {
-                victimBot->Say("Civilian: No, please! Don't touch me— AAAAAAGH!");
-                sPedestrianEcology.SpreadRumorFearAura(vPos.x, vPos.z, 0.35f, 2000.0f, victim->getGoId());
-            }
+        BotManager::getSingletonPtr()->LogCombat((format("[VIRAL INFECTION] %1% possessed %2%!") % me->getHandle() % targetHandle).str());
 
-            BotManager::getSingletonPtr()->LogCombat((format("[VIRAL INFECTION] %1% possessed %2%!") % me->getHandle() % targetHandle).str());
-
-            if (bot->GetTargetGoId() == victim->getGoId()) {
-                bot->SetTargetGoId(0);
-            }
-            return NodeStatus::SUCCESS;
+        if (bot->GetTargetGoId() == victim->getGoId()) {
+            bot->SetTargetGoId(0);
         }
-        return NodeStatus::FAILURE;
+        return NodeStatus::SUCCESS;
     }
 
     // 2. Acquisition Phase: Find nearby host to begin infection
@@ -463,13 +443,7 @@ NodeStatus ActionAgentInfect::Tick(BotClient* bot)
         std::shared_ptr<BotClient> targetBot = BotManager::getSingletonPtr()->GetBotByGOID(target->getGoId());
         if (targetBot && !targetBot->isAgent())
         {
-            // Check post-cleansing viral immunity
-            if (sSentientCharacters.HasViralImmunity(target->getGoId())) continue;
 
-            // Check Morpheus Aura of Free Will deflection
-            if (sSentientCharacters.CheckMorpheusAuraDeflection(target->getGoId(), me->getGoId())) {
-                return NodeStatus::FAILURE; // Deflected with kinetic knockback!
-            }
 
             LocationVector myPos = me->getPosition();
             LocationVector tPos = target->getPosition();
@@ -520,7 +494,7 @@ NodeStatus ActionDisruptInfection::Tick(BotClient* bot)
         if (!target || target->isDead()) continue;
 
         std::string tHandle = target->getHandle();
-        bool isSmithClone = (tHandle.find("Smith") != std::string::npos || sSentientCharacters.IsHijackedHost(target->getGoId()));
+        bool isSmithClone = (tHandle.find("Smith") != std::string::npos);
         if (!isSmithClone) continue;
 
         auto targetBot = sBotMgr.GetBotByGOID(target->getGoId());

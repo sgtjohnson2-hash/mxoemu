@@ -1138,7 +1138,6 @@ void PlayerObject::HandleCommand( ByteBuffer &srcCmd )
 		m_RPCshort[0x810e] = &PlayerObject::RPC_HandleVendorBuy;
 		m_RPCshort[0x8111] = &PlayerObject::RPC_HandleVendorSell;
 		m_RPCshort[0x8121] = &PlayerObject::RPC_HandleMarketOpen;
-		m_RPCshort[0x8124] = &PlayerObject::RPC_HandleMarketListItems;
 		m_RPCshort[0x8063] = &PlayerObject::RPC_HandleItemMountRSI;
 		m_RPCshort[0x8064] = &PlayerObject::RPC_HandleItemUnmountRSI;
 		m_RPCshort[0x8065] = &PlayerObject::RPC_HandleItemMoveSlot;

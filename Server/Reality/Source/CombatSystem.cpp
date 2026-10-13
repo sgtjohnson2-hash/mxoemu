@@ -13,8 +13,6 @@
 #include "SpatialGrid.h"
 #include "BotClient.h"
 #include "AI/MatrixThreatHeatmap.h"
-#include "WorldDirector.h"
-#include "LogisticsManager.h"
 #include "StatusEffectManager.h"
 #include "InventorySystem.h"
 #include "StaticObjectManager.h"
@@ -2251,22 +2249,10 @@ void CombatSystem::AwardKill(PlayerObject* killer, PlayerObject* victim)
     
     uint32 infoAmount = (uint32)(baseInfo * multiplier);
     
-    // Living History Notoriety & Reputation Update
-    if (victimHandle.find("Agent") != std::string::npos && !killer->getClient().isBot()) {
-        sWorldDirector.RecordAgentDefeated(killer->getClient().GetCharacterId(), killer->getHandle());
-        sWorldDirector.PropagatePlayerDeedGossip(
-            (format("%1% terminated an Agent in combat!") % killer->getHandle()).str(),
-            victim->getPosition().x, victim->getPosition().z
-        );
-    }
-
     // Dynamic Agent Defeat Demorphing
     if (AgentPossessionManager::getSingletonPtr() && sAgentPossessionMgr.IsEntityPossessed(victim->getGoId())) {
         sAgentPossessionMgr.HandleAgentDefeat(victim->getGoId(), killer->getGoId());
     }
-
-    // Logistics courier ambush check
-    sLogisticsMgr.OnCourierDestroyed(victim->getGoId(), killer->getGoId());
 
     killer->addInformation(infoAmount);
     INFO_LOG(format("AwardKill: %1%:%2% defeated %3%:%4% -> +%5% XP, +%6% $Info (killer total %7% XP, %8% $Info)")
