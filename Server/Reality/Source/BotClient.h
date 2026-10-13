@@ -1,4 +1,4 @@
-﻿#ifndef MXOSIM_BOTCLIENT_H
+#ifndef MXOSIM_BOTCLIENT_H
 #define MXOSIM_BOTCLIENT_H
 
 #include "GameClient.h"
@@ -55,6 +55,7 @@ public:
     std::vector<BotVector2D> m_patrolCircuit;
     size_t m_currentPatrolIndex = 0;
     bool m_patrolInitialized = false;
+    uint32 m_stuckTicks = 0;
     void InitializePatrolCircuit();
     float GetDeltaSeconds() const { return m_deltaSeconds; }
     void UpdateBotAI(float deltaSeconds);

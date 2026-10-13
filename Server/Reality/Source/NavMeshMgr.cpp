@@ -340,11 +340,11 @@ std::vector<LocationVector> NavMeshMgr::FindPath3D(float startX, float startY, f
     return path3D;
 }
 
-bool NavMeshMgr::CheckLineOfSight(float startX, float startZ, float targetX, float targetZ)
+bool NavMeshMgr::CheckLineOfSight(float startX, float startY, float startZ, float targetX, float targetY, float targetZ)
 {
     std::lock_guard<std::mutex> lock(m_navMutex);
-    // First, verify line of sight against static buildings & urban geometry
-    if (!sStaticObjMgr.CheckLineOfSight(startX, 0.0f, startZ, targetX, 0.0f, targetZ)) {
+    // First, verify line of sight against static buildings & urban geometry with real 3D coordinates
+    if (!sStaticObjMgr.CheckLineOfSight(startX, startY, startZ, targetX, targetY, targetZ)) {
         return false;
     }
 
@@ -352,8 +352,8 @@ bool NavMeshMgr::CheckLineOfSight(float startX, float startZ, float targetX, flo
         return true; // Assume clear if no navmesh
     }
 
-    float startPos[3] = {startX, 0.0f, startZ};
-    float endPos[3] = {targetX, 0.0f, targetZ};
+    float startPos[3] = {startX, startY, startZ};
+    float endPos[3] = {targetX, targetY, targetZ};
     float extents[3] = {500.0f, 10000.0f, 500.0f};
 
     dtQueryFilter filter;
@@ -381,4 +381,9 @@ bool NavMeshMgr::CheckLineOfSight(float startX, float startZ, float targetX, flo
     }
     
     return true;
+}
+
+bool NavMeshMgr::CheckLineOfSight(float startX, float startZ, float targetX, float targetZ)
+{
+    return CheckLineOfSight(startX, 0.0f, startZ, targetX, 0.0f, targetZ);
 }

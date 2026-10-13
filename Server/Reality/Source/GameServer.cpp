@@ -56,6 +56,7 @@
 #include "AdaptiveMusicSystem.h"
 #include "NavMeshMgr.h"
 #include "SpatialGrid.h"
+#include "StaticObjectManager.h"
 #include "SocketSystem.h"
 #include "Database/AsyncDatabase.h"
 #include "StatusEffectManager.h"
@@ -111,6 +112,9 @@ bool GameServer::Start()
 	sVehicleSys.Initialize();
 	
 	sNavMeshMgr.Initialize();
+	if (sConfig.GetBoolDefault("World.LoadStaticCollision", true)) {
+		sStaticObjMgr.Initialize("Data/hd_dump/");
+	}
 	sSocketSystem.initialize();
 	sAsyncDatabase.Initialize();
 	sStatusEffectManager.Initialize();

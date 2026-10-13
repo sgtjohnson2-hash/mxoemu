@@ -48,16 +48,56 @@ NodeStatus SelectorNode::Tick(BotClient* bot)
 
 NodeStatus ActionRoam::Tick(BotClient* bot)
 {
-    // The Swarm Logic (V13 Boids + NavMeshMgr)
+    // Squad / Swarm Formation Logic with Staggered Offsets
     uint32 leaderId = bot->GetCrewLeaderId();
     if (leaderId != 0) {
         PlayerObject* leader = BotGetPlayer(leaderId);
         if (leader && !leader->isDead()) {
             LocationVector lPos = leader->getPosition();
-            bot->MoveTo(lPos.x, lPos.y, lPos.z);
+            float heading = (float)lPos.rot;
+            float cosH = std::cos(heading);
+            float sinH = std::sin(heading);
+
+            uint32 botGo = bot->GetPlayerGoId();
+            int slot = (botGo % 3) + 1;
+            // Slot 1: Left Flank (-180, -200)
+            // Slot 2: Right Flank (+180, -200)
+            // Slot 3: Rear Guard (0, -350)
+            float localX = (slot == 1) ? -180.0f : (slot == 2) ? 180.0f : 0.0f;
+            float localZ = (slot == 3) ? -350.0f : -200.0f;
+
+            float targetX = (float)lPos.x + (localX * cosH - localZ * sinH);
+            float targetZ = (float)lPos.z + (localX * sinH + localZ * cosH);
+
+            bot->MoveTo(targetX, (float)lPos.y, targetZ);
             return NodeStatus::SUCCESS;
         } else {
-            bot->SetCrewLeaderId(0); // Leader died or despawned
+            // Dynamic Leader Succession: promote next available squad member
+            bot->SetCrewLeaderId(0);
+            uint32 myCrew = bot->GetCrewId();
+            uint32 newLeaderGo = 0;
+            if (myCrew != 0) {
+                PlayerObject* me = BotGetPlayer(bot->GetPlayerGoId());
+                float myX = me ? (float)me->getPosition().x : bot->GetSpawnX();
+                float myZ = me ? (float)me->getPosition().z : bot->GetSpawnZ();
+                auto nearby = sSpatialGrid.GetClientsInRadius(myX, myZ, 3000.0f);
+                for (GameClient* gc : nearby) {
+                    if (gc->GetPlayerGoId() == bot->GetPlayerGoId()) continue;
+                    auto ob = sBotMgr.GetBotByGOID(gc->GetPlayerGoId());
+                    if (ob && ob->GetCrewId() == myCrew) {
+                        PlayerObject* opo = BotGetPlayer(ob->GetPlayerGoId());
+                        if (opo && !opo->isDead()) {
+                            newLeaderGo = ob->GetPlayerGoId();
+                            break;
+                        }
+                    }
+                }
+            }
+            if (newLeaderGo != 0) {
+                bot->SetCrewLeaderId(newLeaderGo);
+            } else {
+                bot->SetCrewId(0); // Disband defunct crew so bot can join/form new squads
+            }
         }
     }
 
@@ -517,6 +557,47 @@ NodeStatus ActionDisruptInfection::Tick(BotClient* bot)
     return NodeStatus::FAILURE;
 }
 
+static bool IsGunnerBot(PlayerObject* me)
+{
+    if (!me) return false;
+    auto weapons = me->getEquippedWeapons();
+    for (const auto& w : weapons) {
+        if (!w) continue;
+        const ItemTemplate* tpl = sDataLoader.GetItemTemplate(w->getTemplateId());
+        if (tpl && tpl->type == ITEM_TYPE_WEAPON && tpl->range > 500.0f) {
+            return true;
+        }
+    }
+    if (auto ab = me->getAbilitySystem()) {
+        for (const auto& pair : ab->getLoadedAbilities()) {
+            const AbilityTemplate* t = sDataLoader.GetAbilityTemplate(pair.first);
+            if (t && t->discipline == DisciplineType::GUNNER && t->isCastable) {
+                return true;
+            }
+        }
+    }
+    std::string handle = me->getHandle();
+    if (handle.find("Gunner") != std::string::npos || handle.find("Soldier") != std::string::npos ||
+        handle.find("Sniper") != std::string::npos || handle.find("Police") != std::string::npos) {
+        return true;
+    }
+    return false;
+}
+
+static bool IsHackerBot(PlayerObject* me)
+{
+    if (!me) return false;
+    if (auto ab = me->getAbilitySystem()) {
+        for (const auto& pair : ab->getLoadedAbilities()) {
+            const AbilityTemplate* t = sDataLoader.GetAbilityTemplate(pair.first);
+            if (t && (t->discipline == DisciplineType::HACKER || t->discipline == DisciplineType::CODER) && t->isCastable) {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
 NodeStatus ActionEngageTarget::Tick(BotClient* bot)
 {
     if (bot->GetTargetGoId() == 0) return NodeStatus::FAILURE;
@@ -535,7 +616,13 @@ NodeStatus ActionEngageTarget::Tick(BotClient* bot)
     LocationVector targetPos = target->getPosition();
     float dist = sqrt(pow(myPos.x - targetPos.x, 2) + pow(myPos.y - targetPos.y, 2) + pow(myPos.z - targetPos.z, 2));
 
-    if (dist > 250.0f) //melee engage distance
+    bool isGunner = IsGunnerBot(me);
+    bool isHacker = !isGunner && IsHackerBot(me);
+
+    float minEngageDist = (isGunner) ? 1200.0f : (isHacker) ? 1000.0f : 0.0f;
+    float maxEngageDist = (isGunner) ? 2200.0f : (isHacker) ? 1800.0f : 250.0f;
+
+    if (dist > maxEngageDist)
     {
         bot->SetLocomotionAnimation(30); // 30 = DetectDiff_RunF (Combat Sprint)
 
@@ -568,7 +655,41 @@ NodeStatus ActionEngageTarget::Tick(BotClient* bot)
                 sGame.AnnounceStateUpdateNear(myPos.x, myPos.z, 20000.0f, make_shared<RotationStateMsg>(bot->GetPlayerGoId(), newRot));
             }
         }
-        return NodeStatus::RUNNING; // Still moving
+        return NodeStatus::RUNNING; // Still moving into range
+    }
+    else if ((isGunner || isHacker) && dist < minEngageDist && !sCombatSys.IsInterlocked(me->getGoId()))
+    {
+        // Ranged combatant maintaining distance (kite backwards)
+        bot->SetLocomotionAnimation(3); // Walk backwards
+        float dx = myPos.x - targetPos.x;
+        float dz = myPos.z - targetPos.z;
+        float length = std::max(0.01f, static_cast<float>(sqrt(dx*dx + dz*dz)));
+        dx /= length; dz /= length;
+
+        float dt = (bot->GetDeltaSeconds() > 0.0001f) ? bot->GetDeltaSeconds() : 0.033f;
+        float kiteSpeed = 280.0f;
+        float nextX = myPos.x + dx * kiteSpeed * dt;
+        float nextZ = myPos.z + dz * kiteSpeed * dt;
+
+        if (!sSpatialGrid.CheckCollision(nextX, nextZ, 1.0f, bot->GetPlayerGoId()))
+        {
+            myPos.x = nextX;
+            myPos.z = nextZ;
+            myPos.rot = myPos.CalcAngTo(targetPos);
+            uint8 newRot = myPos.getMxoRot();
+
+            me->setPosition(myPos);
+            sSpatialGrid.UpdateClientPosition(bot, myPos.x, myPos.z);
+
+            uint32 nowMs = getMSTime();
+            if (nowMs - bot->m_lastRoamBroadcastMs >= 150)
+            {
+                bot->m_lastRoamBroadcastMs = nowMs;
+                sGame.AnnounceStateUpdateNear(myPos.x, myPos.z, 20000.0f, make_shared<PositionStateMsg>(bot->GetPlayerGoId()));
+                sGame.AnnounceStateUpdateNear(myPos.x, myPos.z, 20000.0f, make_shared<RotationStateMsg>(bot->GetPlayerGoId(), newRot));
+            }
+        }
+        return NodeStatus::SUCCESS;
     }
     
     // Within range: squarely face target and stop sprint
@@ -647,10 +768,68 @@ NodeStatus ActionCombatCycle::Tick(BotClient* bot)
     me->setTactic(chosen);
     sCombatSys.SetTactic(bot->GetPlayerGoId(), chosen);
 
+    bool isGunner = IsGunnerBot(me);
+    bool isHacker = !isGunner && IsHackerBot(me);
+    bool interlocked = sCombatSys.IsInterlocked(me->getGoId());
+
+    if (!interlocked)
+    {
+        // Ranged freefire combat: Gunners and Hackers attack from distance
+        if (isGunner)
+        {
+            uint16 gunAbility = 14; // Power Shot
+            if (auto ab = me->getAbilitySystem())
+            {
+                for (const auto& pair : ab->getLoadedAbilities())
+                {
+                    const AbilityTemplate* t = sDataLoader.GetAbilityTemplate(pair.first);
+                    if (t && t->discipline == DisciplineType::GUNNER && t->isCastable)
+                    {
+                        gunAbility = pair.first;
+                        break;
+                    }
+                }
+                if (!ab->getAbility(gunAbility))
+                    ab->loadAbility(gunAbility, 1, 0);
+            }
+            sCombatSys.UseAbility(me, gunAbility, target->getGoId());
+            uint32 delay = (uint32)(2000.0f / me->GetTimeDilation());
+            bot->SetNextActionTime(currentTime + delay);
+            return NodeStatus::SUCCESS;
+        }
+        else if (isHacker)
+        {
+            uint16 hackerAbility = 1; // Logic Bomb
+            if (auto ab = me->getAbilitySystem())
+            {
+                for (const auto& pair : ab->getLoadedAbilities())
+                {
+                    const AbilityTemplate* t = sDataLoader.GetAbilityTemplate(pair.first);
+                    if (t && (t->discipline == DisciplineType::HACKER || t->discipline == DisciplineType::CODER) && t->isCastable)
+                    {
+                        hackerAbility = pair.first;
+                        break;
+                    }
+                }
+                if (!ab->getAbility(hackerAbility))
+                    ab->loadAbility(hackerAbility, 1, 0);
+            }
+            sCombatSys.UseAbility(me, hackerAbility, target->getGoId());
+            uint32 delay = (uint32)(2500.0f / me->GetTimeDilation());
+            bot->SetNextActionTime(currentTime + delay);
+            return NodeStatus::SUCCESS;
+        }
+        else
+        {
+            // Martial artist waiting for close combat interlock
+            uint32 delay = (uint32)(1000.0f / me->GetTimeDilation());
+            bot->SetNextActionTime(currentTime + delay);
+            return NodeStatus::SUCCESS;
+        }
+    }
+
     // One real ability for this faction, loaded once, cast through the same handler a player uses.
-    // Only the bot that is interlocked with this target casts. Every engaged bot used to cast
-    // (Power Shot goes straight to takeDamage), so a crowd killed the player in ~3 s and the
-    // interlock never got past its opening clip.
+    // Only the bot that is interlocked with this target casts.
     me->ensureAbilitySystem();
     if (me->getInterlockPartner() != target->getGoId() || !sCombatSys.IsInterlocked(me->getGoId()))
     {
@@ -660,10 +839,24 @@ NodeStatus ActionCombatCycle::Tick(BotClient* bot)
     }
     if (auto ab = me->getAbilitySystem())
     {
-        // Kung Fu for everyone but the Merovingian. Agents used to cast Power Shot, a ranged
-        // ability, but this point is only reached while interlocked, i.e. in close combat.
-        uint16 id = 133; // Kung Fu
-        if (me->getFaction() == FACTION_MEROVINGIAN) id = (hpPct < 0.50f) ? 77 : 146; // Restore, else Poison Knife
+        uint16 id = 133; // Kung Fu default
+        if (me->getFaction() == FACTION_MEROVINGIAN)
+        {
+            id = (hpPct < 0.50f) ? 77 : 146; // Restore, else Poison Knife
+        }
+        else
+        {
+            // Check loaded martial arts abilities
+            for (const auto& pair : ab->getLoadedAbilities())
+            {
+                const AbilityTemplate* t = sDataLoader.GetAbilityTemplate(pair.first);
+                if (t && t->discipline == DisciplineType::MARTIAL_ARTIST && t->isCastable)
+                {
+                    id = pair.first;
+                    break;
+                }
+            }
+        }
         if (!ab->getAbility(id))
             ab->loadAbility(id, 1, 0);
         if (ab->canCastAbility(id))

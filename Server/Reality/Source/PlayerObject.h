@@ -255,6 +255,7 @@ public:
     void UpdateAppearance();
     void setAgentAppearance();
     void setMartialArtistAppearance(FightingStyle style);
+    void GenerateProceduralAppearance(uint32 seed, int faction = -1, const std::string& archetype = "");
 
     // Evade Shield & Bullet Dodge (retail PlayerAttrSelf/Other EvadeShieldHealth)
     uint8 getEvadeShield() const { return m_evadeShield; }

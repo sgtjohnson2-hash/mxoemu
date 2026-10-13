@@ -39,7 +39,7 @@ public:
 
     // Scoring formula: Score = ThreatOcclusion * 2.0 - TravelDistance * 0.5 + LineOfSightToTarget * 1.2
     float ScoreCoverPoint(float candX, float candZ, float botX, float botZ,
-                          float threatX, float threatZ, bool& outOccluded, bool& outHasSight);
+                          float threatX, float threatZ, bool& outOccluded, bool& outHasSight, float botY = 95.0f);
 
 private:
     mutable std::mutex m_coverMutex;

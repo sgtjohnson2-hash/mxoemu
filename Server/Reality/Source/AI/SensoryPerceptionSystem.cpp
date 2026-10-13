@@ -1,9 +1,10 @@
-﻿#include "SensoryPerceptionSystem.h"
+#include "SensoryPerceptionSystem.h"
 #include "PlayerObject.h"
 #include "BotClient.h"
 #include "BotManager.h"
 #include "SpatialGrid.h"
 #include "NavMeshMgr.h"
+#include "StaticObjectManager.h"
 #include "MatrixThreatHeatmap.h"
 #include "Log.h"
 #include "Timer.h"
@@ -95,8 +96,9 @@ bool SensoryPerceptionSystem::CheckVision(PlayerObject* observer, PlayerObject* 
         return false;
     }
 
-    // Line of sight raycast query against city architecture
-    if (!sNavMeshMgr.CheckLineOfSight(obsPos.x, obsPos.z, tgtPos.x, tgtPos.z)) {
+    // 3D Line of sight raycast query against city architecture
+    if (!sNavMeshMgr.CheckLineOfSight((float)obsPos.x, (float)obsPos.y + 100.0f, (float)obsPos.z,
+                                      (float)tgtPos.x, (float)tgtPos.y + 100.0f, (float)tgtPos.z)) {
         return false;
     }
 
@@ -154,9 +156,14 @@ void SensoryPerceptionSystem::EmitSound(float x, float y, float z, SoundEmission
 
         if (distSq > effectiveRadius * effectiveRadius) continue;
 
+        // 3D obstacle occlusion: wall attenuation through physical buildings
+        bool occluded = !sStaticObjMgr.CheckLineOfSight(x, y + 50.0f, z, (float)botPos.x, (float)botPos.y + 100.0f, (float)botPos.z);
+        float perceivedMultiplier = occluded ? 0.25f : 1.0f; // 75% sound dampening behind concrete walls
+
         // Sound intensity decays with distance squared: I(d) = I_0 / (1 + alpha * d^2)
         float alpha = 0.000005f;
-        float decayedIntensity = intensity / (1.0f + alpha * distSq);
+        float decayedIntensity = (intensity * perceivedMultiplier) / (1.0f + alpha * distSq);
+        if (decayedIntensity < 0.05f) continue;
 
         float azimuthRad = std::atan2(dz, dx);
 

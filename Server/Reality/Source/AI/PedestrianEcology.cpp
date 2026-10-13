@@ -262,6 +262,8 @@ void PedestrianEcology::InteractWithPOI(BotClient* bot, PlayerObject* me, const 
 {
     if (!bot || !me) return;
 
+    bot->SetLocomotionAnimation(0); // Idle during POI interaction
+
     switch (poi.type) {
         case POI_DINER_RESTAURANT: {
             // Restore health & IS from eating
@@ -269,32 +271,20 @@ void PedestrianEcology::InteractWithPOI(BotClient* bot, PlayerObject* me, const 
             uint16 maxH = me->getMaximumHealth();
             if (curH < maxH) me->setCurrentHealth(std::min<uint16>(maxH, curH + 150));
             me->setCurrentIS(std::min<uint16>(me->getMaximumIS(), me->getCurrentIS() + 25));
-            bot->Emote(42); // Eating/drinking emote
-            if (rand() % 100 < 10) {
-                bot->Say("*sips coffee quietly*");
-            }
             break;
         }
         case POI_PARK_BENCH: {
             // Rest and recuperate
             me->setCurrentHealth(std::min<uint16>(me->getMaximumHealth(), me->getCurrentHealth() + 80));
-            bot->Emote(40); // Sitting/resting emote
             break;
         }
         case POI_PAYPHONE_HARDLINE: {
-            // Check dial tone or listen for operator
-            bot->Emote(41);
-            if (rand() % 100 < 8) {
-                bot->Say("*picks up payphone receiver, listening for an operator tone*");
-            }
             break;
         }
         case POI_ATM_TERMINAL: {
-            bot->Emote(41); // Interacting with terminal
             break;
         }
         case POI_NIGHTCLUB_BAR: {
-            bot->Emote(44); // Dancing / social emote
             break;
         }
         default:
@@ -599,17 +589,14 @@ void PedestrianEcology::ExecuteTier0Normal(BotClient* bot, PlayerObject* me, flo
     float distToPOI = std::sqrt(toPdx * toPdx + toPdz * toPdz);
 
     if (distToPOI > 1500.0f) {
-        toPdx /= distToPOI;
-        toPdz /= distToPOI;
-
-        float steerX = 0.0f, steerZ = 0.0f;
-        ApplyCrowdSteering(bot, me, steerX, steerZ);
-
-        float walkSpeed = 3.5f;
-        float moveX = (toPdx * walkSpeed * 100.0f + steerX * 50.0f) * deltaSeconds;
-        float moveZ = (toPdz * walkSpeed * 100.0f + steerZ * 50.0f) * deltaSeconds;
-        bot->MoveTo(pos.x + moveX, pos.y, pos.z + moveZ);
+        if (!bot->HasPath()) {
+            bot->MoveTo(targetPOI.x, targetPOI.y, targetPOI.z);
+        }
+        bot->StepAlongPath(deltaSeconds, 280.0f, 3); // 280 units/s authentic walk, anim 3 = WalkF
     } else {
+        if (bot->HasPath()) {
+            bot->ClearPath();
+        }
         InteractWithPOI(bot, me, targetPOI);
 
         int roll = rand() % 100;
@@ -647,16 +634,15 @@ void PedestrianEcology::ExecuteTier1Uneasy(BotClient* bot, PlayerObject* me, flo
     float distToPOI = std::sqrt(toPdx * toPdx + toPdz * toPdz);
 
     if (distToPOI > 800.0f) {
-        toPdx /= distToPOI;
-        toPdz /= distToPOI;
-        float steerX = 0.0f, steerZ = 0.0f;
-        ApplyCrowdSteering(bot, me, steerX, steerZ);
-
-        float walkSpeed = 4.0f; // Alert, faster walking gait
-        float moveX = (toPdx * walkSpeed * 100.0f + steerX * 40.0f) * deltaSeconds;
-        float moveZ = (toPdz * walkSpeed * 100.0f + steerZ * 40.0f) * deltaSeconds;
-        bot->MoveTo(pos.x + moveX, pos.y, pos.z + moveZ);
+        if (!bot->HasPath()) {
+            bot->MoveTo(targetPOI.x, targetPOI.y, targetPOI.z);
+        }
+        bot->StepAlongPath(deltaSeconds, 320.0f, 3); // Hurry walk
     } else {
+        if (bot->HasPath()) {
+            bot->ClearPath();
+        }
+        bot->SetLocomotionAnimation(0);
         // At gathering spot: whisper outbreak rumors to nearby pedestrians
         auto nearby = sSpatialGrid.GetClientsInRadius(pos.x, pos.z);
         bool gossiped = false;
@@ -754,7 +740,7 @@ void PedestrianEcology::ExecuteTier2Alarm(BotClient* bot, PlayerObject* me, floa
     // 3. Nervous glances over shoulder
     if (now - bot->GetLastLookAroundTime() > 4000) {
         bot->SetLastLookAroundTime(now);
-        bot->Emote(40); // Sitting/alert glance
+        bot->SetLocomotionAnimation(0); // Alert glance
         if (!m_evasionWhispers.empty() && (rand() % 100 < 30)) {
             bot->Say(m_evasionWhispers[rand() % m_evasionWhispers.size()]);
         }
@@ -781,7 +767,7 @@ void PedestrianEcology::ExecuteTier3Panic(BotClient* bot, PlayerObject* me, floa
                 bot->SetLastWhisperTime(now);
                 bot->Say("The subway is sealed! The police locked the gates! We're trapped!");
             }
-            bot->Emote(50); // Cower
+            bot->SetLocomotionAnimation(0); // Cower / freeze
             return;
         }
         dest = GetNearestPOI(pos.x, pos.z, POI_OFFICE_COMMERCIAL);
@@ -790,18 +776,20 @@ void PedestrianEcology::ExecuteTier3Panic(BotClient* bot, PlayerObject* me, floa
     }
 
     // Sprint fleeing speed scaled by neuroticism
-    float fleeSpeed = 9.0f + (personality.neuroticism * 4.5f);
     float dx = dest.x - pos.x;
     float dz = dest.z - pos.z;
     float dist = std::sqrt(dx * dx + dz * dz);
 
     if (dist > 250.0f) {
-        dx /= dist;
-        dz /= dist;
-        float moveX = dx * fleeSpeed * deltaSeconds * 100.0f;
-        float moveZ = dz * fleeSpeed * deltaSeconds * 100.0f;
-        bot->MoveTo(pos.x + moveX, pos.y, pos.z + moveZ);
+        if (!bot->HasPath()) {
+            bot->MoveTo(dest.x, dest.y, dest.z);
+        }
+        bot->StepAlongPath(deltaSeconds, 650.0f, 30); // Authentic 6.5 m/s combat run, anim 30 = RunF
     } else {
+        if (bot->HasPath()) {
+            bot->ClearPath();
+        }
+        bot->SetLocomotionAnimation(0);
         // Reached shelter
         if (now - bot->GetLastWhisperTime() > 8000) {
             bot->SetLastWhisperTime(now);

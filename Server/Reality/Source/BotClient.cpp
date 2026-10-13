@@ -254,7 +254,13 @@ void BotClient::UpdateBotAI(float deltaSeconds)
     if (sStatusEffectManager.HasEffect(m_playerGoId, EFFECT_STUN)) {
         return; // Skip AI evaluation while stunned
     }
-    
+
+    // 1. Civilian Behavior Branch - Pedestrian Ecology & Circadian Routines
+    if (me->getFactionName() == "Civilian")
+    {
+        sPedestrianEcology.UpdateCivilian(this, deltaSeconds);
+        return;
+    }
 
     // Street-life mode (default): fight back when engaged, otherwise stroll around home.
     // The legacy ecology/viral/sentient/active-inference pipeline below mostly generated
@@ -295,7 +301,6 @@ void BotClient::UpdateBotAI(float deltaSeconds)
             {
                 m_lastRoamBroadcastMs = nowMs;
                 sGame.AnnounceStateUpdateNear(loc.x, loc.z, 20000.0f, std::make_shared<PositionStateMsg>(m_playerGoId));
-                sGame.AnnounceStateUpdateNear(loc.x, loc.z, 20000.0f, std::make_shared<LocomotionStateMsg>(m_playerGoId, anim, loc.getMxoRot()));
             }
         };
 
@@ -663,21 +668,26 @@ void BotClient::InitializePatrolCircuit()
         }
     }
 
-    // 2. Generate street-scale waypoints across intersections and avenues (18m - 35m)
-    const float angles[] = { 0.0f, 0.785398f, 1.5707963f, 2.356194f, 3.14159265f, -2.356194f, -1.5707963f, -0.785398f };
-    for (float ang : angles)
+    // 2. Generate street-scale waypoints across intersections and avenues (15m - 25m) along street axes
+    // In the Mega-City, streets align with coordinate axes (X and Z). Patrolling along cardinal axes
+    // keeps bots on sidewalks and street corridors rather than casting into corner buildings.
+    const float cardinalOffsets[][2] = {
+        { 2500.0f, 0.0f },
+        { 0.0f, 2500.0f },
+        { -2500.0f, 0.0f },
+        { 0.0f, -2500.0f },
+        { 1500.0f, 0.0f },
+        { 0.0f, -1500.0f }
+    };
+    for (const auto& off : cardinalOffsets)
     {
-        for (float r : { 3500.0f, 2500.0f, 1800.0f })
+        float wx = m_homeX + off[0];
+        float wz = m_homeZ + off[1];
+        if (!sSpatialGrid.CheckCollision(wx, wz, 1.0f, m_playerGoId))
         {
-            float wx = m_homeX + cosf(ang) * r;
-            float wz = m_homeZ + sinf(ang) * r;
-            if (!sSpatialGrid.CheckCollision(wx, wz, 1.0f, m_playerGoId))
-            {
-                m_patrolCircuit.push_back(BotVector2D(wx, wz));
-                break;
-            }
+            m_patrolCircuit.push_back(BotVector2D(wx, wz));
         }
-        if (m_patrolCircuit.size() >= 6)
+        if (m_patrolCircuit.size() >= 5)
             break;
     }
 
@@ -735,14 +745,13 @@ void BotClient::RoamAndSwarm(float deltaSeconds)
                 m_pathWaypoints.clear();
                 SetLocomotionAnimation(0);
                 sGame.AnnounceStateUpdateNear(loc.x, loc.z, 20000.0f, std::make_shared<PositionStateMsg>(m_playerGoId));
-                sGame.AnnounceStateUpdateNear(loc.x, loc.z, 20000.0f, std::make_shared<LocomotionStateMsg>(m_playerGoId, 0, loc.getMxoRot()));
             }
         } else {
             dist = std::max(0.01f, dist); // Prevent division by zero
 
-            // Base Pathfinding velocity: 180.0f cm/s = 1.8 m/s walking stride
+            // Authentic walking stride velocity: 280.0f units/s = 2.8 m/s
             SetLocomotionAnimation(3); // 3 = WalkF
-            float speed = 180.0f;
+            float speed = 280.0f;
             BotVector2D pathVel((dx / dist) * speed, (dz / dist) * speed);
 
             // Add Boids velocity
@@ -761,17 +770,16 @@ void BotClient::RoamAndSwarm(float deltaSeconds)
                 // Compute orientation/heading angle facing direction of movement
                 float heading = std::atan2(dz, dx);
                 loc.rot = heading;
-                uint8 newRot = loc.getMxoRot();
 
                 me->setPosition(loc);
                 sSpatialGrid.UpdateClientPosition(this, newX, newZ);
+                m_stuckTicks = 0;
 
                 uint32 nowMs = getMSTime();
                 if (nowMs - m_lastRoamBroadcastMs >= 150) {
                     m_lastRoamBroadcastMs = nowMs;
+                    // PositionStateMsg smoothly interpolates client skeleton without resetting blend tree
                     sGame.AnnounceStateUpdateNear(loc.x, loc.z, 15000.0f, std::make_shared<PositionStateMsg>(m_playerGoId));
-                    // Broadcast 0x06 locomotion animation (3 = WalkF) + heading rotation
-                    sGame.AnnounceStateUpdateNear(loc.x, loc.z, 15000.0f, std::make_shared<LocomotionStateMsg>(m_playerGoId, 3, newRot));
                 }
             } else {
                 // Someone is standing on the next step. Sidestep instead of abandoning the walk.
@@ -789,17 +797,37 @@ void BotClient::RoamAndSwarm(float deltaSeconds)
                     loc.rot = std::atan2(dz, dx);
                     me->setPosition(loc);
                     sSpatialGrid.UpdateClientPosition(this, ax, az);
+                    m_stuckTicks = 0;
+
                     uint32 nowMs = getMSTime();
                     if (nowMs - m_lastRoamBroadcastMs >= 150) {
                         m_lastRoamBroadcastMs = nowMs;
                         sGame.AnnounceStateUpdateNear(loc.x, loc.z, 15000.0f, std::make_shared<PositionStateMsg>(m_playerGoId));
-                        sGame.AnnounceStateUpdateNear(loc.x, loc.z, 15000.0f, std::make_shared<LocomotionStateMsg>(m_playerGoId, 3, loc.getMxoRot()));
                     }
                     moved = true;
                     break;
                 }
                 if (!moved)
-                    m_currentWaypointIndex++;
+                {
+                    m_stuckTicks++;
+                    if (m_stuckTicks >= 3)
+                    {
+                        // Wall or obstacle collision turnaround: turn 180 degrees back to home origin or previous point
+                        m_stuckTicks = 0;
+                        m_pathWaypoints.clear();
+                        SetLocomotionAnimation(0);
+                        uint32 nowMs = getMSTime();
+                        m_idleUntilMs = nowMs + 1000 + (rand() % 1500); // pause 1-2.5s before redirecting
+                        if (!m_patrolCircuit.empty())
+                        {
+                            m_currentPatrolIndex = (m_currentPatrolIndex + 1) % m_patrolCircuit.size();
+                        }
+                    }
+                    else
+                    {
+                        m_currentWaypointIndex++;
+                    }
+                }
             }
         }
     }
@@ -943,11 +971,7 @@ void BotClient::MoveTo(float x, float y, float z)
             return;
         }
     }
-    m_spawnX = x;
-    m_spawnY = y;
-    m_spawnZ = z;
-
-    sSpatialGrid.UpdateClientPosition(this, x, z);
+    // Spawn anchor (m_spawnX/Y/Z) is fixed and must not be mutated by intermediate pathfinding.
 
     if (m_playerGoId != 0)
     {
@@ -1043,7 +1067,7 @@ BotVector2D BotClient::CalculateBoidsVelocity(PlayerObject* me)
         // Separation (< 2.0m = 200 units, or scaled)
         if (distSq > 0.0001f && distSq < 40000.0f)
         {
-            float dist = std::sqrt(distSq);
+            float dist = std::max(std::sqrt(distSq), 10.0f);
             separation.x += (dx / dist) / dist; // scale by inverse distance
             separation.z += (dz / dist) / dist;
         }

@@ -21,10 +21,11 @@ void CoverSystem::Initialize()
 }
 
 float CoverSystem::ScoreCoverPoint(float candX, float candZ, float botX, float botZ,
-                                  float threatX, float threatZ, bool& outOccluded, bool& outHasSight)
+                                  float threatX, float threatZ, bool& outOccluded, bool& outHasSight, float botY)
 {
+    float evalY = (botY != 0.0f) ? (botY + 100.0f) : 672.0f;
     // 1. Threat Occlusion: Does cover block line of sight from threat to cover point?
-    outOccluded = !sNavMeshMgr.CheckLineOfSight(threatX, threatZ, candX, candZ);
+    outOccluded = !sNavMeshMgr.CheckLineOfSight(threatX, evalY, threatZ, candX, evalY, candZ);
     float threatOcclusion = outOccluded ? 1.0f : 0.0f;
 
     // 2. Travel Distance from Bot to Cover Point (normalized to meters, 100 units = 1m)
@@ -33,7 +34,7 @@ float CoverSystem::ScoreCoverPoint(float candX, float candZ, float botX, float b
     // 3. Line of sight / peek potential from offset firing position (0.8m peek out)
     float peekX = candX + (threatX - candX) * 0.1f;
     float peekZ = candZ + (threatZ - candZ) * 0.1f;
-    outHasSight = sNavMeshMgr.CheckLineOfSight(peekX, peekZ, threatX, threatZ);
+    outHasSight = sNavMeshMgr.CheckLineOfSight(peekX, evalY, peekZ, threatX, evalY, threatZ);
     float lineOfSightToTarget = outHasSight ? 1.0f : 0.0f;
 
     // Roadmap formula: Score = ThreatOcclusion * 2.0 - TravelDistance * 0.5 + LineOfSightToTarget * 1.2
@@ -42,7 +43,7 @@ float CoverSystem::ScoreCoverPoint(float candX, float candZ, float botX, float b
 }
 
 bool CoverSystem::FindBestCover(float botX, float botZ, float threatX, float threatZ,
-                               float searchRadius, CoverPoint& outCoverPoint, float botY)
+                                float searchRadius, CoverPoint& outCoverPoint, float botY)
 {
     std::lock_guard<std::mutex> lock(m_coverMutex);
 
@@ -68,11 +69,12 @@ bool CoverSystem::FindBestCover(float botX, float botZ, float threatX, float thr
             float cz = candPts[i][1];
 
             // Verify point itself is not colliding with building geometry
-            if (sStaticObjMgr.CheckCollision(cx, 0.0f, cz, 80.0f)) continue;
+            float checkY = (box.minY != box.maxY) ? ((box.minY + box.maxY) * 0.5f) : (botY != 0.0f ? botY : 572.0f);
+            if (sStaticObjMgr.CheckCollision(cx, checkY, cz, 80.0f)) continue;
 
             bool occluded = false;
             bool hasSight = false;
-            float score = ScoreCoverPoint(cx, cz, botX, botZ, threatX, threatZ, occluded, hasSight);
+            float score = ScoreCoverPoint(cx, cz, botX, botZ, threatX, threatZ, occluded, hasSight, botY);
 
             if (occluded && score > bestScore) {
                 bestScore = score;

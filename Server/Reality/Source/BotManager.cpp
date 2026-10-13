@@ -190,6 +190,9 @@ std::shared_ptr<BotClient> BotManager::SpawnSingleBot(float x, float y, float z,
         }
         else if (faction == FACTION_MEROVINGIAN) factionName = "Merovingian";
         po->setFactionName(factionName);
+        if (!bot->isAgent()) {
+            po->GenerateProceduralAppearance(uint32(uid), faction, factionName);
+        }
         if (autoSpawnSelf) {
             po->SpawnSelf();
         }
@@ -881,6 +884,7 @@ std::shared_ptr<BotClient> BotManager::SpawnTester(int index, const LocationVect
         po->setPosition(start);
         po->addInformation(startCash);
         po->ensureAbilitySystem();
+        po->GenerateProceduralAppearance(uint32(uid), factionIds[i % 3], factions[i % 3]);
         sSpatialGrid.UpdateClientPosition(bot.get(), start.x, start.z);
         po->SpawnSelf();
         bot->MakeTester(i + 1);

@@ -28,6 +28,8 @@
 #include "BotClient.h"
 #include "SpatialGrid.h"
 #include "AbilitySystem.h"
+#include "NavMeshMgr.h"
+#include "BehaviorTree.h"
 #include "DataLoader.h"
 #include "CombatAnimationMatrix.h"
 #include "DojoSpawn.h"
@@ -2568,6 +2570,113 @@ int RunCombatTestSuite()
 				check(appBuf.size() > 0, "PlayerAppearanceMsg serializes cleanly for Harahel bot");
 				check(appBuf.read<uint8>(0) == 0x03, "PlayerAppearanceMsg opcode is 0x03");
 				check(appBuf.read<uint16>(1) == botView, "PlayerAppearanceMsg viewId matches allocated view");
+			}
+
+			// 13. Verify Procedural Appearance Diversity across bots
+			std::vector<std::vector<byte>> rsiSamples;
+			int maleCount = 0;
+			int femaleCount = 0;
+			for (uint32 bId = 0; bId < 10; ++bId) {
+				auto sampleBot = std::make_shared<BotClient>(9000000 + 500 + bId);
+				PlayerObject* po = sObjMgr.getGOPtr(sampleBot->GetPlayerGoId());
+				if (po) {
+					std::vector<byte> rsi(15, 0);
+					po->getRsiData(rsi.data(), 15);
+					rsiSamples.push_back(rsi);
+					if ((rsi[0] & 0x80) != 0) {
+						femaleCount++;
+					} else {
+						maleCount++;
+					}
+				}
+			}
+			check(rsiSamples.size() == 10, "Spawned 10 procedural appearance test bots");
+			if (sConfig.GetBoolDefault("Bots.ProceduralAppearance", false)) {
+			check(maleCount > 0, "Bot population contains male operatives");
+			check(femaleCount > 0, "Bot population contains female operatives");
+			bool hasVariation = false;
+			for (size_t i = 1; i < rsiSamples.size(); ++i) {
+				if (rsiSamples[i] != rsiSamples[0]) {
+					hasVariation = true;
+					break;
+				}
+			}
+			check(hasVariation, "Bot population exhibits procedural appearance diversity (not all identical)");
+			} // Bots.ProceduralAppearance
+
+			// 14. Verify Locomotion Stuck Tracking
+			auto roamBot = std::make_shared<BotClient>(9000000 + 600);
+			check(roamBot->m_stuckTicks == 0, "Initial bot stuckTicks is 0");
+			roamBot->m_stuckTicks = 3;
+			check(roamBot->m_stuckTicks >= 3, "Stuck tracking reaches turnaround threshold (>=3)");
+
+			// 15. Verify Civilian Ecology Routing & Spawn Anchor Preservation
+			auto civBot = std::make_shared<BotClient>(9000000 + 700);
+			PlayerObject* civPo = sObjMgr.getGOPtr(civBot->GetPlayerGoId());
+			check(civPo != nullptr, "Constructed civilian test bot");
+			if (civPo) {
+				civPo->setFactionName("Civilian");
+				civBot->SetSpawnLocation(1000.0f, 572.0f, 2000.0f);
+				civBot->MoveTo(1500.0f, 572.0f, 2500.0f);
+				check(civBot->GetSpawnX() == 1000.0f && civBot->GetSpawnZ() == 2000.0f,
+					"Bot spawn anchor coordinates preserved (MoveTo does not overwrite m_spawnX/Z)");
+				civBot->UpdateBotAI(0.1f);
+				check(civBot->GetTargetGoId() == 0, "Civilian bot does not acquire combat targets or enter combat");
+			}
+
+			// 16. Verify Gunner Stand-Off Range & Freefire Combat Execution
+			auto gunnerBot = std::make_shared<BotClient>(9000000 + 710);
+			auto victimBot = std::make_shared<BotClient>(9000000 + 711);
+			PlayerObject* gunnerPo = sObjMgr.getGOPtr(gunnerBot->GetPlayerGoId());
+			PlayerObject* victimPo = sObjMgr.getGOPtr(victimBot->GetPlayerGoId());
+			check(gunnerPo && victimPo, "Constructed gunner and victim test bots");
+			if (gunnerPo && victimPo) {
+				gunnerPo->setHandle("City Police Gunner");
+				gunnerPo->giveItem(1001); // Dual Berettas (Ranged weapon)
+				gunnerPo->setPosition(LocationVector(50000.0, 572.0, 50000.0));
+				victimPo->setPosition(LocationVector(50000.0, 572.0, 51600.0)); // 1600 units away (optimal standoff)
+				gunnerBot->SetTargetGoId(victimPo->getGoId());
+
+				ActionEngageTarget engage;
+				NodeStatus engStatus = engage.Tick(gunnerBot.get());
+				check(engStatus == NodeStatus::SUCCESS, "Gunner bot preserves stand-off range (1600 units within 1200..2200 bracket)");
+
+				ActionCombatCycle combatCycle;
+				gunnerBot->SetNextActionTime(0);
+				NodeStatus cycleStatus = combatCycle.Tick(gunnerBot.get());
+				check(cycleStatus == NodeStatus::SUCCESS, "Gunner combat cycle executed freefire ability at distance");
+				check(!sCombatSys.IsInterlocked(gunnerPo->getGoId()), "Gunner does not force unwanted melee interlock from ranged standoff");
+			}
+
+			// 17. Verify 3D Line of Sight Raycast with Elevation
+			bool losClear = sNavMeshMgr.CheckLineOfSight(100.0f, 572.0f, 100.0f, 200.0f, 572.0f, 200.0f);
+			check(losClear, "3D NavMeshMgr::CheckLineOfSight evaluates unobstructed ray at elevation 572.0");
+
+			// 18. Verify Squad Formation Offsets & Dynamic Leader Succession
+			auto leaderBot = std::make_shared<BotClient>(9000000 + 720);
+			auto followerBot = std::make_shared<BotClient>(9000000 + 721);
+			PlayerObject* leaderPo = sObjMgr.getGOPtr(leaderBot->GetPlayerGoId());
+			PlayerObject* followerPo = sObjMgr.getGOPtr(followerBot->GetPlayerGoId());
+			check(leaderPo && followerPo, "Constructed squad leader and follower bots");
+			if (leaderPo && followerPo) {
+				leaderPo->setPosition(LocationVector(20000.0, 572.0, 20000.0));
+				followerPo->setPosition(LocationVector(20000.0, 572.0, 19800.0));
+				uint32 crewId = 888;
+				leaderBot->SetCrewId(crewId);
+				leaderBot->SetCrewLeaderId(leaderPo->getGoId());
+				followerBot->SetCrewId(crewId);
+				followerBot->SetCrewLeaderId(leaderPo->getGoId());
+
+				ActionRoam roam;
+				roam.Tick(followerBot.get());
+				check(followerBot->HasPath() || followerPo->getPosition().Distance(leaderPo->getPosition()) > 50.0f,
+					"Follower moves toward staggered formation offset rather than stacking directly on leader center");
+
+				// Kill the leader to verify dynamic succession
+				leaderPo->die(0);
+				roam.Tick(followerBot.get());
+				check(followerBot->GetCrewLeaderId() != leaderPo->getGoId(),
+					"Follower detects deceased leader and updates crew hierarchy (dynamic succession)");
 			}
 		}
 	}

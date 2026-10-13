@@ -98,10 +98,8 @@ PlayerObject::PlayerObject( GameClient &parent,uint64 charUID, bool isBot ) :m_p
 		m_district = 0;
 		m_isAdmin = false;
 
-		//default RSI so bots render as a standard male avatar
-		m_rsi.reset(new RsiDataMale);
-		const byte defaultRsiValues[] = {0x00,0x0C,0x71,0x48,0x18,0x0C,0xE2,0x00,0x23,0x00,0xB0,0x00,0x40,0x00,0x00};
-		m_rsi->FromBytes(defaultRsiValues,sizeof(defaultRsiValues));
+		// Procedural RSI generation for bots: unique, diverse male/female appearances per entity
+		GenerateProceduralAppearance(uint32(m_characterUID), getFaction(), m_handle);
 	}
 
 	m_goId=0;
@@ -373,12 +371,18 @@ void PlayerObject::setRsiHex(const std::string& hexStr)
 		return;
 	}
 
-	// For bots with short archetype hashes (e.g. mob_parsed.csv 4-byte ids like 93030008),
-	// assign authentic client-verified retail default RSI appearance to prevent client.dll
-	// NULL demeanor lookup crashes.
-	m_rsi.reset(new RsiDataMale);
-	const byte defaultMaleRsi[] = {0x00,0x0C,0x71,0x48,0x18,0x0C,0xE2,0x00,0x23,0x00,0xB0,0x00,0x40,0x00,0x00};
-	m_rsi->FromBytes(defaultMaleRsi, sizeof(defaultMaleRsi));
+	// For bots with short archetype hashes (e.g. mob_parsed.csv 4-byte ids like b0010058),
+	// dynamically generate procedural appearances seeded by the archetype hash.
+	uint32 seed = 0;
+	for (size_t i = 0; i < bytes.size(); ++i)
+	{
+		seed = (seed << 8) | bytes[i];
+	}
+	if (seed == 0)
+	{
+		for (char c : m_handle) seed = seed * 31 + (uint8)c;
+	}
+	GenerateProceduralAppearance(seed, getFaction(), m_handle);
 }
 
 void PlayerObject::checkAndStore()
@@ -549,6 +553,175 @@ void PlayerObject::setMartialArtistAppearance(FightingStyle style)
 	ref["GlassesColor"] = 0;
 	ref["HairColor"] = 0;
 	ref["SkinTone"] = 0;
+	ref["Tattoo"] = 0;
+	ref["FacialDetailColor"] = 0;
+
+	if (m_spawnedInWorld)
+	{
+		sGame.AnnounceStateUpdate(NULL, make_shared<PlayerAppearanceMsg>(m_goId));
+	}
+}
+
+void PlayerObject::GenerateProceduralAppearance(uint32 seed, int faction, const std::string& archetype)
+{
+	// Bots.ProceduralAppearance (default 0): the random head/hair/clothing indices below are not
+	// checked against the client's RSI tables. The fixed RSI is the client-verified retail default
+	// that avoids the client.dll NULL demeanor lookup crash. Enable only after a live crash-free run.
+	if (!sConfig.GetBoolDefault("Bots.ProceduralAppearance", false))
+	{
+		m_rsi.reset(new RsiDataMale);
+		const byte defaultRsiValues[] = {0x00,0x0C,0x71,0x48,0x18,0x0C,0xE2,0x00,0x23,0x00,0xB0,0x00,0x40,0x00,0x00};
+		m_rsi->FromBytes(defaultRsiValues, sizeof(defaultRsiValues));
+		(void)seed; (void)faction; (void)archetype;
+		return;
+	}
+	if (seed == 0)
+	{
+		seed = (uint32)m_characterUID;
+		if (seed == 0)
+		{
+			for (char c : m_handle) seed = seed * 37 + (uint8)c;
+		}
+	}
+
+	std::string handleLower = m_handle;
+	std::transform(handleLower.begin(), handleLower.end(), handleLower.begin(), ::tolower);
+	std::string archLower = archetype;
+	std::transform(archLower.begin(), archLower.end(), archLower.begin(), ::tolower);
+
+	if (handleLower.find("agent") != std::string::npos || archLower.find("agent") != std::string::npos)
+	{
+		setAgentAppearance();
+		return;
+	}
+
+	if (faction == -1)
+	{
+		faction = getFaction();
+	}
+
+	// Pseudo-random state generator from seed
+	auto nextRand = [&seed]() -> uint32 {
+		seed = seed * 1664525u + 1013904223u;
+		return seed;
+	};
+
+	// Gender selection: 50% Male, 50% Female
+	bool isFemale = ((nextRand() >> 16) % 2) != 0;
+
+	if (isFemale)
+	{
+		m_rsi.reset(new RsiDataFemale);
+	}
+	else
+	{
+		m_rsi.reset(new RsiDataMale);
+	}
+
+	RsiData &ref = *m_rsi;
+	ref["Sex"] = isFemale ? 1 : 0;
+	ref["Body"] = (nextRand() >> 8) % 3; // 0=Slender, 1=Average, 2=Heavy
+	ref["Hat"] = 0; // Default no hat
+
+	// Head & Face mesh
+	if (isFemale)
+	{
+		ref["Face"] = (nextRand() >> 4) % 20; // RSIFHead001 - RSIFHead020 (0..19)
+		ref["Hair"] = (nextRand() >> 6) % 19; // RSIFHair001 - RSIFHair019 (0..18)
+		ref["Leggings"] = 0;
+		ref["FacialDetail"] = (nextRand() >> 7) % 6; // makeup/beauty marks
+	}
+	else
+	{
+		ref["Face"] = (nextRand() >> 4) % 19; // RSIMHead001 - RSIMHead019 (0..18)
+		ref["Hair"] = (nextRand() >> 6) % 18; // RSIMHair001 - RSIMHair018 (0..17)
+		ref["FacialDetail"] = (nextRand() >> 7) % 12; // facial hair (clean, stubble, beard, mustache)
+	}
+
+	// Authentic colors
+	static const uint8 skinPalette[] = { 0, 1, 2, 3, 4, 5, 8, 9, 10, 11, 12, 13, 14, 15 };
+	static const uint8 hairPalette[] = { 0, 1, 2, 3, 4, 5, 6, 7, 8, 12, 14, 16 };
+	ref["SkinTone"] = skinPalette[(nextRand() >> 3) % (sizeof(skinPalette) / sizeof(skinPalette[0]))];
+	ref["HairColor"] = hairPalette[(nextRand() >> 5) % (sizeof(hairPalette) / sizeof(hairPalette[0]))];
+
+	// Clothing by Faction & Archetype
+	if (faction == FACTION_MACHINES)
+	{
+		// Machines Operatives / Informants: Dark formal suits, sunglasses
+		ref["Shirt"] = isFemale ? 7 : 10;
+		ref["Coat"] = 0;
+		ref["Pants"] = 1;
+		ref["Shoes"] = 1;
+		ref["Gloves"] = 0;
+		ref["Glasses"] = 17; // Sunglasses
+		ref["ShirtColor"] = 32;
+		ref["PantsColor"] = 9;
+		ref["CoatColor"] = 0;
+		ref["ShoeColor"] = 0;
+		ref["GlassesColor"] = 0;
+	}
+	else if (faction == FACTION_ZION)
+	{
+		// Zion Operatives: Cyberpunk trench coats, combat tops, cargo pants, combat boots
+		static const uint8 zionShirts[] = { 1, 3, 4, 5, 8, 12 };
+		static const uint8 zionCoats[] = { 0, 1, 2, 3, 4, 5 };
+		static const uint8 zionPants[] = { 1, 2, 3, 5, 6 };
+		static const uint8 zionColors[] = { 0, 1, 4, 9, 12, 16, 20, 24, 32 };
+
+		ref["Shirt"] = zionShirts[(nextRand() >> 4) % (sizeof(zionShirts) / sizeof(zionShirts[0]))];
+		ref["Coat"] = zionCoats[(nextRand() >> 5) % (sizeof(zionCoats) / sizeof(zionCoats[0]))];
+		ref["Pants"] = zionPants[(nextRand() >> 6) % (sizeof(zionPants) / sizeof(zionPants[0]))];
+		ref["Shoes"] = 1 + ((nextRand() >> 7) % 5);
+		ref["Gloves"] = ((nextRand() >> 8) % 3 == 0) ? 1 : 0;
+		ref["Glasses"] = ((nextRand() >> 9) % 2 == 0) ? (1 + ((nextRand() >> 10) % 18)) : 0;
+
+		ref["ShirtColor"] = zionColors[(nextRand() >> 3) % (sizeof(zionColors) / sizeof(zionColors[0]))];
+		ref["PantsColor"] = zionColors[(nextRand() >> 5) % (sizeof(zionColors) / sizeof(zionColors[0]))];
+		ref["CoatColor"] = zionColors[(nextRand() >> 7) % (sizeof(zionColors) / sizeof(zionColors[0]))];
+		ref["ShoeColor"] = (nextRand() >> 8) % 4;
+		ref["GlassesColor"] = 0;
+	}
+	else if (faction == FACTION_MEROVINGIAN || faction == FACTION_EXILE)
+	{
+		// Merovingian Exiles: Aristocratic velvet coats, elegant dress shirts, dark formal trousers
+		static const uint8 exileShirts[] = { 2, 4, 6, 7, 10 };
+		static const uint8 exileCoats[] = { 1, 2, 4, 6 };
+		static const uint8 exileColors[] = { 0, 6, 9, 14, 16, 22, 25, 33 };
+
+		ref["Shirt"] = exileShirts[(nextRand() >> 4) % (sizeof(exileShirts) / sizeof(exileShirts[0]))];
+		ref["Coat"] = exileCoats[(nextRand() >> 5) % (sizeof(exileCoats) / sizeof(exileCoats[0]))];
+		ref["Pants"] = 1 + ((nextRand() >> 6) % 4);
+		ref["Shoes"] = 1 + ((nextRand() >> 7) % 4);
+		ref["Gloves"] = 0;
+		ref["Glasses"] = ((nextRand() >> 8) % 3 == 0) ? (1 + ((nextRand() >> 9) % 18)) : 0;
+
+		ref["ShirtColor"] = exileColors[(nextRand() >> 3) % (sizeof(exileColors) / sizeof(exileColors[0]))];
+		ref["PantsColor"] = exileColors[(nextRand() >> 5) % (sizeof(exileColors) / sizeof(exileColors[0]))];
+		ref["CoatColor"] = exileColors[(nextRand() >> 7) % (sizeof(exileColors) / sizeof(exileColors[0]))];
+		ref["ShoeColor"] = 0;
+		ref["GlassesColor"] = 0;
+	}
+	else
+	{
+		// Bluepill Citizens: Diverse street casual, blazers, sweaters, jeans, slacks
+		static const uint8 civShirts[] = { 1, 2, 3, 5, 6, 8, 9, 11 };
+		static const uint8 civPants[] = { 1, 2, 3, 4, 5, 7 };
+		static const uint8 civColors[] = { 0, 1, 3, 6, 9, 11, 14, 16, 19, 22, 24, 27, 30, 32, 41 };
+
+		ref["Shirt"] = civShirts[(nextRand() >> 4) % (sizeof(civShirts) / sizeof(civShirts[0]))];
+		ref["Coat"] = ((nextRand() >> 5) % 3 == 0) ? (1 + ((nextRand() >> 6) % 5)) : 0;
+		ref["Pants"] = civPants[(nextRand() >> 7) % (sizeof(civPants) / sizeof(civPants[0]))];
+		ref["Shoes"] = 1 + ((nextRand() >> 8) % 5);
+		ref["Gloves"] = 0;
+		ref["Glasses"] = ((nextRand() >> 9) % 4 == 0) ? (1 + ((nextRand() >> 10) % 15)) : 0;
+
+		ref["ShirtColor"] = civColors[(nextRand() >> 3) % (sizeof(civColors) / sizeof(civColors[0]))];
+		ref["PantsColor"] = civColors[(nextRand() >> 5) % (sizeof(civColors) / sizeof(civColors[0]))];
+		ref["CoatColor"] = civColors[(nextRand() >> 7) % (sizeof(civColors) / sizeof(civColors[0]))];
+		ref["ShoeColor"] = (nextRand() >> 8) % 4;
+		ref["GlassesColor"] = 0;
+	}
+
 	ref["Tattoo"] = 0;
 	ref["FacialDetailColor"] = 0;
 

@@ -44,8 +44,9 @@ public:
                                           float targetX, float targetY, float targetZ,
                                           bool ignoreCollision = false);
 
-    // Checks Line of Sight using Detour raycast
+    // Checks Line of Sight using Detour raycast and static building obstacles
     bool CheckLineOfSight(float startX, float startZ, float targetX, float targetZ);
+    bool CheckLineOfSight(float startX, float startY, float startZ, float targetX, float targetY, float targetZ);
 
     // Off-mesh links management
     void RegisterOffMeshLink(uint32 id, OffMeshLinkType type, LocationVector start, LocationVector end, bool biDir = true);
