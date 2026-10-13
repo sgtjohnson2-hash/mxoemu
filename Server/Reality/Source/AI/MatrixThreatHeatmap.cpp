@@ -1,4 +1,5 @@
 #include "MatrixThreatHeatmap.h"
+#include "Config.h"
 #include "Log.h"
 #include "BotManager.h"
 #include "ObjectMgr.h"
@@ -207,6 +208,11 @@ void MatrixThreatHeatmap::Update(float dtSeconds, uint32 currentMs)
 
 void MatrixThreatHeatmap::TriggerEscalationResponse(int gx, int gz, EscalationTier tier, uint32 currentMs)
 {
+    // World.InventedEscalation (default 0): the heat -> police/SWAT/Agent escalation, its radio
+    // chatter and its SWAT_Tactical_* bots have no retail source (no HDS file, no client.dll
+    // reference, no capture). GEMINI.md guardrail: no fake systems. Off unless explicitly enabled.
+    if (!sConfig.GetBoolDefault("World.InventedEscalation", false))
+        return;
     float wx, wz;
     GridToWorld(gx, gz, wx, wz);
 

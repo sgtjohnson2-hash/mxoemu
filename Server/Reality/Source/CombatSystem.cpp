@@ -577,6 +577,20 @@ bool CombatSystem::RequestInterlock(uint32 attackerGoId, uint32 targetGoId, uint
 		INFO_LOG(format("RequestInterlock %1% -> %2% refused: one side already interlocked") % attackerGoId % targetGoId);
 		return false;
 	}
+	// A fighter who just withdrew can walk away: nobody else may lock them again during the
+	// grace window. They may still start a new fight themselves (they are the attacker then).
+	{
+		auto g = m_withdrawGraceUntil.find(targetGoId);
+		if (g != m_withdrawGraceUntil.end()) {
+			const uint32 now = getMSTime();
+			if (int32(g->second - now) > 0) {
+				INFO_LOG(format("RequestInterlock %1% -> %2% refused: target withdrew, grace %3% ms left")
+					% attackerGoId % targetGoId % (g->second - now));
+				return false;
+			}
+			m_withdrawGraceUntil.erase(g);
+		}
+	}
 
 	PlayerObject* pA = getPlayerSafe(attackerGoId);
 	PlayerObject* pB = getPlayerSafe(targetGoId);
@@ -986,6 +1000,12 @@ void CombatSystem::EndInterlock(uint32 goId, bool byWithdraw)
 
 		INFO_LOG(format("EndInterlock: %1% vs %2% ended (requested by go %3%, %4%)")
 			% s.goIdA % s.goIdB % goId % (byWithdraw ? "withdraw" : "reaped"));
+		if (byWithdraw) {
+			// Interlock.WithdrawGraceMs (default 8000, 0 = off): see m_withdrawGraceUntil
+			const int graceMs = sConfig.GetIntDefault("Interlock.WithdrawGraceMs", 8000);
+			if (graceMs > 0)
+				m_withdrawGraceUntil[goId] = getMSTime() + uint32(graceMs);
+		}
 
 		if (byWithdraw && pA && pB && !pA->isDead() && !pB->isDead()) {
 			// Parting Shot

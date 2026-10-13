@@ -235,6 +235,10 @@ private:
 	bool m_updatingInterlocks;
 	std::vector< std::pair<uint32,bool> > m_deferredInterlockEnds;
 	std::vector<uint32> m_deferredFreefireStops;
+
+	//goId -> getMSTime() until which nobody else may lock that fighter back into an interlock.
+	//Set on withdraw. Live 2026-10-13: the dojo bot re-locked Slacker 1 s after &withdraw.
+	std::unordered_map<uint32, uint32> m_withdrawGraceUntil;
 };
 
 #define sCombatSys CombatSystem::getSingleton()

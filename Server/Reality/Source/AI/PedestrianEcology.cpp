@@ -1,4 +1,5 @@
 #include "PedestrianEcology.h"
+#include "Config.h"
 #include "BotClient.h"
 #include "PlayerObject.h"
 #include "SpatialGrid.h"
@@ -822,6 +823,11 @@ void PedestrianEcology::ExecuteTier3Panic(BotClient* bot, PlayerObject* me, floa
 
 void PedestrianEcology::DeployTacticalCordon(uint32 districtId)
 {
+    // World.InventedEscalation (default 0): the heat -> police/SWAT/Agent escalation, its radio
+    // chatter and its SWAT_Tactical_* bots have no retail source (no HDS file, no client.dll
+    // reference, no capture). GEMINI.md guardrail: no fake systems. Off unless explicitly enabled.
+    if (!sConfig.GetBoolDefault("World.InventedEscalation", false))
+        return;
     std::lock_guard<std::recursive_mutex> lock(m_cordonMutex);
     auto it = m_tacticalCordons.find(districtId);
     if (it != m_tacticalCordons.end() && it->second.active) {
