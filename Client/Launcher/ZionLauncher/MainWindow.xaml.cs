@@ -26,7 +26,12 @@ namespace ZionLauncher
 {
     public partial class MainWindow : Window
     {
-        public static readonly Version CurrentLauncherVersion = new("1.3.1");
+        // Taken from the assembly (<Version> in ZionLauncher.csproj) so the self-update check can never disagree
+        // with the build: a hard-coded copy that lagged the csproj made a new build update itself forever.
+        public static readonly Version CurrentLauncherVersion =
+            System.Reflection.Assembly.GetExecutingAssembly().GetName().Version is Version v
+                ? new Version(v.Major, v.Minor, Math.Max(0, v.Build))
+                : new Version(0, 0, 0);
         public const long DefaultClientArchiveSizeBytes = 1_327_331_186L;
         public const long DefaultClientUncompressedSizeBytes = 5_975_384_547L;
         public const int DefaultClientTotalFiles = 2666;
@@ -1455,6 +1460,13 @@ namespace ZionLauncher
         private void PopulateFallbackPatchNotes()
         {
             PatchNotesCardsContainer.Children.Clear();
+            PatchNotesCardsContainer.Children.Add(CreatePatchNoteCard(
+                "⚡ Patch 1.3.2: Fresh-Install Fixes",
+                "2026-10-13",
+                "Zion Construct Engineering",
+                "INSTALLER",
+                "• Verify no longer reports d3d9.dll / Cool*.dll as missing (they are not part of the client and the game never loads them).\n• The Zion login hook (mxohax_modern.dll) and server key (pubkey.dat) are downloaded automatically after install, on Verify and before Jack In.\n• Jack In starts the game from the folder that actually holds the client."
+            ));
             PatchNotesCardsContainer.Children.Add(CreatePatchNoteCard(
                 "⚡ Patch 1.3.1: High-Speed Multi-Core Client Extractor & Smart Resume",
                 "2026-10-13",

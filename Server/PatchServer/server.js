@@ -44,6 +44,36 @@ if (mysql) {
     });
 }
 
+const community = require('./community');
+community.initializeDatabase(pool);
+
+if (pool) {
+    pool.query(`
+        CREATE TABLE IF NOT EXISTS bug_reports (
+            id INT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+            char_id BIGINT UNSIGNED NOT NULL DEFAULT 0,
+            handle VARCHAR(64) NOT NULL DEFAULT 'Unknown',
+            category VARCHAR(32) NOT NULL DEFAULT 'GENERAL',
+            description TEXT NOT NULL,
+            district INT UNSIGNED NOT NULL DEFAULT 0,
+            x FLOAT NOT NULL DEFAULT 0,
+            y FLOAT NOT NULL DEFAULT 0,
+            z FLOAT NOT NULL DEFAULT 0,
+            rot INT NOT NULL DEFAULT 0,
+            target_go_id INT UNSIGNED NOT NULL DEFAULT 0,
+            fighting_style INT UNSIGNED NOT NULL DEFAULT 0,
+            level INT UNSIGNED NOT NULL DEFAULT 1,
+            hp INT UNSIGNED NOT NULL DEFAULT 0,
+            max_hp INT UNSIGNED NOT NULL DEFAULT 0,
+            status VARCHAR(24) NOT NULL DEFAULT 'OPEN',
+            admin_notes TEXT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            INDEX idx_bug_status (status),
+            INDEX idx_bug_char (char_id)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+    `).catch(err => console.error('[PatchServer] bug_reports init notice:', err.message));
+}
+
 // Password Hashing Functions matching AuthServer C++
 function sha1(str) {
     return crypto.createHash('sha1').update(str).digest('hex').toLowerCase();
@@ -171,11 +201,11 @@ const defaultManifest = {
     gameServer: "15.204.82.250:10000",
     patchServer: "http://15.204.82.250",
     launcher: {
-        version: "1.2.0",
+        version: "1.3.1",
         minVersion: "1.0.0",
         url: "/launcher/ZionLauncher.exe",
         filename: "ZionLauncher.exe",
-        notes: "Matrix Digital Rain loader & auto-updater"
+        notes: "High-speed multi-core client extractor & smart archive reuse"
     },
     clientPackage: {
         filename: "MxO_Client.7z",
@@ -200,7 +230,12 @@ try {
 
 const server = http.createServer(async (req, res) => {
     const urlObj = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
-    const pathname = decodeURIComponent(urlObj.pathname);
+    let pathname = urlObj.pathname;
+    try {
+        pathname = decodeURIComponent(urlObj.pathname);
+    } catch (e) {
+        pathname = urlObj.pathname;
+    }
 
     console.log(`[PatchServer] ${req.method} ${pathname}`);
 
@@ -219,6 +254,14 @@ const server = http.createServer(async (req, res) => {
         res.writeHead(204);
         res.end();
         return;
+    }
+
+    // Community Hub, Forums & News API Router
+    try {
+        const handledByCommunity = await community.handleCommunityRequest(req, res, pathname, urlObj, parseJsonBody, pool);
+        if (handledByCommunity) return;
+    } catch (cErr) {
+        console.error('[PatchServer] Community router error:', cErr);
     }
 
     // 1. Landing Page (Root /)
@@ -438,12 +481,107 @@ const server = http.createServer(async (req, res) => {
         return;
     }
 
+    // 3c. REST API: In-Game Bug Reports Database Viewer & Manager
+    if (pathname === '/api/bugs' || pathname === '/api/bug_reports') {
+        res.setHeader('Content-Type', 'application/json');
+        if (!pool) {
+            res.writeHead(503);
+            res.end(JSON.stringify({ success: false, message: 'Database service unavailable.' }));
+            return;
+        }
+        try {
+            if (req.method === 'GET') {
+                const statusFilter = (urlObj.searchParams.get('status') || '').trim().toUpperCase();
+                const idParam = parseInt(urlObj.searchParams.get('id') || '0', 10);
+                let limit = parseInt(urlObj.searchParams.get('limit') || '50', 10);
+                if (isNaN(limit) || limit < 1) limit = 50;
+                if (limit > 500) limit = 500;
+
+                if (idParam > 0) {
+                    const [rows] = await pool.execute('SELECT * FROM bug_reports WHERE id = ? LIMIT 1', [idParam]);
+                    res.writeHead(rows.length ? 200 : 404);
+                    res.end(JSON.stringify({
+                        success: rows.length > 0,
+                        report: rows.length ? rows[0] : null
+                    }, null, 2));
+                    return;
+                }
+
+                let rows = [];
+                if (statusFilter && statusFilter !== 'ALL') {
+                    const [r] = await pool.query(
+                        'SELECT * FROM bug_reports WHERE UPPER(status) = ? ORDER BY id DESC LIMIT ?',
+                        [statusFilter, limit]
+                    );
+                    rows = r;
+                } else {
+                    const [r] = await pool.query(
+                        'SELECT * FROM bug_reports ORDER BY id DESC LIMIT ?',
+                        [limit]
+                    );
+                    rows = r;
+                }
+
+                const [counts] = await pool.query(
+                    "SELECT COUNT(*) AS total, SUM(CASE WHEN UPPER(status) = 'OPEN' THEN 1 ELSE 0 END) AS open_cnt, SUM(CASE WHEN UPPER(status) = 'RESOLVED' THEN 1 ELSE 0 END) AS resolved_cnt FROM bug_reports"
+                );
+                const summary = counts[0] || { total: 0, open_cnt: 0, resolved_cnt: 0 };
+
+                res.writeHead(200);
+                res.end(JSON.stringify({
+                    success: true,
+                    total_reports: Number(summary.total || 0),
+                    open_reports: Number(summary.open_cnt || 0),
+                    resolved_reports: Number(summary.resolved_cnt || 0),
+                    count: rows.length,
+                    reports: rows
+                }, null, 2));
+                return;
+            } else if (req.method === 'POST') {
+                const data = await parseJsonBody(req);
+                if (data.id && data.status) {
+                    const newStatus = String(data.status).trim().toUpperCase();
+                    const notes = data.admin_notes !== undefined ? String(data.admin_notes).trim() : null;
+                    if (notes !== null) {
+                        await pool.execute('UPDATE bug_reports SET status = ?, admin_notes = ? WHERE id = ?', [newStatus, notes, Number(data.id)]);
+                    } else {
+                        await pool.execute('UPDATE bug_reports SET status = ? WHERE id = ?', [newStatus, Number(data.id)]);
+                    }
+                    res.writeHead(200);
+                    res.end(JSON.stringify({ success: true, id: Number(data.id), status: newStatus }));
+                    return;
+                }
+                const handle = (data.handle || 'WebOperative').trim().slice(0, 60);
+                const description = (data.description || '').trim();
+                const category = (data.category || 'GENERAL').trim().toUpperCase().slice(0, 30);
+                if (!description) {
+                    res.writeHead(400);
+                    res.end(JSON.stringify({ success: false, message: 'Bug description is required.' }));
+                    return;
+                }
+                const [result] = await pool.execute(
+                    'INSERT INTO bug_reports (char_id, handle, category, description, district, x, y, z, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+                    [Number(data.char_id || 0), handle, category, description, Number(data.district || 0), Number(data.x || 0), Number(data.y || 0), Number(data.z || 0), 'OPEN']
+                );
+                res.writeHead(201);
+                res.end(JSON.stringify({ success: true, id: result.insertId, message: 'Bug report saved to database.' }));
+                return;
+            }
+        } catch (err) {
+            console.error('[PatchServer] /api/bugs error:', err.message);
+            res.writeHead(500);
+            res.end(JSON.stringify({ success: false, message: err.message }));
+            return;
+        }
+    }
+
     // 4. REST API: Server Stats & Telemetry
     if (pathname === '/api/stats' || pathname === '/status' || pathname === '/health') {
         res.setHeader('Content-Type', 'application/json');
         try {
             let usersCount = 0;
             let charactersCount = 0;
+            let bugReportsCount = 0;
             let dbConnected = false;
 
             if (pool) {
@@ -452,6 +590,8 @@ const server = http.createServer(async (req, res) => {
                     usersCount = uRows[0].cnt;
                     const [cRows] = await pool.query('SELECT COUNT(*) AS cnt FROM characters');
                     charactersCount = cRows[0].cnt;
+                    const [bRows] = await pool.query('SELECT COUNT(*) AS cnt FROM bug_reports');
+                    bugReportsCount = bRows[0].cnt;
                     dbConnected = true;
                 } catch (dbErr) {
                     console.error('[PatchServer] DB poll error:', dbErr.message);
@@ -467,12 +607,14 @@ const server = http.createServer(async (req, res) => {
                 database: {
                     connected: dbConnected,
                     registered_operatives: usersCount,
-                    total_characters: charactersCount
+                    total_characters: charactersCount,
+                    bug_reports: bugReportsCount
                 },
                 endpoints: {
                     auth: "15.204.82.250:11000",
                     game: "15.204.82.250:10000",
-                    patch: "http://15.204.82.250"
+                    patch: "http://15.204.82.250",
+                    bugs: "http://15.204.82.250/api/bugs"
                 },
                 timestamp: new Date().toISOString()
             }, null, 2));
@@ -494,11 +636,11 @@ const server = http.createServer(async (req, res) => {
     if (pathname === '/launcher/version' || pathname === '/launcher/version.json' || pathname === '/version.json') {
         res.writeHead(200, { 'Content-Type': 'application/json' });
         let launcherInfo = {
-            version: "1.2.0",
+            version: "1.3.1",
             minVersion: "1.0.0",
             downloadUrl: "/launcher/ZionLauncher.exe",
             filename: "ZionLauncher.exe",
-            notes: "Matrix Digital Rain loader & auto-updater"
+            notes: "High-speed multi-core client extractor & smart archive reuse"
         };
         try {
             if (fs.existsSync(manifestJsonPath)) {
@@ -522,7 +664,7 @@ const server = http.createServer(async (req, res) => {
 
     if (pathname === '/launcher/version.txt') {
         res.writeHead(200, { 'Content-Type': 'text/plain' });
-        let v = "1.2.0";
+        let v = "1.3.1";
         try {
             if (fs.existsSync(manifestJsonPath)) {
                 const mData = JSON.parse(fs.readFileSync(manifestJsonPath, 'utf8'));

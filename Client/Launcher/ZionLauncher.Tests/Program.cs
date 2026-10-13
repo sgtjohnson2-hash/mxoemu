@@ -47,6 +47,9 @@ namespace ZionLauncher.Tests
             // 9. Offline & Malformed JSON Edge Case Tests
             TestOfflineAndMalformedJsonHandling();
 
+            // 10. Client Extraction Speed, Archive Reuse & Telemetry Tests (v1.3.1)
+            TestClientExtractionAndReuse();
+
             Console.WriteLine();
             Console.ForegroundColor = ConsoleColor.Green;
             Console.WriteLine($"TOTAL PASSED: {_passed}");
@@ -471,6 +474,121 @@ namespace ZionLauncher.Tests
             string? ev = docEmptyVer.RootElement.TryGetProperty("version", out var ep) ? ep.GetString() : null;
             bool ok = MainWindow.TryParseNormalizedVersion(ev, out _);
             Assert(!ok, "Empty 'version' string is safely rejected by TryParseNormalizedVersion");
+        }
+
+        private static void TestClientExtractionAndReuse()
+        {
+            Console.ForegroundColor = ConsoleColor.Yellow;
+            Console.WriteLine("\n[10] Client Extraction Speed, Archive Reuse & Telemetry Tests (v1.3.1)");
+            Console.ResetColor();
+
+            // 1. Version 1.3.0 -> 1.3.1 upgrade check
+            Assert(MainWindow.CurrentLauncherVersion >= new Version("1.3.2"),
+                $"CurrentLauncherVersion comes from the assembly and is at least 1.3.2 (actual: {MainWindow.CurrentLauncherVersion})");
+            Assert(!MainWindow.IsRemoteVersionNewer(MainWindow.CurrentLauncherVersion.ToString(), MainWindow.CurrentLauncherVersion, out _),
+                "A launcher never treats its own version as an update (no self-update loop)");
+            bool upgradeFrom130 = MainWindow.IsRemoteVersionNewer("1.3.1", new Version("1.3.0"), out var parsed131);
+            Assert(upgradeFrom130 && parsed131 == new Version(1, 3, 1, 0),
+                "v1.3.0 clients evaluate remote '1.3.1' as newer and trigger auto-upgrade");
+
+            // 2. Existing archive reuse detection (MxO_Client.7z.tmp size match skips re-download)
+            string tempDir = Path.Combine(Path.GetTempPath(), "ZionArchiveReuseTest_" + Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(tempDir);
+            try
+            {
+                string tmpArc = Path.Combine(tempDir, "MxO_Client.7z.tmp");
+                File.WriteAllBytes(tmpArc, new byte[1024]);
+                string? undersized = MainWindow.ResolveExistingClientArchive(tempDir, 2048);
+                Assert(undersized == null, "Partial/undersized MxO_Client.7z.tmp is not treated as complete archive");
+
+                string? matched = MainWindow.ResolveExistingClientArchive(tempDir, 1024);
+                Assert(string.Equals(matched, tmpArc, StringComparison.OrdinalIgnoreCase),
+                    "Complete MxO_Client.7z.tmp matching expected size is detected and reused without re-downloading");
+            }
+            finally
+            {
+                try { Directory.Delete(tempDir, true); } catch { }
+            }
+
+            // 3. 7-Zip stdout progress & filename parser tests
+            string curFile = "initial";
+            int curEntry = 0;
+            bool p0 = MainWindow.TryParse7zProgressLine("- packmaps\\cin_1.pkb", ref curFile, ref curEntry, out int pct0);
+            Assert(!p0 && curFile == "cin_1.pkb",
+                $"'- packmaps\\cin_1.pkb' updates currentFile to 'cin_1.pkb' (actual: '{curFile}')");
+
+            bool p1 = MainWindow.TryParse7zProgressLine(" 18% 185 - packmaps\\dialog.pkb", ref curFile, ref curEntry, out int pct1);
+            Assert(p1 && pct1 == 18 && curEntry == 185 && curFile == "dialog.pkb",
+                $"Parses ' 18% 185 - packmaps\\dialog.pkb' -> pct={pct1}, entry={curEntry}, file={curFile}");
+
+            bool p2 = MainWindow.TryParse7zProgressLine(" 99% 2787 T autodetect_settings.exe", ref curFile, ref curEntry, out int pct2);
+            Assert(p2 && pct2 == 99 && curEntry == 2787 && curFile == "autodetect_settings.exe",
+                $"Parses ' 99% 2787 T autodetect_settings.exe' -> pct={pct2}, entry={curEntry}, file={curFile}");
+
+            Assert(MainWindow.FormatEtaString(25.0) == "25s", "FormatEtaString(25) -> '25s'");
+            Assert(MainWindow.FormatEtaString(125.0) == "2m 5s", "FormatEtaString(125) -> '2m 5s'");
+
+            // 4. Embedded native 7z.exe + 7z.dll extraction verification
+            string? sevenZipExe = MainWindow.EnsureNative7zExtractor(AppContext.BaseDirectory);
+            Assert(!string.IsNullOrEmpty(sevenZipExe) && File.Exists(sevenZipExe),
+                $"EnsureNative7zExtractor provisions standalone 7z.exe ({sevenZipExe})");
+
+            // 5. Single-pass solid .7z streaming extraction test
+            if (!string.IsNullOrEmpty(sevenZipExe) && File.Exists(sevenZipExe))
+            {
+                string workDir = Path.Combine(Path.GetTempPath(), "ZionSinglePassTest_" + Guid.NewGuid().ToString("N"));
+                string srcDir = Path.Combine(workDir, "src");
+                string outDir = Path.Combine(workDir, "out");
+                string archivePath = Path.Combine(workDir, "solid_test.7z");
+                Directory.CreateDirectory(Path.Combine(srcDir, "packmaps"));
+                Directory.CreateDirectory(outDir);
+
+                try
+                {
+                    byte[] payloadA = new byte[512 * 1024];
+                    byte[] payloadB = new byte[768 * 1024];
+                    new Random(42).NextBytes(payloadA);
+                    new Random(1337).NextBytes(payloadB);
+                    File.WriteAllBytes(Path.Combine(srcDir, "packmaps", "test_a.pkb"), payloadA);
+                    File.WriteAllBytes(Path.Combine(srcDir, "packmaps", "test_b.pkb"), payloadB);
+                    File.WriteAllText(Path.Combine(srcDir, "matrix.exe"), "DUMMY_MATRIX_EXE");
+
+                    var psi = new System.Diagnostics.ProcessStartInfo
+                    {
+                        FileName = sevenZipExe,
+                        Arguments = $"a \"{archivePath}\" \"{srcDir}\\*\" -ms=on -mx=1",
+                        UseShellExecute = false,
+                        CreateNoWindow = true,
+                        RedirectStandardOutput = true,
+                        RedirectStandardError = true
+                    };
+                    using (var proc = System.Diagnostics.Process.Start(psi))
+                    {
+                        proc?.WaitForExit(15000);
+                    }
+
+                    Assert(File.Exists(archivePath), "Created solid .7z test archive via embedded 7z.exe");
+
+                    long lastReportedBytes = 0;
+                    int lastFilesDone = 0;
+                    MainWindow.ExtractArchiveSinglePass(archivePath, outDir, (file, curB, totB, files, elapsed) =>
+                    {
+                        lastReportedBytes = curB;
+                        lastFilesDone = files;
+                    });
+
+                    Assert(File.Exists(Path.Combine(outDir, "packmaps", "test_a.pkb")) &&
+                           File.Exists(Path.Combine(outDir, "packmaps", "test_b.pkb")) &&
+                           File.Exists(Path.Combine(outDir, "matrix.exe")),
+                        "ExtractArchiveSinglePass unpacked all solid .7z entries accurately in single sequential pass");
+                    Assert(lastFilesDone == 3 && lastReportedBytes >= payloadA.Length + payloadB.Length,
+                        $"ExtractArchiveSinglePass reported byte-accurate progress ({lastReportedBytes:N0} bytes across {lastFilesDone} files)");
+                }
+                finally
+                {
+                    try { Directory.Delete(workDir, true); } catch { }
+                }
+            }
         }
     }
 }

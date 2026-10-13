@@ -6,6 +6,7 @@ WORKDIR /app
 RUN npm init -y && npm install mysql2
 
 COPY server.js ./
+COPY community.js ./
 
 EXPOSE 80
 
