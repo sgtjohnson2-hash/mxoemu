@@ -3209,9 +3209,9 @@ int RunCombatTestSuite()
 				bool foundAtDestBefore = (std::find(nearDestBefore.begin(), nearDestBefore.end(), &p9Client) != nearDestBefore.end());
 				check(!foundAtDestBefore, "Before 0x03 movement packet: Human client is not in destination SpatialGrid cell (45000, 45000)");
 
-				// Build authentic 0x03 movement state packet (stateCode 0x08: action:u8, shortrot:u8, x:f32, y:f32, z:f32)
+				// Build authentic 0x03 movement state packet (viewId=VIEWID_SELF(2), shouldBeOne=1, updateType=0x08, x:f32, y:f32, z:f32)
 				ByteBuffer moveStatePkt;
-				moveStatePkt << (uint8)0x08 << (uint8)1 << (uint8)64;
+				moveStatePkt << (uint16)VIEWID_SELF << (uint8)1 << (uint8)0x08;
 				moveStatePkt << (float)45010.0f << (float)572.0f << (float)45020.0f;
 				p9Human.po->HandleStateUpdate(moveStatePkt);
 

@@ -109,13 +109,12 @@ void AbilitySystem::saveToDB(bool force)
 {
     if (!m_owner)
         return;
+    if (!force && !m_dirty)
+        return;
+    m_dirty = false;
     // bots are memory-only (virtual charIds >= 9000000): never write their loadouts
     if (m_owner->getClient().isBot() || m_owner->getCharacterUID() >= 9000000)
         return;
-    if (!force && !m_dirty)
-        return;
-
-    m_dirty = false;
     if (Database_Main == nullptr)
         return;
 

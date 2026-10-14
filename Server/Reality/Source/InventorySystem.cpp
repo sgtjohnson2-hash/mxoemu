@@ -122,10 +122,9 @@ void InventorySystem::loadFromDB()
 void InventorySystem::saveToDB(bool force)
 {
     if (!m_owner) return;
-    if (m_owner->getClient().isBot() || m_owner->getCharacterUID() >= 9000000) return;
     if (!force && !m_dirty) return;
-
     m_dirty = false;
+    if (m_owner->getClient().isBot() || m_owner->getCharacterUID() >= 9000000) return;
     if (Database_Main == nullptr) return;
 
     PreparedStatement delStmt("DELETE FROM `inventory` WHERE `charId` = ?0");
