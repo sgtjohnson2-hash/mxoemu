@@ -55,6 +55,7 @@ services:
       - ./Server/Reality/Binaries/pubkey.dat:/app/Server/Reality/Binaries/pubkey.dat:ro
       - ./Server/Reality/Binaries/signPriv.dat:/app/Server/Reality/Binaries/signPriv.dat:ro
       - ./Server/Reality/Binaries/signPub.dat:/app/Server/Reality/Binaries/signPub.dat:ro
+      - ./Server/PatchServer/patch_data:/app/patch_data
 
 volumes:
   db_data:

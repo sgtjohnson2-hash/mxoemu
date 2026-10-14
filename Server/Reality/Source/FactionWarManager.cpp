@@ -1086,6 +1086,7 @@ void FactionWarManager::SaveDistrictControlToDB(uint32 districtId)
         stmt.SetUInt32(6, meroNodes);
         sDatabase.ExecutePrepared(&stmt);
     }
+    WriteWorldStatusJsonFile("world_status.json");
 }
 
 void FactionWarManager::LoadDistrictControlFromDB()
@@ -1246,6 +1247,7 @@ uint32 FactionWarManager::TriggerWorldEvent(uint32 districtId, WorldEventType ty
     }
 
     m_activeWorldEvents.push_back(ev);
+    WriteWorldStatusJsonFile("world_status.json");
 
     std::string distName = GetDistrictName(districtId);
     std::string warnMsg = (format("{c:FF2200}[WORLD EVENT ALERT] %1% detected in %2% (District %3%)! World Boss '%4%' [Lv60] has materialized near (%5%, %6%)! All Operatives converge!{/c}")
@@ -1299,20 +1301,24 @@ bool FactionWarManager::OnWorldBossDefeated(uint32 bossGoId, uint32 killerGoId)
 
             uint32 totalDamage = 0;
             for (const auto& kv : ev.damageContributors) {
-                totalDamage += kv.second;
+                if (kv.second >= 50 || kv.first == killerGoId) {
+                    totalDamage += kv.second;
+                }
             }
             if (totalDamage == 0) totalDamage = 1;
 
             std::vector<uint32> lootTable = GetWorldBossLootTable(ev.type);
+            size_t rewardedContributors = 0;
 
             for (const auto& kv : ev.damageContributors) {
                 uint32 contributorGoId = kv.first;
                 uint32 dmg = kv.second;
-                if (dmg == 0) continue;
+                if (dmg < 50 && contributorGoId != killerGoId) continue;
 
                 PlayerObject* player = sObjMgr.getGOPtrSafe(contributorGoId);
                 if (!player) continue;
 
+                rewardedContributors++;
                 float share = std::clamp(float(dmg) / float(totalDamage), 0.10f, 1.0f);
                 uint32 infoReward = std::max<uint32>(500, uint32(std::lround(5000.0f * share)));
                 uint32 xpReward   = std::max<uint32>(250, uint32(std::lround(2500.0f * share)));
@@ -1348,8 +1354,10 @@ bool FactionWarManager::OnWorldBossDefeated(uint32 bossGoId, uint32 killerGoId)
                 }
             }
 
-            INFO_LOG(format("FactionWarManager: World Event #%1% ('%2%') defeated! Distributed multi-player spoils to %3% contributors.")
-                     % ev.eventId % ev.bossName % ev.damageContributors.size());
+            WriteWorldStatusJsonFile("world_status.json");
+
+            INFO_LOG(format("FactionWarManager: World Event #%1% ('%2%') defeated! Distributed multi-player spoils to %3% eligible contributors.")
+                     % ev.eventId % ev.bossName % rewardedContributors);
             return true;
         }
     }
@@ -1423,10 +1431,19 @@ std::string FactionWarManager::BuildWorldStatusJson() const
 
 bool FactionWarManager::WriteWorldStatusJsonFile(const std::string& filePath) const
 {
+    std::string payload = BuildWorldStatusJson();
     std::ofstream ofs(filePath, std::ios::out | std::ios::trunc);
     if (!ofs.is_open()) return false;
-    ofs << BuildWorldStatusJson();
+    ofs << payload;
     ofs.close();
+
+    if (filePath == "world_status.json") {
+        std::ofstream sharedOfs("/app/patch_data/world_status.json", std::ios::out | std::ios::trunc);
+        if (sharedOfs.is_open()) {
+            sharedOfs << payload;
+            sharedOfs.close();
+        }
+    }
     return true;
 }
 

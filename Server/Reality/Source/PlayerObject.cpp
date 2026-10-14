@@ -1056,7 +1056,7 @@ void PlayerObject::UpdateAoIStreaming()
 	const float STREAM_OUT_RADIUS_SQ = 18000.0f * 18000.0f; // 180m: cull with hysteresis
 
 	// 1. Stream in entities entering 120m (rate limited to 1 new entity per second)
-	auto nearbyClients = sSpatialGrid.GetClientsInAoI(m_pos.x, m_pos.z, STREAM_IN_RADIUS);
+	auto nearbyClients = sSpatialGrid.GetClientsInAoI(m_pos.x, m_pos.z, STREAM_IN_RADIUS, m_parent.m_instanceId);
 	for (GameClient* client : nearbyClients)
 	{
 		if (!client || client == &m_parent) continue;
@@ -1070,7 +1070,7 @@ void PlayerObject::UpdateAoIStreaming()
 				if (m_knownEntities.size() >= 50) break;
 			}
 			PlayerObject* otherObj = sObjMgr.getGOPtrSafe(otherGoId);
-			if (otherObj && !otherObj->isDead())
+			if (otherObj && !otherObj->isDead() && otherObj->getClient().m_instanceId == m_parent.m_instanceId)
 			{
 				noteEntitySpawned(otherGoId);
 				vector<msgBaseClassPtr> statePackets = otherObj->getCurrentStatePackets();
@@ -1083,7 +1083,7 @@ void PlayerObject::UpdateAoIStreaming()
 		}
 	}
 
-	// 2. Stream out (cull) entities leaving 300m or dead
+	// 2. Stream out (cull) entities leaving 300m, dead, or in a different instance dimension
 	std::vector<uint32> known;
 	{
 		std::lock_guard<std::mutex> l(m_knownMutex);
@@ -1092,9 +1092,13 @@ void PlayerObject::UpdateAoIStreaming()
 	for (uint32 knownGoId : known)
 	{
 		PlayerObject* otherObj = sObjMgr.getGOPtrSafe(knownGoId);
-		bool cull = (!otherObj || otherObj->isDead() || m_pos.Distance2DSq(otherObj->getPosition()) > STREAM_OUT_RADIUS_SQ);
+		bool cull = (!otherObj || otherObj->isDead() ||
+		             otherObj->getClient().m_instanceId != m_parent.m_instanceId ||
+		             m_pos.Distance2DSq(otherObj->getPosition()) > STREAM_OUT_RADIUS_SQ);
 		if (cull)
 		{
+			if (m_targetGoId == knownGoId) m_targetGoId = 0;
+			if (m_lastDojoBotGoId == knownGoId) m_lastDojoBotGoId = 0;
 			//say WHY the entity is leaving this client's view (diagnoses vanished targets)
 			if (!otherObj)
 			{
@@ -1105,6 +1109,12 @@ void PlayerObject::UpdateAoIStreaming()
 			{
 				INFO_LOG(format("AoI cull: %1%:%2% drops go %3% (%4%) from view (reason: dead)")
 					% m_handle % m_goId % knownGoId % otherObj->getHandle());
+			}
+			else if (otherObj->getClient().m_instanceId != m_parent.m_instanceId)
+			{
+				INFO_LOG(format("AoI cull: %1%:%2% drops go %3% (%4%) from view (reason: instance %5% != %6%)")
+					% m_handle % m_goId % knownGoId % otherObj->getHandle()
+					% otherObj->getClient().m_instanceId % m_parent.m_instanceId);
 			}
 			else
 			{
@@ -1133,6 +1143,7 @@ void PlayerObject::FlushAndRefreshAoI()
 	{
 		PlayerObject* otherObj = sObjMgr.getGOPtrSafe(knownGoId);
 		bool cull = (!otherObj || otherObj->isDead() ||
+		             otherObj->getClient().m_instanceId != m_parent.m_instanceId ||
 		             (otherObj->getDistrict() != 0 && m_district != 0 && otherObj->getDistrict() != m_district &&
 		              m_pos.Distance2DSq(otherObj->getPosition()) > STREAM_OUT_RADIUS_SQ) ||
 		             m_pos.Distance2DSq(otherObj->getPosition()) > STREAM_OUT_RADIUS_SQ);
@@ -1146,7 +1157,7 @@ void PlayerObject::FlushAndRefreshAoI()
 		}
 	}
 
-	auto nearbyClients = sSpatialGrid.GetClientsInAoI(m_pos.x, m_pos.z, STREAM_IN_RADIUS);
+	auto nearbyClients = sSpatialGrid.GetClientsInAoI(m_pos.x, m_pos.z, STREAM_IN_RADIUS, m_parent.m_instanceId);
 	size_t spawnedNow = 0;
 	for (GameClient* client : nearbyClients)
 	{
@@ -1158,7 +1169,7 @@ void PlayerObject::FlushAndRefreshAoI()
 		if (!knowsEntity(otherGoId))
 		{
 			PlayerObject* otherObj = sObjMgr.getGOPtrSafe(otherGoId);
-			if (otherObj && !otherObj->isDead())
+			if (otherObj && !otherObj->isDead() && otherObj->getClient().m_instanceId == m_parent.m_instanceId)
 			{
 				noteEntitySpawned(otherGoId);
 				vector<msgBaseClassPtr> statePackets = otherObj->getCurrentStatePackets();

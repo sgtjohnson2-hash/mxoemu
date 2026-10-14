@@ -68,6 +68,7 @@ private:
     std::vector<DisruptionCell> m_grid;
     std::vector<float> m_diffuseBuffer;
     std::map<uint32, bool> m_sabotagedDistricts;
+    std::map<uint32, uint32> m_districtWorldEventMs;
     mutable std::recursive_mutex m_mutex;
 };
 

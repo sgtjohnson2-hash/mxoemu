@@ -166,8 +166,10 @@ struct MissionInteriorInstance
     uint32 orgId = 0;
     uint32 missionId = 0;
     uint32 bossDoorId = 0;
+    uint32 stage = 1;
     bool bossDoorUnlocked = false;
     bool bossSpawned = false;
+    bool bossDefeated = false;
     uint32 bossGoId = 0;
     MissionNpc lieutenantTemplate;
     std::vector<uint32> guardGoIds;

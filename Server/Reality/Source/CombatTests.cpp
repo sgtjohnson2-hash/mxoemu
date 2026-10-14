@@ -3330,11 +3330,20 @@ int RunCombatTestSuite()
 				uint32 instSquadA = sMissionSys.EnterMissionInterior(opSquadA.po, 101, 0xBEEF0101);
 				uint32 instSquadB = sMissionSys.EnterMissionInterior(opSquadB.po, 101, 0xBEEF0101);
 				uint32 instSolo   = sMissionSys.EnterMissionInterior(opSolo.po,   101, 0xBEEF0101);
+				uint32 instSoloRepeat = sMissionSys.EnterMissionInterior(opSolo.po, 101, 0xBEEF0101);
 
 				check(instSquadA >= 5000 && instSquadA == instSquadB,
 					"Phase 13.1: Same-Organization squadmates entering mission interior share isolated m_instanceId");
 				check(instSolo >= 5000 && instSolo != instSquadA,
 					"Phase 13.1: Solo operative or different squad receives separate isolated m_instanceId dimension");
+				check(instSoloRepeat == instSolo,
+					"Phase 13.1: Solo operative re-entering mission interior reuses existing m_instanceId without leaking duplicate instance");
+
+				// Verify AoI streaming & FlushAndRefreshAoI instance isolation
+				opSquadA.po->UpdateAoIStreaming();
+				opSolo.po->UpdateAoIStreaming();
+				check(opSquadA.po->knowsEntity(opSquadB.go) && !opSquadA.po->knowsEntity(opSolo.go) && !opSolo.po->knowsEntity(opSquadA.go),
+					"Phase 13.1: UpdateAoIStreaming & FlushAndRefreshAoI isolate AoI entities across different m_instanceId dimensions");
 
 				auto clientsInSquadInst = sSpatialGrid.GetClientsInRadius(
 					(float)opSquadA.po->getPosition().x, (float)opSquadA.po->getPosition().z, 5000.0f, instSquadA);
@@ -3343,9 +3352,21 @@ int RunCombatTestSuite()
 				check(foundSquadA && !foundSoloInSquadInst,
 					"Phase 13.1: SpatialGrid instance filtering isolates squad construct from cross-team players");
 
+				// Verify /lair status reports instance status without re-entering
+				{
+					ByteBuffer lairStatusCmd;
+					lairStatusCmd << (uint8)0x28 << (uint8)0x10 << (uint16)swap16(8) << (uint32)0;
+					lairStatusCmd.writeString("/lair status");
+					p13ClientA.captured.clear();
+					opSquadA.po->HandleCommand(lairStatusCmd);
+					check(p13ClientA.sawText("[CONSTRUCT INTERIOR]") && p13ClientA.sawText("Stage: 1") &&
+						  opSquadA.po->getClient().m_instanceId == instSquadA,
+						"Phase 13.1: /lair status reports active construct stage and guard count without re-entering");
+				}
+
 				const MissionInteriorInstance* instPtr = sMissionSys.GetInteriorInstance(instSquadA);
-				check(instPtr != nullptr && instPtr->guardGoIds.size() >= 2 && !instPtr->bossDoorUnlocked && !instPtr->bossSpawned,
-					"Phase 13.2: Mission interior instance initializes room guard wave and locked inner boss door");
+				check(instPtr != nullptr && instPtr->guardGoIds.size() >= 2 && !instPtr->bossDoorUnlocked && !instPtr->bossSpawned && instPtr->stage == 1,
+					"Phase 13.2: Mission interior instance initializes Stage 1 room guard wave and locked inner boss door");
 
 				if (instPtr && instPtr->guardGoIds.size() >= 2)
 				{
@@ -3372,21 +3393,39 @@ int RunCombatTestSuite()
 					instPtr = sMissionSys.GetInteriorInstance(instSquadA);
 					check(instPtr && instPtr->bossDoorUnlocked && sObjMgr.HasDoor(1, instPtr->bossDoorId),
 						"Phase 13.2: Clearing all room guards unlocks inner boss door via ObjectMgr in-memory door cache");
-					check(instPtr && instPtr->bossSpawned && instPtr->bossGoId != 0,
-						"Phase 13.2: Clearing all room guards spawns the mission lieutenant inside the instance");
+					check(instPtr && instPtr->bossSpawned && instPtr->bossGoId != 0 && instPtr->stage == 2,
+						"Phase 13.2: Clearing all room guards advances to Stage 2 and spawns the mission lieutenant inside the instance");
 					if (instPtr && instPtr->bossGoId != 0)
 					{
 						PlayerObject* ltPo = sObjMgr.getGOPtrSafe(instPtr->bossGoId);
 						check(ltPo != nullptr && ltPo->getClient().m_instanceId == instSquadA,
 							"Phase 13.2: Spawned mission lieutenant resides in the squad's isolated m_instanceId");
+						if (ltPo)
+						{
+							uint64 infoBeforeLt = opSquadA.po->getInformation();
+							p13ClientA.captured.clear();
+							p13ClientB.captured.clear();
+							ltPo->die(opSquadA.go);
+							instPtr = sMissionSys.GetInteriorInstance(instSquadA);
+							check(instPtr && instPtr->bossDefeated && instPtr->stage == 3 &&
+								  p13ClientA.sawText("[LAIR CLEARED]") && p13ClientB.sawText("[LAIR CLEARED]") &&
+								  opSquadA.po->getInformation() > infoBeforeLt,
+								"Phase 13.2: Defeating Mission Lieutenant completes Stage 3, broadcasts [LAIR CLEARED], and rewards squad");
+						}
 					}
 				}
 
 				bool exitedA = sMissionSys.ExitMissionInterior(opSquadA.po);
 				sMissionSys.ExitMissionInterior(opSquadB.po);
-				sMissionSys.ExitMissionInterior(opSolo.po);
 				check(exitedA && opSquadA.po->getClient().m_instanceId == 0,
 					"Phase 13.1: ExitMissionInterior restores operative to street dimension (m_instanceId == 0)");
+
+				// Verify orphan instance reaping when solo player disconnects/leaves without explicit ExitMissionInterior
+				opSolo.po->getClient().m_instanceId = 0;
+				sSpatialGrid.UpdateClientPosition(&p13ClientSolo, (float)opSolo.po->getPosition().x, (float)opSolo.po->getPosition().z);
+				sMissionSys.Update(1000);
+				check(sMissionSys.GetInteriorInstance(instSolo) == nullptr,
+					"Phase 13.1: MissionSystem::Update reaps abandoned interior instances and despawns leftover bots");
 
 				// --- Phase 14: Persistent Organization Territory Control & District Buffs ---
 				sFactionWarMgr.registerControlNode(9901, 1, -15000.0f, 572.0f, -21000.0f);
@@ -3469,7 +3508,31 @@ int RunCombatTestSuite()
 				check(meroEvId != 0,
 					"Phase 15.1: TriggerWorldEvent(MEROVINGIAN_EXILE_RAID) spawns The Assassin world boss raid");
 
-				// Find the spawned boss for sentinelEvId and test multi-player contribution loot table
+				// Verify /worldevent status reports active events without spawning a new event
+				{
+					size_t eventsBeforeStatus = sFactionWarMgr.GetActiveWorldEvents().size();
+					ByteBuffer weStatusCmd;
+					weStatusCmd << (uint8)0x28 << (uint8)0x10 << (uint16)swap16(8) << (uint32)0;
+					weStatusCmd.writeString("/worldevent status");
+					p13ClientA.captured.clear();
+					opSquadA.po->HandleCommand(weStatusCmd);
+					check(p13ClientA.sawText("[WORLD EVENT STATUS]") &&
+						  sFactionWarMgr.GetActiveWorldEvents().size() == eventsBeforeStatus,
+						"Phase 15.1: /worldevent status lists active world bosses without triggering a duplicate spawn");
+				}
+
+				// Verify MatrixThreatHeatmap extreme disruption (>= 180.0f) auto-triggers a world event in an idle district
+				// and blocks duplicate triggers in the same district while active
+				{
+					size_t eventsBeforeHeat = sFactionWarMgr.GetActiveWorldEvents().size();
+					sMatrixThreatHeatmap.RecordDisruption(-13500.0f, -19500.0f, 200.0f, "TestDisruption");
+					size_t eventsAfterHeat = sFactionWarMgr.GetActiveWorldEvents().size();
+					uint32 duplicateHeatEvId = sMatrixThreatHeatmap.CheckAndTriggerWorldEvent(-13500.0f, 572.0f, -19500.0f);
+					check(eventsAfterHeat == eventsBeforeHeat + 1 && duplicateHeatEvId == 0,
+						"Phase 15.1: MatrixThreatHeatmap::RecordDisruption (>= 180.0f) spawns world boss and blocks duplicate district triggers");
+				}
+
+				// Find the spawned boss for sentinelEvId and test multi-player contribution loot table + <50 damage filter
 				uint32 bossGoId = 0;
 				for (const auto& ev : sFactionWarMgr.GetActiveWorldEvents())
 				{
@@ -3487,18 +3550,23 @@ int RunCombatTestSuite()
 				{
 					uint64 infoA0 = opSquadA.po->getInformation();
 					uint64 infoB0 = opSquadB.po->getInformation();
+					uint64 infoSolo0 = opSolo.po->getInformation();
 					p13ClientA.captured.clear();
 					p13ClientB.captured.clear();
+					p13ClientSolo.captured.clear();
 
-					// Both operatives deal damage to the World Boss
+					// SquadA and SquadB deal >= 50 damage; Solo deals only 25 (< 50 threshold)
 					bossPo->takeDamage(opSquadA.go, 3000, 0x05, false);
 					bossPo->takeDamage(opSquadB.go, 2000, 0x05, false);
+					bossPo->takeDamage(opSolo.go, 25, 0x05, false);
 					bossPo->die(opSquadA.go);
 
 					check(opSquadA.po->getInformation() > infoA0 && opSquadB.po->getInformation() > infoB0,
-						"Phase 15.2: Defeating World Boss distributes multi-player contribution $Info rewards to all contributors");
+						"Phase 15.2: Defeating World Boss distributes multi-player contribution $Info rewards to all contributors (>= 50 dmg)");
 					check(p13ClientA.sawText("[WORLD EVENT VICTORY]") && p13ClientB.sawText("[WORLD EVENT VICTORY]"),
-						"Phase 15.2: All contributing operatives receive [WORLD EVENT VICTORY] spoils notification and loot item");
+						"Phase 15.2: All qualifying contributors receive [WORLD EVENT VICTORY] spoils notification and loot item");
+					check(opSolo.po->getInformation() == infoSolo0 && !p13ClientSolo.sawText("[WORLD EVENT VICTORY]"),
+						"Phase 15.2: Sub-threshold contributor (< 50 damage, non-killer) is excluded from World Boss spoils");
 				}
 
 				// --- Phase 16: Launcher Telemetry World Status JSON & /worldstatus Command ---

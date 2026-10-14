@@ -666,6 +666,8 @@ async function handleCommunityRequest(req, res, pathname, urlObj, parseJsonBody,
             const fs = require('fs');
             const path = require('path');
             const candidates = [
+                '/app/patch_data/world_status.json',
+                path.join(__dirname, 'patch_data', 'world_status.json'),
                 path.join(__dirname, 'world_status.json'),
                 path.join(__dirname, '..', 'Reality', 'Binaries', 'world_status.json'),
                 path.join(__dirname, '..', '..', 'world_status.json'),
@@ -1204,7 +1206,14 @@ function renderCommunityHubHtml() {
 '                    <h3>🌐 SYSTEM STATUS</h3>\n' +
 '                    <p style="font-size:12px; margin-bottom:4px;">VPS Host: <span style="color:#39ff14;">15.204.82.250</span></p>\n' +
 '                    <p style="font-size:12px; margin-bottom:4px;">Reality Core: <span style="color:#39ff14;">ONLINE [PORT 10000]</span></p>\n' +
-'                    <p style="font-size:12px;">Active Operatives: <span style="color:#00e5ff;">Connected</span></p>\n' +
+'                    <p style="font-size:12px; margin-bottom:6px;">Megacity Clock: <span id="wsCircadianHour" style="color:#00e5ff;">Syncing...</span></p>\n' +
+'                    <div id="wsDistrictList" style="border-top:1px dashed #004415; padding-top:6px; font-size:11px; color:#88ffaa;">\n' +
+'                        <div>Slums: <span style="color:#39ff14;">Syncing...</span></div>\n' +
+'                        <div>Downtown: <span style="color:#39ff14;">Syncing...</span></div>\n' +
+'                        <div>International: <span style="color:#39ff14;">Syncing...</span></div>\n' +
+'                        <div>Richland: <span style="color:#39ff14;">Syncing...</span></div>\n' +
+'                    </div>\n' +
+'                    <div id="wsEventBanner" style="border-top:1px dashed #004415; margin-top:6px; padding-top:6px; font-size:11px; color:#ffcc00;">No Active Incursions</div>\n' +
 '                </div>\n' +
 '            </aside>\n' +
 '            <main class="content-panel">\n' +
@@ -1383,7 +1392,7 @@ function renderCommunityHubHtml() {
 '            g_CurrentCategory = catId;\n' +
 '            var items = document.getElementsByClassName("cat-item");\n' +
 '            for (var i = 0; i < items.length; i++) {\n' +
-'                items[i].className = items[i].className.replace(/\bactive\b/g, "").trim();\n' +
+'                items[i].className = items[i].className.replace(/\\bactive\\b/g, "").trim();\n' +
 '            }\n' +
 '            var activeEl = document.getElementById("cat_" + catId);\n' +
 '            if (activeEl) activeEl.className += " active";\n' +
@@ -1399,14 +1408,14 @@ function renderCommunityHubHtml() {
 '        }\n' +
 '        function loadThreads() {\n' +
 '            var cont = document.getElementById("threadListContainer");\n' +
-'            cont.innerHTML = "<p style=\"color:#88ffaa; padding:20px;\">Decrypting channel transmissions...</p>";\n' +
+'            cont.innerHTML = "<p style=\\"color:#88ffaa; padding:20px;\\">Decrypting channel transmissions...</p>";\n' +
 '            apiGet("/api/community/threads?category=" + encodeURIComponent(g_CurrentCategory), function(err, data) {\n' +
 '                if (err || !data.success) {\n' +
-'                    cont.innerHTML = "<p style=\"color:#ff3333; padding:20px;\">Transmission link interrupted.</p>";\n' +
+'                    cont.innerHTML = "<p style=\\"color:#ff3333; padding:20px;\\">Transmission link interrupted.</p>";\n' +
 '                    return;\n' +
 '                }\n' +
 '                if (data.threads.length === 0) {\n' +
-'                    cont.innerHTML = "<p style=\"color:#558866; padding:30px; text-align:center;\">No transmissions on this frequency yet. Click [+ NEW THREAD] to initiate contact.</p>";\n' +
+'                    cont.innerHTML = "<p style=\\"color:#558866; padding:30px; text-align:center;\\">No transmissions on this frequency yet. Click [+ NEW THREAD] to initiate contact.</p>";\n' +
 '                    return;\n' +
 '                }\n' +
 '                var html = "";\n' +
@@ -1417,13 +1426,13 @@ function renderCommunityHubHtml() {
 '                        if (g_Avatars[a].id === t.avatarId) { av = g_Avatars[a]; break; }\n' +
 '                    }\n' +
 '                    var dateStr = new Date(t.createdAt * 1000).toLocaleString();\n' +
-'                    html += "<div class=\"thread-item\" onclick=\"openThread(" + t.id + ")\">" +\n' +
-'                        "<div class=\"thread-avatar\">" + av.icon + "</div>" +\n' +
-'                        "<div class=\"thread-body\">" +\n' +
-'                            "<div class=\"thread-title\">" + (t.isPinned ? "📌 " : "") + t.title + "</div>" +\n' +
-'                            "<div class=\"thread-meta\">Transmitted by " + t.authorName + " // " + dateStr + "</div>" +\n' +
+'                    html += "<div class=\\"thread-item\\" onclick=\\"openThread(" + t.id + ")\\">" +\n' +
+'                        "<div class=\\"thread-avatar\\">" + av.icon + "</div>" +\n' +
+'                        "<div class=\\"thread-body\\">" +\n' +
+'                            "<div class=\\"thread-title\\">" + (t.isPinned ? "📌 " : "") + t.title + "</div>" +\n' +
+'                            "<div class=\\"thread-meta\\">Transmitted by " + t.authorName + " // " + dateStr + "</div>" +\n' +
 '                        "</div>" +\n' +
-'                        "<div class=\"thread-stats\">" +\n' +
+'                        "<div class=\\"thread-stats\\">" +\n' +
 '                            "<div>💬 " + t.replyCount + "</div>" +\n' +
 '                            "<div>👁️ " + t.views + "</div>" +\n' +
 '                        "</div>" +\n' +
@@ -1438,10 +1447,10 @@ function renderCommunityHubHtml() {
 '            document.getElementById("newsListView").style.display = "none";\n' +
 '            document.getElementById("threadDetailView").style.display = "block";\n' +
 '            var cont = document.getElementById("threadDetailBody");\n' +
-'            cont.innerHTML = "<p style=\"color:#88ffaa; padding:20px;\">Decrypting thread data stream...</p>";\n' +
+'            cont.innerHTML = "<p style=\\"color:#88ffaa; padding:20px;\\">Decrypting thread data stream...</p>";\n' +
 '            apiGet("/api/community/thread/" + id, function(err, data) {\n' +
 '                if (err || !data.success) {\n' +
-'                    cont.innerHTML = "<p style=\"color:#ff3333; padding:20px;\">Failed to decompile thread.</p>";\n' +
+'                    cont.innerHTML = "<p style=\\"color:#ff3333; padding:20px;\\">Failed to decompile thread.</p>";\n' +
 '                    return;\n' +
 '                }\n' +
 '                var t = data.thread;\n' +
@@ -1452,19 +1461,19 @@ function renderCommunityHubHtml() {
 '                }\n' +
 '                var opDate = new Date(t.createdAt * 1000).toLocaleString();\n' +
 '                var opSig = (t.authorProfile && t.authorProfile.signature) ?\n' +
-'                    ("<div class=\"post-sig\">" + formatSignature(t.authorProfile.signature) + "</div>") : "";\n' +
-'                var html = "<div class=\"op-box\">" +\n' +
-'                    "<div class=\"post-header\">" +\n' +
-'                        "<div class=\"user-avatar-badge\">" + opAv.icon + "</div>" +\n' +
+'                    ("<div class=\\"post-sig\\">" + formatSignature(t.authorProfile.signature) + "</div>") : "";\n' +
+'                var html = "<div class=\\"op-box\\">" +\n' +
+'                    "<div class=\\"post-header\\">" +\n' +
+'                        "<div class=\\"user-avatar-badge\\">" + opAv.icon + "</div>" +\n' +
 '                        "<div>" +\n' +
-'                            "<div style=\"font-weight:bold; color:#39ff14;\">" + (t.authorProfile ? (t.authorProfile.customHandle || t.authorName) : t.authorName) + "</div>" +\n' +
-'                            "<div style=\"font-size:11px; color:#88ffaa;\">" + (t.authorProfile ? (t.authorProfile.title || "Operative") : "Operative") + " // " + opDate + "</div>" +\n' +
+'                            "<div style=\\"font-weight:bold; color:#39ff14;\\">" + (t.authorProfile ? (t.authorProfile.customHandle || t.authorName) : t.authorName) + "</div>" +\n' +
+'                            "<div style=\\"font-size:11px; color:#88ffaa;\\">" + (t.authorProfile ? (t.authorProfile.title || "Operative") : "Operative") + " // " + opDate + "</div>" +\n' +
 '                        "</div>" +\n' +
 '                    "</div>" +\n' +
-'                    "<div class=\"post-content\">" + t.content + "</div>" + opSig +\n' +
+'                    "<div class=\\"post-content\\">" + t.content + "</div>" + opSig +\n' +
 '                "</div>";\n' +
 '                if (t.posts && t.posts.length > 0) {\n' +
-'                    html += "<h3 style=\"color:#39ff14; font-size:14px; margin:20px 0 10px 0;\">OPERATIVE REPLIES (" + t.posts.length + ")</h3>";\n' +
+'                    html += "<h3 style=\\"color:#39ff14; font-size:14px; margin:20px 0 10px 0;\\">OPERATIVE REPLIES (" + t.posts.length + ")</h3>";\n' +
 '                    for (var p = 0; p < t.posts.length; p++) {\n' +
 '                        var post = t.posts[p];\n' +
 '                        var pAv = { icon: "🕶️" };\n' +
@@ -1473,21 +1482,21 @@ function renderCommunityHubHtml() {
 '                        }\n' +
 '                        var pDate = new Date(post.createdAt * 1000).toLocaleString();\n' +
 '                        var pSig = (post.profile && post.profile.signature) ?\n' +
-'                            ("<div class=\"post-sig\">" + formatSignature(post.profile.signature) + "</div>") : "";\n' +
+'                            ("<div class=\\"post-sig\\">" + formatSignature(post.profile.signature) + "</div>") : "";\n' +
 '                        var r = post.reactions || {};\n' +
-'                        html += "<div class=\"reply-box\">" +\n' +
-'                            "<div class=\"post-header\">" +\n' +
-'                                "<div class=\"user-avatar-badge\" style=\"width:36px; height:36px; font-size:18px;\">" + pAv.icon + "</div>" +\n' +
+'                        html += "<div class=\\"reply-box\\">" +\n' +
+'                            "<div class=\\"post-header\\">" +\n' +
+'                                "<div class=\\"user-avatar-badge\\" style=\\"width:36px; height:36px; font-size:18px;\\">" + pAv.icon + "</div>" +\n' +
 '                                "<div>" +\n' +
-'                                    "<div style=\"font-weight:bold; color:#39ff14;\">" + post.authorName + "</div>" +\n' +
-'                                    "<div style=\"font-size:10px; color:#88ffaa;\">" + (post.profile ? post.profile.title : "Operative") + " // " + pDate + "</div>" +\n' +
+'                                    "<div style=\\"font-weight:bold; color:#39ff14;\\">" + post.authorName + "</div>" +\n' +
+'                                    "<div style=\\"font-size:10px; color:#88ffaa;\\">" + (post.profile ? post.profile.title : "Operative") + " // " + pDate + "</div>" +\n' +
 '                                "</div>" +\n' +
 '                            "</div>" +\n' +
-'                            "<div class=\"post-content\">" + post.content + "</div>" + pSig +\n' +
-'                                "<button class=\"react-btn\" onclick=\"reactToPost(" + t.id + ", " + post.id + ", 0)\">🟢 " + (r["🟢"] || 0) + "</button>" +\n' +
-'                                "<button class=\"react-btn\" onclick=\"reactToPost(" + t.id + ", " + post.id + ", 1)\">💊 " + (r["💊"] || 0) + "</button>" +\n' +
-'                                "<button class=\"react-btn\" onclick=\"reactToPost(" + t.id + ", " + post.id + ", 2)\">🕶️ " + (r["🕶️"] || 0) + "</button>" +\n' +
-'                                "<button class=\"react-btn\" onclick=\"reactToPost(" + t.id + ", " + post.id + ", 3)\">⚡ " + (r["⚡"] || 0) + "</button>" +\n' +
+'                            "<div class=\\"post-content\\">" + post.content + "</div>" + pSig +\n' +
+'                                "<button class=\\"react-btn\\" onclick=\\"reactToPost(" + t.id + ", " + post.id + ", 0)\\">🟢 " + (r["🟢"] || 0) + "</button>" +\n' +
+'                                "<button class=\\"react-btn\\" onclick=\\"reactToPost(" + t.id + ", " + post.id + ", 1)\\">💊 " + (r["💊"] || 0) + "</button>" +\n' +
+'                                "<button class=\\"react-btn\\" onclick=\\"reactToPost(" + t.id + ", " + post.id + ", 2)\\">🕶️ " + (r["🕶️"] || 0) + "</button>" +\n' +
+'                                "<button class=\\"react-btn\\" onclick=\\"reactToPost(" + t.id + ", " + post.id + ", 3)\\">⚡ " + (r["⚡"] || 0) + "</button>" +\n' +
 '                            "</div>" +\n' +
 '                        "</div>";\n' +
 '                    }\n' +
@@ -1497,7 +1506,7 @@ function renderCommunityHubHtml() {
 '        }\n' +
 '        function formatSignature(sig) {\n' +
 '            if (!sig) return "";\n' +
-'            return sig.replace(/\{c:([A-Fa-f0-9]{6})\}(.*?)\{\/c\}/g, "<span style=\"color:#$1\">$2</span>");\n' +
+'            return sig.replace(/\\{c:([A-Fa-f0-9]{6})\\}(.*?)\\{\\/c\\}/g, "<span style=\\"color:#$1\\">$2</span>");\n' +
 '        }\n' +
 '        function backToThreadList() {\n' +
 '            document.getElementById("threadListView").style.display = "block";\n' +
@@ -1535,7 +1544,7 @@ function renderCommunityHubHtml() {
 '            g_Profile.avatarId = id;\n' +
 '            var cards = document.getElementsByClassName("avatar-card");\n' +
 '            for (var i = 0; i < cards.length; i++) {\n' +
-'                cards[i].className = cards[i].className.replace(/\bselected\b/g, "").trim();\n' +
+'                cards[i].className = cards[i].className.replace(/\\bselected\\b/g, "").trim();\n' +
 '            }\n' +
 '            var sel = document.getElementById("av_card_" + id);\n' +
 '            if (sel) sel.className += " selected";\n' +
@@ -1592,15 +1601,50 @@ function renderCommunityHubHtml() {
 '                selectCategory(cat);\n' +
 '            });\n' +
 '        }\n' +
+'        function loadWorldStatus() {\n' +
+'            apiGet("/api/worldstatus", function(err, ws) {\n' +
+'                if (err || !ws || ws.status !== "online") return;\n' +
+'                var hr = Number(ws.megacity_circadian_hour || 0).toFixed(2);\n' +
+'                var phase = ws.is_night_window ? "NIGHT [HIGH THREAT]" : "DAY";\n' +
+'                var hrEl = document.getElementById("wsCircadianHour");\n' +
+'                if (hrEl) hrEl.innerText = hr + "h (" + phase + ")";\n' +
+'                var dEl = document.getElementById("wsDistrictList");\n' +
+'                if (dEl && ws.districts && ws.districts.length) {\n' +
+'                    var dHtml = "";\n' +
+'                    for (var i = 0; i < ws.districts.length; i++) {\n' +
+'                        var d = ws.districts[i];\n' +
+'                        var fColor = "#ff4444";\n' +
+'                        if (d.controlling_faction === "Zion") fColor = "#39ff14";\n' +
+'                        else if (d.controlling_faction === "Merovingian") fColor = "#ffcc00";\n' +
+'                        dHtml += "<div style=\\"margin-bottom:2px;\\">" + d.name + ": <span style=\\"color:" + fColor + "; font-weight:bold;\\">" + d.controlling_faction + "</span> (+5% IS/$I)</div>";\n' +
+'                    }\n' +
+'                    dEl.innerHTML = dHtml;\n' +
+'                }\n' +
+'                var evEl = document.getElementById("wsEventBanner");\n' +
+'                if (evEl) {\n' +
+'                    if (ws.active_world_events && ws.active_world_events.length > 0) {\n' +
+'                        var ev = ws.active_world_events[0];\n' +
+'                        evEl.style.color = "#ff3333";\n' +
+'                        evEl.innerHTML = "⚠️ <b>ACTIVE RAID:</b> " + ev.boss_name + " @ " + ev.district_name + " (HP: " + ev.current_hp + "/" + ev.max_hp + ")";\n' +
+'                    } else {\n' +
+'                        evEl.style.color = "#88ffaa";\n' +
+'                        evEl.innerText = "Sector Clear (No Active World Bosses)";\n' +
+'                    }\n' +
+'                }\n' +
+'            });\n' +
+'        }\n' +
 '        window.onload = function() {\n' +
 '            initMatrixRain();\n' +
 '            updateTopWidget();\n' +
+'            loadWorldStatus();\n' +
+'            setInterval(loadWorldStatus, 30000);\n' +
 '            apiGet("/api/community/profile?username=" + encodeURIComponent(g_Profile.username), function(err, data) {\n' +
 '                if (!err && data.success && data.profile) {\n' +
 '                    g_Profile = data.profile;\n' +
 '                    updateTopWidget();\n' +
 '                }\n' +
 '            });\n' +
+'        };\n' +
 '    </script>\n' +
 '</body>\n' +
 '</html>';

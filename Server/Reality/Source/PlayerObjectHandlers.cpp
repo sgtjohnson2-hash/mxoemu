@@ -3549,10 +3549,27 @@ void PlayerObject::ParsePlayerCommand( string theCmd )
         cmdStream >> subCmd;
         if (iequals(subCmd, "exit") || iequals(subCmd, "leave")) {
             sMissionSys.ExitMissionInterior(this);
+        } else if (iequals(subCmd, "status")) {
+            uint32 instId = m_parent.m_instanceId;
+            const MissionInteriorInstance* inst = (instId != 0) ? sMissionSys.GetInteriorInstance(instId) : nullptr;
+            if (!inst) {
+                m_parent.QueueCommand(make_shared<SystemChatMsg>(
+                    "{c:00FFCC}[CONSTRUCT INTERIOR] Status: Street Matrix (Dimension 0, no active interior instance).{/c}"));
+            } else {
+                m_parent.QueueCommand(make_shared<SystemChatMsg>(
+                    (format("{c:00FFCC}[CONSTRUCT INTERIOR] Instance #%1% | Stage: %2% | Guards Remaining: %3% | Boss Door (0x%4$08X): %5% | Lieutenant: %6%{/c}")
+                        % inst->instanceId % inst->stage % inst->guardGoIds.size() % inst->bossDoorId
+                        % (inst->bossDoorUnlocked ? "UNLOCKED" : "LOCKED")
+                        % (inst->bossDefeated ? "DEFEATED" : (inst->bossSpawned ? "SPAWNED" : "PENDING"))).str()));
+            }
         } else {
             uint32 missionId = 0;
             uint32 doorId = 9101;
-            if (!cmdStream.eof()) cmdStream >> missionId;
+            if (!subCmd.empty() && !iequals(subCmd, "enter")) {
+                try { missionId = (uint32)std::stoul(subCmd, nullptr, 0); } catch (...) {}
+            } else if (!cmdStream.eof()) {
+                cmdStream >> missionId;
+            }
             if (!cmdStream.eof()) cmdStream >> doorId;
             sMissionSys.EnterMissionInterior(this, missionId, doorId);
         }
@@ -3560,15 +3577,32 @@ void PlayerObject::ParsePlayerCommand( string theCmd )
     }
     else if (iequals(command, "worldevent"))
     {
+        std::string evTypeStr;
+        cmdStream >> evTypeStr;
+        if (iequals(evTypeStr, "status")) {
+            size_t activeCount = 0;
+            for (const auto& ev : sFactionWarMgr.GetActiveWorldEvents()) {
+                if (!ev.active) continue;
+                activeCount++;
+                m_parent.QueueCommand(make_shared<SystemChatMsg>(
+                    (format("{c:00FFCC}[WORLD EVENT STATUS] Event #%1%: %2% | Boss: %3% (GoID %4%) | District %5% (%6%){/c}")
+                        % ev.eventId % ev.eventName % ev.bossName % ev.bossGoId % ev.districtId % sFactionWarMgr.GetDistrictName(ev.districtId)).str()));
+            }
+            if (activeCount == 0) {
+                m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:00FFCC}[WORLD EVENT STATUS] No active world boss events.{/c}"));
+            }
+            return;
+        }
         if (!m_isAdmin) {
             m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FF0000}That command is restricted to admins.{/c}"));
             return;
         }
-        std::string evTypeStr;
         uint32 distId = getDistrict() != 0 ? getDistrict() : 1;
-        cmdStream >> evTypeStr;
         if (!cmdStream.eof()) cmdStream >> distId;
-        WorldEventType evType = iequals(evTypeStr, "mero")
+        bool isMero = (iequals(evTypeStr, "mero") || iequals(evTypeStr, "exile") ||
+                       iequals(evTypeStr, "exileraid") || iequals(evTypeStr, "merovingian") ||
+                       iequals(evTypeStr, "assassin"));
+        WorldEventType evType = isMero
             ? WorldEventType::MEROVINGIAN_EXILE_RAID
             : WorldEventType::MACHINE_SENTINEL_INCURSION;
         sFactionWarMgr.TriggerWorldEvent(distId, evType, getPosition().x, getPosition().y, getPosition().z);
@@ -3621,7 +3655,7 @@ void PlayerObject::RPC_HandleChat( ByteBuffer &srcCmd )
 	if (!m_isAdmin && theMessage[0] == '/')
 	{
 		static const char* adminSlash[] = { "/crisis", "/sabotage", "/repair", "/district", "/teleport", "/tp ",
-			"/tension", "/outbreak", "/glitch", "/anomaly", "/worldevent", NULL };
+			"/tension", "/outbreak", "/glitch", "/anomaly", NULL };
 		for (int i = 0; adminSlash[i] != NULL; i++)
 		{
 			if (boost::istarts_with(theMessage, adminSlash[i]))

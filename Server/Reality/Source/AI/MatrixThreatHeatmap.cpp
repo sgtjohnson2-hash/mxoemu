@@ -36,6 +36,7 @@ void MatrixThreatHeatmap::Initialize()
     }
     std::fill(m_diffuseBuffer.begin(), m_diffuseBuffer.end(), 0.0f);
     m_sabotagedDistricts.clear();
+    m_districtWorldEventMs.clear();
 
     INFO_LOG(format("MatrixThreatHeatmap Initialized: %1%x%2% grid (Cell size %3%x%4% units).") 
              % GRID_WIDTH % GRID_DEPTH % m_cellWidth % m_cellDepth);
@@ -115,10 +116,20 @@ void MatrixThreatHeatmap::RecordDisruption(float worldX, float worldY, float wor
 
 uint32 MatrixThreatHeatmap::CheckAndTriggerWorldEvent(float worldX, float worldY, float worldZ)
 {
+    if (FactionWarManager::getSingletonPtr() == nullptr) {
+        return 0;
+    }
+
     int gx, gz;
     WorldToGrid(worldX, worldZ, gx, gz);
-
     uint32 districtId = GetDistrictAt(worldX, worldZ);
+
+    for (const auto& ev : sFactionWarMgr.GetActiveWorldEvents()) {
+        if (ev.active && ev.districtId == districtId) {
+            return 0;
+        }
+    }
+
     {
         std::lock_guard<std::recursive_mutex> lock(m_mutex);
         int idx = gz * GRID_WIDTH + gx;
@@ -131,22 +142,20 @@ uint32 MatrixThreatHeatmap::CheckAndTriggerWorldEvent(float worldX, float worldY
         if (cell.lastWorldEventMs != 0 && now >= cell.lastWorldEventMs && (now - cell.lastWorldEventMs) < 300000) {
             return 0;
         }
-        cell.lastWorldEventMs = (now != 0) ? now : 1;
+        auto distIt = m_districtWorldEventMs.find(districtId);
+        if (distIt != m_districtWorldEventMs.end() && distIt->second != 0 && now >= distIt->second && (now - distIt->second) < 300000) {
+            return 0;
+        }
+        uint32 stamp = (now != 0) ? now : 1;
+        cell.lastWorldEventMs = stamp;
+        m_districtWorldEventMs[districtId] = stamp;
     }
 
-    if (FactionWarManager::getSingletonPtr() != nullptr) {
-        for (const auto& ev : sFactionWarMgr.GetActiveWorldEvents()) {
-            if (ev.active && ev.districtId == districtId) {
-                return 0;
-            }
-        }
-        uint32 ctrlFaction = sFactionWarMgr.GetDistrictControllingFaction(districtId);
-        WorldEventType evType = (ctrlFaction == FACTION_MEROVINGIAN)
-            ? WorldEventType::MEROVINGIAN_EXILE_RAID
-            : WorldEventType::MACHINE_SENTINEL_INCURSION;
-        return sFactionWarMgr.TriggerWorldEvent(districtId, evType, worldX, (worldY > 100.0f) ? worldY : 572.0f, worldZ);
-    }
-    return 0;
+    uint32 ctrlFaction = sFactionWarMgr.GetDistrictControllingFaction(districtId);
+    WorldEventType evType = (ctrlFaction == FACTION_MEROVINGIAN)
+        ? WorldEventType::MEROVINGIAN_EXILE_RAID
+        : WorldEventType::MACHINE_SENTINEL_INCURSION;
+    return sFactionWarMgr.TriggerWorldEvent(districtId, evType, worldX, (worldY > 100.0f) ? worldY : 572.0f, worldZ);
 }
 
 bool MatrixThreatHeatmap::CheckAndTriggerIntervention(float worldX, float worldY, float worldZ, uint32 targetGoId)
