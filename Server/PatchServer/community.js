@@ -659,7 +659,66 @@ async function handleCommunityRequest(req, res, pathname, urlObj, parseJsonBody,
         }
     }
 
-    // 10. Web Community Hub Portal (HTML/CSS/JS)
+    // 10. Live World Status Telemetry API (District Faction Control, Circadian Hour, Active World Events)
+    if (pathname === '/api/worldstatus' || pathname === '/api/community/worldstatus' || pathname === '/world_status.json') {
+        res.setHeader('Content-Type', 'application/json; charset=utf-8');
+        try {
+            const fs = require('fs');
+            const path = require('path');
+            const candidates = [
+                path.join(__dirname, 'world_status.json'),
+                path.join(__dirname, '..', 'Reality', 'Binaries', 'world_status.json'),
+                path.join(__dirname, '..', '..', 'world_status.json'),
+                '/app/Server/Reality/Binaries/world_status.json'
+            ];
+            for (const cand of candidates) {
+                if (fs.existsSync(cand)) {
+                    const raw = fs.readFileSync(cand, 'utf8');
+                    res.writeHead(200);
+                    res.end(raw);
+                    return true;
+                }
+            }
+            const realSeconds = Math.floor(Date.now() / 1000) % 7200;
+            const circadianHour = Number(((realSeconds / 7200.0) * 24.0).toFixed(2));
+            const isNight = (circadianHour >= 20.0 || circadianHour < 6.0);
+            let districts = [
+                { district_id: 1, name: "Slums", controlling_faction: "Machine", faction_id: 2, is_regen_bonus_pct: 5, info_drop_bonus_pct: 5 },
+                { district_id: 2, name: "Downtown", controlling_faction: "Machine", faction_id: 2, is_regen_bonus_pct: 5, info_drop_bonus_pct: 5 },
+                { district_id: 3, name: "International", controlling_faction: "Machine", faction_id: 2, is_regen_bonus_pct: 5, info_drop_bonus_pct: 5 },
+                { district_id: 4, name: "Richland", controlling_faction: "Machine", faction_id: 2, is_regen_bonus_pct: 5, info_drop_bonus_pct: 5 }
+            ];
+            if (g_DbPool) {
+                const [rows] = await g_DbPool.query(
+                    "SELECT district_id, district_name, controlling_faction, faction_name FROM district_control ORDER BY district_id ASC"
+                ).catch(() => [[]]);
+                if (rows && rows.length > 0) {
+                    districts = rows.map(r => ({
+                        district_id: r.district_id,
+                        name: r.district_name,
+                        controlling_faction: r.faction_name,
+                        faction_id: r.controlling_faction,
+                        is_regen_bonus_pct: 5,
+                        info_drop_bonus_pct: 5
+                    }));
+                }
+            }
+            res.writeHead(200);
+            res.end(JSON.stringify({
+                status: "online",
+                megacity_circadian_hour: circadianHour,
+                is_night_window: isNight,
+                districts: districts,
+                active_world_events: []
+            }, null, 2));
+        } catch (err) {
+            res.writeHead(500);
+            res.end(JSON.stringify({ status: "error", message: err.message }));
+        }
+        return true;
+    }
+
+    // 11. Web Community Hub Portal (HTML/CSS/JS)
     if (pathname === '/community' || pathname === '/community/' || pathname === '/forum' || pathname === '/forum/') {
         res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
         res.end(renderCommunityHubHtml());
