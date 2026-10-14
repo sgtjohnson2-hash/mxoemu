@@ -107,33 +107,52 @@ void InventorySystem::loadFromDB()
             m_goIdToSlot[newGoId] = sg.slot;
         }
         
-        saveToDB();
+        m_dirty = true;
+        saveToDB(true);
         INFO_LOG(format("Granted default starter operative kit (%1% items) to %2%") % m_items.size() % m_owner->getHandle());
+    }
+    else
+    {
+        m_dirty = false;
     }
 
     INFO_LOG(format("Loaded %1% inventory items for %2%") % m_items.size() % m_owner->getHandle());
 }
 
-void InventorySystem::saveToDB()
+void InventorySystem::saveToDB(bool force)
 {
     if (!m_owner) return;
     if (m_owner->getClient().isBot() || m_owner->getCharacterUID() >= 9000000) return;
+    if (!force && !m_dirty) return;
+
+    m_dirty = false;
+    if (Database_Main == nullptr) return;
 
     PreparedStatement delStmt("DELETE FROM `inventory` WHERE `charId` = ?0");
     delStmt.SetUInt64(0, m_owner->getCharacterUID());
     sDatabase.ExecutePrepared(&delStmt);
     
+    if (m_items.empty())
+        return;
+
+    std::ostringstream batchSql;
+    batchSql << "INSERT INTO `inventory` (`charId`, `goid`, `slot`, `item_metadata`) VALUES ";
+    bool first = true;
     for (auto it = m_items.begin(); it != m_items.end(); ++it)
     {
         if (!it->second) continue;
-        PreparedStatement insStmt("INSERT INTO `inventory` (`charId`, `goid`, `slot`, `item_metadata`) VALUES (?0, ?1, ?2, ?3)");
-        insStmt.SetUInt64(0, m_owner->getCharacterUID());
-        insStmt.SetUInt32(1, it->second->getGoId());
-        insStmt.SetUInt32(2, (uint32)it->first);
         std::string metadata = ItemSerializer::Serialize(it->second);
         it->second->setMetadata(metadata);
-        insStmt.SetString(3, metadata);
-        sDatabase.ExecutePrepared(&insStmt);
+        if (!first) batchSql << ",";
+        first = false;
+        batchSql << "(" << m_owner->getCharacterUID()
+                 << "," << it->second->getGoId()
+                 << "," << (uint32)it->first
+                 << ",'" << sDatabase.EscapeString(metadata) << "')";
+    }
+    if (!first)
+    {
+        sDatabase.Execute(batchSql.str());
     }
 }
 
@@ -144,6 +163,7 @@ bool InventorySystem::addItem(shared_ptr<Item> item, uint8 slot)
         
     m_items[slot] = item;
     m_goIdToSlot[item->getGoId()] = slot;
+    m_dirty = true;
     return true;
 }
 
@@ -172,6 +192,7 @@ bool InventorySystem::removeItem(uint32 goId)
         uint8 slot = it->second;
         m_items.erase(slot);
         m_goIdToSlot.erase(it);
+        m_dirty = true;
         return true;
     }
     return false;
@@ -224,7 +245,7 @@ bool InventorySystem::moveItem(uint8 fromSlot, uint8 toSlot)
         m_items.erase(fromSlot);
         m_goIdToSlot[itemFrom->getGoId()] = toSlot;
     }
-    
+    m_dirty = true;
     return true;
 }
 
@@ -279,6 +300,7 @@ bool InventorySystem::consumeItemByTemplate(uint32 templateId)
                 it->second->setStackCount(it->second->getStackCount() - 1);
                 std::string meta = ItemSerializer::Serialize(it->second);
                 it->second->setMetadata(meta);
+                m_dirty = true;
             }
             else
             {
@@ -297,6 +319,7 @@ bool InventorySystem::consumeItemByTemplate(uint32 templateId)
 void InventorySystem::clear() {
     m_items.clear();
     m_goIdToSlot.clear();
+    m_dirty = true;
 }
 
 std::vector<shared_ptr<Item>> InventorySystem::getAllItems() const {

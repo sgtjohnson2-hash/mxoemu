@@ -1978,7 +1978,7 @@ void PlayerObject::ParsePlayerCommand( string theCmd )
 					m_parent.QueueState(make_shared<RotationStateMsg>(targetCivId, agentPo->getPosition().getMxoRot()));
 					m_parent.QueueState(make_shared<LocomotionStateMsg>(targetCivId, 0, agentPo->getPosition().getMxoRot()));
 					m_parent.QueueState(make_shared<CombatantModeMsg>(targetCivId, 1));
-					sGame.AnnounceStateUpdate(NULL, make_shared<PlayerAppearanceMsg>(targetCivId));
+					sGame.AnnounceStateUpdate(&agentPo->getClient(), make_shared<PlayerAppearanceMsg>(targetCivId));
 				}
 
 				uint16 targetViewId = sObjMgr.getViewForGO(&m_parent, targetCivId);
@@ -2408,7 +2408,9 @@ void PlayerObject::ParsePlayerCommand( string theCmd )
 		LocationVector derp(x,y,z);
 		this->setPosition(derp);
 
-		sGame.AnnounceStateUpdate(NULL,make_shared<PositionStateMsg>(m_goId));
+		auto posMsg = make_shared<PositionStateMsg>(m_goId);
+		m_parent.QueueState(posMsg);
+		sGame.AnnounceStateUpdate(&m_parent, posMsg);
 		return;
 	}
 	else if (iequals(command, "incX") || iequals(command, "incY") || iequals(command, "incZ"))
@@ -2442,7 +2444,9 @@ void PlayerObject::ParsePlayerCommand( string theCmd )
 
 		LocationVector newPos(newX,newY,newZ);
 		this->setPosition(newPos);
-		sGame.AnnounceStateUpdate(NULL,make_shared<PositionStateMsg>(m_goId),true);
+		auto posMsg = make_shared<PositionStateMsg>(m_goId);
+		m_parent.QueueState(posMsg, true);
+		sGame.AnnounceStateUpdate(&m_parent, posMsg, true);
 		return;
 	}
 	else if (iequals(command, "goThru"))
@@ -2515,7 +2519,9 @@ void PlayerObject::ParsePlayerCommand( string theCmd )
 		}
 
 		this->setPosition(theTargetPlayer->getPosition());		
-		sGame.AnnounceStateUpdate(NULL,make_shared<PositionStateMsg>(m_goId));
+		auto posMsg = make_shared<PositionStateMsg>(m_goId);
+		m_parent.QueueState(posMsg);
+		sGame.AnnounceStateUpdate(&m_parent, posMsg);
 		return;
 	}
 	else if (iequals(command, "go"))
@@ -2545,7 +2551,9 @@ void PlayerObject::ParsePlayerCommand( string theCmd )
 			LocationVector derp(newX,newY,newZ);
 			this->setPosition(derp);
 
-			sGame.AnnounceStateUpdate(NULL,make_shared<PositionStateMsg>(m_goId));
+			auto posMsg = make_shared<PositionStateMsg>(m_goId);
+			m_parent.QueueState(posMsg);
+			sGame.AnnounceStateUpdate(&m_parent, posMsg);
 			return;
 		}
 	}
@@ -2643,10 +2651,15 @@ void PlayerObject::ParsePlayerCommand( string theCmd )
             return;
         }
     }
-    else if (iequals(command, "org") || iequals(command, "crew"))
+    else if (iequals(command, "org") || iequals(command, "crew") ||
+             iequals(command, "orgcreate") || iequals(command, "orginvite") || iequals(command, "orgleave"))
     {
         string sub;
-        cmdStream >> sub;
+        if (iequals(command, "orgcreate")) sub = "create";
+        else if (iequals(command, "orginvite")) sub = "invite";
+        else if (iequals(command, "orgleave")) sub = "leave";
+        else cmdStream >> sub;
+
         if (iequals(sub, "create"))
         {
             string orgName;
@@ -2665,6 +2678,42 @@ void PlayerObject::ParsePlayerCommand( string theCmd )
             INFO_LOG(format("Organization: Player %1% created organization '%2%' (ID %3%)") % m_handle % orgName % newOrgId);
             return;
         }
+        else if (iequals(sub, "invite"))
+        {
+            string targetName;
+            cmdStream >> targetName;
+            if (targetName.empty()) {
+                m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FF4444}Usage: /org invite <targetName>{/c}"));
+                return;
+            }
+            if (m_orgId == 0) {
+                m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FF0000}You are not in an Organization.{/c}"));
+                return;
+            }
+            Organization* org = sOrgMgr.getOrganization(m_orgId);
+            if (!org || org->leaderId != getCharId()) {
+                m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FF0000}Only the Organization Leader can invite.{/c}"));
+                return;
+            }
+            auto players = sObjMgr.getAllGOIds();
+            for (auto id : players) {
+                PlayerObject* p = sObjMgr.getGOPtrSafe(id);
+                if (p && boost::iequals(p->getHandle(), targetName)) {
+                    if (p->getOrgId() != 0) {
+                        m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FF0000}Target is already in an Organization.{/c}"));
+                        return;
+                    }
+                    if (sOrgMgr.joinOrganization(m_orgId, p->getCharId())) {
+                        p->setOrgId(m_orgId);
+                        p->getClient().QueueCommand(make_shared<SystemChatMsg>((format("{c:00FF00}You have been recruited into Organization '%1%'.{/c}") % org->name).str()));
+                        m_parent.QueueCommand(make_shared<SystemChatMsg>((format("{c:00FF00}%1% has joined the Organization.{/c}") % p->getHandle()).str()));
+                    }
+                    return;
+                }
+            }
+            m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FF0000}Target player not found.{/c}"));
+            return;
+        }
         else if (iequals(sub, "leave"))
         {
             if (m_orgId == 0) {
@@ -2678,7 +2727,7 @@ void PlayerObject::ParsePlayerCommand( string theCmd )
             }
             return;
         }
-        else
+        else if (sub.empty() || iequals(sub, "info") || iequals(sub, "status"))
         {
             if (m_orgId == 0) {
                 m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FFFF55}[ORGANIZATION] Status: Independent Operative (Unaffiliated). Create one via: /org create <Name>{/c}"));
@@ -2687,6 +2736,25 @@ void PlayerObject::ParsePlayerCommand( string theCmd )
                 if (org) {
                     m_parent.QueueCommand(make_shared<SystemChatMsg>((format("{c:00FFCC}[ORGANIZATION] Crew: %1% (ID %2%) | Leader: %3% | Members: %4%{/c}")
                         % org->name % org->id % org->leaderId % org->members.size()).str()));
+                }
+            }
+            return;
+        }
+        else
+        {
+            if (m_orgId == 0) {
+                m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FF0000}You are not in an Organization.{/c}"));
+                return;
+            }
+            string restMsg;
+            std::getline(cmdStream, restMsg);
+            string orgMsg = sub + restMsg;
+            string formattedMsg = (format("{c:00FFFF}[Org] %1%: %2%{/c}") % m_handle % orgMsg).str();
+            auto players = sObjMgr.getAllGOIds();
+            for (auto id : players) {
+                PlayerObject* p = sObjMgr.getGOPtrSafe(id);
+                if (p && p->getOrgId() == m_orgId) {
+                    p->getClient().QueueCommand(std::make_shared<SystemChatMsg>(formattedMsg));
                 }
             }
             return;
@@ -3189,6 +3257,69 @@ void PlayerObject::ParsePlayerCommand( string theCmd )
         SubmitBugReport(rest);
         return;
     }
+    else if (iequals(command, "clock"))
+    {
+        float h = sPedestrianEcology.GetMatrixHour();
+        int hour = (int)h;
+        int minute = (int)((h - hour) * 60.0f);
+        CircadianPeriod period = sPedestrianEcology.GetCircadianPeriod();
+        std::string desc;
+        switch (period) {
+            case PERIOD_COMMUTE_MORNING: desc = "Morning Commute"; break;
+            case PERIOD_WORK: desc = "Work Hours"; break;
+            case PERIOD_COMMUTE_EVENING: desc = "Evening Commute"; break;
+            case PERIOD_LEISURE: desc = "Evening Leisure"; break;
+            case PERIOD_REST_NIGHT: desc = "Night Rest"; break;
+        }
+        std::string timeStr = (format("%02d:%02d") % hour % minute).str();
+        m_parent.QueueCommand(make_shared<SystemChatMsg>(
+            (format("{c:55FF55}[Matrix Clock] Time: %1% | Cycle: %2%{/c}") % timeStr % desc).str()
+        ));
+        return;
+    }
+    else if (iequals(command, "f") || iequals(command, "faction"))
+    {
+        string factionMsg;
+        std::getline(cmdStream, factionMsg);
+        boost::trim(factionMsg);
+        if (factionMsg.empty()) {
+            m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FFFF00}Usage: /f <message> | /faction <message>{/c}"));
+            return;
+        }
+        string color = "FFFFFF";
+        if (m_factionName == "Zion") color = "00FF00";
+        else if (m_factionName == "Machines") color = "0000FF";
+        else if (m_factionName == "Merovingian") color = "FF00FF";
+
+        string formattedMsg = (format("{c:%1%}[Faction] %2%: %3%{/c}") % color % m_handle % factionMsg).str();
+        auto players = sObjMgr.getAllGOIds();
+        for (auto id : players) {
+            PlayerObject* p = sObjMgr.getGOPtrSafe(id);
+            if (p && p->getFactionName() == m_factionName) {
+                p->getClient().QueueCommand(std::make_shared<SystemChatMsg>(formattedMsg));
+            }
+        }
+        return;
+    }
+    else if (iequals(command, "teleport") || iequals(command, "tp"))
+    {
+        uint32 destDistrict = 0;
+        uint32 destHL = 0;
+        if (cmdStream >> destDistrict >> destHL) {
+            ByteBuffer tpCmd;
+            tpCmd << (uint8)1; // source HL
+            while (tpCmd.size() < 6) tpCmd << (uint8)0;
+            tpCmd << (uint8)m_district;
+            while (tpCmd.size() < 10) tpCmd << (uint8)0;
+            tpCmd << (uint8)destHL;
+            while (tpCmd.size() < 14) tpCmd << (uint8)0;
+            tpCmd << (uint8)destDistrict;
+            RPC_HandleHardlineTeleport(tpCmd);
+        } else {
+            m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FFFF00}Usage: /tp <districtId> <hardlineId>{/c}"));
+        }
+        return;
+    }
     else if (iequals(command, "heat"))
     {
         float hx = getPosition().x;
@@ -3238,7 +3369,9 @@ void PlayerObject::ParsePlayerCommand( string theCmd )
         this->setPosition(targetPos);
         this->setDistrict(newDistrictId);
         this->saveDataToDB();
-        sGame.AnnounceStateUpdate(NULL, make_shared<PositionStateMsg>(m_goId));
+        auto posMsg = make_shared<PositionStateMsg>(m_goId);
+        m_parent.QueueState(posMsg);
+        sGame.AnnounceStateUpdate(&m_parent, posMsg);
         this->FlushAndRefreshAoI();
         m_parent.QueueState(make_shared<JackoutEffectMsg>(m_goId, false));
         m_parent.QueueCommand(make_shared<SystemChatMsg>((format("{c:00FFCC}[Transit] Transferred to %1% hardline network (District %2%).{/c}") % distName % newDistrictId).str()));
@@ -3342,7 +3475,9 @@ void PlayerObject::ParsePlayerCommand( string theCmd )
         LocationVector nearestHl = sBotMgr.GetNearestHardline(getPosition().x, getPosition().z);
         nearestHl.y += 20.0f;
         this->setPosition(nearestHl);
-        sGame.AnnounceStateUpdate(NULL, make_shared<PositionStateMsg>(m_goId));
+        auto posMsg = make_shared<PositionStateMsg>(m_goId);
+        m_parent.QueueState(posMsg);
+        sGame.AnnounceStateUpdate(&m_parent, posMsg);
         m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FFFF55}[Emergency Unstuck] Repositioned operator to nearest safe Hardline phone booth.{/c}"));
         return;
     }
@@ -3363,6 +3498,7 @@ void PlayerObject::ParsePlayerCommand( string theCmd )
         m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:00FFFF}/style <kungfu|karate|aikido|street>{/c} - Switch martial arts discipline style"));
         m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:00FFFF}/loadability <id>{/c} - Load ability onto memory track"));
         m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:00FFFF}/target{/c} - Target nearest hostile operative"));
+        m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FFFF55}/wear <slot> <id> | /dye <slot> <color>{/c} - Tailor RSI wardrobe & dye"));
         m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FFFF55}/clock{/c} - Current Matrix time & circadian cycle"));
         m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FFFF55}/heat{/c} - Local disruption heat & security tier"));
         m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FFFF55}/district <slums|dt|it|richland>{/c} - Fast district transit"));
@@ -3456,6 +3592,7 @@ void PlayerObject::RPC_HandleChat( ByteBuffer &srcCmd )
 									  boost::istarts_with(theMessage, "/agentstrike") ||
 									  boost::istarts_with(theMessage, "/agent") ||
 									  boost::istarts_with(theMessage, "/craft") ||
+									  boost::istarts_with(theMessage, "/compile") ||
 									  boost::istarts_with(theMessage, "/org") ||
 									  boost::istarts_with(theMessage, "/crew") ||
 									  boost::istarts_with(theMessage, "/mission") ||
@@ -3471,587 +3608,30 @@ void PlayerObject::RPC_HandleChat( ByteBuffer &srcCmd )
 									  boost::istarts_with(theMessage, "/dojo") ||
 									  boost::istarts_with(theMessage, "/bug") ||
 									  boost::istarts_with(theMessage, "/bugs") ||
-									  boost::istarts_with(theMessage, "/report"))))
+									  boost::istarts_with(theMessage, "/report") ||
+									  boost::istarts_with(theMessage, "/trade") ||
+									  boost::istarts_with(theMessage, "/clock") ||
+									  boost::istarts_with(theMessage, "/heat") ||
+									  boost::istarts_with(theMessage, "/district") ||
+									  boost::istarts_with(theMessage, "/who") ||
+									  boost::istarts_with(theMessage, "/stats") ||
+									  boost::istarts_with(theMessage, "/stuck") ||
+									  boost::istarts_with(theMessage, "/vendor") ||
+									  boost::istarts_with(theMessage, "/shop") ||
+									  boost::istarts_with(theMessage, "/jackout") ||
+									  boost::istarts_with(theMessage, "/exit") ||
+									  boost::istarts_with(theMessage, "/help") ||
+									  boost::iequals(theMessage, "/?") ||
+									  boost::istarts_with(theMessage, "/f ") ||
+									  boost::istarts_with(theMessage, "/faction") ||
+									  boost::istarts_with(theMessage, "/teleport") ||
+									  boost::istarts_with(theMessage, "/tp ") ||
+									  boost::iequals(theMessage, "/tp"))))
 	{
 		INFO_LOG(format("(%1%) %2%:%3% chat command: %4%") % m_parent.Address() % m_handle % m_goId % theMessage);
 		ParsePlayerCommand(theMessage.substr(1));
 		return;
 	}
-
-    // Item 118: Organization Chat
-    if (theMessage.length() >= 5 && boost::iequals(theMessage.substr(0, 5), "/org ")) {
-        if (m_orgId == 0) {
-            m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FF0000}You are not in an Organization.{/c}"));
-            return;
-        }
-        string orgMsg = theMessage.substr(5);
-        string formattedMsg = (format("{c:00FFFF}[Org] %1%: %2%{/c}") % m_handle % orgMsg).str();
-        auto players = sObjMgr.getAllGOIds();
-        for (auto id : players) {
-            PlayerObject* p = sObjMgr.getGOPtrSafe(id);
-            if (p && p->getOrgId() == m_orgId) {
-                p->getClient().QueueCommand(std::make_shared<SystemChatMsg>(formattedMsg));
-            }
-        }
-        return;
-    }
-
-    if (theMessage.length() >= 7 && boost::iequals(theMessage.substr(0, 7), "/trade ")) {
-        std::stringstream ss(theMessage.substr(7));
-        string targetHandle;
-        uint32 templateId = 0;
-        ss >> targetHandle >> templateId;
-        if (targetHandle.empty() || templateId == 0) {
-            m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FF0000}Usage: /trade <targetName> <templateId>{/c}"));
-            return;
-        }
-
-        PlayerObject* recipient = nullptr;
-        auto allIds = sObjMgr.getAllGOIds();
-        for (auto id : allIds) {
-            PlayerObject* p = sObjMgr.getGOPtrSafe(id);
-            if (p && boost::iequals(p->getHandle(), targetHandle)) {
-                recipient = p;
-                break;
-            }
-        }
-
-        if (!recipient) {
-            m_parent.QueueCommand(make_shared<SystemChatMsg>((format("{c:FF0000}Operative '%1%' not found.{/c}") % targetHandle).str()));
-            return;
-        }
-
-        LocationVector pA = getPosition();
-        LocationVector pB = recipient->getPosition();
-        double dx = pB.x - pA.x;
-        double dz = pB.z - pA.z;
-        if ((dx * dx + dz * dz) > (1000.0 * 1000.0)) {
-            m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FF0000}Trade partner is out of range (max 10m).{/c}"));
-            return;
-        }
-
-        if (m_inventorySystem && recipient->getInventory()) {
-            if (m_inventorySystem->consumeItemByTemplate(templateId)) {
-                recipient->giveItem(templateId);
-                m_inventorySystem->saveToDB();
-                recipient->getInventory()->saveToDB();
-                m_parent.QueueCommand(make_shared<SystemChatMsg>(
-                    (format("{c:00FF00}[TRADE] Transferred item %1% to %2%.{/c}") % templateId % targetHandle).str()));
-                recipient->getClient().QueueCommand(make_shared<SystemChatMsg>(
-                    (format("{c:00FF00}[TRADE] Received item %1% from %2%.{/c}") % templateId % getHandle()).str()));
-            } else {
-                m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FF0000}[TRADE] You do not possess that item.{/c}"));
-            }
-        }
-        return;
-    }
-
-    // Phase 4 Part 2: Crew & Faction Management
-    if (theMessage.length() >= 10 && boost::iequals(theMessage.substr(0, 11), "/orgcreate ")) {
-        string orgName = theMessage.substr(11);
-        if (m_orgId != 0) {
-            m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FF0000}You are already in an Organization.{/c}"));
-            return;
-        }
-        uint32 newOrgId = sOrgMgr.createOrganization(orgName, getCharId());
-        m_orgId = newOrgId;
-        m_parent.QueueCommand(make_shared<SystemChatMsg>((format("{c:00FF00}Organization '%1%' created successfully.{/c}") % orgName).str()));
-        // Note: Broadcast visual tag update here when packet mapped
-        return;
-    }
-
-    if (theMessage.length() >= 10 && boost::iequals(theMessage.substr(0, 11), "/orginvite ")) {
-        string targetName = theMessage.substr(11);
-        if (m_orgId == 0) {
-            m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FF0000}You are not in an Organization.{/c}"));
-            return;
-        }
-        Organization* org = sOrgMgr.getOrganization(m_orgId);
-        if (!org || org->leaderId != getCharId()) {
-            m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FF0000}Only the Organization Leader can invite.{/c}"));
-            return;
-        }
-        auto players = sObjMgr.getAllGOIds();
-        for (auto id : players) {
-            PlayerObject* p = sObjMgr.getGOPtrSafe(id);
-            if (p && boost::iequals(p->getHandle(), targetName)) {
-                if (p->getOrgId() != 0) {
-                    m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FF0000}Target is already in an Organization.{/c}"));
-                    return;
-                }
-                if (sOrgMgr.joinOrganization(m_orgId, p->getCharId())) {
-                    p->setOrgId(m_orgId);
-                    p->getClient().QueueCommand(make_shared<SystemChatMsg>((format("{c:00FF00}You have been recruited into Organization '%1%'.{/c}") % org->name).str()));
-                    m_parent.QueueCommand(make_shared<SystemChatMsg>((format("{c:00FF00}%1% has joined the Organization.{/c}") % p->getHandle()).str()));
-                }
-                return;
-            }
-        }
-        m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FF0000}Target player not found.{/c}"));
-        return;
-    }
-
-    if (boost::iequals(theMessage, "/orgleave")) {
-        if (m_orgId == 0) {
-            m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FF0000}You are not in an Organization.{/c}"));
-            return;
-        }
-        if (sOrgMgr.leaveOrganization(m_orgId, getCharId())) {
-            m_orgId = 0;
-            m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:00FF00}You have left the Organization.{/c}"));
-            // Note: Broadcast visual tag update here when packet mapped
-        }
-        return;
-    }
-
-    // Phase 4: Faction Chat
-    if (theMessage.length() >= 3 && (boost::iequals(theMessage.substr(0, 3), "/f ") || boost::iequals(theMessage.substr(0, 9), "/faction "))) {
-        string factionMsg = boost::iequals(theMessage.substr(0, 3), "/f ") ? theMessage.substr(3) : theMessage.substr(9);
-        
-        string color = "FFFFFF";
-        if (m_factionName == "Zion") color = "00FF00";
-        else if (m_factionName == "Machines") color = "0000FF";
-        else if (m_factionName == "Merovingian") color = "FF00FF";
-        
-        string formattedMsg = (format("{c:%1%}[Faction] %2%: %3%{/c}") % color % m_handle % factionMsg).str();
-        auto players = sObjMgr.getAllGOIds();
-        for (auto id : players) {
-            PlayerObject* p = sObjMgr.getGOPtrSafe(id);
-            if (p && p->getFactionName() == m_factionName) {
-                p->getClient().QueueCommand(std::make_shared<SystemChatMsg>(formattedMsg));
-            }
-        }
-        return;
-    }
-
-    // Hardline Locker / Vault Storage System
-    if (boost::iequals(theMessage, "/locker") || boost::iequals(theMessage, "/vault") ||
-        boost::iequals(theMessage, "/locker help") || boost::iequals(theMessage, "/vault help") ||
-        (theMessage.length() >= 8 && boost::iequals(theMessage.substr(0, 8), "/locker ")) ||
-        (theMessage.length() >= 7 && boost::iequals(theMessage.substr(0, 7), "/vault "))) {
-
-        string subCmd;
-        std::stringstream ss;
-        if (boost::istarts_with(theMessage, "/locker")) {
-            if (theMessage.length() > 7) ss.str(theMessage.substr(8));
-        } else {
-            if (theMessage.length() > 6) ss.str(theMessage.substr(7));
-        }
-        ss >> subCmd;
-
-        const HardlineNode* hl = PlayerObject::GetNearestHardline(m_district, m_pos.x, m_pos.z);
-        uint32 hlId = hl ? hl->hardlineId : 0;
-        double d2 = hl ? ((m_pos.x - hl->x)*(m_pos.x - hl->x) + (m_pos.z - hl->z)*(m_pos.z - hl->z)) : 1e12;
-        bool nearHl = (d2 <= (2500.0 * 2500.0)); // 25 meters
-
-        if (subCmd.empty() || boost::iequals(subCmd, "help")) {
-            m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:00FFCC}--- HARDLINE LOCKER VAULT SYSTEM ---{/c}"));
-            m_parent.QueueCommand(make_shared<SystemChatMsg>("  /locker list - List stored items in this Hardline vault"));
-            m_parent.QueueCommand(make_shared<SystemChatMsg>("  /locker store <invSlot> - Store item from inventory (1-24) into vault"));
-            m_parent.QueueCommand(make_shared<SystemChatMsg>("  /locker withdraw <entryId> - Retrieve item from vault into inventory"));
-            return;
-        }
-
-        if (!nearHl) {
-            m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FF0000}[LOCKER] Access Denied. You must be within 25m of an active Hardline.{/c}"));
-            return;
-        }
-
-        if (boost::iequals(subCmd, "list")) {
-            auto items = sEconomySys.GetLockerItems(getCharacterUID(), hlId);
-            if (items.empty()) {
-                m_parent.QueueCommand(make_shared<SystemChatMsg>((format("{c:FFFF00}[LOCKER] Hardline #%1% vault is empty.{/c}") % hlId).str()));
-                return;
-            }
-            m_parent.QueueCommand(make_shared<SystemChatMsg>((format("{c:00FFCC}--- HARDLINE #%1% VAULT (%2% ITEMS) ---{/c}") % hlId % items.size()).str()));
-            for (const auto& it : items) {
-                m_parent.QueueCommand(make_shared<SystemChatMsg>(
-                    (format("  [ID: %1%] Slot: %2% | Template: %3% | Qty: %4%")
-                        % it.entryId % (int)it.slot % it.templateId % it.quantity).str()));
-            }
-            return;
-        }
-
-        if (boost::iequals(subCmd, "store")) {
-            uint32 invSlot = 0;
-            ss >> invSlot;
-            if (invSlot == 0 || !m_inventorySystem) {
-                m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FF0000}Usage: /locker store <invSlot>{/c}"));
-                return;
-            }
-            shared_ptr<Item> item = m_inventorySystem->getItemBySlot(static_cast<uint8>(invSlot));
-            if (!item) {
-                m_parent.QueueCommand(make_shared<SystemChatMsg>((format("{c:FF0000}[LOCKER] No item in inventory slot %1%.{/c}") % invSlot).str()));
-                return;
-            }
-            uint32 tId = item->getTemplateId();
-            if (sEconomySys.DepositToLocker(this, hlId, tId, static_cast<uint8>(invSlot))) {
-                m_parent.QueueCommand(make_shared<SystemChatMsg>(
-                    (format("{c:00FF00}[LOCKER] Deposited item (Template #%1%) into Hardline #%2% vault.{/c}") % tId % hlId).str()));
-            } else {
-                m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FF0000}[LOCKER] Failed to deposit item into vault.{/c}"));
-            }
-            return;
-        }
-
-        if (boost::iequals(subCmd, "withdraw")) {
-            uint64 entryId = 0;
-            ss >> entryId;
-            if (entryId == 0) {
-                m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FF0000}Usage: /locker withdraw <entryId>{/c}"));
-                return;
-            }
-            if (sEconomySys.WithdrawFromLocker(this, hlId, entryId)) {
-                m_parent.QueueCommand(make_shared<SystemChatMsg>(
-                    (format("{c:00FF00}[LOCKER] Withdrew item (Locker ID #%1%) from Hardline #%2% vault into inventory.{/c}") % entryId % hlId).str()));
-            } else {
-                m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FF0000}[LOCKER] Failed to withdraw item (check entry ID or inventory space).{/c}"));
-            }
-            return;
-        }
-    }
-
-    // Tailor Wardrobe & RSI Color Dyeing
-    if (theMessage.length() >= 5 && boost::iequals(theMessage.substr(0, 5), "/dye ")) {
-        std::stringstream ss(theMessage.substr(5));
-        string slotStr;
-        uint32 colorVal = 0;
-        ss >> slotStr >> colorVal;
-
-        if (slotStr.empty()) {
-            m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:00FFCC}Usage: /dye <coat|shirt|pants|shoes|glasses|hair|skin> <0-31>{/c}"));
-            return;
-        }
-
-        if (!SetRsiDyeColor(slotStr, colorVal)) {
-            m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FF0000}[TAILOR] Unknown wardrobe slot. Valid: coat, shirt, pants, shoes, glasses, hair, skin.{/c}"));
-            return;
-        }
-
-        m_parent.QueueCommand(make_shared<SystemChatMsg>(
-            (format("{c:00FF00}[TAILOR] Your %1% has been dyed to palette color #%2%! Appearance matrix synchronized.{/c}")
-                % slotStr % colorVal).str()
-        ));
-        return;
-    }
-
-    // Faction Warfare Hardline / Broadcast Node Viral Capture
-    if ((theMessage.length() >= 9 && boost::iequals(theMessage.substr(0, 9), "/capture ")) ||
-        (theMessage.length() >= 10 && boost::iequals(theMessage.substr(0, 10), "/hacknode "))) {
-        std::stringstream ss;
-        if (boost::istarts_with(theMessage, "/capture")) ss.str(theMessage.substr(9));
-        else ss.str(theMessage.substr(10));
-
-        uint32 nodeId = 0;
-        ss >> nodeId;
-        if (nodeId == 0) {
-            m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FF0000}Usage: /capture <nodeId>{/c}"));
-            return;
-        }
-
-        const auto& nodes = sFactionWarMgr.GetControlNodes();
-        auto it = nodes.find(nodeId);
-        if (it == nodes.end()) {
-            m_parent.QueueCommand(make_shared<SystemChatMsg>((format("{c:FF0000}[FACTION WAR] Control Node #%1% not found in directory.{/c}") % nodeId).str()));
-            return;
-        }
-
-        const ControlNode& node = it->second;
-        double dx = m_pos.x - node.x;
-        double dz = m_pos.z - node.z;
-        if ((dx * dx + dz * dz) > (2500.0 * 2500.0)) { // 25 meters
-            m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FF0000}[FACTION WAR] You must be within 25m of the Hardline node to upload viral control code.{/c}"));
-            return;
-        }
-
-        uint32 myFaction = getFaction();
-        if (myFaction == 0) myFaction = FACTION_ZION;
-
-        if (node.controllingFaction == myFaction) {
-            m_parent.QueueCommand(make_shared<SystemChatMsg>((format("{c:FFFF00}[FACTION WAR] Hardline Node #%1% is already controlled by your faction.{/c}") % nodeId).str()));
-            return;
-        }
-
-        sFactionWarMgr.AdvanceNodeCapture(nodeId, myFaction, 0.35f, this);
-        return;
-    }
-
-    // Matrix Environment Commands
-    if (boost::iequals(theMessage, "/clock")) {
-        float h = sPedestrianEcology.GetMatrixHour();
-        int hour = (int)h;
-        int minute = (int)((h - hour) * 60.0f);
-        CircadianPeriod period = sPedestrianEcology.GetCircadianPeriod();
-        std::string desc;
-        switch (period) {
-            case PERIOD_COMMUTE_MORNING: desc = "Morning Commute"; break;
-            case PERIOD_WORK: desc = "Work Hours"; break;
-            case PERIOD_COMMUTE_EVENING: desc = "Evening Commute"; break;
-            case PERIOD_LEISURE: desc = "Evening Leisure"; break;
-            case PERIOD_REST_NIGHT: desc = "Night Rest"; break;
-        }
-        std::string timeStr = (format("%02d:%02d") % hour % minute).str();
-        m_parent.QueueCommand(make_shared<SystemChatMsg>(
-            (format("{c:55FF55}[Matrix Clock] Time: %1% | Cycle: %2%{/c}") % timeStr % desc).str()
-        ));
-        return;
-    }
-
-    if (boost::iequals(theMessage, "/heat")) {
-        float hx = getPosition().x;
-        float hz = getPosition().z;
-        float heat = sMatrixThreatHeatmap.GetHeat(hx, hz);
-        HeatTier tier = sMatrixThreatHeatmap.GetTier(hx, hz);
-        uint32 dId = sMatrixThreatHeatmap.GetDistrictAt(hx, hz);
-        std::string dName = (dId == 1) ? "Richland" : ((dId == 2) ? "Downtown" : ((dId == 3) ? "International" : "The Slums"));
-        bool sabotaged = sMatrixThreatHeatmap.IsDistrictSabotaged(dId);
-        m_parent.QueueCommand(make_shared<SystemChatMsg>(
-            (format("{c:FFFF55}[Heatmap] District: %1% (ID %2%) | Heat: %3$.1f | Heat Tier: %4% | Sabotaged: %5%{/c}") 
-             % dName % dId % heat % (int)tier % (sabotaged ? "YES" : "NO")).str()
-        ));
-        return;
-    }
-
-    if (boost::iequals(theMessage, "/help") || boost::iequals(theMessage, "/?")) {
-        m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:00FF00}=== THE MATRIX ONLINE COMMANDS ==={/c}"));
-        m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:00FF00}&bug <description> | /bug <description>{/c} - Save a bug report to the server database"));
-        m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:00FF00}&bugs | /bugs | &bug view <id>{/c} - Check saved bug reports in the database"));
-        m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:00FFFF}/attack | &attack{/c} - Engage selected target in melee interlock"));
-        m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:00FFFF}/tactic <power|speed|grab|block>{/c} - Set combat martial arts tactic"));
-        m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:00FFFF}/withdraw | &withdraw{/c} - Disengage from interlock"));
-        m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:00FFFF}/style <kungfu|karate|aikido|street>{/c} - Switch martial arts discipline style"));
-        m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:00FFFF}/loadability <id>{/c} - Load ability onto memory track"));
-        m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:00FFFF}/target{/c} - Target nearest hostile operative"));
-        m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FFFF55}/wear <slot> <id> | /dye <slot> <color>{/c} - Tailor RSI wardrobe & dye"));
-        m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FFFF55}/clock{/c} - Current Matrix time & circadian cycle"));
-        m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FFFF55}/heat{/c} - Local disruption heat & security tier"));
-        m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FFFF55}/district <slums|dt|it|richland>{/c} - Fast district transit"));
-        m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FFFF55}/who{/c} - Online operatives census"));
-        m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FFFF55}/stats{/c} - Operator combat, HP & location telemetry"));
-        m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FFFF55}/hardlines{/c} - Nearest Hardline phone booth beacon"));
-        m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FFFF55}/stuck{/c} - Recover operative to nearest safe Hardline"));
-        m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FFFF55}/jackout | /exit{/c} - Cleanly disconnect from the Matrix"));
-        m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FFFF55}/vendor | /shop{/c} - Connect to nearest Hardline vendor"));
-        m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FFFF55}/craft <id> | /craft list{/c} - Coder ability blueprint compilation"));
-        m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FFFF55}/org <create|leave>{/c} - Syndicate organization management"));
-        m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FFFF55}/dojo <1v1|clear|leave>{/c} - Sparring partner construct"));
-        m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FFFF55}/contact <list|call <name>>{/c} - Uplink with canonical mission contacts"));
-        return;
-    }
-
-    if (theMessage.length() >= 9 && boost::iequals(theMessage.substr(0, 9), "/district")) {
-        std::stringstream ss(theMessage.substr(9));
-        std::string targetDistrict;
-        ss >> targetDistrict;
-        boost::to_lower(targetDistrict);
-        LocationVector targetPos(99640.0f, 572.0f, 8350.0f);
-        std::string distName = "The Slums";
-        uint32 newDistrictId = 1;
-
-        if (targetDistrict == "dt" || targetDistrict == "downtown") {
-            targetPos = LocationVector(39216.0f, 572.0f, -21475.0f);
-            distName = "Downtown";
-            newDistrictId = 2;
-        } else if (targetDistrict == "it" || targetDistrict == "international") {
-            targetPos = LocationVector(-37444.0f, 572.0f, 23659.0f);
-            distName = "International";
-            newDistrictId = 3;
-        } else if (targetDistrict == "richland") {
-            targetPos = LocationVector(-15000.0f, 572.0f, -15000.0f);
-            distName = "Richland";
-            newDistrictId = 4;
-        } else if (targetDistrict == "slums") {
-            targetPos = LocationVector(99640.0f, 572.0f, 8350.0f);
-            distName = "The Slums";
-            newDistrictId = 1;
-        } else {
-            m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FF5555}Unknown district. Valid: slums, dt, it, richland{/c}"));
-            return;
-        }
-
-        this->setPosition(targetPos);
-        this->setDistrict(newDistrictId);
-        this->saveDataToDB();
-        sGame.AnnounceStateUpdate(NULL, make_shared<PositionStateMsg>(m_goId));
-        this->FlushAndRefreshAoI();
-        m_parent.QueueState(make_shared<JackoutEffectMsg>(m_goId, false));
-        m_parent.QueueCommand(make_shared<SystemChatMsg>((format("{c:00FFCC}[Transit] Transferred to %1% hardline network (District %2%).{/c}") % distName % newDistrictId).str()));
-        return;
-    }
-
-    if (boost::iequals(theMessage, "/who")) {
-        auto allIds = sObjMgr.getAllGOIds();
-        uint32 humanCount = 0;
-        for (auto id : allIds) {
-            PlayerObject* p = sObjMgr.getGOPtrSafe(id);
-            if (p && !p->getClient().isBot()) humanCount++;
-        }
-        size_t botCount = sBotMgr.GetBotCount();
-        m_parent.QueueCommand(make_shared<SystemChatMsg>(
-            (format("{c:00FF00}[Zion Census] Operators Jacked In: %1% | Active Construct Bots: %2% | Hardlines: 135{/c}") 
-             % humanCount % botCount).str()
-        ));
-        return;
-    }
-
-    if (boost::iequals(theMessage, "/stats")) {
-        LocationVector pos = getPosition();
-        uint32 dId = sMatrixThreatHeatmap.GetDistrictAt(pos.x, pos.z);
-        std::string dName = (dId == 1) ? "Richland" : ((dId == 2) ? "Downtown" : ((dId == 3) ? "International" : "The Slums"));
-        std::ostringstream ss;
-        ss << std::fixed << std::setprecision(0);
-        ss << "{c:00FFFF}[Operator Stats] Handle: " << m_handle 
-           << " | Level: " << (int)getLevel() 
-           << " | HP: " << (int)getCurrentHealth() << "/" << (int)getMaximumHealth() 
-           << " | IS: " << (int)getCurrentIS() << "/" << (int)getMaximumIS() 
-           << " | District: " << dName 
-           << " | Pos: (" << pos.x << ", " << pos.y << ", " << pos.z << "){/c}";
-        m_parent.QueueCommand(make_shared<SystemChatMsg>(ss.str()));
-        return;
-    }
-
-    if (boost::iequals(theMessage, "/hardlines")) {
-        LocationVector nearestHl = sBotMgr.GetNearestHardline(getPosition().x, getPosition().z);
-        float dist = sqrt(nearestHl.DistanceSq(getPosition()));
-        m_parent.QueueCommand(make_shared<SystemChatMsg>(
-            (format("{c:00FFCC}[Hardline Relay] Total Hardlines: 135 | Nearest Hardline: (%.0f, %.0f, %.0f) - Range: %.1fm{/c}")
-             % nearestHl.x % nearestHl.y % nearestHl.z % (dist / 100.0f)).str()
-        ));
-        return;
-    }
-
-    if (boost::iequals(theMessage, "/stuck")) {
-        LocationVector nearestHl = sBotMgr.GetNearestHardline(getPosition().x, getPosition().z);
-        nearestHl.y += 20.0f;
-        this->setPosition(nearestHl);
-        sGame.AnnounceStateUpdate(NULL, make_shared<PositionStateMsg>(m_goId));
-        m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FFFF55}[Emergency Unstuck] Repositioned operator to nearest safe Hardline phone booth.{/c}"));
-        return;
-    }
-
-    // Authentic Vendor & Economy Chat Commands
-    if (boost::iequals(theMessage, "/vendor") || boost::iequals(theMessage, "/shop") || boost::iequals(theMessage, "/vendor list")) {
-        auto vendors = sEconomySys.GetVendorsForDistrict(m_district);
-        if (vendors.empty()) vendors = sEconomySys.GetVendorsForDistrict(1);
-        if (!vendors.empty()) {
-            const HardlineVendor* nearest = &vendors[0];
-            double bestDist = 1e9;
-            for (const auto& v : vendors) {
-                double d = (m_pos.x - v.x)*(m_pos.x - v.x) + (m_pos.z - v.z)*(m_pos.z - v.z);
-                if (d < bestDist) {
-                    bestDist = d;
-                    nearest = &v;
-                }
-            }
-            m_parent.QueueCommand(std::make_shared<VendorOpenMsg>(
-                500.0f, nearest->x, nearest->y, nearest->z, nearest->inventoryTemplates
-            ));
-            std::stringstream ss;
-            ss << "{c:00FFCC}[VENDOR] " << nearest->name << " (ID: " << nearest->staticId << ") Catalog:\n";
-            size_t count = 0;
-            for (uint32 tplId : nearest->inventoryTemplates) {
-                if (++count > 8) { ss << "... and " << (nearest->inventoryTemplates.size() - 8) << " more items."; break; }
-                const ItemTemplate* tpl = sDataLoader.GetItemTemplate(tplId);
-                std::string name = tpl ? tpl->name : (format("Item %1%") % tplId).str();
-                uint32 price = tpl && tpl->value > 0 ? tpl->value : sEconomySys.GetItemPrice(tplId);
-                ss << " - " << name << " (ID " << tplId << "): " << price << " $Info\n";
-            }
-            ss << "{/c}";
-            m_parent.QueueCommand(make_shared<SystemChatMsg>(ss.str()));
-        } else {
-            m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FF4444}[VENDOR] No active district vendors found.{/c}"));
-        }
-        return;
-    }
-
-    if (boost::istarts_with(theMessage, "/vendor buy ") || boost::istarts_with(theMessage, "/shop buy ")) {
-        std::string arg = theMessage.substr(theMessage.find("buy ") + 4);
-        boost::trim(arg);
-        try {
-            uint32 tplId = std::stoul(arg);
-            ByteBuffer buyCmd;
-            buyCmd << uint32(tplId) << uint32(0);
-            RPC_HandleVendorBuy(buyCmd);
-        } catch (...) {
-            m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FF4444}Usage: /vendor buy <itemTemplateId>{/c}"));
-        }
-        return;
-    }
-
-    if (boost::istarts_with(theMessage, "/vendor sell ") || boost::istarts_with(theMessage, "/shop sell ")) {
-        std::string arg = theMessage.substr(theMessage.find("sell ") + 5);
-        boost::trim(arg);
-        try {
-            uint32 itemId = std::stoul(arg);
-            ByteBuffer sellCmd;
-            sellCmd << uint32(itemId) << uint32(0);
-            RPC_HandleVendorSell(sellCmd);
-        } catch (...) {
-            m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FF4444}Usage: /vendor sell <itemId>{/c}"));
-        }
-        return;
-    }
-
-    // Authentic Marketplace Chat Commands (/market, &market, /market list, /market sell, /market buy)
-    if (boost::iequals(theMessage, "/jackout") || boost::iequals(theMessage, "/exit")) {
-        ByteBuffer dummy;
-        RPC_HandleJackoutRequest(dummy);
-        return;
-    }
-
-    if (boost::iequals(theMessage, "/hardline") || boost::iequals(theMessage, "/hardlines")) {
-        const HardlineNode* nearest = GetNearestHardline(m_district, getPosition().x, getPosition().z);
-        size_t total = GetTotalHardlines();
-        if (nearest) {
-            double dist = sqrt((nearest->x - getPosition().x)*(nearest->x - getPosition().x) + (nearest->z - getPosition().z)*(nearest->z - getPosition().z));
-            std::ostringstream ss;
-            ss << std::fixed << std::setprecision(1);
-            ss << "{c:00FFCC}[HARDLINE] Nearest: " << nearest->name 
-               << " (District " << (int)nearest->districtId << ", #" << (int)nearest->hardlineId << ")"
-               << " | Distance: " << (dist / 100.0) << "m"
-               << " | Total Matrix Hardlines: " << total << "{/c}";
-            m_parent.QueueCommand(make_shared<SystemChatMsg>(ss.str()));
-        } else {
-            std::ostringstream ss;
-            ss << "{c:00FFCC}[HARDLINE] Total Matrix Hardlines: " << total << "{/c}";
-            m_parent.QueueCommand(make_shared<SystemChatMsg>(ss.str()));
-        }
-        return;
-    }
-
-    if (boost::iequals(theMessage, "/hardline list")) {
-        m_parent.QueueCommand(make_shared<SystemChatMsg>((format("{c:00FFCC}--- HARDLINES IN DISTRICT %1% ---{/c}") % (int)m_district).str()));
-        int count = 0;
-        for (const auto& kv : GetHardlineDirectory()) {
-            if (kv.first.first == m_district && count < 8) {
-                std::ostringstream ss;
-                ss << std::fixed << std::setprecision(0);
-                ss << "  Node #" << (int)kv.second.hardlineId << ": " << kv.second.name
-                   << " at (" << kv.second.x << ", " << kv.second.y << ", " << kv.second.z << ")";
-                m_parent.QueueCommand(make_shared<SystemChatMsg>(ss.str()));
-                count++;
-            }
-        }
-        return;
-    }
-
-    if (boost::istarts_with(theMessage, "/teleport ") || boost::istarts_with(theMessage, "/tp ")) {
-        std::stringstream ss(theMessage.substr(theMessage.find(' ') + 1));
-        uint32 destDistrict = 0;
-        uint32 destHL = 0;
-        if (ss >> destDistrict >> destHL) {
-            ByteBuffer tpCmd;
-            tpCmd << (uint8)1; // source HL
-            while (tpCmd.size() < 6) tpCmd << (uint8)0;
-            tpCmd << (uint8)m_district;
-            while (tpCmd.size() < 10) tpCmd << (uint8)0;
-            tpCmd << (uint8)destHL;
-            while (tpCmd.size() < 14) tpCmd << (uint8)0;
-            tpCmd << (uint8)destDistrict;
-            RPC_HandleHardlineTeleport(tpCmd);
-            return;
-        }
-    }
 
     // Item 43: Director Mode Possession Chat Reroute
     if (m_possessingBotId != 0) {
@@ -4065,8 +3645,6 @@ void PlayerObject::RPC_HandleChat( ByteBuffer &srcCmd )
 	INFO_LOG(format("%1% says %2%") % m_handle % theMessage);
 	m_parent.QueueCommand(make_shared<SystemChatMsg>((format("You said %1%") % theMessage).str()));
 	sGame.AnnounceCommand(&m_parent,make_shared<PlayerChatMsg>(m_handle,theMessage));
-
-
 }
 
 void PlayerObject::RPC_HandleWhisper( ByteBuffer &srcCmd )
@@ -4121,21 +3699,27 @@ void PlayerObject::RPC_HandleWhisper( ByteBuffer &srcCmd )
 void PlayerObject::RPC_HandleStopAnimation( ByteBuffer &srcCmd )
 {
 	m_currAnimation = 0;
-	sGame.AnnounceStateUpdate(NULL,make_shared<AnimationStateMsg>(m_goId));
+	auto animMsg = make_shared<AnimationStateMsg>(m_goId);
+	m_parent.QueueState(animMsg);
+	sGame.AnnounceStateUpdate(&m_parent, animMsg);
 }
 
 void PlayerObject::RPC_HandleStartAnimtion( ByteBuffer &srcCmd )
 {
 	uint8 newAnimation = srcCmd.read<uint8>();
 	m_currAnimation = newAnimation;
-	sGame.AnnounceStateUpdate(NULL,make_shared<AnimationStateMsg>(m_goId));
+	auto animMsg = make_shared<AnimationStateMsg>(m_goId);
+	m_parent.QueueState(animMsg);
+	sGame.AnnounceStateUpdate(&m_parent, animMsg);
 }
 
 void PlayerObject::RPC_HandleChangeMood( ByteBuffer &srcCmd )
 {
 	uint8 newMood = srcCmd.read<uint8>();
-	m_currMood = newMood;	
-	sGame.AnnounceStateUpdate(NULL,make_shared<AnimationStateMsg>(m_goId));
+	m_currMood = newMood;
+	auto animMsg = make_shared<AnimationStateMsg>(m_goId);
+	m_parent.QueueState(animMsg);
+	sGame.AnnounceStateUpdate(&m_parent, animMsg);
 	return;
 }
 
@@ -4145,7 +3729,9 @@ void PlayerObject::RPC_HandlePerformEmote( ByteBuffer &srcCmd )
 	uint32 emoteTarget = srcCmd.read<uint32>();
 
 	m_emoteCounter++;
-	sGame.AnnounceStateUpdate(NULL,make_shared<EmoteMsg>(m_goId,emoteId,m_emoteCounter));
+	auto emoteMsg = make_shared<EmoteMsg>(m_goId,emoteId,m_emoteCounter);
+	m_parent.QueueState(emoteMsg);
+	sGame.AnnounceStateUpdate(&m_parent, emoteMsg);
 
 	DEBUG_LOG(format("(%1%) %2%:%3% doing emote %4% on target %5% at coords %6%,%7%,%8%")
 		% m_parent.Address()
@@ -4364,11 +3950,11 @@ void PlayerObject::RPC_HandleStaticObjInteraction( ByteBuffer &srcCmd )
 	{
 		LocationVector loc = this->getPosition();
 
-		scoped_ptr<QueryResult> resultDoorExists(sDatabase.Query(format("SELECT * FROM `doors` WHERE `DistrictId`='%1%' And `DoorId`='%2%' Limit 1") % (int)getDistrict() % staticObjId));
-		// Only admins record new doors; any player used to write rows into the live doors table.
-		if (resultDoorExists == NULL && m_isAdmin)
+		// Only admins record new doors; check in-memory door cache instead of blocking on SQL SELECT.
+		if (!sObjMgr.HasDoor(getDistrict(), staticObjId) && m_isAdmin)
 		{
 			m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FFFF00}You are using a door not in the database yet, lets add it{/c}"));	
+			sObjMgr.RegisterDoor(m_district, staticObjId, loc.x, loc.y, loc.z, loc.rot, 1);
 			format sqlDoorInsert = 
 				format("INSERT INTO `doors` SET  `DistrictId` = '%1%', `DoorId` = '%2%', X = '%3%', Y = '%4%', Z = '%5%', ROT = '%6%', FirstUser = '%7%'")
 				% (int)m_district
@@ -4376,7 +3962,7 @@ void PlayerObject::RPC_HandleStaticObjInteraction( ByteBuffer &srcCmd )
 				% loc.x	% loc.y	% loc.z	% loc.rot
 				% this->getHandle();
 
-			if (sDatabase.Execute(sqlDoorInsert))
+			if (Database_Main == nullptr || sDatabase.Execute(sqlDoorInsert))
 			{
 				format msg1 = 
 					format("{c:00FF00}Door:0x%08x in District %d Set to Location X:%f Y:%f Z:%f O:%f{/c}")
@@ -4424,7 +4010,9 @@ void PlayerObject::RPC_HandleJump( ByteBuffer &srcCmd )
 		% theTimeStamp );*/
 
 	this->setPosition(endPos);
-	sGame.AnnounceStateUpdate(NULL,make_shared<PositionStateMsg>(m_goId));
+	auto posMsg = make_shared<PositionStateMsg>(m_goId);
+	m_parent.QueueState(posMsg);
+	sGame.AnnounceStateUpdate(&m_parent, posMsg);
 }
 
 void PlayerObject::RPC_HandleRegionLoadedNotification( ByteBuffer &srcCmd )
@@ -4669,7 +4257,21 @@ void PlayerObject::RPC_HandleHardlineTeleport( ByteBuffer &srcCmd )
 	int factionTag = 0;
 	bool found = false;
 
-	if (Database_Main != nullptr)
+	// Fast-path: check in-memory static hardline directory first (zero main-thread SQL blocking)
+	const HardlineNode* node = GetHardline(hardlineDistrict, hardlineLocation);
+	if (node)
+	{
+		newX = node->x;
+		newY = node->y;
+		newZ = node->z;
+		newRot = node->rot;
+		newlocationName = node->name;
+		factionTag = node->factionTag;
+		found = true;
+	}
+
+	// Fallback to database only if custom hardline entry is not in the in-memory directory
+	if (!found && Database_Main != nullptr)
 	{
 		format sql = 
 			format("SELECT `X`,`Y`,`Z`, `ROT`, `HardlineName`, `FactionTag` FROM `hardlines` Where `DistrictId` = '%1%' And `HardlineId` = '%2%' LIMIT 1")
@@ -4692,22 +4294,6 @@ void PlayerObject::RPC_HandleHardlineTeleport( ByteBuffer &srcCmd )
 			}
 		}
 		catch (...) {}
-	}
-
-	// Fallback to static hardline directory (e.g. headless tests or offline DB)
-	if (!found)
-	{
-		const HardlineNode* node = GetHardline(hardlineDistrict, hardlineLocation);
-		if (node)
-		{
-			newX = node->x;
-			newY = node->y;
-			newZ = node->z;
-			newRot = node->rot;
-			newlocationName = node->name;
-			factionTag = node->factionTag;
-			found = true;
-		}
 	}
 
 	if (!found)
@@ -4738,7 +4324,9 @@ void PlayerObject::RPC_HandleHardlineTeleport( ByteBuffer &srcCmd )
 	this->setPosition(newLoc);
 	this->setDistrict(hardlineDistrict);
 	this->saveDataToDB();
-	sGame.AnnounceStateUpdate(NULL, make_shared<PositionStateMsg>(m_goId));
+	auto posMsg = make_shared<PositionStateMsg>(m_goId);
+	m_parent.QueueState(posMsg);
+	sGame.AnnounceStateUpdate(&m_parent, posMsg);
 	this->FlushAndRefreshAoI();
 
 	// Authentic retail hardline ring & transmission audio FX via JackoutEffectMsg materialization

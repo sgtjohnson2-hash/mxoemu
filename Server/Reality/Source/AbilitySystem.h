@@ -93,7 +93,9 @@ public:
     ~AbilitySystem();
 
     void loadFromDB();
-    void saveToDB();
+    void saveToDB(bool force = false);
+    bool isDirty() const { return m_dirty; }
+    void markDirty() { m_dirty = true; }
 
     bool loadAbility(uint16 abilityId, uint16 level, uint16 slot);
     bool unloadAbility(uint16 abilityId);
@@ -124,6 +126,7 @@ private:
 
     PlayerObject* m_owner;
     uint16 m_maxMemory;
+    bool m_dirty = false;
     
     // Map of abilityId -> Ability
     map<uint16, shared_ptr<Ability>> m_loadedAbilities;

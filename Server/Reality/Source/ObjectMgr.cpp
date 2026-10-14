@@ -138,15 +138,16 @@ void ObjectMgr::destroyObject( uint32 goId )
 	}
 
 	//erase from object view maps (of all clients) and release object view
-	for (clientToViewMap::iterator it1=m_views.begin();it1!=m_views.end();++it1)
+	for (auto& cPair : m_goToViews)
 	{
-		for (viewIdsMap::iterator it2=it1->second.begin();it2!=it1->second.end();)
+		auto gIt = cPair.second.find(goId);
+		if (gIt != cPair.second.end())
 		{
-			uint32 theGoId = it2->second;
-			if (theGoId == goId)
-				it1->second.erase(it2++);
-			else
-				++it2;
+			uint16 viewId = gIt->second;
+			cPair.second.erase(gIt);
+			auto vIt = m_views.find(cPair.first);
+			if (vIt != m_views.end())
+				vIt->second.erase(viewId);
 		}
 	}
 	lock.unlock();
@@ -182,17 +183,10 @@ std::shared_ptr<class PlayerObject> ObjectMgr::getGOSharedPtr( uint32 goId )
 
 uint32 ObjectMgr::getGOId( class PlayerObject* forWhichObj )
 {
-	if (forWhichObj==NULL)
+	if (forWhichObj == NULL)
 		return 0;
 
-	std::shared_lock<std::shared_mutex> lock(m_objMutex);
-	for (objectsMap::iterator it=m_objects.begin();it!=m_objects.end();++it)
-	{
-		if (it->second.get() == forWhichObj)
-			return it->first;
-	}
-
-	return 0;
+	return forWhichObj->getGoId();
 }
 
 uint16 ObjectMgr::getViewForGO( GameClient* requester, uint32 goId )
@@ -207,15 +201,25 @@ uint16 ObjectMgr::getViewForGO( GameClient* requester, uint32 goId )
 	if (!requester->isBot() && requester->GetPlayerGoId() != 0 && goId == requester->GetPlayerGoId())
 		return VIEWID_SELF;
 
+	// Fast path: non-blocking shared read lock + O(1) hash lookup for existing views
+	{
+		std::shared_lock<std::shared_mutex> readLock(m_objMutex);
+		auto cIt = m_goToViews.find(requester);
+		if (cIt != m_goToViews.end())
+		{
+			auto gIt = cIt->second.find(goId);
+			if (gIt != cIt->second.end())
+				return gIt->second;
+		}
+	}
+
 	std::unique_lock<std::shared_mutex> lock(m_objMutex);
 	viewIdsMap &viewsOfClient = m_views[requester];
+	goToViewMap &goToView = m_goToViews[requester];
 
-	// Check if this goId is already mapped to a viewId for this client
-	for (const auto& pair : viewsOfClient)
-	{
-		if (pair.second == goId)
-			return pair.first;
-	}
+	auto gIt = goToView.find(goId);
+	if (gIt != goToView.end())
+		return gIt->second;
 
 	// client.dll ConnectionContext viewListSize is 128 (0x80 elements).
 	// View 0 = unassigned, 1 = ObjectManager, 2 = Self.
@@ -226,6 +230,7 @@ uint16 ObjectMgr::getViewForGO( GameClient* requester, uint32 goId )
 		if (viewsOfClient.find(id) == viewsOfClient.end())
 		{
 			viewsOfClient[id] = goId;
+			goToView[goId] = id;
 			return id;
 		}
 	}
@@ -238,17 +243,15 @@ uint16 ObjectMgr::getViewForGO( GameClient* requester, uint32 goId )
 void ObjectMgr::releaseRelevantSet( GameClient *requester )
 {
 	std::unique_lock<std::shared_mutex> lock(m_objMutex);
-	clientToViewMap::iterator it = m_views.find(requester);
-	if (it != m_views.end())
-		m_views.erase(it);
+	m_views.erase(requester);
+	m_goToViews.erase(requester);
 }
 
-uint16 ObjectMgr::allocateViewId( GameClient* requester )
+uint16 ObjectMgr::allocateViewIdLocked( GameClient* requester )
 {
 	if (requester == NULL)
 		throw ClientNotAvailable();
 
-	std::unique_lock<std::shared_mutex> lock(m_objMutex);
 	const viewIdsMap &viewsOfClient = m_views[requester];
 	// client.dll viewListSize is 128; allocate in [3..127]
 	for (uint16 id = 3; id < 128; ++id)
@@ -258,6 +261,15 @@ uint16 ObjectMgr::allocateViewId( GameClient* requester )
 	}
 
 	throw NoMoreFreeViews();
+}
+
+uint16 ObjectMgr::allocateViewId( GameClient* requester )
+{
+	if (requester == NULL)
+		throw ClientNotAvailable();
+
+	std::unique_lock<std::shared_mutex> lock(m_objMutex);
+	return allocateViewIdLocked(requester);
 }
 
 uint32 ObjectMgr::getGOForView( class GameClient *requester, uint16 viewId )
@@ -292,6 +304,8 @@ uint16 ObjectMgr::allocateDynamicView( class GameClient *requester, uint32 tagOb
 		if (viewsOfClient.find(id) == viewsOfClient.end())
 		{
 			viewsOfClient[id] = tagObjId;
+			if (tagObjId != 0)
+				m_goToViews[requester][tagObjId] = id;
 			return id;
 		}
 	}
@@ -308,7 +322,19 @@ void ObjectMgr::releaseDynamicView( class GameClient *requester, uint16 viewId )
 	clientToViewMap::iterator it = m_views.find(requester);
 	if (it != m_views.end())
 	{
-		it->second.erase(viewId);
+		auto vit = it->second.find(viewId);
+		if (vit != it->second.end())
+		{
+			uint32 tagObjId = vit->second;
+			it->second.erase(vit);
+			auto gClientIt = m_goToViews.find(requester);
+			if (gClientIt != m_goToViews.end())
+			{
+				auto gIt = gClientIt->second.find(tagObjId);
+				if (gIt != gClientIt->second.end() && gIt->second == viewId)
+					gClientIt->second.erase(gIt);
+			}
+		}
 	}
 }
 
@@ -317,12 +343,9 @@ void ObjectMgr::releaseDynamicView( class GameClient *requester, uint16 viewId )
 
 void ObjectMgr::RandomObject( uint32 randomObjectId, GameClient* requester, double X, double Y, double Z, double ROT)
 {
-	//uint32 randObjId = rand() % 0xFFFFFFFF;
-
 	string msg1 = (format("{c:0FFFF0}Object :%1%{/c}") % (int)randomObjectId).str();
 	requester->QueueCommand(make_shared<SystemChatMsg>(msg1));
 
-	
 	uint16 randViewId = rand() % 0xFFFF;
 
 	std::string s;
@@ -335,92 +358,159 @@ void ObjectMgr::RandomObject( uint32 randomObjectId, GameClient* requester, doub
 	requester->QueueState(make_shared<DoorAnimationMsg>(randomObjectId, randViewId, X, Y, Z, ROT, 1));	
 }
 
+void ObjectMgr::EnsureDoorsLoaded()
+{
+	if (m_doorsLoaded.load(std::memory_order_acquire))
+		return;
+
+	std::unique_lock<std::shared_mutex> lock(m_objMutex);
+	if (m_doorsLoaded.load(std::memory_order_relaxed))
+		return;
+
+	m_doorsLoaded.store(true, std::memory_order_release);
+	if (Database_Main == nullptr)
+		return;
+
+	try
+	{
+		scoped_ptr<QueryResult> res(sDatabase.Query("SELECT `DoorId`, `DistrictId`, `X`, `Y`, `Z`, `ROT`, `DoorType` FROM `doors`"));
+		if (res)
+		{
+			do
+			{
+				Field* f = res->Fetch();
+				CachedDoorInfo info;
+				info.doorId = f[0].GetUInt32();
+				info.districtId = f[1].GetUInt16();
+				info.x = f[2].GetDouble();
+				info.y = f[3].GetDouble();
+				info.z = f[4].GetDouble();
+				info.rot = f[5].GetDouble();
+				info.doorType = f[6].GetUInt16();
+				m_doorCache[info.doorId] = info;
+			} while (res->NextRow());
+		}
+	}
+	catch (...) {}
+}
+
+bool ObjectMgr::HasDoor(uint16 districtId, uint32 doorId)
+{
+	EnsureDoorsLoaded();
+	std::shared_lock<std::shared_mutex> lock(m_objMutex);
+	auto it = m_doorCache.find(doorId);
+	return (it != m_doorCache.end() && (it->second.districtId == districtId || it->second.districtId == 0));
+}
+
+void ObjectMgr::RegisterDoor(uint16 districtId, uint32 doorId, double x, double y, double z, double rot, uint16 doorType)
+{
+	EnsureDoorsLoaded();
+	std::unique_lock<std::shared_mutex> lock(m_objMutex);
+	CachedDoorInfo info;
+	info.doorId = doorId;
+	info.districtId = districtId;
+	info.x = x;
+	info.y = y;
+	info.z = z;
+	info.rot = rot;
+	info.doorType = doorType;
+	m_doorCache[doorId] = info;
+}
 
 void ObjectMgr::OpenDoor( uint32 doorId, GameClient* requester)
 {
-	//Does this work?
-	for (map<uint16,uint32>::iterator it=m_openDoors.begin();it!=m_openDoors.end();++it)
-	{
-		if (it->second == doorId)
-		{
-			//Didnt work first time, lets change door type
-			format sqlUpdateDoorType = format("UPDATE `doors` SET `DoorType`='0' WHERE `DoorId`='%1%' LIMIT 1") % doorId;
-			if (sDatabase.Execute(sqlUpdateDoorType))
-			{
-				format msg1 = format("{c:0FFFF0}Door:0x%08x Set to Indoors since u tried to open it but I think it is open, try again.{/c}") % (int)doorId;
-				
-				//Close Doors not working
-				//sGame.AnnounceStateUpdate(NULL,make_shared<CloseDoorMsg>(it->first));	
+	if (!requester)
+		return;
 
-				requester->QueueCommand(make_shared<SystemChatMsg>(msg1.str()));
+	EnsureDoorsLoaded();
+
+	uint16 viewId = 0;
+	CachedDoorInfo doorInfo;
+	bool hasDoorInfo = false;
+	bool toggledClosed = false;
+
+	{
+		std::unique_lock<std::shared_mutex> lock(m_objMutex);
+		for (map<uint16,uint32>::iterator it=m_openDoors.begin();it!=m_openDoors.end();++it)
+		{
+			if (it->second == doorId)
+			{
+				auto dIt = m_doorCache.find(doorId);
+				if (dIt != m_doorCache.end())
+					dIt->second.doorType = 0;
+				m_openDoors.erase(it);
+				toggledClosed = true;
+				break;
 			}
-			m_openDoors.erase(it);
-			return;
 		}
-		
+
+		if (!toggledClosed)
+		{
+			if (m_openDoors.size() > 37000)
+			{
+				m_openDoors.erase(m_openDoors.begin());
+			}
+
+			viewId = allocateViewIdLocked(requester);
+			m_views[requester][viewId] = doorId;
+			m_goToViews[requester][doorId] = viewId;
+			m_openDoors[viewId] = doorId;
+
+			auto dIt = m_doorCache.find(doorId);
+			if (dIt != m_doorCache.end())
+			{
+				doorInfo = dIt->second;
+				hasDoorInfo = true;
+			}
+		}
+	}
+
+	if (toggledClosed)
+	{
+		if (Database_Main != nullptr)
+		{
+			format sqlUpdateDoorType = format("UPDATE `doors` SET `DoorType`='0' WHERE `DoorId`='%1%' LIMIT 1") % doorId;
+			sDatabase.Execute(sqlUpdateDoorType);
+		}
+		format msg1 = format("{c:0FFFF0}Door:0x%08x Set to Indoors since u tried to open it but I think it is open, try again.{/c}") % (int)doorId;
+		requester->QueueCommand(make_shared<SystemChatMsg>(msg1.str()));
+		return;
 	}
 
 	format msg2 = format("{c:0FFFF0}Door:0x%08x{/c}") % (int)doorId;
 	requester->QueueCommand(make_shared<SystemChatMsg>(msg2.str()));
 
-	if (m_openDoors.size() > 37000) //if lots of doors, then we want to close one
-	{
-		m_openDoors.erase(m_openDoors.begin());
-		//Close Doors not working
-		//sGame.AnnounceStateUpdate(NULL,make_shared<CloseDoorMsg>(it->first));						
-	}
-
-	uint16 viewId = allocateViewId(requester);
-	viewIdsMap &viewsOfClient = m_views[requester];
-	viewsOfClient[viewId]=doorId;
-	m_openDoors[viewId]=doorId;	
-
 	format s = format("Door Opened With ViewId: %1%") % int(viewId);
 	DEBUG_LOG(s.str());
 
-	//sGame.AnnounceStateUpdate(NULL,make_shared<DeleteDoorMsg>(doorId));	
-	format sqlDoor = format("SELECT `X`, `Y`, `Z`, `ROT`, `DoorType` FROM `doors` WHERE `DoorId`='%1%' LIMIT 1") % doorId;
-
-	scoped_ptr<QueryResult> resultDoor(sDatabase.Query(sqlDoor));
-	if (resultDoor != NULL)
+	if (hasDoorInfo)
 	{
-		Field *field = resultDoor->Fetch();
-		double X = field[0].GetDouble();
-		double Y = field[1].GetDouble();
-		double Z = field[2].GetDouble();
-		double O = field[3].GetDouble();
-		int doorType = field[4].GetUInt16();
-		requester->QueueState(make_shared<DoorAnimationMsg>(doorId, viewId, X, Y, Z, O, doorType));
+		requester->QueueState(make_shared<DoorAnimationMsg>(doorId, viewId, doorInfo.x, doorInfo.y, doorInfo.z, doorInfo.rot, doorInfo.doorType));
 	}
-
 }
 
 vector<msgBaseClassPtr> ObjectMgr::GetAllOpenDoors( GameClient* requester )
 {
 	vector<msgBaseClassPtr> tempVec;
+	if (!requester)
+		return tempVec;
 
-	//Does this work?
+	EnsureDoorsLoaded();
 
-	//Set cleitn views to current views.. (so we know which doors are open)
+	std::unique_lock<std::shared_mutex> lock(m_objMutex);
 	viewIdsMap &viewsOfClient = m_views[requester];
+	goToViewMap &goToView = m_goToViews[requester];
 
 	for (map<uint16,uint32>::iterator it=m_openDoors.begin();it!=m_openDoors.end();++it)
 	{
 		viewsOfClient[it->first] = it->second;
+		goToView[it->second] = it->first;
 
-		format sqlDoor = format("SELECT `X`, `Y`, `Z`, `ROT`, `DoorType` FROM `doors` WHERE `DoorId`='%1%' LIMIT 1") % it->second;
-		scoped_ptr<QueryResult> resultDoor(sDatabase.Query(sqlDoor));
-		if (resultDoor != NULL)
+		auto dIt = m_doorCache.find(it->second);
+		if (dIt != m_doorCache.end())
 		{
-			Field *field = resultDoor->Fetch();
-			double X = field[0].GetDouble();
-			double Y = field[1].GetDouble();
-			double Z = field[2].GetDouble();
-			double O = field[3].GetDouble();
-			int doorType = field[4].GetUInt16();
-			//int doorType = 1;
-			
-			tempVec.push_back(make_shared<DoorAnimationMsg>(it->second,it->first, X, Y, Z, O, doorType));
+			const CachedDoorInfo& d = dIt->second;
+			tempVec.push_back(make_shared<DoorAnimationMsg>(it->second, it->first, d.x, d.y, d.z, d.rot, d.doorType));
 		}
 	}
 	return tempVec;

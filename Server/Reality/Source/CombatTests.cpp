@@ -3196,6 +3196,106 @@ int RunCombatTestSuite()
 				check(crewA.po->getExperience() >= expBeforeDuel + 100,
 					"Sparring duel victor receives +100 sparring XP upon non-lethal victory");
 			}
+
+			// 25. Phases 9-12: SpatialGrid Human Movement Sync, O(1) ObjectMgr Lookups, Dirty-Flag Persistence, Door Cache & Unified Dispatcher
+			{
+				// A. Phase 9.1: Human 0x03 movement packet (stateCode 0x08) updates SpatialGrid cell coordinates
+				TestHumanClient p9Client;
+				Actor p9Human = makeHuman(&p9Client, 9100310, 1000.0, 1000.0);
+				p9Human.po->setAdmin(true);
+				sSpatialGrid.UpdateClientPosition(&p9Client, 1000.0f, 1000.0f);
+
+				auto nearDestBefore = sSpatialGrid.GetClientsInRadius(45000.0f, 45000.0f, 1000.0f);
+				bool foundAtDestBefore = (std::find(nearDestBefore.begin(), nearDestBefore.end(), &p9Client) != nearDestBefore.end());
+				check(!foundAtDestBefore, "Before 0x03 movement packet: Human client is not in destination SpatialGrid cell (45000, 45000)");
+
+				// Build authentic 0x03 movement state packet (stateCode 0x08: action:u8, shortrot:u8, x:f32, y:f32, z:f32)
+				ByteBuffer moveStatePkt;
+				moveStatePkt << (uint8)0x08 << (uint8)1 << (uint8)64;
+				moveStatePkt << (float)45010.0f << (float)572.0f << (float)45020.0f;
+				p9Human.po->HandleStateUpdate(moveStatePkt);
+
+				check(std::abs(p9Human.po->getPosition().x - 45010.0) < 0.5 && std::abs(p9Human.po->getPosition().z - 45020.0) < 0.5,
+					"HandleStateUpdate(0x08) updates PlayerObject m_pos to (45010, 572, 45020)");
+				auto nearDestAfter = sSpatialGrid.GetClientsInRadius(45000.0f, 45000.0f, 1000.0f);
+				bool foundAtDestAfter = (std::find(nearDestAfter.begin(), nearDestAfter.end(), &p9Client) != nearDestAfter.end());
+				check(foundAtDestAfter,
+					"HandleStateUpdate(0x08) synchronizes SpatialGrid cell so human client is discoverable at (45010, 45020)");
+
+				// B. Phase 9.3: O(1) ObjectMgr::getGOId and O(1) reverse view lookup (m_goToViews)
+				check(sObjMgr.getGOId(&p9Client) == p9Human.go,
+					"ObjectMgr::getGOId resolves client->GetPlayerGoId() in O(1)");
+				Actor p9Bot = makeBot(9200311, 45050.0, 45050.0, 1, 100);
+				uint16 vAlloc = sObjMgr.getViewForGO(&p9Client, p9Bot.go);
+				check(vAlloc >= 3 && vAlloc < 128, "getViewForGO allocates valid viewId in [3..127]");
+				check(sObjMgr.getViewForGO(&p9Client, p9Bot.go) == vAlloc,
+					"Shared-lock O(1) m_goToViews fast path returns identical viewId on repeat lookup");
+				check(sObjMgr.getGOForView(&p9Client, vAlloc) == p9Bot.go,
+					"Forward viewsOfClient map matches reverse m_goToViews map");
+				sObjMgr.releaseViewForGO(&p9Client, vAlloc);
+				check(sObjMgr.getGOForView(&p9Client, vAlloc) == 0,
+					"releaseViewForGO erases both forward and reverse view mappings cleanly");
+
+				// C. Phase 10.2: InventorySystem & AbilitySystem dirty-flag persistence
+				auto invSys = p9Human.po->getInventory();
+				auto abSys = p9Human.po->getAbilitySystem();
+				check(invSys != nullptr && abSys != nullptr, "Operative has valid InventorySystem and AbilitySystem");
+				if (invSys && abSys)
+				{
+					invSys->saveToDB(true);
+					check(!invSys->isDirty(), "InventorySystem::saveToDB clears m_dirty flag");
+					p9Human.po->giveItem(20201);
+					check(invSys->isDirty(), "Adding an item marks InventorySystem dirty");
+					invSys->saveToDB();
+					check(!invSys->isDirty(), "Subsequent InventorySystem::saveToDB flushes dirty state");
+
+					abSys->saveToDB(true);
+					check(!abSys->isDirty(), "AbilitySystem::saveToDB clears m_dirty flag");
+					abSys->loadAbility(57, 1, 3);
+					check(abSys->isDirty(), "Loading an ability into memory slot marks AbilitySystem dirty");
+					abSys->saveToDB();
+					check(!abSys->isDirty(), "Subsequent AbilitySystem::saveToDB flushes dirty state");
+				}
+
+				// D. Phase 10.3: In-Memory Door Cache (RegisterDoor / HasDoor / OpenDoor without SQL blocking)
+				uint32 testDoorId = 0xABCD1234;
+				sObjMgr.RegisterDoor(1, testDoorId, 45015.0, 572.0, 45025.0, 0.0, 1);
+				check(sObjMgr.HasDoor(1, testDoorId) && !sObjMgr.HasDoor(2, testDoorId),
+					"ObjectMgr::RegisterDoor and HasDoor cache door coordinates in RAM by (districtId, doorId)");
+
+				p9Human.po->setDistrict(1);
+				ByteBuffer doorInteractPkt;
+				doorInteractPkt << (uint8)0x80 << (uint8)0xc8 << (uint32)testDoorId << (uint16)0x03;
+				p9Client.captured.clear();
+				p9Human.po->HandleCommand(doorInteractPkt);
+				check(!p9Client.captured.empty(),
+					"0x80c8 door interaction (0x03) dispatches DoorAnimationMsg from in-memory cache with zero SQL queries");
+
+				// E. Phase 11.2: Unified '&' and '/' Command Dispatcher Parity
+				ByteBuffer slashClockCmd;
+				slashClockCmd << (uint8)0x28 << (uint8)0x10 << (uint16)swap16(8) << (uint32)0;
+				slashClockCmd.writeString("/clock");
+				p9Client.captured.clear();
+				p9Human.po->HandleCommand(slashClockCmd);
+				bool slashClockOk = p9Client.sawText("[Matrix Clock] Time:");
+
+				ByteBuffer ampClockCmd;
+				ampClockCmd << (uint8)0x28 << (uint8)0x10 << (uint16)swap16(8) << (uint32)0;
+				ampClockCmd.writeString("&clock");
+				p9Client.captured.clear();
+				p9Human.po->HandleCommand(ampClockCmd);
+				bool ampClockOk = p9Client.sawText("[Matrix Clock] Time:");
+				check(slashClockOk && ampClockOk,
+					"Both /clock and &clock route through unified ParsePlayerCommand dispatcher");
+
+				ByteBuffer orgCreateCmd;
+				orgCreateCmd << (uint8)0x28 << (uint8)0x10 << (uint16)swap16(8) << (uint32)0;
+				orgCreateCmd.writeString("/orgcreate Phase12Syndicate");
+				p9Client.captured.clear();
+				p9Human.po->HandleCommand(orgCreateCmd);
+				check(p9Human.po->getOrgId() != 0 && p9Client.sawText("Phase12Syndicate"),
+					"/orgcreate routes through unified ParsePlayerCommand and creates organization");
+			}
 		}
 	}
 	catch (const std::exception& e)

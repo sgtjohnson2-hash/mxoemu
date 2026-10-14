@@ -241,7 +241,7 @@ void GameServer::SimulationLoop()
 				sFactionWarMgr.update(delta1Hz);
 				sAgentPossessionMgr.Update(delta1Hz * 1000);
 
-				// Throttled background bot network queue flush
+				// Throttled background bot network queue flush (skip po->Update() for bots already ticked in 30Hz pass)
 				if (botsSnapshot)
 				{
 					for (const auto& bot : *botsSnapshot)
@@ -249,7 +249,9 @@ void GameServer::SimulationLoop()
 						if (!bot) continue;
 						PlayerObject* po = bot->getPlayer();
 						if (po) {
-							po->Update();
+							if (!po->isDead() && po->m_deathDelayMS == 0 && po->getInterlockPartner() == 0) {
+								po->Update();
+							}
 							bot->FlushQueue();
 						}
 					}

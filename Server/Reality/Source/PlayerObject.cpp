@@ -503,11 +503,9 @@ void PlayerObject::UpdateAppearance()
 		const byte defaultRsiValues[] = {0x00,0x0C,0x71,0x48,0x18,0x0C,0xE2,0x00,0x23,0x00,0xB0,0x00,0x40,0x00,0x00};
 		m_rsi->FromBytes(defaultRsiValues, sizeof(defaultRsiValues));
 	}
-	if (m_parent.hasSocket())
-	{
-		m_parent.QueueState(make_shared<PlayerAppearanceMsg>(m_goId));
-	}
-	sGame.AnnounceStateUpdate(NULL, make_shared<PlayerAppearanceMsg>(m_goId));
+	auto appMsg = make_shared<PlayerAppearanceMsg>(m_goId);
+	m_parent.QueueState(appMsg);
+	sGame.AnnounceStateUpdate(&m_parent, appMsg);
 }
 
 uint32 PlayerObject::getRsiField(const std::string& field) const
@@ -753,7 +751,9 @@ void PlayerObject::setAgentAppearance()
 
 	if (m_spawnedInWorld)
 	{
-		sGame.AnnounceStateUpdate(NULL, make_shared<PlayerAppearanceMsg>(m_goId));
+		auto appMsg = make_shared<PlayerAppearanceMsg>(m_goId);
+		m_parent.QueueState(appMsg);
+		sGame.AnnounceStateUpdate(&m_parent, appMsg);
 	}
 }
 
@@ -796,7 +796,9 @@ void PlayerObject::setMartialArtistAppearance(FightingStyle style)
 
 	if (m_spawnedInWorld)
 	{
-		sGame.AnnounceStateUpdate(NULL, make_shared<PlayerAppearanceMsg>(m_goId));
+		auto appMsg = make_shared<PlayerAppearanceMsg>(m_goId);
+		m_parent.QueueState(appMsg);
+		sGame.AnnounceStateUpdate(&m_parent, appMsg);
 	}
 }
 
@@ -965,7 +967,9 @@ void PlayerObject::GenerateProceduralAppearance(uint32 seed, int faction, const 
 
 	if (m_spawnedInWorld)
 	{
-		sGame.AnnounceStateUpdate(NULL, make_shared<PlayerAppearanceMsg>(m_goId));
+		auto appMsg = make_shared<PlayerAppearanceMsg>(m_goId);
+		m_parent.QueueState(appMsg);
+		sGame.AnnounceStateUpdate(&m_parent, appMsg);
 	}
 }
 
@@ -1353,6 +1357,10 @@ void PlayerObject::HandleStateUpdate( ByteBuffer &srcData )
 				m_pos = posBeforeMove;
 				return;
 			}
+			if (m_pos.x != posBeforeMove.x || m_pos.z != posBeforeMove.z)
+			{
+				sSpatialGrid.UpdateClientPosition(&m_parent, m_pos.x, m_pos.z);
+			}
 			size_t cancelled = this->cancelEvents(EVENT_JACKOUT);
 			if (cancelled > 0)
 			{
@@ -1532,7 +1540,9 @@ void PlayerObject::GoAhead(double distanceToGo)
 		newLoc.z -= zInc;
 	}
 	this->setPosition(newLoc);
-	sGame.AnnounceStateUpdate(NULL,make_shared<PositionStateMsg>(m_goId),true);
+	auto posMsg = make_shared<PositionStateMsg>(m_goId);
+	m_parent.QueueState(posMsg, true);
+	sGame.AnnounceStateUpdate(&m_parent, posMsg, true);
 }
 
 void PlayerObject::Update()
@@ -1688,6 +1698,7 @@ void PlayerObject::degradeEquippedWeapon(uint16 degradationAmount) {
 	auto weapons = getEquippedWeapons();
 	for (auto weapon : weapons) {
 		weapon->reduceDurability((float)degradationAmount);
+		if (m_inventorySystem) m_inventorySystem->markDirty();
 		if (weapon->getDurability() <= 0.0f) {
 			if (!getClient().isBot()) {
 				getClient().QueueState(std::make_shared<SystemChatMsg>("{c:FF0000}[SYSTEM] Your equipped weapon has broken due to low durability!{/c}"));
@@ -1711,6 +1722,7 @@ bool PlayerObject::consumeFirearmAmmo()
 	{
 		uint16 roundsToConsume = (isDualWield && weapons[0]->getAmmoCount() >= 2) ? 2 : 1;
 		weapons[0]->setAmmoCount(weapons[0]->getAmmoCount() - roundsToConsume);
+		if (m_inventorySystem) m_inventorySystem->markDirty();
 		return true;
 	}
 	else if (wpnTpl->maxAmmo > 0)
@@ -1933,7 +1945,9 @@ void PlayerObject::Emote(uint32 emoteId)
     if (m_parent.isBot())
         return;
     m_emoteCounter++;
-    sGame.AnnounceStateUpdate(NULL, std::make_shared<EmoteMsg>(m_goId, emoteId, m_emoteCounter));
+    auto emoteMsg = std::make_shared<EmoteMsg>(m_goId, emoteId, m_emoteCounter);
+    m_parent.QueueState(emoteMsg);
+    sGame.AnnounceStateUpdate(&m_parent, emoteMsg);
 }
 
 

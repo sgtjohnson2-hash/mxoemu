@@ -69,9 +69,14 @@ void AbilitySystem::loadFromDB()
     {
         // Grant authentic Level 1 baseline operative abilities (real ids from abilityIDs.csv)
         grantDefaultLoadout();
-        saveToDB();
+        m_dirty = true;
+        saveToDB(true);
         INFO_LOG(format("Granted default Level 1 melee loadout (%1% abilities) for %2%")
             % m_loadedAbilities.size() % m_owner->getHandle());
+    }
+    else
+    {
+        m_dirty = false;
     }
 }
 
@@ -93,32 +98,51 @@ void AbilitySystem::grantDefaultLoadout()
     for (const DefaultLoadoutEntry& e : GetDefaultLoadout())
     {
         if (m_loadedAbilities.find(e.abilityId) == m_loadedAbilities.end())
+        {
             m_loadedAbilities[e.abilityId] = make_shared<Ability>(e.abilityId, e.level, e.slot);
+            m_dirty = true;
+        }
     }
 }
 
-void AbilitySystem::saveToDB()
+void AbilitySystem::saveToDB(bool force)
 {
     if (!m_owner)
         return;
     // bots are memory-only (virtual charIds >= 9000000): never write their loadouts
     if (m_owner->getClient().isBot() || m_owner->getCharacterUID() >= 9000000)
         return;
+    if (!force && !m_dirty)
+        return;
+
+    m_dirty = false;
+    if (Database_Main == nullptr)
+        return;
 
     PreparedStatement delStmt("DELETE FROM `abilities` WHERE `charId` = ?0");
     delStmt.SetUInt64(0, m_owner->getCharacterUID());
     sDatabase.ExecutePrepared(&delStmt);
     
+    if (m_loadedAbilities.empty())
+        return;
+
+    std::ostringstream batchSql;
+    batchSql << "INSERT INTO `abilities` (`charId`, `abilityId`, `level`, `slot`) VALUES ";
+    bool first = true;
     for (auto it = m_loadedAbilities.begin(); it != m_loadedAbilities.end(); ++it)
     {
         if (!it->second)
             continue;
-        PreparedStatement insStmt("INSERT INTO `abilities` (`charId`, `abilityId`, `level`, `slot`) VALUES (?0, ?1, ?2, ?3)");
-        insStmt.SetUInt64(0, m_owner->getCharacterUID());
-        insStmt.SetUInt16(1, it->second->getAbilityId());
-        insStmt.SetUInt16(2, it->second->getLevel());
-        insStmt.SetUInt16(3, it->second->getMemorySlot());
-        sDatabase.ExecutePrepared(&insStmt);
+        if (!first) batchSql << ",";
+        first = false;
+        batchSql << "(" << m_owner->getCharacterUID()
+                 << "," << it->second->getAbilityId()
+                 << "," << it->second->getLevel()
+                 << "," << it->second->getMemorySlot() << ")";
+    }
+    if (!first)
+    {
+        sDatabase.Execute(batchSql.str());
     }
 }
 
@@ -129,6 +153,7 @@ bool AbilitySystem::loadAbility(uint16 abilityId, uint16 level, uint16 slot)
     {
         // Ability already loaded: update level and slot without deducting additional memory
         it->second = make_shared<Ability>(abilityId, level, slot);
+        m_dirty = true;
         return true;
     }
 
@@ -145,6 +170,7 @@ bool AbilitySystem::loadAbility(uint16 abilityId, uint16 level, uint16 slot)
     
     shared_ptr<Ability> newAbility(new Ability(abilityId, level, slot));
     m_loadedAbilities[abilityId] = newAbility;
+    m_dirty = true;
     return true;
 }
 
@@ -154,6 +180,7 @@ bool AbilitySystem::unloadAbility(uint16 abilityId)
     if (it != m_loadedAbilities.end())
     {
         m_loadedAbilities.erase(it);
+        m_dirty = true;
         return true;
     }
     return false;
@@ -162,6 +189,7 @@ bool AbilitySystem::unloadAbility(uint16 abilityId)
 void AbilitySystem::clearLoadout()
 {
     m_loadedAbilities.clear();
+    m_dirty = true;
 }
 
 shared_ptr<Ability> AbilitySystem::getAbility(uint16 abilityId)

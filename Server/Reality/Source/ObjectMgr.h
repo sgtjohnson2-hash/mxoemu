@@ -33,8 +33,20 @@
 #include <shared_mutex>
 #include <atomic>
 #include <mutex>
+#include <unordered_map>
 
 const uint32 OBJECTMANAGER_STARTINGOBJECTID = 0x8000; //we have plenty of uint32s
+
+struct CachedDoorInfo
+{
+	uint32 doorId = 0;
+	uint16 districtId = 0;
+	double x = 0.0;
+	double y = 0.0;
+	double z = 0.0;
+	double rot = 0.0;
+	uint16 doorType = 1;
+};
 
 class ObjectMgr
 {
@@ -136,6 +148,9 @@ public:
 			}
 		}
 	}
+	void EnsureDoorsLoaded();
+	bool HasDoor(uint16 districtId, uint32 doorId);
+	void RegisterDoor(uint16 districtId, uint32 doorId, double x, double y, double z, double rot, uint16 doorType = 1);
 	void OpenDoor(uint32 doorId, class GameClient *requester);
 	vector<msgBaseClassPtr> GetAllOpenDoors(class GameClient *requester);
 
@@ -157,14 +172,20 @@ private:
 	typedef map<uint16,uint32> viewIdsMap;
 	typedef map<class GameClient*,viewIdsMap> clientToViewMap;
 	clientToViewMap m_views;
+	typedef std::unordered_map<uint32,uint16> goToViewMap;
+	typedef map<class GameClient*,goToViewMap> clientToGoViewMap;
+	clientToGoViewMap m_goToViews;
 
 	uint16 allocateViewId(class GameClient* requester);
+	uint16 allocateViewIdLocked(class GameClient* requester);
 	std::atomic<uint32> m_currFreeObjectId;
 	std::atomic<uint32> m_nextItemId{0x01000000};
 	std::mutex m_idAllocMutex;
 	map<uint32,uint32> m_recentlyFreedIds; // goId -> getMSTime() when freed
 
 	map<uint16,uint32> m_openDoors;
+	std::unordered_map<uint32, CachedDoorInfo> m_doorCache;
+	std::atomic<bool> m_doorsLoaded{false};
 	
 	mutable std::shared_mutex m_objMutex;
 	std::unique_ptr<ObjectPool<PlayerObject>> m_playerPool;

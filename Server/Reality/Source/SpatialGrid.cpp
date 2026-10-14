@@ -167,8 +167,8 @@ std::vector<GameClient*> SpatialGrid::GetClientsInRadius(float x, float z, float
 
 bool SpatialGrid::CheckCollision(float x, float z, float radius, uint32 ignoreGoId, uint32 instanceId) const
 {
-    // First, check static world geometry (buildings, walls, urban obstacles)
-    if (sStaticObjMgr.CheckCollision(x, 0.0f, z, radius))
+    // First, check static world geometry (buildings, walls, urban obstacles) at street elevation (Y=572.0f)
+    if (sStaticObjMgr.CheckCollision(x, 572.0f, z, radius))
         return true;
 
     float rSq = radius * radius;

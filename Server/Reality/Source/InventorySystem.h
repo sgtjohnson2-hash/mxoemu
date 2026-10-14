@@ -28,8 +28,10 @@ public:
     // Load inventory from database
     void loadFromDB();
     
-    // Save inventory to database
-    void saveToDB();
+    // Save inventory to database (skips DB write if !m_dirty && !force)
+    void saveToDB(bool force = false);
+    bool isDirty() const { return m_dirty; }
+    void markDirty() { m_dirty = true; }
 
     // Inventory operations
     bool addItem(shared_ptr<Item> item, uint8 slot);
@@ -53,6 +55,7 @@ public:
 
 private:
     PlayerObject* m_owner;
+    bool m_dirty = false;
     
     // Map of Slot ID -> Item
     map<uint8, shared_ptr<Item>> m_items;

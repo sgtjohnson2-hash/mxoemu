@@ -381,29 +381,38 @@ bool Database::run()
 	SetThreadName("Database Executor");
 	ThreadRunning = true;
 	string *query = queries_queue.pop();
-	DatabaseConnection &con = GetFreeConnection();
 	while(query)
 	{
-		if (_SendQuery( con, query->c_str(), false ) && con.conn) {
-			MYSQL_RES* res = mysql_store_result(con.conn);
-			if (res) mysql_free_result(res);
-			while (mysql_more_results(con.conn)) {
-				if (mysql_next_result(con.conn) == 0) {
-					MYSQL_RES* extra = mysql_store_result(con.conn);
-					if (extra) mysql_free_result(extra);
-				} else {
-					break;
+		DatabaseConnection &con = GetFreeConnection();
+		do
+		{
+			if (_SendQuery( con, query->c_str(), false ) && con.conn) {
+				MYSQL_RES* res = mysql_store_result(con.conn);
+				if (res) mysql_free_result(res);
+				while (mysql_more_results(con.conn)) {
+					if (mysql_next_result(con.conn) == 0) {
+						MYSQL_RES* extra = mysql_store_result(con.conn);
+						if (extra) mysql_free_result(extra);
+					} else {
+						break;
+					}
 				}
 			}
-		}
-		delete query;
+			delete query;
+			if(!m_threadRunning)
+			{
+				query = NULL;
+				break;
+			}
+			query = queries_queue.pop_nowait();
+		} while(query);
+
+		ReleaseConnection(con);
 		if(!m_threadRunning)
 			break;
 
 		query = queries_queue.pop();
 	}
-
-	ReleaseConnection(con);
 
 	if(queries_queue.get_size() > 0)
 	{
@@ -496,22 +505,30 @@ QueryThread::~QueryThread()
 
 void Database::thread_proc_query()
 {
-	QueryBuffer * q;
-	DatabaseConnection &con = GetFreeConnection();
-
-	q = query_buffer.pop( );
+	QueryBuffer * q = query_buffer.pop( );
 	while( q != NULL )
 	{
-		PerformQueryBuffer( q, con );
-		delete q;
+		DatabaseConnection &con = GetFreeConnection();
+		do
+		{
+			PerformQueryBuffer( q, con );
+			delete q;
 
+			if( !m_threadRunning )
+			{
+				q = NULL;
+				break;
+			}
+
+			q = query_buffer.pop_nowait( );
+		} while( q != NULL );
+
+		ReleaseConnection(con);
 		if( !m_threadRunning )
 			break;
 
 		q = query_buffer.pop( );
 	}
-
-	ReleaseConnection(con);
 
 	// kill any queries
 	q = query_buffer.pop_nowait( );
@@ -560,7 +577,10 @@ string Database::EscapeString(std::string Escape)
 	char a2[16384] = {0};
 
 	DatabaseConnection &con = GetFreeConnection();
-	if (!con.conn) return Escape;
+	if (!con.conn) {
+		ReleaseConnection(con);
+		return Escape;
+	}
 	const char * ret;
 	if(mysql_real_escape_string(con.conn, a2, Escape.c_str(), (unsigned long)Escape.length()) == 0)
 		ret = Escape.c_str();
@@ -577,20 +597,21 @@ void Database::EscapeLongString(const char * str, uint32 len, stringstream& out)
 		out.write(str, len);
 		return;
 	}
-	char a2[65536*3] = {0};
+	std::vector<char> a2(len * 2 + 1, 0);
 
 	DatabaseConnection &con = GetFreeConnection();
 	if (!con.conn) {
+		ReleaseConnection(con);
 		out.write(str, len);
 		return;
 	}
 	const char * ret;
-	if(mysql_real_escape_string(con.conn, a2, str, (unsigned long)len) == 0)
+	if(mysql_real_escape_string(con.conn, a2.data(), str, (unsigned long)len) == 0)
 		ret = str;
 	else
-		ret = a2;
+		ret = a2.data();
 
-	out.write(a2, (std::streamsize)strlen(a2));
+	out.write(ret, (std::streamsize)strlen(ret));
 	ReleaseConnection(con);
 }
 
