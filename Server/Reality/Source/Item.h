@@ -56,6 +56,8 @@ struct ItemTemplate
     uint16 animAttack{0};
 
     // Clothing specifics
+    std::string clothesSlot;
+    uint8 rsiColorId{0};
     uint16 bonusHacking{0};
     uint16 bonusEvasion{0};
 };

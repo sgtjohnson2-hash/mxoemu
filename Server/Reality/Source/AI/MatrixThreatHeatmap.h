@@ -21,6 +21,7 @@ struct DisruptionCell {
     float heat = 0.0f;
     float peakHeat = 0.0f;
     uint32 lastIncidentMs = 0;
+    uint32 lastInterventionMs = 0;
     float lastY = 572.0f;
 };
 
@@ -34,6 +35,7 @@ public:
     // Record combat disruption events (wire-fu, gunfire, virus, kills)
     void RecordDisruption(float worldX, float worldZ, float amount, const std::string& cause);
     void RecordDisruption(float worldX, float worldY, float worldZ, float amount, const std::string& cause);
+    bool CheckAndTriggerIntervention(float worldX, float worldY, float worldZ, uint32 targetGoId);
 
     // Queries
     float GetHeat(float worldX, float worldZ) const;

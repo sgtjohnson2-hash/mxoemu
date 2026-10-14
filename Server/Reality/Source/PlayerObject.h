@@ -275,6 +275,14 @@ public:
     void setRsiHex(const std::string& hexStr);
     std::string getRsiHex() const;
     void UpdateAppearance();
+    uint32 getRsiField(const std::string& field) const;
+    bool SetRsiWardrobe(const std::string& partName, uint8 modelId, int colorId = -1);
+    bool SetRsiDyeColor(const std::string& slotStr, uint32 colorVal);
+    bool MountClothingItem(uint32 itemGoIdOrTemplateId, uint8 slotHint = 0);
+    bool UnmountClothingItem(uint8 slotOrPartIndex);
+    unsigned short getBonusHacking() const;
+    void FlushAndRefreshAoI();
+    static uint8 DetectDistrictFromCoordinates(double x, double z);
     void setAgentAppearance();
     void setMartialArtistAppearance(FightingStyle style);
     void GenerateProceduralAppearance(uint32 seed, int faction = -1, const std::string& archetype = "");

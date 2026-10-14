@@ -1477,40 +1477,66 @@ void PlayerObject::ParsePlayerCommand( string theCmd )
 			return;
 		}
 
-		string colName = "";
-		uint32 maxColor = 31;
-		if (boost::iequals(slotStr, "coat"))        { colName = "coatcolor"; maxColor = 31; }
-		else if (boost::iequals(slotStr, "shirt"))   { colName = "shirtcolor"; maxColor = 63; }
-		else if (boost::iequals(slotStr, "pants"))   { colName = "pantscolor"; maxColor = 31; }
-		else if (boost::iequals(slotStr, "shoes"))   { colName = "shoecolor"; maxColor = 15; }
-		else if (boost::iequals(slotStr, "glasses")) { colName = "glassescolor"; maxColor = 15; }
-		else if (boost::iequals(slotStr, "hair"))    { colName = "haircolor"; maxColor = 31; }
-		else if (boost::iequals(slotStr, "skin"))    { colName = "skintone"; maxColor = 31; }
-		else
+		if (!SetRsiDyeColor(slotStr, colorVal))
 		{
 			m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FF0000}[TAILOR] Unknown wardrobe slot. Valid: coat, shirt, pants, shoes, glasses, hair, skin.{/c}"));
 			return;
 		}
 
-		if (colorVal > maxColor) colorVal = maxColor;
-
-		if (Database_Main != nullptr)
-		{
-			try
-			{
-				PreparedStatement stmt((format("UPDATE `rsivalues` SET `%1%` = ?0 WHERE `charId` = ?1") % colName).str());
-				stmt.SetUInt32(0, colorVal);
-				stmt.SetUInt64(1, getCharacterUID());
-				sDatabase.ExecutePrepared(&stmt);
-			} catch (...) {}
-		}
-
-		UpdateAppearance();
 		INFO_LOG(format("Tailor: %1% dyed %2% to color %3%") % m_handle % slotStr % colorVal);
 		m_parent.QueueCommand(make_shared<SystemChatMsg>(
 			(format("{c:00FF00}[TAILOR] Your %1% has been dyed to palette color #%2%! Appearance matrix synchronized.{/c}")
 				% slotStr % colorVal).str()
 		));
+		return;
+	}
+	else if (iequals(command, "wear") || iequals(command, "wardrobe"))
+	{
+		string firstArg;
+		cmdStream >> firstArg;
+		if (firstArg.empty())
+		{
+			m_parent.QueueCommand(make_shared<SystemChatMsg>(
+				"{c:00FFCC}Usage: &wear <coat|shirt|pants|shoes|glasses|gloves|hat> <styleId> [colorId] | &wear <itemIdOrSlot>{/c}"));
+			return;
+		}
+
+		if (isdigit((unsigned char)firstArg[0]))
+		{
+			uint32 idOrSlot = static_cast<uint32>(std::stoul(firstArg));
+			uint8 slotHint = (idOrSlot <= 64) ? static_cast<uint8>(idOrSlot) : 0;
+			if (MountClothingItem(idOrSlot, slotHint))
+			{
+				INFO_LOG(format("Tailor: %1% mounted clothing item %2% (Evasion=%3%, Hacking=+%4%)")
+					% m_handle % idOrSlot % getEvasion() % getBonusHacking());
+				m_parent.QueueCommand(make_shared<SystemChatMsg>(
+					(format("{c:00FF00}[WARDROBE] Equipped clothing item #%1%! (Evasion: %2%, Hacking: +%3%){/c}")
+						% idOrSlot % getEvasion() % getBonusHacking()).str()));
+			}
+			else
+			{
+				m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FF0000}[WARDROBE] Could not mount specified item.{/c}"));
+			}
+			return;
+		}
+
+		uint32 styleVal = 1;
+		int colorVal = -1;
+		cmdStream >> styleVal;
+		if (!(cmdStream >> colorVal)) colorVal = -1;
+
+		if (SetRsiWardrobe(firstArg, static_cast<uint8>(styleVal), colorVal))
+		{
+			INFO_LOG(format("Tailor: %1% equipped wardrobe %2% style %3% color %4%") % m_handle % firstArg % styleVal % colorVal);
+			m_parent.QueueCommand(make_shared<SystemChatMsg>(
+				(format("{c:00FF00}[WARDROBE] Equipped %1% style #%2%! Appearance matrix synchronized.{/c}")
+					% firstArg % styleVal).str()));
+		}
+		else
+		{
+			m_parent.QueueCommand(make_shared<SystemChatMsg>(
+				"{c:FF0000}[WARDROBE] Unknown slot. Valid: coat, shirt, pants, shoes, glasses, gloves, hat, hair.{/c}"));
+		}
 		return;
 	}
 	else if (iequals(command, "capture") || iequals(command, "hacknode"))
@@ -2445,6 +2471,8 @@ void PlayerObject::ParsePlayerCommand( string theCmd )
 	}
 	else if (iequals(command, "update"))
 	{
+		if (Database_Main != nullptr && m_characterUID < 9000000)
+			loadFromDB(false);
 		this->UpdateAppearance();
 		m_parent.QueueCommand(make_shared<SystemChatMsg>("Your appearance has been refreshed."));
 		return;
@@ -3256,6 +3284,8 @@ void PlayerObject::RPC_HandleChat( ByteBuffer &srcCmd )
 									  boost::istarts_with(theMessage, "/locker") ||
 									  boost::istarts_with(theMessage, "/vault") ||
 									  boost::istarts_with(theMessage, "/dye") ||
+									  boost::istarts_with(theMessage, "/wear") ||
+									  boost::istarts_with(theMessage, "/wardrobe") ||
 									  boost::istarts_with(theMessage, "/capture") ||
 									  boost::istarts_with(theMessage, "/hacknode") ||
 									  boost::istarts_with(theMessage, "/socket") ||
@@ -3530,32 +3560,11 @@ void PlayerObject::RPC_HandleChat( ByteBuffer &srcCmd )
             return;
         }
 
-        string colName = "";
-        uint32 maxColor = 31;
-        if (boost::iequals(slotStr, "coat"))        { colName = "coatcolor"; maxColor = 31; }
-        else if (boost::iequals(slotStr, "shirt"))   { colName = "shirtcolor"; maxColor = 63; }
-        else if (boost::iequals(slotStr, "pants"))   { colName = "pantscolor"; maxColor = 31; }
-        else if (boost::iequals(slotStr, "shoes"))   { colName = "shoecolor"; maxColor = 15; }
-        else if (boost::iequals(slotStr, "glasses")) { colName = "glassescolor"; maxColor = 15; }
-        else if (boost::iequals(slotStr, "hair"))    { colName = "haircolor"; maxColor = 31; }
-        else if (boost::iequals(slotStr, "skin"))    { colName = "skintone"; maxColor = 31; }
-        else {
+        if (!SetRsiDyeColor(slotStr, colorVal)) {
             m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FF0000}[TAILOR] Unknown wardrobe slot. Valid: coat, shirt, pants, shoes, glasses, hair, skin.{/c}"));
             return;
         }
 
-        if (colorVal > maxColor) colorVal = maxColor;
-
-        if (Database_Main != nullptr) {
-            try {
-                PreparedStatement stmt((format("UPDATE `rsivalues` SET `%1%` = ?0 WHERE `charId` = ?1") % colName).str());
-                stmt.SetUInt32(0, colorVal);
-                stmt.SetUInt64(1, getCharacterUID());
-                sDatabase.ExecutePrepared(&stmt);
-            } catch (...) {}
-        }
-
-        UpdateAppearance();
         m_parent.QueueCommand(make_shared<SystemChatMsg>(
             (format("{c:00FF00}[TAILOR] Your %1% has been dyed to palette color #%2%! Appearance matrix synchronized.{/c}")
                 % slotStr % colorVal).str()
@@ -3650,6 +3659,7 @@ void PlayerObject::RPC_HandleChat( ByteBuffer &srcCmd )
         m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:00FFFF}/style <kungfu|karate|aikido|street>{/c} - Switch martial arts discipline style"));
         m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:00FFFF}/loadability <id>{/c} - Load ability onto memory track"));
         m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:00FFFF}/target{/c} - Target nearest hostile operative"));
+        m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FFFF55}/wear <slot> <id> | /dye <slot> <color>{/c} - Tailor RSI wardrobe & dye"));
         m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FFFF55}/clock{/c} - Current Matrix time & circadian cycle"));
         m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FFFF55}/heat{/c} - Local disruption heat & security tier"));
         m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FFFF55}/district <slums|dt|it|richland>{/c} - Fast district transit"));
@@ -3671,29 +3681,38 @@ void PlayerObject::RPC_HandleChat( ByteBuffer &srcCmd )
         std::string targetDistrict;
         ss >> targetDistrict;
         boost::to_lower(targetDistrict);
-        LocationVector targetPos(99640.0f, 500.0f, 8350.0f);
+        LocationVector targetPos(99640.0f, 572.0f, 8350.0f);
         std::string distName = "The Slums";
+        uint32 newDistrictId = 1;
 
         if (targetDistrict == "dt" || targetDistrict == "downtown") {
-            targetPos = LocationVector(39216.0f, 500.0f, -21475.0f);
+            targetPos = LocationVector(39216.0f, 572.0f, -21475.0f);
             distName = "Downtown";
+            newDistrictId = 2;
         } else if (targetDistrict == "it" || targetDistrict == "international") {
-            targetPos = LocationVector(-37444.0f, 500.0f, 23659.0f);
+            targetPos = LocationVector(-37444.0f, 572.0f, 23659.0f);
             distName = "International";
+            newDistrictId = 3;
         } else if (targetDistrict == "richland") {
-            targetPos = LocationVector(-15000.0f, 500.0f, -15000.0f);
+            targetPos = LocationVector(-15000.0f, 572.0f, -15000.0f);
             distName = "Richland";
+            newDistrictId = 4;
         } else if (targetDistrict == "slums") {
-            targetPos = LocationVector(99640.0f, 500.0f, 8350.0f);
+            targetPos = LocationVector(99640.0f, 572.0f, 8350.0f);
             distName = "The Slums";
+            newDistrictId = 1;
         } else {
             m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FF5555}Unknown district. Valid: slums, dt, it, richland{/c}"));
             return;
         }
 
         this->setPosition(targetPos);
+        this->setDistrict(newDistrictId);
+        this->saveDataToDB();
         sGame.AnnounceStateUpdate(NULL, make_shared<PositionStateMsg>(m_goId));
-        m_parent.QueueCommand(make_shared<SystemChatMsg>((format("{c:00FFCC}[Transit] Transferred to %1% hardline network.{/c}") % distName).str()));
+        this->FlushAndRefreshAoI();
+        m_parent.QueueState(make_shared<JackoutEffectMsg>(m_goId, false));
+        m_parent.QueueCommand(make_shared<SystemChatMsg>((format("{c:00FFCC}[Transit] Transferred to %1% hardline network (District %2%).{/c}") % distName % newDistrictId).str()));
         return;
     }
 
@@ -4507,14 +4526,17 @@ void PlayerObject::RPC_HandleHardlineTeleport( ByteBuffer &srcCmd )
 		% newlocationName % (int)hardlineDistrict % (int)hardlineLocation;
 	m_parent.QueueCommand(make_shared<SystemChatMsg>(message1.str()));
 
+	if (newY >= -10.0 && newY <= 10.0)
+	{
+		newY = 572.0;
+	}
 	LocationVector newLoc(newX, newY, newZ);
 	newLoc.rot = newRot;
 	this->setPosition(newLoc);
 	this->setDistrict(hardlineDistrict);
+	this->saveDataToDB();
 	sGame.AnnounceStateUpdate(NULL, make_shared<PositionStateMsg>(m_goId));
-	
-	// Link Hardlines properly to spatial network
-	sSpatialGrid.UpdateClientPosition(&m_parent, newLoc.x, newLoc.z);
+	this->FlushAndRefreshAoI();
 
 	// Authentic retail hardline ring & transmission audio FX via JackoutEffectMsg materialization
 	m_parent.QueueState(make_shared<JackoutEffectMsg>(m_goId, false));
@@ -4925,7 +4947,7 @@ void PlayerObject::RPC_HandleItemUnmountRSI(ByteBuffer& srcCmd)
 		slot = srcCmd.read<uint8>();
 	DEBUG_LOG(format("(%1%) %2%:%3% RPC_HandleItemUnmountRSI: slot=%4%")
 		% m_parent.Address() % m_handle % m_goId % (int)slot);
-	UpdateAppearance();
+	UnmountClothingItem(slot);
 	if (m_inventorySystem && !getClient().isBot())
 	{
 		m_inventorySystem->saveToDB();
@@ -4942,7 +4964,7 @@ void PlayerObject::RPC_HandleItemMountRSI(ByteBuffer& srcCmd)
 		slot = srcCmd.read<uint8>();
 	DEBUG_LOG(format("(%1%) %2%:%3% RPC_HandleItemMountRSI: itemGoId=%4% slot=%5%")
 		% m_parent.Address() % m_handle % m_goId % itemGoId % (int)slot);
-	UpdateAppearance();
+	MountClothingItem(itemGoId, slot);
 	if (m_inventorySystem && !getClient().isBot())
 	{
 		m_inventorySystem->saveToDB();

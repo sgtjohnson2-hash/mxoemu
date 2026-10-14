@@ -125,6 +125,14 @@ bool DataLoader::LoadClothing(const std::string& filePath)
 {
     std::ifstream file(filePath.c_str());
     if (!file.is_open())
+        file.open("Data/hd_dump/mxoClothing.csv");
+    if (!file.is_open())
+        file.open("mxoemu_live/Server/Reality/Data/hd_dump/mxoClothing.csv");
+    if (!file.is_open())
+        file.open("../../Data/hd_dump/mxoClothing.csv");
+    if (!file.is_open())
+        file.open("../Data/hd_dump/mxoClothing.csv");
+    if (!file.is_open())
     {
         WARNING_LOG(format("Could not open clothing data file: %1%") % filePath);
         return false;
@@ -145,25 +153,38 @@ bool DataLoader::LoadClothing(const std::string& filePath)
         {
             try {
                 uint32 id = safe_stoul(tokens[0]);
-            std::string name = tokens[5];
-            
-            ItemTemplate templ;
-            templ.templateId = id;
-            templ.type = ITEM_TYPE_CLOTHING;
-            templ.name = name; 
-            templ.rsiDataId = safe_stoul(tokens[6]);
-            
-            // Item 35: Clothing Stat Overhaul
-            if (tokens.size() > 8) {
-                templ.bonusHacking = safe_stoul(tokens[7]);
-                templ.bonusEvasion = safe_stoul(tokens[8]);
-            } else {
-                // Fallback: assign pseudo-random stats based on ID to simulate the overhaul
-                templ.bonusHacking = (id % 10 == 0) ? (id % 5) + 1 : 0;
-                templ.bonusEvasion = (id % 10 == 1) ? (id % 5) + 1 : 0;
-            }
-            
-            m_items[id] = templ;
+                std::string clothesType = tokens[3];
+                std::string name = tokens[5];
+                
+                ItemTemplate templ;
+                templ.templateId = id;
+                templ.type = ITEM_TYPE_CLOTHING;
+                templ.name = name; 
+                templ.rsiDataId = safe_stoul(tokens[6]);
+                if (tokens.size() >= 8) {
+                    templ.rsiColorId = static_cast<uint8>(safe_stoul(tokens[7]) & 0x3F);
+                }
+
+                if (clothesType.find("COAT") != std::string::npos) templ.clothesSlot = "Coat";
+                else if (clothesType.find("SHIRT") != std::string::npos) templ.clothesSlot = "Shirt";
+                else if (clothesType.find("PANTS") != std::string::npos) templ.clothesSlot = "Pants";
+                else if (clothesType.find("SHOES") != std::string::npos) templ.clothesSlot = "Shoes";
+                else if (clothesType.find("GLOVES") != std::string::npos) templ.clothesSlot = "Gloves";
+                else if (clothesType.find("GLASSES") != std::string::npos) templ.clothesSlot = "Glasses";
+                else if (clothesType.find("HAT") != std::string::npos) templ.clothesSlot = "Hat";
+                else if (clothesType.find("LEGGINGS") != std::string::npos) templ.clothesSlot = "Leggings";
+                
+                // Item 35: Clothing Stat Overhaul
+                if (tokens.size() > 8) {
+                    templ.bonusHacking = safe_stoul(tokens[7]);
+                    templ.bonusEvasion = safe_stoul(tokens[8]);
+                } else {
+                    templ.bonusHacking = (id % 10 == 0) ? (id % 5) + 1 : 2;
+                    templ.bonusEvasion = (id % 10 == 1) ? (id % 5) + 1 : 3;
+                }
+                templ.value = 150 + (id % 600);
+                
+                m_items[id] = templ;
             } catch (const std::exception& e) {
                 WARNING_LOG(format("DataLoader: Failed to parse clothing line: %1%") % e.what());
             }
@@ -579,6 +600,90 @@ void DataLoader::EnsureCoreAbilities()
         ammo556.value = 100;
         m_items[1051] = ammo556;
     }
+
+    auto addClothingCore = [this](uint32 id, const std::string& name, const std::string& slot,
+                                  uint32 rsiModel, uint8 rsiColor, uint16 evasion, uint16 hacking, uint32 price)
+    {
+        auto it = m_items.find(id);
+        if (it == m_items.end())
+        {
+            ItemTemplate c;
+            c.templateId = id;
+            c.name = name;
+            c.type = ITEM_TYPE_CLOTHING;
+            c.clothesSlot = slot;
+            c.rsiDataId = rsiModel;
+            c.rsiColorId = rsiColor;
+            c.bonusEvasion = evasion;
+            c.bonusHacking = hacking;
+            c.value = price;
+            m_items[id] = c;
+        }
+        else
+        {
+            it->second.type = ITEM_TYPE_CLOTHING;
+            if (it->second.clothesSlot.empty()) it->second.clothesSlot = slot;
+            if (it->second.rsiDataId == 0) it->second.rsiDataId = rsiModel;
+            if (it->second.bonusEvasion == 0) it->second.bonusEvasion = evasion;
+            if (it->second.bonusHacking == 0) it->second.bonusHacking = hacking;
+            if (it->second.value == 0) it->second.value = price;
+        }
+    };
+
+    auto addWeaponCore = [this](uint32 id, const std::string& name, bool dual, uint16 minDmg, uint16 maxDmg,
+                                float speed, uint16 ammo, float range, uint32 price, uint16 anim)
+    {
+        if (m_items.find(id) == m_items.end())
+        {
+            ItemTemplate w;
+            w.templateId = id;
+            w.name = name;
+            w.type = ITEM_TYPE_WEAPON;
+            w.isDualWield = dual;
+            w.minDamage = minDmg;
+            w.maxDamage = maxDmg;
+            w.attackSpeed = speed;
+            w.maxAmmo = ammo;
+            w.range = range;
+            w.value = price;
+            w.animAttack = anim;
+            m_items[id] = w;
+        }
+    };
+
+    // Starter Operative Clothing Kit
+    addClothingCore(46568, "Area K Trenchcoat", "Coat", 15, 1, 8, 4, 800);
+    addClothingCore(46407, "System Sunglasses", "Glasses", 17, 0, 5, 6, 600);
+    addClothingCore(47243, "Rave Pants", "Pants", 3, 9, 4, 2, 450);
+    addClothingCore(40476, "Caution Shoes", "Shoes", 2, 0, 4, 1, 350);
+
+    // District Hardline Vendor Catalog (10101-10112)
+    addWeaponCore(ITEM_DUAL_BERETTAS, "Dual Beretta 92FS", true, 16, 26, 1.2f, 30, 2500.0f, 1200, 0x0EDD);
+    addClothingCore(ITEM_TRENCHCOAT_ONYX, "Onyx Leather Trenchcoat", "Coat", 14, 9, 12, 5, 1500);
+    addClothingCore(ITEM_DARK_SHADES, "Dark UV Shades", "Glasses", 12, 0, 6, 4, 600);
+    addClothingCore(ITEM_SLUMS_TRENCHCOAT, "Slums Reinforced Duster", "Coat", 8, 1, 10, 3, 1500);
+    addWeaponCore(ITEM_POLISHED_BERETTAS, "Polished Dual Berettas", true, 18, 28, 1.2f, 30, 2500.0f, 1200, 0x0EDD);
+    addClothingCore(ITEM_MIRRORED_SHADES, "Mirrored Operator Shades", "Glasses", 17, 1, 7, 6, 600);
+    addWeaponCore(ITEM_TACTICAL_BERETTAS, "Tactical Dual Berettas", true, 20, 30, 1.1f, 30, 2600.0f, 1200, 0x0EDD);
+    addClothingCore(ITEM_OPERATIVE_DUSTER, "Operative Combat Duster", "Coat", 16, 0, 14, 6, 1500);
+    addClothingCore(ITEM_VISION_SHADES, "Cybernetic Vision Shades", "Glasses", 15, 2, 8, 10, 600);
+    addWeaponCore(ITEM_HEAVY_BERETTAS, "Heavy Custom Berettas", true, 22, 34, 1.3f, 30, 2600.0f, 1200, 0x0EDD);
+    addClothingCore(ITEM_NANOWEAVE_COAT, "Nanoweave Syndicate Coat", "Coat", 18, 0, 16, 8, 1500);
+    addClothingCore(ITEM_POLARIZED_SHADES, "Polarized Matrix Shades", "Glasses", 17, 0, 9, 8, 600);
+
+    // Extended Tailor & Vendor Wardrobe Series (20201-20404)
+    addClothingCore(20201, "Mara Tailored Coat", "Coat", 10, 9, 10, 5, 900);
+    addClothingCore(20202, "Creston Silk Shirt", "Shirt", 6, 16, 5, 5, 500);
+    addClothingCore(20203, "Richland Combat Trousers", "Pants", 4, 9, 7, 3, 600);
+    addClothingCore(20204, "Tactical Stride Boots", "Shoes", 3, 0, 6, 2, 450);
+    addClothingCore(20301, "Zion Operative Longcoat", "Coat", 12, 1, 12, 6, 1100);
+    addClothingCore(20302, "Merovingian Velvet Vest", "Shirt", 7, 22, 6, 8, 750);
+    addClothingCore(20303, "Dark Kevlar Slacks", "Pants", 5, 9, 8, 4, 700);
+    addClothingCore(20304, "Shadow Runner Boots", "Shoes", 4, 0, 8, 3, 550);
+    addClothingCore(20401, "Archivist System Coat", "Coat", 17, 0, 15, 10, 1400);
+    addClothingCore(20402, "Operator Mesh Top", "Shirt", 8, 32, 7, 9, 800);
+    addClothingCore(20403, "Sentinel Armored Pants", "Pants", 2, 9, 10, 5, 850);
+    addClothingCore(20404, "Zero-Trace Combat Gloves", "Gloves", 1, 0, 5, 7, 500);
 }
 
 bool DataLoader::LoadNPCs(const std::string& filePath)

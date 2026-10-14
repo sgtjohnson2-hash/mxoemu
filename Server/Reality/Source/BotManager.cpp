@@ -354,7 +354,7 @@ void BotManager::Update()
             float ry = p->getPosition().y;
             float rz = p->getPosition().z + ((rand() % 40) - 20);
             
-            SpawnBot(1, rx, ry, rz, 1); // 1 = FACTION_MACHINES/Neutral Pedestrian
+            SpawnBot(1, rx, ry, rz, FACTION_NONE); // 0 = FACTION_NONE ("Civilian" Neutral Pedestrian)
         });
     }
 
@@ -631,7 +631,7 @@ void BotManager::PopulateWorld()
         } else if (templ.faction == "Zion") {
             factionId = FACTION_ZION;
         } else {
-            factionId = FACTION_ZION; // Civilians use Zion mechanics (neutral to player by default)
+            factionId = FACTION_NONE; // Civilians use FACTION_NONE (neutral street pedestrians)
         }
 
         uint64 charId = findOrCreateBotCharacter(templ.npcId, templ.x, templ.y, templ.z, factionId);

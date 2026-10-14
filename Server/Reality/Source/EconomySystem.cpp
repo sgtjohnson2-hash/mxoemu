@@ -313,14 +313,20 @@ void EconomySystem::InitializeHardlineVendors()
     std::lock_guard<std::recursive_mutex> lock(m_transactionMutex);
     m_hardlineVendors.clear();
 
-    // 1. Slums District Vendor: Morrell Station Hardline
+    // 1. Slums District Vendor: Morrell Station /Mara Central Hardline
     HardlineVendor vSlums;
     vSlums.vendorId = 1;
     vSlums.staticId = 1;
-    vSlums.hardlineId = 101;
+    vSlums.hardlineId = 152;
     vSlums.districtId = DISTRICT_SLUMS;
     vSlums.name = "Slums Barrens Arms & Apparel";
-    vSlums.inventoryTemplates = { ITEM_DUAL_BERETTAS, ITEM_SLUMS_TRENCHCOAT, ITEM_DARK_SHADES };
+    vSlums.x = 17043.1f;
+    vSlums.y = 572.0f;
+    vSlums.z = 2398.8f;
+    vSlums.inventoryTemplates = {
+        ITEM_DUAL_BERETTAS, ITEM_SLUMS_TRENCHCOAT, ITEM_DARK_SHADES,
+        46568, 46407, 47243, 40476, 1001, 1002, 1050, 20201, 20202, 20203, 20204
+    };
     m_hardlineVendors[1] = vSlums;
 
     // 2. Downtown District Vendor: Mara Central Hardline
@@ -330,7 +336,13 @@ void EconomySystem::InitializeHardlineVendors()
     vDT.hardlineId = 201;
     vDT.districtId = DISTRICT_DOWNTOWN;
     vDT.name = "Downtown Mara High-End Depot";
-    vDT.inventoryTemplates = { ITEM_POLISHED_BERETTAS, ITEM_TRENCHCOAT_ONYX, ITEM_MIRRORED_SHADES };
+    vDT.x = 39216.0f;
+    vDT.y = 572.0f;
+    vDT.z = -21475.0f;
+    vDT.inventoryTemplates = {
+        ITEM_POLISHED_BERETTAS, ITEM_TRENCHCOAT_ONYX, ITEM_MIRRORED_SHADES,
+        1003, 1050, 1051, 20301, 20302, 20303, 20304
+    };
     m_hardlineVendors[2] = vDT;
 
     // 3. International District Vendor: Creston Hardline
@@ -340,7 +352,13 @@ void EconomySystem::InitializeHardlineVendors()
     vIT.hardlineId = 301;
     vIT.districtId = DISTRICT_INTL;
     vIT.name = "Creston Tactical Cybernetics";
-    vIT.inventoryTemplates = { ITEM_TACTICAL_BERETTAS, ITEM_OPERATIVE_DUSTER, ITEM_VISION_SHADES };
+    vIT.x = -37444.0f;
+    vIT.y = 572.0f;
+    vIT.z = 23659.0f;
+    vIT.inventoryTemplates = {
+        ITEM_TACTICAL_BERETTAS, ITEM_OPERATIVE_DUSTER, ITEM_VISION_SHADES,
+        1004, 1050, 1051, 20401, 20402, 20403, 20404
+    };
     m_hardlineVendors[3] = vIT;
 
     // 4. Richland District Vendor: Richland Center Hardline
@@ -350,13 +368,27 @@ void EconomySystem::InitializeHardlineVendors()
     vRichland.hardlineId = 401;
     vRichland.districtId = DISTRICT_RICHLAND;
     vRichland.name = "Richland Black Market Syndicate";
-    vRichland.inventoryTemplates = { ITEM_HEAVY_BERETTAS, ITEM_NANOWEAVE_COAT, ITEM_POLARIZED_SHADES };
+    vRichland.x = -15000.0f;
+    vRichland.y = 572.0f;
+    vRichland.z = -15000.0f;
+    vRichland.inventoryTemplates = {
+        ITEM_HEAVY_BERETTAS, ITEM_NANOWEAVE_COAT, ITEM_POLARIZED_SHADES,
+        1001, 1003, 1050, 1051, 20401, 20402, 20403, 20404
+    };
     m_hardlineVendors[4] = vRichland;
 }
 
 void EconomySystem::LoadVendorsFromCSV(const std::string& filePath)
 {
     std::ifstream file(filePath.c_str());
+    if (!file.is_open())
+        file.open("Data/hd_dump/vendor_items.csv");
+    if (!file.is_open())
+        file.open("mxoemu_live/Server/Reality/Data/hd_dump/vendor_items.csv");
+    if (!file.is_open())
+        file.open("../../Data/hd_dump/vendor_items.csv");
+    if (!file.is_open())
+        file.open("../Data/hd_dump/vendor_items.csv");
     if (!file.is_open())
     {
         WARNING_LOG(format("EconomySystem: Could not open vendor CSV file %1%") % filePath);

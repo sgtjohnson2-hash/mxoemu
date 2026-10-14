@@ -98,11 +98,13 @@ uint32 AgentPossessionManager::PossessCivilian(uint32 civilianGoId, const std::s
             po->sayChat("Anomaly detected. Commencing system overwrite.");
             po->setHandle(agent.agentName);
             po->setFactionName("Machines");
+            po->setLevel(50);
             po->setMaximumHealth(10000);
             po->setCurrentHealth(10000);
-            po->giveItem(500); // Service weapon
+            po->giveItem(1001); // Service weapon
             po->setAgentAppearance();
             po->setCombatStance(true);
+            sGame.AnnounceStateUpdate(NULL, std::make_shared<PlayerAppearanceMsg>(civilianGoId));
 
             if (targetGoId != 0) {
                 po->enterInterlock(targetGoId);
@@ -147,7 +149,7 @@ bool AgentPossessionManager::TriggerEmergencyIntervention(const LocationVector& 
     }
 
     uint32 bestCandidateGoId = 0;
-    float bestDistSq = 250000.0f; // 500m radius
+    float bestDistSq = 2500000000.0f; // 500m radius in cm/world units
 
     if (Has3DWorldSupport()) {
         auto nearbyClients = sSpatialGrid.GetClientsInRadius(pos.x, pos.z, 50000.0f);
@@ -163,6 +165,12 @@ bool AgentPossessionManager::TriggerEmergencyIntervention(const LocationVector& 
             if (dSq < bestDistSq) {
                 bestDistSq = dSq;
                 bestCandidateGoId = botGoId;
+            }
+        }
+        if (bestCandidateGoId == 0 && targetGoId != 0 && sObjMgr.getGOPtrSafe(targetGoId) != nullptr) {
+            auto spawnedCiv = sBotMgr.SpawnSingleBot((float)pos.x + 8.0f, (float)pos.y, (float)pos.z + 8.0f, FACTION_NONE);
+            if (spawnedCiv) {
+                bestCandidateGoId = spawnedCiv->GetPlayerGoId();
             }
         }
     }

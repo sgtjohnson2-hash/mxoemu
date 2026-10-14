@@ -497,11 +497,232 @@ void PlayerObject::InitializeWorld()
 
 void PlayerObject::UpdateAppearance()
 {
+	if (!m_rsi)
+	{
+		m_rsi.reset(new RsiDataMale);
+		const byte defaultRsiValues[] = {0x00,0x0C,0x71,0x48,0x18,0x0C,0xE2,0x00,0x23,0x00,0xB0,0x00,0x40,0x00,0x00};
+		m_rsi->FromBytes(defaultRsiValues, sizeof(defaultRsiValues));
+	}
+	if (m_parent.hasSocket())
+	{
+		m_parent.QueueState(make_shared<PlayerAppearanceMsg>(m_goId));
+	}
+	sGame.AnnounceStateUpdate(NULL, make_shared<PlayerAppearanceMsg>(m_goId));
+}
+
+uint32 PlayerObject::getRsiField(const std::string& field) const
+{
+	if (!m_rsi) return 0;
+	return (*m_rsi)[field];
+}
+
+bool PlayerObject::SetRsiWardrobe(const std::string& partName, uint8 modelId, int colorId)
+{
+	if (!m_rsi)
+	{
+		m_rsi.reset(new RsiDataMale);
+		const byte defaultRsiValues[] = {0x00,0x0C,0x71,0x48,0x18,0x0C,0xE2,0x00,0x23,0x00,0xB0,0x00,0x40,0x00,0x00};
+		m_rsi->FromBytes(defaultRsiValues, sizeof(defaultRsiValues));
+	}
+
+	std::string rsiField = "";
+	std::string dbCol = "";
+	std::string rsiColorField = "";
+	std::string dbColorCol = "";
+	uint8 maxModel = 18;
+	uint8 maxColor = 31;
+
+	if (boost::iequals(partName, "coat") || boost::iequals(partName, "jacket") || boost::iequals(partName, "trench"))
+	{
+		rsiField = "Coat"; dbCol = "coat"; rsiColorField = "CoatColor"; dbColorCol = "coatcolor"; maxModel = 18; maxColor = 31;
+	}
+	else if (boost::iequals(partName, "shirt") || boost::iequals(partName, "top") || boost::iequals(partName, "vest"))
+	{
+		rsiField = "Shirt"; dbCol = "shirt"; rsiColorField = "ShirtColor"; dbColorCol = "shirtcolor"; maxModel = 12; maxColor = 63;
+	}
+	else if (boost::iequals(partName, "pants") || boost::iequals(partName, "trousers") || boost::iequals(partName, "slacks"))
+	{
+		rsiField = "Pants"; dbCol = "pants"; rsiColorField = "PantsColor"; dbColorCol = "pantscolor"; maxModel = 7; maxColor = 31;
+	}
+	else if (boost::iequals(partName, "shoes") || boost::iequals(partName, "boots") || boost::iequals(partName, "footwear"))
+	{
+		rsiField = "Shoes"; dbCol = "shoes"; rsiColorField = "ShoeColor"; dbColorCol = "shoecolor"; maxModel = 6; maxColor = 15;
+	}
+	else if (boost::iequals(partName, "glasses") || boost::iequals(partName, "shades") || boost::iequals(partName, "eyewear"))
+	{
+		rsiField = "Glasses"; dbCol = "glasses"; rsiColorField = "GlassesColor"; dbColorCol = "glassescolor"; maxModel = 18; maxColor = 15;
+	}
+	else if (boost::iequals(partName, "gloves") || boost::iequals(partName, "hands"))
+	{
+		rsiField = "Gloves"; dbCol = "gloves"; maxModel = 3;
+	}
+	else if (boost::iequals(partName, "hat") || boost::iequals(partName, "headgear"))
+	{
+		rsiField = "Hat"; dbCol = "hat"; maxModel = 8;
+	}
+	else if (boost::iequals(partName, "hair"))
+	{
+		rsiField = "Hair"; dbCol = "hair"; rsiColorField = "HairColor"; dbColorCol = "haircolor"; maxModel = 17; maxColor = 31;
+	}
+	else
+	{
+		return false;
+	}
+
+	uint8 safeModel = (modelId > maxModel) ? (modelId % (maxModel + 1)) : modelId;
+	(*m_rsi)[rsiField] = safeModel;
+
+	if (colorId >= 0 && !rsiColorField.empty())
+	{
+		uint8 safeColor = (colorId > (int)maxColor) ? (uint8)(colorId % (maxColor + 1)) : (uint8)colorId;
+		(*m_rsi)[rsiColorField] = safeColor;
+	}
+
 	if (Database_Main != nullptr && m_characterUID < 9000000)
 	{
-		loadFromDB(false);
+		try
+		{
+			sDatabase.Execute(format("UPDATE `rsivalues` SET `%1%` = '%2%' WHERE `charId` = '%3%'")
+				% dbCol % uint32(safeModel) % m_characterUID);
+			if (colorId >= 0 && !dbColorCol.empty())
+			{
+				uint8 safeColor = (colorId > (int)maxColor) ? (uint8)(colorId % (maxColor + 1)) : (uint8)colorId;
+				sDatabase.Execute(format("UPDATE `rsivalues` SET `%1%` = '%2%' WHERE `charId` = '%3%'")
+					% dbColorCol % uint32(safeColor) % m_characterUID);
+			}
+		}
+		catch (...) {}
 	}
-	sGame.AnnounceStateUpdate(NULL,make_shared<PlayerAppearanceMsg>(m_goId));
+
+	UpdateAppearance();
+	return true;
+}
+
+bool PlayerObject::SetRsiDyeColor(const std::string& slotStr, uint32 colorVal)
+{
+	if (!m_rsi)
+	{
+		m_rsi.reset(new RsiDataMale);
+		const byte defaultRsiValues[] = {0x00,0x0C,0x71,0x48,0x18,0x0C,0xE2,0x00,0x23,0x00,0xB0,0x00,0x40,0x00,0x00};
+		m_rsi->FromBytes(defaultRsiValues, sizeof(defaultRsiValues));
+	}
+
+	std::string rsiField = "";
+	std::string colName = "";
+	uint32 maxColor = 31;
+	if (boost::iequals(slotStr, "coat"))        { rsiField = "CoatColor";    colName = "coatcolor";    maxColor = 31; }
+	else if (boost::iequals(slotStr, "shirt"))   { rsiField = "ShirtColor";   colName = "shirtcolor";   maxColor = 63; }
+	else if (boost::iequals(slotStr, "pants"))   { rsiField = "PantsColor";   colName = "pantscolor";   maxColor = 31; }
+	else if (boost::iequals(slotStr, "shoes"))   { rsiField = "ShoeColor";    colName = "shoecolor";    maxColor = 15; }
+	else if (boost::iequals(slotStr, "glasses")) { rsiField = "GlassesColor"; colName = "glassescolor"; maxColor = 15; }
+	else if (boost::iequals(slotStr, "hair"))    { rsiField = "HairColor";    colName = "haircolor";    maxColor = 31; }
+	else if (boost::iequals(slotStr, "skin"))    { rsiField = "SkinTone";     colName = "skintone";     maxColor = 31; }
+	else return false;
+
+	if (colorVal > maxColor) colorVal = maxColor;
+	(*m_rsi)[rsiField] = static_cast<uint8>(colorVal);
+
+	if (Database_Main != nullptr && m_characterUID < 9000000)
+	{
+		try
+		{
+			sDatabase.Execute(format("UPDATE `rsivalues` SET `%1%` = '%2%' WHERE `charId` = '%3%'")
+				% colName % colorVal % m_characterUID);
+		}
+		catch (...) {}
+	}
+
+	UpdateAppearance();
+	return true;
+}
+
+bool PlayerObject::MountClothingItem(uint32 itemGoIdOrTemplateId, uint8 slotHint)
+{
+	uint32 templateId = itemGoIdOrTemplateId;
+	if (m_inventorySystem)
+	{
+		auto item = m_inventorySystem->getItemByGoId(itemGoIdOrTemplateId);
+		if (!item && slotHint > 0)
+			item = m_inventorySystem->getItemBySlot(slotHint);
+		if (!item)
+			item = m_inventorySystem->getItemByTemplate(itemGoIdOrTemplateId);
+		if (item)
+			templateId = item->getTemplateId();
+	}
+
+	const ItemTemplate* tpl = sDataLoader.GetItemTemplate(templateId);
+	if (tpl && tpl->type == ITEM_TYPE_WEAPON)
+	{
+		uint32 equipId = itemGoIdOrTemplateId;
+		if (m_inventorySystem)
+		{
+			if (auto wItem = m_inventorySystem->getItemByTemplate(templateId))
+				equipId = wItem->getGoId();
+		}
+		setEquippedWeaponId(equipId);
+		saveDataToDB();
+		return true;
+	}
+
+	std::string partName = (tpl && !tpl->clothesSlot.empty()) ? tpl->clothesSlot : "";
+	if (partName.empty() && tpl)
+	{
+		std::string n = tpl->name;
+		if (n.find("Coat") != std::string::npos || n.find("Trench") != std::string::npos ||
+		    n.find("Duster") != std::string::npos || n.find("Jacket") != std::string::npos)
+			partName = "Coat";
+		else if (n.find("Glasses") != std::string::npos || n.find("Shades") != std::string::npos)
+			partName = "Glasses";
+		else if (n.find("Pants") != std::string::npos || n.find("Trousers") != std::string::npos ||
+		         n.find("Slacks") != std::string::npos)
+			partName = "Pants";
+		else if (n.find("Shoes") != std::string::npos || n.find("Boots") != std::string::npos)
+			partName = "Shoes";
+		else if (n.find("Shirt") != std::string::npos || n.find("Vest") != std::string::npos ||
+		         n.find("Top") != std::string::npos || n.find("Suit") != std::string::npos)
+			partName = "Shirt";
+		else if (n.find("Gloves") != std::string::npos)
+			partName = "Gloves";
+		else if (n.find("Hat") != std::string::npos)
+			partName = "Hat";
+	}
+	if (partName.empty())
+	{
+		switch (slotHint)
+		{
+			case 1: partName = "Coat"; break;
+			case 2: partName = "Glasses"; break;
+			case 3: partName = "Pants"; break;
+			case 4: partName = "Shoes"; break;
+			case 5: partName = "Shirt"; break;
+			case 6: partName = "Gloves"; break;
+			case 7: partName = "Hat"; break;
+			default: partName = "Coat"; break;
+		}
+	}
+
+	uint8 modelId = (tpl && tpl->rsiDataId > 0) ? static_cast<uint8>(tpl->rsiDataId) : static_cast<uint8>((templateId % 12) + 1);
+	int colorId = (tpl) ? static_cast<int>(tpl->rsiColorId) : -1;
+	return SetRsiWardrobe(partName, modelId, colorId);
+}
+
+bool PlayerObject::UnmountClothingItem(uint8 slotOrPartIndex)
+{
+	std::string partName = "Coat";
+	uint8 defaultModel = 0;
+	switch (slotOrPartIndex)
+	{
+		case 0:
+		case 1: partName = "Coat";    defaultModel = 0; break;
+		case 2: partName = "Glasses"; defaultModel = 0; break;
+		case 3: partName = "Pants";   defaultModel = 1; break;
+		case 4: partName = "Shoes";   defaultModel = 1; break;
+		case 5: partName = "Shirt";   defaultModel = 1; break;
+		case 6: partName = "Gloves";  defaultModel = 0; break;
+		case 7: partName = "Hat";     defaultModel = 0; break;
+		default: partName = "Coat";   defaultModel = 0; break;
+	}
+	return SetRsiWardrobe(partName, defaultModel, -1);
 }
 
 void PlayerObject::setAgentAppearance()
@@ -822,9 +1043,9 @@ void PlayerObject::PopulateWorld()
 void PlayerObject::UpdateAoIStreaming()
 {
 	uint32 now = getMSTime();
-	if (now - m_lastAoIUpdateMs < 1000) // Throttle to 1Hz
+	if (m_lastAoIUpdateMs != 0 && now >= m_lastAoIUpdateMs && (now - m_lastAoIUpdateMs) < 1000) // Throttle to 1Hz
 		return;
-	m_lastAoIUpdateMs = now;
+	m_lastAoIUpdateMs = (now != 0) ? now : 1;
 
 	const float STREAM_IN_RADIUS = 12000.0f;     // 120m: dynamically stream in
 	const float STREAM_OUT_RADIUS_SQ = 18000.0f * 18000.0f; // 180m: cull with hysteresis
@@ -891,6 +1112,56 @@ void PlayerObject::UpdateAoIStreaming()
 			try { m_parent.QueueState(make_shared<DeletePlayerMsg>(knownGoId)); } catch (...) {}
 		}
 	}
+}
+
+void PlayerObject::FlushAndRefreshAoI()
+{
+	const float STREAM_IN_RADIUS = 12000.0f;
+	const float STREAM_OUT_RADIUS_SQ = 18000.0f * 18000.0f;
+	std::vector<uint32> known;
+	{
+		std::lock_guard<std::mutex> l(m_knownMutex);
+		known.assign(m_knownEntities.begin(), m_knownEntities.end());
+	}
+	for (uint32 knownGoId : known)
+	{
+		PlayerObject* otherObj = sObjMgr.getGOPtrSafe(knownGoId);
+		bool cull = (!otherObj || otherObj->isDead() ||
+		             (otherObj->getDistrict() != 0 && m_district != 0 && otherObj->getDistrict() != m_district &&
+		              m_pos.Distance2DSq(otherObj->getPosition()) > STREAM_OUT_RADIUS_SQ) ||
+		             m_pos.Distance2DSq(otherObj->getPosition()) > STREAM_OUT_RADIUS_SQ);
+		if (cull)
+		{
+			noteEntityDeleted(knownGoId);
+			try { m_parent.QueueState(make_shared<DeletePlayerMsg>(knownGoId)); } catch (...) {}
+		}
+	}
+
+	auto nearbyClients = sSpatialGrid.GetClientsInAoI(m_pos.x, m_pos.z, STREAM_IN_RADIUS);
+	size_t spawnedNow = 0;
+	for (GameClient* client : nearbyClients)
+	{
+		if (spawnedNow >= 8) break;
+		if (!client || client == &m_parent) continue;
+		uint32 otherGoId = client->GetPlayerGoId();
+		if (otherGoId == 0 || otherGoId == m_goId) continue;
+
+		if (!knowsEntity(otherGoId))
+		{
+			PlayerObject* otherObj = sObjMgr.getGOPtrSafe(otherGoId);
+			if (otherObj && !otherObj->isDead())
+			{
+				noteEntitySpawned(otherGoId);
+				vector<msgBaseClassPtr> statePackets = otherObj->getCurrentStatePackets();
+				for (const auto& pkt : statePackets)
+				{
+					try { m_parent.QueueState(pkt); } catch (...) {}
+				}
+				spawnedNow++;
+			}
+		}
+	}
+	m_lastAoIUpdateMs = 0;
 }
 
 void PlayerObject::ensureEntityKnown(PlayerObject* other)
@@ -1486,10 +1757,27 @@ unsigned short PlayerObject::getEvasion() const {
     for (auto item : items) {
         const ItemTemplate* tpl = sDataLoader.GetItemTemplate(item->getTemplateId());
         if (tpl && tpl->type == ITEM_TYPE_CLOTHING) {
-            evasion += tpl->bonusEvasion;
+            if (!m_rsi || tpl->clothesSlot.empty() || (*m_rsi)[tpl->clothesSlot] != 0) {
+                evasion += tpl->bonusEvasion;
+            }
         }
     }
     return evasion;
+}
+
+unsigned short PlayerObject::getBonusHacking() const {
+    unsigned short hacking = 0;
+    if (!m_inventorySystem) return hacking;
+    auto items = m_inventorySystem->getAllItems();
+    for (auto item : items) {
+        const ItemTemplate* tpl = sDataLoader.GetItemTemplate(item->getTemplateId());
+        if (tpl && tpl->type == ITEM_TYPE_CLOTHING) {
+            if (!m_rsi || tpl->clothesSlot.empty() || (*m_rsi)[tpl->clothesSlot] != 0) {
+                hacking += tpl->bonusHacking;
+            }
+        }
+    }
+    return hacking;
 }
 
 unsigned short PlayerObject::getPerception() const {

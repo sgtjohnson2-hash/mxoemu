@@ -654,7 +654,6 @@ void PedestrianEcology::ExecuteTier1Uneasy(BotClient* bot, PlayerObject* me, flo
             int rIdx = rand() % m_outbreakRumors.size();
             bot->Say(m_outbreakRumors[rIdx]);
             SpreadRumorFearAura(pos.x, pos.z, 0.08f, 700.0f, me->getGoId());
-            bot->Emote(41);
         }
     }
 }

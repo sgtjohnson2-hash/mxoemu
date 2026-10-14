@@ -2008,7 +2008,7 @@ int RunCombatTestSuite()
 			humanOperative.po->setDistrict(1);
 			humanOperative.po->setPosition(LocationVector(maraCentral->x + 50000.0, maraCentral->y, maraCentral->z + 50000.0));
 			humanClient.captured.clear();
-			{ ByteBuffer far(tpCmd); humanOperative.po->HandleCommand(far); }
+			{ ByteBuffer farBuf(tpCmd); humanOperative.po->HandleCommand(farBuf); }
 			check(humanClient.sawText("You need to be at a hardline to use it") && !humanClient.sawText("[HARDLINE] Transferred"),
 				"0x818e away from a hardline is refused (no teleport from anywhere)");
 			// standing at MaraCentral: allowed
@@ -2909,6 +2909,166 @@ int RunCombatTestSuite()
 					auto rBlocked = sCombatSys.StrikeInterlock(maSession, p2Human.po, maDummy.po, *kfMove, TACTIC_POWER, TACTIC_DEFENSE, true, false);
 					check(rBlocked.isBlocked && maSession.comboStepA == 0, "Blocked strike resets attacker comboStepA back to 0");
 				}
+			}
+
+			// 21. Phase 3: Living MegaCity Ecology & Heatmap-Driven Agent Possession Pipeline
+			{
+				TestHumanClient p3Client;
+				Actor p3Human = makeHuman(&p3Client, 9100270, 25000.0, 25000.0);
+				p3Human.po->setDistrict(1);
+
+				// Spawn a Civilian bystander near the operative at (25020, 572, 25000)
+				Actor p3Civ = makeBot(9200271, 25020.0, 25000.0, 1, 100);
+				p3Civ.po->setHandle("Slums Commuter");
+				p3Civ.po->setFactionName("Civilian");
+
+				check(!sAgentPossessionMgr.IsEntityPossessed(p3Civ.go), "Phase 3 civilian bystander initially unpossessed");
+
+				// Drive local heat at (25000, 25000) above HEAT_TIER_3_HIGH (110.0f) and tick heatmap
+				sMatrixThreatHeatmap.RecordDisruption(25000.0f, 572.0f, 25000.0f, 125.0f, "Phase 3 Escalation Test");
+				check(sMatrixThreatHeatmap.GetTier(25000.0f, 25000.0f) == HEAT_TIER_3_HIGH,
+					"Phase 3 combat disruption elevates cell to HEAT_TIER_3_HIGH (>= 110)");
+
+				uint32 simNowMs = getMSTime() + 60000;
+				sMatrixThreatHeatmap.Update(0.5f, simNowMs);
+				check(sAgentPossessionMgr.IsEntityPossessed(p3Civ.go),
+					"MatrixThreatHeatmap::CheckAndTriggerIntervention automatically overwrites nearby Civilian at HEAT_TIER_3_HIGH");
+
+				byte agentRsi[15] = {0};
+				p3Civ.po->getRsiData(agentRsi, 15);
+				check(p3Civ.po->getLevel() >= 50 && p3Civ.po->getMaximumHealth() >= 5000,
+					"Overwritten Civilian host scales to Level 50 Agent boss stats");
+
+				// Clean up possession
+				sAgentPossessionMgr.HandleAgentDefeat(p3Civ.go, p3Human.go);
+			}
+
+			// 22. Phase 4: Full Equipment, RSI Clothing Mutation & 4-District Vendor Economy
+			{
+				sDataLoader.EnsureCoreAbilities();
+				sEconomySys.InitializeHardlineVendors();
+
+				TestHumanClient p4Client;
+				Actor p4Human = makeHuman(&p4Client, 9100280, 17043.1, 2398.8);
+				p4Human.po->setDistrict(1);
+				p4Human.po->setMaximumHealth(500);
+				p4Human.po->setCurrentHealth(420);
+				p4Human.po->setFightingStyle(FightingStyle::Karate);
+
+				// A. Verify all 4 districts have initialized Hardline vendors with extended catalogs
+				for (uint32 dId = 1; dId <= 4; ++dId)
+				{
+					auto distVendors = sEconomySys.GetVendorsForDistrict(dId);
+					bool hasFullCatalog = false;
+					for (const auto& v : distVendors)
+					{
+						if (v.inventoryTemplates.size() >= 10)
+						{
+							hasFullCatalog = true;
+							break;
+						}
+					}
+					check(hasFullCatalog,
+						(format("District %1% has initialized Hardline vendor with >= 10 catalog items") % dId).str().c_str());
+				}
+
+				// B. Verify Tailor & Starter Clothing templates have valid clothesSlot, rsiDataId, and stat bonuses
+				const ItemTemplate* coatTpl = sDataLoader.GetItemTemplate(20201);
+				const ItemTemplate* glassesTpl = sDataLoader.GetItemTemplate(ITEM_VISION_SHADES);
+				check(coatTpl != nullptr && coatTpl->clothesSlot == "Coat" && coatTpl->rsiDataId == 10 && coatTpl->bonusEvasion == 10,
+					"Template 20201 (Mara Tailored Coat) has ClothesSlot=Coat, rsiDataId=10, bonusEvasion=10");
+				check(glassesTpl != nullptr && glassesTpl->clothesSlot == "Glasses" && glassesTpl->rsiDataId == 15 && glassesTpl->bonusHacking == 10,
+					"Template 10109 (Cybernetic Vision Shades) has ClothesSlot=Glasses, rsiDataId=15, bonusHacking=10");
+
+				// C. Test RPC_HandleItemMountRSI (0x8063) & RPC_HandleItemUnmountRSI (0x8064)
+				p4Human.po->UnmountClothingItem(1); // Clear Coat
+				p4Human.po->UnmountClothingItem(2); // Clear Glasses
+				uint32 baseEvasion = p4Human.po->getEvasion();
+				uint32 baseHacking = p4Human.po->getBonusHacking();
+
+				p4Human.po->giveItem(20201); // Mara Tailored Coat (+10 evasion, +5 hacking)
+				p4Human.po->giveItem(ITEM_VISION_SHADES); // Cybernetic Vision Shades (+8 evasion, +10 hacking)
+				auto coatItem = p4Human.po->getInventory()->getItemByTemplate(20201);
+				auto glassesItem = p4Human.po->getInventory()->getItemByTemplate(ITEM_VISION_SHADES);
+				check(coatItem != nullptr && glassesItem != nullptr, "Operative received coat (20201) and glasses (10109) in inventory");
+
+				if (coatItem && glassesItem)
+				{
+					ByteBuffer mountCoatCmd;
+					mountCoatCmd << (uint8)0x80 << (uint8)0x63 << (uint32)coatItem->getGoId() << (uint8)1;
+					p4Client.captured.clear();
+					p4Human.po->HandleCommand(mountCoatCmd);
+					check(p4Human.po->getRsiField("Coat") == 10, "RPC_HandleItemMountRSI (0x8063) sets RSI Coat=10 for template 20201");
+
+					ByteBuffer mountGlassesCmd;
+					mountGlassesCmd << (uint8)0x80 << (uint8)0x63 << (uint32)glassesItem->getGoId() << (uint8)2;
+					p4Human.po->HandleCommand(mountGlassesCmd);
+					check(p4Human.po->getRsiField("Glasses") == 15, "RPC_HandleItemMountRSI (0x8063) sets RSI Glasses=15 for template 10109");
+					check(p4Human.po->getEvasion() == baseEvasion + 18, "Mounted Coat + Glasses grant +18 Evasion");
+					check(p4Human.po->getBonusHacking() == baseHacking + 15, "Mounted Coat + Glasses grant +15 BonusHacking");
+
+					// Unmount Glasses (slot 2) via 0x8064
+					uint32 hackingWithBoth = p4Human.po->getBonusHacking();
+					ByteBuffer unmountGlassesCmd;
+					unmountGlassesCmd << (uint8)0x80 << (uint8)0x64 << (uint8)2;
+					p4Human.po->HandleCommand(unmountGlassesCmd);
+					check(p4Human.po->getRsiField("Glasses") == 0, "RPC_HandleItemUnmountRSI (0x8064) clears RSI Glasses back to 0");
+					check(p4Human.po->getBonusHacking() == hackingWithBoth - 10, "Unmounting Vision Shades removes its +10 BonusHacking");
+				}
+
+				// D. Test &wear and &dye mutate RSI directly without clobbering health or fighting style
+				ByteBuffer wearCmd;
+				wearCmd << (uint8)0x28 << (uint8)0x10 << (uint16)swap16(8) << (uint32)0;
+				wearCmd.writeString("&wear coat 1 5");
+				p4Client.captured.clear();
+				p4Human.po->HandleCommand(wearCmd);
+				check(p4Human.po->getRsiField("Coat") == 1 && p4Human.po->getRsiField("CoatColor") == 5,
+					"&wear coat 1 5 mutates in-memory RSI Coat=1 and CoatColor=5");
+				check(p4Human.po->getCurrentHealth() == 420 && p4Human.po->getFightingStyle() == FightingStyle::Karate,
+					"UpdateAppearance() preserves in-memory health (420) and fightingStyle (Karate) without DB clobbering");
+			}
+
+			// 23. Phase 5: Multi-District World Streaming, AoI Flush & Coordinate District Detection
+			{
+				// A. Verify DetectDistrictFromCoordinates across all 4 MegaCity sectors
+				check(PlayerObject::DetectDistrictFromCoordinates(-15000.0, -15000.0) == 4,
+					"DetectDistrictFromCoordinates maps (-15000, -15000) to District 4 (Richland)");
+				check(PlayerObject::DetectDistrictFromCoordinates(39216.0, -21475.0) == 2,
+					"DetectDistrictFromCoordinates maps (39216, -21475) to District 2 (Downtown)");
+				check(PlayerObject::DetectDistrictFromCoordinates(-37444.0, 23659.0) == 3,
+					"DetectDistrictFromCoordinates maps (-37444, 23659) to District 3 (International)");
+				check(PlayerObject::DetectDistrictFromCoordinates(99640.0, 8350.0) == 1,
+					"DetectDistrictFromCoordinates maps (99640, 8350) to District 1 (The Slums)");
+
+				// B. Verify /district and Hardline Teleport flush stale AoI views (DeletePlayerMsg) and spawn new district entities
+				TestHumanClient p5Client;
+				Actor p5Human = makeHuman(&p5Client, 9100290, 99640.0, 8350.0);
+				p5Human.po->setDistrict(1);
+				p5Human.po->setAdmin(true);
+
+				// Create a bot in The Slums (99650, 8350) and a bot in Downtown (39220, -21475)
+				Actor slumsBot = makeBot(9200291, 99650.0, 8350.0, 1, 100);
+				Actor dtBot = makeBot(9200292, 39220.0, -21475.0, 1, 100);
+				sSpatialGrid.UpdateClientPosition(slumsBot.client, 99650.0, 8350.0);
+				sSpatialGrid.UpdateClientPosition(dtBot.client, 39220.0, -21475.0);
+
+				p5Human.po->FlushAndRefreshAoI();
+				check(p5Human.po->knowsEntity(slumsBot.go) && !p5Human.po->knowsEntity(dtBot.go),
+					"Before transit: Operative in Slums knows slumsBot and does not know distant dtBot");
+
+				// Execute /district dt
+				ByteBuffer distCmd;
+				distCmd << (uint8)0x28 << (uint8)0x10 << (uint16)swap16(8) << (uint32)0;
+				distCmd.writeString("/district dt");
+				p5Client.captured.clear();
+				p5Human.po->HandleCommand(distCmd);
+
+				check(p5Human.po->getDistrict() == 2, "/district dt updates m_district to 2 (Downtown)");
+				check(std::abs(p5Human.po->getPosition().y - 572.0) < 0.5, "/district dt clamps destination Y elevation to 572.0");
+				check(!p5Human.po->knowsEntity(slumsBot.go),
+					"FlushAndRefreshAoI() removes out-of-range slumsBot from m_knownEntities on transit");
+				check(p5Human.po->knowsEntity(dtBot.go),
+					"FlushAndRefreshAoI() spawns nearby dtBot into m_knownEntities on arrival in Downtown");
 			}
 		}
 	}

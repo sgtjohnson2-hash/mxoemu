@@ -1555,6 +1555,17 @@ CombatSystem::AttackResult CombatSystem::ResolveAttack(PlayerObject* attacker, P
 
 		// H1: the kill reward is paid by PlayerObject::die(), which runs for every death
 		// (zero-delay deaths inside takeDamage and the delayed takedown deaths alike).
+		if (GameServer::getSingletonPtr() != nullptr && MatrixThreatHeatmap::getSingletonPtr() != nullptr &&
+			!attacker->getClient().isBot() && target->getHandle().find("Dojo") == std::string::npos)
+		{
+			LocationVector aPos = attacker->getPosition();
+			float heatAmt = (move.dmgType == DAMAGE_RANGED || move.dmgType == DAMAGE_BALLISTIC) ? 8.0f : 5.0f;
+			sMatrixThreatHeatmap.RecordDisruption((float)aPos.x, (float)aPos.y, (float)aPos.z, heatAmt, move.name);
+			if (target->getHandle().find("Agent") == std::string::npos)
+			{
+				sMatrixThreatHeatmap.CheckAndTriggerIntervention((float)aPos.x, (float)aPos.y, (float)aPos.z, attacker->getGoId());
+			}
+		}
 	}
 	return res;
 }

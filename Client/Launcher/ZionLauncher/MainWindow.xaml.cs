@@ -2607,8 +2607,6 @@ namespace ZionLauncher
                     LoadCommunityWeb(charArg);
                     txtStatus.Foreground = Brushes.Lime;
                     txtStatus.Text = $"[JACKED IN] Operative '{charArg}' online. Construct Community Terminal active.";
-                    this.WindowState = WindowState.Normal;
-                    this.Activate();
                 });
             }
             catch (Exception ex)
@@ -2617,9 +2615,40 @@ namespace ZionLauncher
             }
         }
 
+        private void TryRunDockUiHelper()
+        {
+            try
+            {
+                string[] candidates = new[]
+                {
+                    Path.Combine(GameRoot, "harness32.exe"),
+                    Path.Combine(GameRoot, "tools", "harness32.exe"),
+                    Path.Combine(ClientDir, "harness32.exe")
+                };
+                foreach (var exe in candidates)
+                {
+                    if (File.Exists(exe))
+                    {
+                        var psi = new ProcessStartInfo
+                        {
+                            FileName = exe,
+                            Arguments = "--dock-ui",
+                            WorkingDirectory = Path.GetDirectoryName(exe) ?? GameRoot,
+                            CreateNoWindow = true,
+                            UseShellExecute = false
+                        };
+                        using var p = Process.Start(psi);
+                        p?.WaitForExit(4000);
+                        return;
+                    }
+                }
+            }
+            catch { }
+        }
+
         /// <summary>
         /// The retail launcher (mxowrap) re-runs the game as %TEMP%\MatrixOnline.N\matrix.exe. Find that child, give it the
-        /// game dir + hook + dbghelp, and inject the hook (mirrors tools/harness32.cpp CheckAndHookChildProcesses).
+        /// game dir + hook + dbghelp, inject the hook, and apply widescreen HUD docking once the 3D window loads.
         /// </summary>
         private void WatchRetailChildAndHook(int parentPid, string hookDll, string clientDir)
         {
@@ -2652,7 +2681,16 @@ namespace ZionLauncher
 
                         if (InjectDll(proc, hookDll)) done.Add(proc.Id);
                     }
-                    if (done.Count > 0) { Thread.Sleep(2000); if (done.Count > 0) return; }
+                    if (done.Count > 0)
+                    {
+                        // Wait for the 3D world to stream in and dock the widescreen HUD at 20s, 40s, and 60s
+                        for (int pass = 0; pass < 3; pass++)
+                        {
+                            Thread.Sleep(20000);
+                            TryRunDockUiHelper();
+                        }
+                        return;
+                    }
                 }
             }
             catch { }

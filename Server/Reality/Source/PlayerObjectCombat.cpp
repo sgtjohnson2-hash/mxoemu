@@ -46,6 +46,14 @@ void PlayerObject::LoadHardlinesFromCSV(const std::string& filePath)
 {
     std::ifstream file(filePath.c_str());
     if (!file.is_open())
+        file.open("Data/hd_dump/hardlines.csv");
+    if (!file.is_open())
+        file.open("mxoemu_live/Server/Reality/Data/hd_dump/hardlines.csv");
+    if (!file.is_open())
+        file.open("../../Data/hd_dump/hardlines.csv");
+    if (!file.is_open())
+        file.open("../Data/hd_dump/hardlines.csv");
+    if (!file.is_open())
     {
         WARNING_LOG(format("PlayerObject: Could not open hardlines CSV: %1%") % filePath);
         return;
@@ -92,6 +100,8 @@ void PlayerObject::LoadHardlinesFromCSV(const std::string& filePath)
                 std::string yStr = tokens[5];
                 std::replace(yStr.begin(), yStr.end(), ',', '.');
                 node.y = std::stod(yStr);
+                if (node.y >= -10.0 && node.y <= 10.0)
+                    node.y = 572.0;
 
                 std::string zStr = tokens[6];
                 std::replace(zStr.begin(), zStr.end(), ',', '.');
@@ -141,6 +151,8 @@ void PlayerObject::LoadHardlines()
                 node.districtId = field[0].GetUInt32();
                 node.x = field[1].GetDouble();
                 node.y = field[2].GetDouble();
+                if (node.y >= -10.0 && node.y <= 10.0)
+                    node.y = 572.0;
                 node.z = field[3].GetDouble();
                 node.rot = field[4].GetDouble();
                 node.hardlineId = field[5].GetUInt32();
@@ -200,6 +212,19 @@ const HardlineNode* PlayerObject::GetNearestHardline(uint32 districtId, double x
         }
     }
     return nearest;
+}
+
+uint8 PlayerObject::DetectDistrictFromCoordinates(double x, double z)
+{
+    // Check canonical MegaCity district sectors:
+    // 1 = The Slums (East / Barrens), 2 = Downtown (Central / Mara), 3 = International (North-West / Creston), 4 = Richland (South-West)
+    if (x >= 60000.0)
+        return 1; // The Slums
+    if (x >= 0.0 && z >= -40000.0)
+        return 2; // Downtown
+    if (x < 0.0 && z >= 0.0)
+        return 3; // International
+    return 4;     // Richland
 }
 
 // ---------------------------------------------------------------------------

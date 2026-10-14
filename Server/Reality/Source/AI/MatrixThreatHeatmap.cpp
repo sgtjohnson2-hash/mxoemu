@@ -1,4 +1,5 @@
 #include "MatrixThreatHeatmap.h"
+#include "AgentPossessionManager.h"
 #include "Config.h"
 #include "Log.h"
 #include "BotManager.h"
@@ -29,6 +30,7 @@ void MatrixThreatHeatmap::Initialize()
         cell.heat = 0.0f;
         cell.peakHeat = 0.0f;
         cell.lastIncidentMs = 0;
+        cell.lastInterventionMs = 0;
     }
     std::fill(m_diffuseBuffer.begin(), m_diffuseBuffer.end(), 0.0f);
     m_sabotagedDistricts.clear();
@@ -83,19 +85,57 @@ void MatrixThreatHeatmap::RecordDisruption(float worldX, float worldY, float wor
     int gx, gz;
     WorldToGrid(worldX, worldZ, gx, gz);
 
-    std::lock_guard<std::recursive_mutex> lock(m_mutex);
-    int idx = gz * GRID_WIDTH + gx;
-    DisruptionCell& cell = m_grid[idx];
+    float newHeat = 0.0f;
+    {
+        std::lock_guard<std::recursive_mutex> lock(m_mutex);
+        int idx = gz * GRID_WIDTH + gx;
+        DisruptionCell& cell = m_grid[idx];
 
-    cell.heat += amount;
-    if (cell.heat > cell.peakHeat) cell.peakHeat = cell.heat;
-    cell.lastIncidentMs = getMSTime();
-    if (worldY > 100.0f) {
-        cell.lastY = worldY;
+        cell.heat += amount;
+        if (cell.heat > cell.peakHeat) cell.peakHeat = cell.heat;
+        cell.lastIncidentMs = getMSTime();
+        if (worldY > 100.0f) {
+            cell.lastY = worldY;
+        }
+        newHeat = cell.heat;
+
+        DEBUG_LOG(format("MatrixThreatHeatmap: Recorded +%1% heat at grid (%2%, %3%) from [%4%]. Total heat: %5%") 
+                  % amount % gx % gz % cause % cell.heat);
     }
 
-    DEBUG_LOG(format("MatrixThreatHeatmap: Recorded +%1% heat at grid (%2%, %3%) from [%4%]. Total heat: %5%") 
-              % amount % gx % gz % cause % cell.heat);
+    if (newHeat >= 110.0f) {
+        CheckAndTriggerIntervention(worldX, worldY, worldZ, 0);
+    }
+}
+
+bool MatrixThreatHeatmap::CheckAndTriggerIntervention(float worldX, float worldY, float worldZ, uint32 targetGoId)
+{
+    int gx, gz;
+    WorldToGrid(worldX, worldZ, gx, gz);
+
+    float localHeat = 0.0f;
+    {
+        std::lock_guard<std::recursive_mutex> lock(m_mutex);
+        int idx = gz * GRID_WIDTH + gx;
+        DisruptionCell& cell = m_grid[idx];
+        uint32 districtId = GetDistrictAt(worldX, worldZ);
+        float thresholdMultiplier = IsDistrictSabotaged(districtId) ? 2.5f : 1.0f;
+        if (cell.heat < 60.0f * thresholdMultiplier) {
+            return false;
+        }
+        uint32 now = getMSTime();
+        if (cell.lastInterventionMs != 0 && now >= cell.lastInterventionMs && (now - cell.lastInterventionMs) < 60000) {
+            return false;
+        }
+        cell.lastInterventionMs = (now != 0) ? now : 1;
+        localHeat = cell.heat;
+    }
+
+    if (AgentPossessionManager::getSingletonPtr() != nullptr) {
+        LocationVector pos(worldX, (worldY > 100.0f) ? worldY : 572.0f, worldZ);
+        return sAgentPossessionMgr.TriggerEmergencyIntervention(pos, localHeat, targetGoId, false);
+    }
+    return false;
 }
 
 float MatrixThreatHeatmap::GetHeat(float worldX, float worldZ) const
