@@ -688,8 +688,8 @@ async function handleCommunityRequest(req, res, pathname, urlObj, parseJsonBody,
                 { district_id: 3, name: "International", controlling_faction: "Machine", faction_id: 2, is_regen_bonus_pct: 5, info_drop_bonus_pct: 5 },
                 { district_id: 4, name: "Richland", controlling_faction: "Machine", faction_id: 2, is_regen_bonus_pct: 5, info_drop_bonus_pct: 5 }
             ];
-            if (g_DbPool) {
-                const [rows] = await g_DbPool.query(
+            if (pool) {
+                const [rows] = await pool.query(
                     "SELECT district_id, district_name, controlling_faction, faction_name FROM district_control ORDER BY district_id ASC"
                 ).catch(() => [[]]);
                 if (rows && rows.length > 0) {
@@ -699,7 +699,8 @@ async function handleCommunityRequest(req, res, pathname, urlObj, parseJsonBody,
                         controlling_faction: r.faction_name,
                         faction_id: r.controlling_faction,
                         is_regen_bonus_pct: 5,
-                        info_drop_bonus_pct: 5
+                        info_drop_bonus_pct: 5,
+                        active_buff: r.faction_name + " Territory Control (+5% IS Regen, +5% $Info Drops)"
                     }));
                 }
             }
