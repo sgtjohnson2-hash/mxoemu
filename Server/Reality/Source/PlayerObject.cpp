@@ -202,6 +202,38 @@ void PlayerObject::loadFromDB( bool updatePos )
 			m_lvl = 1;
 		if (m_district == 0)
 			m_district = 1;
+
+		try
+		{
+			scoped_ptr<QueryResult> attrRes(sDatabase.Query(
+				format("SELECT `belief`, `focus`, `perception`, `reason`, `vitality` FROM `characters` WHERE `charId` = '%1%' LIMIT 1") % m_characterUID));
+			if (attrRes)
+			{
+				Field *af = attrRes->Fetch();
+				if (af)
+				{
+					uint16 b = af[0].GetUInt16();
+					uint16 f = af[1].GetUInt16();
+					uint16 p = af[2].GetUInt16();
+					uint16 r = af[3].GetUInt16();
+					uint16 v = af[4].GetUInt16();
+					// client.dll 0x625c5320 / 0x625c5350: MinValue = 7, BaseBudget = 45 + (Level - 1).
+					// If all 5 attributes are the legacy unallocated default of 10 (sum 50) on a character
+					// whose level budget is < 50, normalize to 8 (sum 40) so unspent points are available.
+					uint32 budget = 45u + (m_lvl > 1 ? uint32(m_lvl - 1) : 0u);
+					if (b == 10 && f == 10 && p == 10 && r == 10 && v == 10 && budget < 50)
+					{
+						b = f = p = r = v = 8;
+					}
+					m_belief     = (b >= 7) ? b : 8;
+					m_focus      = (f >= 7) ? f : 8;
+					m_perception = (p >= 7) ? p : 8;
+					m_reason     = (r >= 7) ? r : 8;
+					m_vitality   = (v >= 7) ? v : 8;
+				}
+			}
+		}
+		catch (...) {}
 	}
 	//grab data from rsi table
 	{
@@ -447,6 +479,18 @@ void PlayerObject::saveDataToDB()
 		m_storeCntr++;
 	}
 
+	try
+	{
+		sDatabase.Execute(format("UPDATE `characters` SET `belief` = '%1%', `focus` = '%2%', `perception` = '%3%', `reason` = '%4%', `vitality` = '%5%' WHERE `charId` = '%6%'")
+			% uint32(m_belief)
+			% uint32(m_focus)
+			% uint32(m_perception)
+			% uint32(m_reason)
+			% uint32(m_vitality)
+			% m_characterUID );
+	}
+	catch (...) {}
+
 	if (m_inventorySystem && !m_parent.isBot())
 	{
 		m_inventorySystem->saveToDB();
@@ -468,17 +512,29 @@ void PlayerObject::setOnlineStatus( bool isOnline )
 		% m_characterUID );
 }
 
+void PlayerObject::sendAttributes()
+{
+	// Send primary character attributes (RPC 0x80b2, type 0x0208)
+	// Citations: hd_reference/hds/world/ServerPackets/PlayerPackets.cs:99-107, client.dll 0x6213ae90
+	m_parent.QueueCommand(make_shared<PlayerAttributeMsg>(0x004e, m_focus));      // Focus (78)
+	m_parent.QueueCommand(make_shared<PlayerAttributeMsg>(0x0052, m_belief));     // Belief (82)
+	m_parent.QueueCommand(make_shared<PlayerAttributeMsg>(0x0054, m_vitality));   // Vitality (84)
+	m_parent.QueueCommand(make_shared<PlayerAttributeMsg>(0x004f, m_perception)); // Perception (79)
+	m_parent.QueueCommand(make_shared<PlayerAttributeMsg>(0x0051, m_reason));     // Reason (81)
+}
+
 void PlayerObject::InitializeWorld()
 {
 	m_parent.QueueCommand(make_shared<LoadWorldCmd>((LoadWorldCmd::mxoLocation)m_district,"Massive"));
 	m_parent.QueueCommand(make_shared<SetExperienceCmd>(m_exp));
 	m_parent.QueueCommand(make_shared<SetInformationCmd>(m_cash));
-/*	m_parent.QueueCommand(make_shared<HexGenericMsg>("80b24e0008000802"));
-	m_parent.QueueCommand(make_shared<HexGenericMsg>("80b2520005000802"));
-	m_parent.QueueCommand(make_shared<HexGenericMsg>("80b2540008000802"));
-	m_parent.QueueCommand(make_shared<HexGenericMsg>("80b24f0008000802"));
-	m_parent.QueueCommand(make_shared<HexGenericMsg>("80b251000b000802"));
-	m_parent.QueueCommand(make_shared<HexGenericMsg>("80b2110001000802"));
+
+	if (m_characterUID < 9000000)
+	{
+		sendAttributes();
+	}
+
+/*	m_parent.QueueCommand(make_shared<HexGenericMsg>("80b2110001000802"));
 	m_parent.QueueCommand(make_shared<HexGenericMsg>("80bc4503110000020000001100010000000000000000"));
 	m_parent.QueueCommand(make_shared<HexGenericMsg>("80bc450002000002000000cc00000000000000000000"));
 	m_parent.QueueCommand(make_shared<HexGenericMsg>("80bc1500030000f70300000802000000000000000000"));
@@ -1448,6 +1504,7 @@ void PlayerObject::HandleCommand( ByteBuffer &srcCmd )
 		m_RPCshort[0x80a6] = &PlayerObject::RPC_HandleMissionAbort;
 		m_RPCshort[0x808c] = &PlayerObject::RPC_HandleMissionInvite;
 		m_RPCshort[0x8071] = &PlayerObject::RPC_HandlePartyLeave;
+		m_RPCshort[0x80b5] = &PlayerObject::RPC_HandleApplyAttributes;
 		m_RPCshort[0x80b7] = &PlayerObject::RPC_HandleUpgradeAbility;
 		m_RPCshort[0x810e] = &PlayerObject::RPC_HandleVendorBuy;
 		m_RPCshort[0x8110] = &PlayerObject::RPC_HandleVendorClose;

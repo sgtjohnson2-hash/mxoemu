@@ -79,6 +79,7 @@ public:
 	~PlayerObject();
 
 	void InitializeWorld();
+	void sendAttributes();
 	void SpawnSelf();
 	void PopulateWorld();
 	void UpdateAoIStreaming();
@@ -378,6 +379,7 @@ private:
 	void RPC_HandleMissionInvite( ByteBuffer &srcCmd );
 	void RPC_HandlePartyLeave( ByteBuffer &srcCmd );
 	void RPC_HandleMemoryChangeTactic( ByteBuffer &srcCmd );
+	void RPC_HandleApplyAttributes( ByteBuffer &srcCmd );
 	void RPC_HandleUpgradeAbility( ByteBuffer &srcCmd );
 	void RPC_HandleMissionAbort( ByteBuffer &srcCmd );
 	void RPC_HandleMissionAccept( ByteBuffer &srcCmd );
@@ -403,6 +405,17 @@ private:
 	void RPC_HandleCameraYaw( ByteBuffer &srcCmd );
 
 public:
+	uint16 getBelief() const { return m_belief; }
+	void setBelief(uint16 v) { m_belief = v; }
+	uint16 getFocus() const { return m_focus; }
+	void setFocus(uint16 v) { m_focus = v; }
+	uint16 getPerceptionAttr() const { return m_perception; }
+	void setPerception(uint16 v) { m_perception = v; }
+	uint16 getReason() const { return m_reason; }
+	void setReason(uint16 v) { m_reason = v; }
+	uint16 getVitality() const { return m_vitality; }
+	void setVitality(uint16 v) { m_vitality = v; }
+
 	// StatusEffectManager
 	void sendHealthUpdate(bool isHeal, int amount) { sendHealthUpdate(); }
     void sendHealthUpdate();
@@ -428,6 +441,7 @@ public:
     // stand back up after a takedown like any bot; "&dojo leave" removes the caller's partners.
     uint32 m_dojoOwnerGoId = 0;
     bool IsNearVendor(uint32 itemTemplateId = 0) const;
+    bool isSpawnedInWorld() const { return m_spawnedInWorld; }
     uint32 m_lastCCMs = 0; // when the last crowd-control effect landed (diminishing returns reset)
     
     std::string m_crewName;
@@ -538,6 +552,12 @@ private:
     int m_maskedFaction = -1;
     uint32 m_maskExpiresMs = 0;
 
+    uint16 m_belief = 8;
+    uint16 m_focus = 8;
+    uint16 m_perception = 8;
+    uint16 m_reason = 8;
+    uint16 m_vitality = 8;
+
     std::unordered_set<uint32> m_knownEntities;
     mutable std::mutex m_knownMutex;
 public:
@@ -552,4 +572,4 @@ public:
     float getCameraYaw() const { return m_cameraYaw; }
 };
 
-#endif
+#endif

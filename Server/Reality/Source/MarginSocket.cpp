@@ -500,6 +500,7 @@ void MarginSocket::ProcessData( const byte *buf,size_t len )
 		}
 	case MS_LoadCharacterRequest:
 		{
+			uint64 prevCharId = charId;
 			// Try reading 8-byte charId from packet header (bytes 1..8)
 			if (packetData.remaining() >= sizeof(charId))
 			{
@@ -517,6 +518,13 @@ void MarginSocket::ProcessData( const byte *buf,size_t len )
 				}
 			}
 
+			// If packet charId is still 0, preserve charId set earlier in the session (e.g. HandleCreateCharacterRequest)
+			if (charId == 0 && prevCharId != 0)
+			{
+				charId = prevCharId;
+				INFO_LOG(format("MS_LoadCharacterRequest: Using session charId %1% from character creation") % charId);
+			}
+
 			// Scope for db ptr
 			{
 				scoped_ptr<QueryResult> result;
@@ -529,7 +537,7 @@ void MarginSocket::ProcessData( const byte *buf,size_t len )
 				}
 				else
 				{
-					PreparedStatement stmt("SELECT `charId`, `userId`, `handle`, `firstName`, `lastName`, `background` FROM `characters` WHERE `userId` = ?0 ORDER BY `charId` ASC LIMIT 1");
+					PreparedStatement stmt("SELECT `charId`, `userId`, `handle`, `firstName`, `lastName`, `background` FROM `characters` WHERE `userId` = ?0 ORDER BY `charId` DESC LIMIT 1");
 					stmt.SetUInt32(0, m_userId);
 					result.reset(sDatabase.QueryPrepared(&stmt));
 				}

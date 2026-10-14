@@ -856,6 +856,51 @@ public:
 	~AbilityUpgradeRspMsg() {}
 };
 
+// Primary character attribute sync (RPC 0x80b2, type 0x0208)
+// Primary source citations:
+// 1. hd_reference/hds/world/ServerPackets/PlayerPackets.cs:99-107 (SendPlayerAttributes)
+// 2. Client/client.dll 0x6217a152 -> parser 0x6213ae90 -> handler 0x621e8bc0:
+//    attrId (u16), value (u16), flags (u8 = 0x08), type (u8 = 0x02)
+class PlayerAttributeMsg : public StaticMsg
+{
+public:
+	PlayerAttributeMsg(uint16 attrId, uint16 value)
+	{
+		m_buf.clear();
+		m_buf << uint16(swap16(0x80b2));
+		m_buf << uint16(attrId);
+		m_buf << uint16(value);
+		m_buf << uint8(0x08);
+		m_buf << uint8(0x02);
+	}
+	~PlayerAttributeMsg() {}
+};
+
+// Character attribute allocation response (RPC 0x80b6)
+// Primary source citations:
+// 1. Client/client.dll 0x6217a174 (RPC 0x80b6 dispatcher) -> parser 0x6213b450 -> handler 0x621e8c30 -> UI callback 0x625c52b0:
+//    After 0x80b6: uint16 arrayOffset (0x0006), uint32 resultCode (0 = success),
+//    uint16 count, followed by count * 6-byte entries: [uint8(0), uint32 attrId, uint8 newValue]
+class AttributeUpgradeRspMsg : public StaticMsg
+{
+public:
+	AttributeUpgradeRspMsg(uint32 resultCode, const std::vector<std::pair<uint32, uint8>>& attrs)
+	{
+		m_buf.clear();
+		m_buf << uint16(swap16(0x80b6));
+		m_buf << uint16(0x0006); // offset from payload start to count field (2 + 4 = 6)
+		m_buf << uint32(resultCode);
+		m_buf << uint16(attrs.size());
+		for (const auto& kv : attrs)
+		{
+			m_buf << uint8(0);
+			m_buf << uint32(kv.first);
+			m_buf << uint8(kv.second);
+		}
+	}
+	~AttributeUpgradeRspMsg() {}
+};
+
 //self-view "combat mode on", byte-exact from HDS CombatHandler.ProcessRequestCloseCombat
 //(captured from the live game; the attribute layout inside is not decoded)
 class SelfCombatModeOnMsg : public StaticMsg
@@ -1049,6 +1094,39 @@ struct ILRoundStatus
 	int16 opponentDamageTaken = 0;
 	uint32 lockTimeMs = 0;
 };
+// Inventory RPCs, server -> client. Field names from the client's own printers (client.dll 7.6005):
+// 0x5E (FUN_6214f370): @1 u16 Slot, @3 u32 TypeID (item GOID), @7 u32 Data (stack/purity bits,
+//                      same as margin section 0x05), @0xB u8 PersonalInventoryItem
+// 0x5F (FUN_6214f4f0): @1 u16 Slot, @3 u8 PersonalInventoryItem
+// 0x65 (FUN_621538e0): @1 u16 SlotA, @3 u16 SlotB, @5 u8 IsCentralStorageItem (HDS sendInventoryItemMove)
+class InventoryItemAddMsg : public StaticMsg
+{
+public:
+	InventoryItemAddMsg(uint16 slot, uint32 typeId, uint32 data)
+	{
+		m_buf.clear();
+		m_buf << uint8(0x5E) << uint16(slot) << uint32(typeId) << uint32(data) << uint8(1);
+	}
+};
+class InventoryItemRemoveMsg : public StaticMsg
+{
+public:
+	explicit InventoryItemRemoveMsg(uint16 slot)
+	{
+		m_buf.clear();
+		m_buf << uint8(0x5F) << uint16(slot) << uint8(1);
+	}
+};
+class InventoryItemMoveMsg : public StaticMsg
+{
+public:
+	InventoryItemMoveMsg(uint16 slotA, uint16 slotB)
+	{
+		m_buf.clear();
+		m_buf << uint8(0x65) << uint16(slotA) << uint16(slotB) << uint8(0);
+	}
+};
+
 class ILRoundStatusMsg : public StaticMsg
 {
 public:

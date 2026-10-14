@@ -398,6 +398,7 @@ void PlayerObject::RPC_HandleReadyForSpawn( ByteBuffer &srcCmd )
 	if (!m_spawnedInWorld)
 	{
 		this->SpawnSelf();
+		this->sendAttributes();
 	}
 }
 
@@ -1815,6 +1816,19 @@ void PlayerObject::ParsePlayerCommand( string theCmd )
 			m_parent.QueueCommand(make_shared<SystemChatMsg>(ok
 				? (format("{c:00FF00}Dojo: 1v1 %1% spawned and engaged in close combat interlock!{/c}") % styleLabel).str()
 				: "{c:FF0000}Dojo: could not spawn an enemy.{/c}"));
+		}
+		else if (iequals(subCommand, "ranged") || iequals(subCommand, "freefire"))
+		{
+			float rangedHp = 100.0f;
+			cmdStream >> rangedHp;
+			if (rangedHp <= 0.0f) rangedHp = 100.0f;
+			bool ok = spawnDojoBot(6.0f, 0.0f, FightingStyle::KungFu, "Dojo Range Target", rangedHp);
+			if (ok && m_lastDojoBotGoId) {
+				sCombatSys.RequestRangedCombat(m_goId, m_lastDojoBotGoId);
+			}
+			m_parent.QueueCommand(make_shared<SystemChatMsg>(ok
+				? "{c:00FF00}Dojo: Ranged target spawned at 6m and engaged in Free-Fire combat!{/c}"
+				: "{c:FF0000}Dojo: could not spawn a ranged target.{/c}"));
 		}
 		else if (iequals(subCommand, "group"))
 		{
@@ -4706,38 +4720,113 @@ void PlayerObject::RPC_HandleMemoryChangeTactic(ByteBuffer& srcCmd)
 {
 	DEBUG_LOG(format("(%1%) %2%:%3% RPC_HandleMemoryChangeTactic") % m_parent.Address() % m_handle % m_goId);
 }
+
+void PlayerObject::RPC_HandleApplyAttributes(ByteBuffer& srcCmd)
+{
+	// Primary source citations:
+	// 1. Client/client.dll 0x620c1330 (LevelUp_ApplyAttributes) -> 0x621d4680 (RPC 0x80b5 marshaler):
+	//    Payload after 0x80b5: uint16 arrayOffset (0x0002), uint16 count, followed by count * 6-byte entries:
+	//      [uint8 unk0, uint32 attrId, uint8 delta]
+	//    Attribute IDs (client.dll 0x6287727c & hd_reference/hds/world/Client/RpcHandlers/PlayerHandler.cs:89-100):
+	//      0x4E (78) = Focus, 0x4F (79) = Perception, 0x51 (81) = Reason, 0x52 (82) = Belief, 0x54 (84) = Vitality
+	// 2. Client/client.dll 0x6217a174 (RPC 0x80b6 dispatcher) -> parser 0x6213b450 -> handler 0x621e8c30 -> UI callback 0x625c52b0
+	if (srcCmd.remaining() < 4)
+		return;
+
+	uint16 arrayOffset = srcCmd.read<uint16>();
+	if (arrayOffset > 2 && srcCmd.remaining() >= static_cast<size_t>(arrayOffset - 2 + 2))
+	{
+		for (uint16 skip = 2; skip < arrayOffset; ++skip)
+			srcCmd.read<uint8>();
+	}
+	if (srcCmd.remaining() < 2)
+		return;
+
+	uint16 count = srcCmd.read<uint16>();
+	if (count > 16)
+		count = 16;
+
+	std::vector<std::pair<uint32, uint8>> updatedAttrs;
+	for (uint16 i = 0; i < count && srcCmd.remaining() >= 6; ++i)
+	{
+		uint8 unk0 = srcCmd.read<uint8>();
+		(void)unk0;
+		uint32 attrId = srcCmd.read<uint32>();
+		uint8 delta = srcCmd.read<uint8>();
+
+		uint16 newVal = 0;
+		switch (attrId)
+		{
+		case 0x4E: // Focus (78)
+			if (delta > 0) m_focus = std::min<uint16>(60, m_focus + delta);
+			newVal = m_focus;
+			break;
+		case 0x4F: // Perception (79)
+			if (delta > 0) m_perception = std::min<uint16>(60, m_perception + delta);
+			newVal = m_perception;
+			break;
+		case 0x51: // Reason (81)
+			if (delta > 0) m_reason = std::min<uint16>(60, m_reason + delta);
+			newVal = m_reason;
+			break;
+		case 0x52: // Belief (82)
+			if (delta > 0) m_belief = std::min<uint16>(60, m_belief + delta);
+			newVal = m_belief;
+			break;
+		case 0x54: // Vitality (84)
+			if (delta > 0) m_vitality = std::min<uint16>(60, m_vitality + delta);
+			newVal = m_vitality;
+			break;
+		default:
+			continue;
+		}
+		updatedAttrs.push_back(std::make_pair(attrId, static_cast<uint8>(newVal)));
+		m_parent.QueueCommand(std::make_shared<PlayerAttributeMsg>(static_cast<uint16>(attrId), newVal));
+	}
+
+	saveDataToDB();
+	m_parent.QueueCommand(std::make_shared<AttributeUpgradeRspMsg>(0, updatedAttrs));
+	INFO_LOG(format("(%1%) %2%:%3% RPC_HandleApplyAttributes saved %4% attribute(s): Focus=%5% Perception=%6% Reason=%7% Belief=%8% Vitality=%9%")
+		% m_parent.Address() % m_handle % m_goId % updatedAttrs.size()
+		% m_focus % m_perception % m_reason % m_belief % m_vitality);
+}
+
 void PlayerObject::RPC_HandleUpgradeAbility(ByteBuffer& srcCmd)
 {
-	//layout per HDS AbilityHandler.ProcessUpgradeAbility: ability u16, unknown u16, level u8
+	// Primary source citations:
+	// 1. hd_reference/hds/world/Client/RpcHandlers/AbilityHandler.cs:22-35 (ProcessUpgradeAbility: ability u16, unknown u16, levelToIncrease u8)
+	// 2. Client/client.dll 0x620c1380 (LevelUp_ApplyUpgrade) -> 0x621e1290 (RPC 0x80b7 marshaler):
+	//    [esi + 0xb8] = abilityId (u16), [esi + 0xc4] = levelToIncrease (u8 delta added in UI)
 	if (srcCmd.remaining() < 5)
 		return;
 	uint16 abilityId = srcCmd.read<uint16>();
 	uint16 unknown = srcCmd.read<uint16>();
-	uint8 requestedLevel = srcCmd.read<uint8>();
+	uint8 levelDelta = srcCmd.read<uint8>();
 
-	INFO_LOG(format("(%1%) %2%:%3% upgrade ability %4% unk %5% -> level %6%")
-		% m_parent.Address() % m_handle % m_goId % abilityId % unknown % uint32(requestedLevel));
+	INFO_LOG(format("(%1%) %2%:%3% upgrade ability %4% unk %5% delta +%6%")
+		% m_parent.Address() % m_handle % m_goId % abilityId % unknown % uint32(levelDelta));
 
 	if (abilityId == 0 || !m_abilitySystem)
 		return;
 
-	//only abilities the character already owns can be upgraded, and never past the
-	//character's own level (the old handler loaded any ability at any level for free)
 	auto ab = m_abilitySystem->getAbility(abilityId);
 	if (!ab)
 	{
 		m_parent.QueueCommand(std::make_shared<SystemChatMsg>("{c:FF0000}You don't have that ability.{/c}"));
 		return;
 	}
-	uint16 newLevel = requestedLevel;
-	if (newLevel > getLevel())
-		newLevel = getLevel();
+	uint16 inc = (levelDelta > 0) ? uint16(levelDelta) : 1;
+	uint16 newLevel = ab->getLevel() + inc;
+	uint16 maxAllowed = std::max<uint16>(10, uint16(getLevel()));
+	if (newLevel > maxAllowed)
+		newLevel = maxAllowed;
 	if (newLevel == 0)
 		newLevel = 1;
 
 	m_abilitySystem->loadAbility(abilityId, newLevel, ab->getMemorySlot());
 	m_abilitySystem->saveToDB();
 	m_parent.QueueCommand(std::make_shared<AbilityUpgradeRspMsg>(abilityId, newLevel));
+	m_parent.QueueCommand(std::make_shared<AbilityLoadRspMsg>(abilityId, newLevel, ab->getMemorySlot()));
 }
 void PlayerObject::RPC_HandleMissionAbort(ByteBuffer& srcCmd)
 {
@@ -4828,52 +4917,132 @@ void PlayerObject::RPC_HandleMissionRequest(ByteBuffer& srcCmd)
 }
 void PlayerObject::RPC_HandleItemMoveSlot(ByteBuffer& srcCmd)
 {
-	if (srcCmd.remaining() < 2) return;
-	uint8 fromSlot = srcCmd.read<uint8>();
-	uint8 toSlot = srcCmd.read<uint8>();
-	DEBUG_LOG(format("(%1%) %2%:%3% RPC_HandleItemMoveSlot: fromSlot=%4% toSlot=%5%")
-		% m_parent.Address() % m_handle % m_goId % (int)fromSlot % (int)toSlot);
-	if (m_inventorySystem)
+	// 0x8065: [u16 fromSlot][u16 toSlot] (HDS InventoryHandler.processItemMove). The handler used to
+	// read two bytes, so the destination was always the high byte of the source (0).
+	uint16 fromSlot = 0, toSlot = 0;
+	if (srcCmd.remaining() >= 4)
 	{
-		if (m_inventorySystem->moveItem(fromSlot, toSlot))
-		{
-			if (!getClient().isBot())
-			{
-				m_inventorySystem->saveToDB();
-			}
-		}
+		fromSlot = srcCmd.read<uint16>();
+		toSlot = srcCmd.read<uint16>();
 	}
+	else if (srcCmd.remaining() >= 2)
+	{
+		fromSlot = srcCmd.read<uint8>();
+		toSlot = srcCmd.read<uint8>();
+	}
+	else
+		return;
+	DEBUG_LOG(format("(%1%) %2%:%3% RPC_HandleItemMoveSlot: fromSlot=%4% toSlot=%5%")
+		% m_parent.Address() % m_handle % m_goId % fromSlot % toSlot);
+	if (!m_inventorySystem || fromSlot > 0xFF || toSlot > 0xFF)
+		return;
+	if (m_inventorySystem->moveItem(uint8(fromSlot), uint8(toSlot)))
+	{
+		// the client waits for the server's 0x65 before it moves the icon (HDS sends it back)
+		m_inventorySystem->notifyMove(uint8(fromSlot), uint8(toSlot));
+		if (!getClient().isBot())
+			m_inventorySystem->saveToDB();
+	}
+}
+
+// Retail wear slots (HDS InventoryHandler.processMountItem): 0x61 hat, 0x62 glasses, 0x63 shirt,
+// 0x64 gloves, 0x65 coat, 0x66 pants, 0x67 leggings, 0x68 shoes. Part names as in
+// ItemTemplate::clothesSlot / SetRsiWardrobe.
+static uint8 WearSlotForPart(const std::string &part)
+{
+	if (boost::iequals(part, "Hat")) return 0x61;
+	if (boost::iequals(part, "Glasses")) return 0x62;
+	if (boost::iequals(part, "Shirt")) return 0x63;
+	if (boost::iequals(part, "Gloves")) return 0x64;
+	if (boost::iequals(part, "Coat")) return 0x65;
+	if (boost::iequals(part, "Pants")) return 0x66;
+	if (boost::iequals(part, "Leggings")) return 0x67;
+	if (boost::iequals(part, "Shoes")) return 0x68;
+	return 0;
 }
 
 void PlayerObject::RPC_HandleItemUnmountRSI(ByteBuffer& srcCmd)
 {
-	uint8 slot = 0;
-	if (srcCmd.remaining() >= 1)
-		slot = srcCmd.read<uint8>();
+	// 0x8064: [u8 wearSlot][u8 destSlot] (HDS reads rpcData[0])
+	if (srcCmd.remaining() < 1)
+		return;
+	const uint8 sourceSlot = srcCmd.read<uint8>();
 	DEBUG_LOG(format("(%1%) %2%:%3% RPC_HandleItemUnmountRSI: slot=%4%")
-		% m_parent.Address() % m_handle % m_goId % (int)slot);
-	UnmountClothingItem(slot);
-	if (m_inventorySystem && !getClient().isBot())
+		% m_parent.Address() % m_handle % m_goId % (int)sourceSlot);
+	shared_ptr<Item> item = (m_inventorySystem && sourceSlot >= 0x61 && sourceSlot <= 0x68)
+		? m_inventorySystem->getItemBySlot(sourceSlot) : shared_ptr<Item>();
+	if (!item)
 	{
-		m_inventorySystem->saveToDB();
+		// not a worn item: the server's own callers pass a part index (1 coat .. 7 hat)
+		UnmountClothingItem(sourceSlot);
+		if (m_inventorySystem && !getClient().isBot())
+			m_inventorySystem->saveToDB();
+		return;
 	}
+	const ItemTemplate* tpl = sDataLoader.GetItemTemplate(item->getTemplateId());
+	const uint8 newSlot = m_inventorySystem->getFirstFreeSlot();
+	if (newSlot == 0)
+	{
+		m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FF4444}Your inventory is full.{/c}"));
+		return;
+	}
+	if (tpl && !tpl->clothesSlot.empty())
+		SetRsiWardrobe(tpl->clothesSlot, 0, 0); // bare part, as HDS writes 0 for model and colour
+	if (m_inventorySystem->moveItem(sourceSlot, newSlot))
+		m_inventorySystem->notifyMove(sourceSlot, newSlot);
+	if (!getClient().isBot())
+		m_inventorySystem->saveToDB();
 }
 
 void PlayerObject::RPC_HandleItemMountRSI(ByteBuffer& srcCmd)
 {
-	uint32 itemGoId = 0;
-	uint8 slot = 0;
-	if (srcCmd.remaining() >= 4)
-		itemGoId = srcCmd.read<uint32>();
-	if (srcCmd.remaining() >= 1)
-		slot = srcCmd.read<uint8>();
-	DEBUG_LOG(format("(%1%) %2%:%3% RPC_HandleItemMountRSI: itemGoId=%4% slot=%5%")
-		% m_parent.Address() % m_handle % m_goId % itemGoId % (int)slot);
-	MountClothingItem(itemGoId, slot);
-	if (m_inventorySystem && !getClient().isBot())
+	// 0x8063: [u8 sourceSlot][u8 destSlot] (HDS reads rpcData[0], rpcData[1]); the wear slot comes
+	// from the item's clothes type, not from the request
+	if (srcCmd.remaining() < 1 || !m_inventorySystem)
+		return;
+	if (srcCmd.remaining() >= 5)
 	{
-		m_inventorySystem->saveToDB();
+		// server-side form used by the bot/test harness: [u32 item goid or template][u8 part index]
+		const uint32 itemGoId = srcCmd.read<uint32>();
+		const uint8 partHint = srcCmd.read<uint8>();
+		MountClothingItem(itemGoId, partHint);
+		if (!getClient().isBot())
+			m_inventorySystem->saveToDB();
+		return;
 	}
+	const uint8 sourceSlot = srcCmd.read<uint8>();
+	DEBUG_LOG(format("(%1%) %2%:%3% RPC_HandleItemMountRSI: slot=%4%")
+		% m_parent.Address() % m_handle % m_goId % (int)sourceSlot);
+	shared_ptr<Item> item = m_inventorySystem->getItemBySlot(sourceSlot);
+	if (!item)
+		return;
+	const ItemTemplate* tpl = sDataLoader.GetItemTemplate(item->getTemplateId());
+	const uint8 wearSlot = tpl ? WearSlotForPart(tpl->clothesSlot) : 0;
+	if (!tpl || wearSlot == 0)
+	{
+		// weapons and anything else keep the existing equip path
+		MountClothingItem(item->getGoId(), sourceSlot);
+		if (!getClient().isBot())
+			m_inventorySystem->saveToDB();
+		return;
+	}
+	// whatever is in the wear slot goes back to the first free bag slot
+	if (m_inventorySystem->getItemBySlot(wearSlot))
+	{
+		const uint8 freeSlot = m_inventorySystem->getFirstFreeSlot();
+		if (freeSlot == 0)
+		{
+			m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FF4444}Your inventory is full.{/c}"));
+			return;
+		}
+		if (m_inventorySystem->moveItem(wearSlot, freeSlot))
+			m_inventorySystem->notifyMove(wearSlot, freeSlot);
+	}
+	SetRsiWardrobe(tpl->clothesSlot, uint8(tpl->rsiDataId), int(tpl->rsiColorId));
+	if (m_inventorySystem->moveItem(sourceSlot, wearSlot))
+		m_inventorySystem->notifyMove(sourceSlot, wearSlot);
+	if (!getClient().isBot())
+		m_inventorySystem->saveToDB();
 }
 
 void PlayerObject::RPC_HandleCallContact( ByteBuffer &srcCmd )

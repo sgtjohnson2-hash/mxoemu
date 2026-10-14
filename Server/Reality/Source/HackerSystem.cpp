@@ -12,6 +12,7 @@
 
 #include "DataLoader.h"
 #include "CombatSystem.h"
+#include "Config.h"
 
 createFileSingleton(HackerSystem);
 
@@ -645,6 +646,20 @@ bool HackerSystem::ExecuteSoldierAbility(PlayerObject* caster, uint16 abilityId,
             double dist = c->getPosition().Distance(tgt->getPosition());
             float distMult = CombatSystem::ComputeBallisticDistanceMultiplier(dist, maxRange, abilityId);
             damage = static_cast<uint16>(std::max<float>(1.0f, std::round(float(damage) * distMult)));
+        }
+
+        if (!c->getClient().isBot())
+        {
+            c->setCombatStance(true);
+            // Firing pose for human shooters. Synthetic AnimationStateMsg traffic has crashed the
+            // client before (see AUDIT_AND_ROADMAP_2026-10-07); off until verified in game.
+            static const bool s_fireAnim = sConfig.GetBoolDefault("Combat.FirearmStanceAnim", false);
+            if (s_fireAnim && !isMeleeButtOrWhip)
+            {
+                c->setCurrentAnimation(c->isDualWielding() ? 0xDD : 0xDF);
+                if (GameServer::getSingletonPtr())
+                    sGame.AnnounceStateUpdate(&c->getClient(), std::make_shared<AnimationStateMsg>(c->getGoId()));
+            }
         }
 
         tgt->takeDamage(casterId, damage, hitFx);

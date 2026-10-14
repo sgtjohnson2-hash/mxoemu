@@ -1949,7 +1949,7 @@ namespace ZionLauncher
             string dist = !string.IsNullOrWhiteSpace(op.District) ? op.District : "Megacity";
             txtSelectedOperativeStats.Text = $"DISCIPLINE: Level {op.Level} {disc} | SECTOR: {dist}";
             txtSelectedOperativeIcon.Text = GetProfessionIcon(op.Profession);
-            txtSelectedOperativeRsi.Text = "RSI STATUS: 100% HEALTHY // READY FOR BROADCAST";
+            txtSelectedOperativeRsi.Text = $"ATTRS: BEL {op.Belief} | FOC {op.Focus} | PER {op.Perception} | REA {op.Reason} | VIT {op.Vitality}";
             btnLaunchSelectedOperative.Content = $"⚡ JACK IN AS {op.Handle.ToUpperInvariant()}";
         }
 
@@ -1961,14 +1961,506 @@ namespace ZionLauncher
             string chosenHandle = _selectedOperative != null ? _selectedOperative.Handle : _authenticatedUser;
             txtStatus.Foreground = Brushes.Lime;
             txtStatus.Text = $"ACCESS GRANTED. Jacking in as operative '{chosenHandle}'...";
-            JackIn(_authenticatedUser, _authenticatedPassword, chosenHandle);
+            JackIn(_authenticatedUser, _authenticatedPassword, chosenHandle, createNewChar: false);
         }
 
         private void btnCreateNewOperative_Click(object sender, RoutedEventArgs e)
         {
-            txtStatus.Foreground = Brushes.Lime;
-            txtStatus.Text = "ACCESS GRANTED. Entering Character Creation... (NOTE: Operative handle must not contain spaces)";
-            JackIn(_authenticatedUser, _authenticatedPassword, null);
+            ShowCreateOperativeDialog();
+        }
+
+        private void btnEditAttributes_Click(object sender, RoutedEventArgs e)
+        {
+            if (_selectedOperative == null && _operativesList.Count > 0)
+                _selectedOperative = _operativesList[0];
+            if (_selectedOperative == null)
+            {
+                txtStatus.Foreground = Brushes.Orange;
+                txtStatus.Text = "Select an operative first to allocate attributes.";
+                return;
+            }
+            ShowEditAttributesDialog(_selectedOperative);
+        }
+
+        private async Task<(bool Ok, string Message)> SaveAttributesToServerAsync(long charId, int belief, int focus, int perception, int reason, int vitality)
+        {
+            try
+            {
+                var payload = new
+                {
+                    username = _authenticatedUser,
+                    password = _authenticatedPassword,
+                    charId = charId,
+                    belief = belief,
+                    focus = focus,
+                    perception = perception,
+                    reason = reason,
+                    vitality = vitality
+                };
+                var json = JsonSerializer.Serialize(payload);
+                var content = new StringContent(json, Encoding.UTF8, "application/json");
+                using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(6));
+                var resp = await _httpClient.PostAsync($"http://{_currentServerIp}/api/characters/attributes", content, cts.Token);
+                var body = await resp.Content.ReadAsStringAsync();
+                if (resp.IsSuccessStatusCode)
+                    return (true, "Attributes saved to Zion Mainframe.");
+
+                try
+                {
+                    using var doc = JsonDocument.Parse(body);
+                    if (doc.RootElement.TryGetProperty("message", out var msgProp))
+                        return (false, msgProp.GetString() ?? "Failed to save attributes.");
+                }
+                catch { }
+                return (false, $"Mainframe error ({resp.StatusCode}): {body}");
+            }
+            catch (Exception ex)
+            {
+                return (false, $"Network error saving attributes: {ex.Message}");
+            }
+        }
+
+        private void ShowEditAttributesDialog(OperativeProfile op)
+        {
+            var dlg = new Window
+            {
+                Title = $"NEURAL ATTRIBUTE MATRIX // {op.Handle.ToUpperInvariant()}",
+                Width = 480,
+                Height = 440,
+                WindowStartupLocation = WindowStartupLocation.CenterOwner,
+                Owner = this,
+                ResizeMode = ResizeMode.NoResize,
+                Background = new SolidColorBrush(Color.FromRgb(4, 14, 6)),
+                Foreground = new SolidColorBrush(Color.FromRgb(57, 255, 20)),
+                FontFamily = new FontFamily("Consolas")
+            };
+
+            int[] vals = new int[]
+            {
+                Math.Clamp(op.Belief, 7, 60),
+                Math.Clamp(op.Focus, 7, 60),
+                Math.Clamp(op.Perception, 7, 60),
+                Math.Clamp(op.Reason, 7, 60),
+                Math.Clamp(op.Vitality, 7, 60)
+            };
+            string[] names = { "BELIEF (Awakened / Viral)", "FOCUS (Inner Strength / Speed)", "PERCEPTION (Accuracy / Ranged)", "REASON (Coding / Hacker)", "VITALITY (Health / Defense)" };
+            TextBlock[] valLabels = new TextBlock[5];
+
+            int maxBudget = Math.Max(45 + Math.Max(0, op.Level - 1), vals.Sum() + 5);
+            var lblPool = new TextBlock
+            {
+                FontSize = 13,
+                FontWeight = FontWeights.Bold,
+                Foreground = Brushes.Cyan,
+                Margin = new Thickness(0, 4, 0, 12),
+                TextAlignment = TextAlignment.Center
+            };
+
+            void UpdatePoolText()
+            {
+                int rem = Math.Max(0, maxBudget - vals.Sum());
+                lblPool.Text = $"UNSPENT ATTRIBUTE POINTS: {rem}  (Total Allocated: {vals.Sum()})";
+            }
+
+            var root = new StackPanel { Margin = new Thickness(20) };
+            root.Children.Add(new TextBlock
+            {
+                Text = $"╔═ ATTRIBUTE ALLOCATION: {op.Handle.ToUpperInvariant()} (Lv.{op.Level}) ═╗",
+                FontSize = 15,
+                FontWeight = FontWeights.Bold,
+                TextAlignment = TextAlignment.Center,
+                Margin = new Thickness(0, 0, 0, 6)
+            });
+            root.Children.Add(lblPool);
+
+            for (int i = 0; i < 5; i++)
+            {
+                int idx = i;
+                var row = new Grid { Margin = new Thickness(0, 4, 0, 4) };
+                row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+                row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(36) });
+                row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(48) });
+                row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(36) });
+
+                var nameTxt = new TextBlock
+                {
+                    Text = names[idx],
+                    VerticalAlignment = VerticalAlignment.Center,
+                    FontSize = 12,
+                    Foreground = new SolidColorBrush(Color.FromRgb(136, 255, 170))
+                };
+                Grid.SetColumn(nameTxt, 0);
+
+                var btnMinus = new Button { Content = "-", Height = 28, FontWeight = FontWeights.Bold };
+                Grid.SetColumn(btnMinus, 1);
+
+                var valTxt = new TextBlock
+                {
+                    Text = vals[idx].ToString(),
+                    VerticalAlignment = VerticalAlignment.Center,
+                    HorizontalAlignment = HorizontalAlignment.Center,
+                    FontSize = 15,
+                    FontWeight = FontWeights.Bold,
+                    Foreground = new SolidColorBrush(Color.FromRgb(57, 255, 20))
+                };
+                valLabels[idx] = valTxt;
+                Grid.SetColumn(valTxt, 2);
+
+                var btnPlus = new Button { Content = "+", Height = 28, FontWeight = FontWeights.Bold };
+                Grid.SetColumn(btnPlus, 3);
+
+                btnMinus.Click += (s, ev) =>
+                {
+                    if (vals[idx] > 7)
+                    {
+                        vals[idx]--;
+                        valLabels[idx].Text = vals[idx].ToString();
+                        UpdatePoolText();
+                    }
+                };
+                btnPlus.Click += (s, ev) =>
+                {
+                    if (vals[idx] < 60 && vals.Sum() < maxBudget)
+                    {
+                        vals[idx]++;
+                        valLabels[idx].Text = vals[idx].ToString();
+                        UpdatePoolText();
+                    }
+                };
+
+                row.Children.Add(nameTxt);
+                row.Children.Add(btnMinus);
+                row.Children.Add(valTxt);
+                row.Children.Add(btnPlus);
+                root.Children.Add(row);
+            }
+
+            UpdatePoolText();
+
+            var statusTxt = new TextBlock
+            {
+                Text = "Adjust attributes and click SAVE ATTRIBUTES to persist to database.",
+                FontSize = 11,
+                Foreground = Brushes.LightGreen,
+                TextAlignment = TextAlignment.Center,
+                TextWrapping = TextWrapping.Wrap,
+                Margin = new Thickness(0, 12, 0, 12)
+            };
+            root.Children.Add(statusTxt);
+
+            var btnRow = new Grid();
+            btnRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(2, GridUnitType.Star) });
+            btnRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+
+            var btnSave = new Button
+            {
+                Content = "💾 SAVE ATTRIBUTES",
+                Height = 36,
+                FontWeight = FontWeights.Bold,
+                Margin = new Thickness(0, 0, 6, 0)
+            };
+            Grid.SetColumn(btnSave, 0);
+
+            var btnCancel = new Button
+            {
+                Content = "CLOSE",
+                Height = 36,
+                Margin = new Thickness(6, 0, 0, 0)
+            };
+            Grid.SetColumn(btnCancel, 1);
+
+            btnCancel.Click += (s, ev) => dlg.Close();
+            btnSave.Click += async (s, ev) =>
+            {
+                btnSave.IsEnabled = false;
+                statusTxt.Foreground = Brushes.Yellow;
+                statusTxt.Text = "Saving attributes to Zion Mainframe...";
+                var (ok, msg) = await SaveAttributesToServerAsync(op.Id, vals[0], vals[1], vals[2], vals[3], vals[4]);
+                btnSave.IsEnabled = true;
+                if (ok)
+                {
+                    op.Belief = vals[0];
+                    op.Focus = vals[1];
+                    op.Perception = vals[2];
+                    op.Reason = vals[3];
+                    op.Vitality = vals[4];
+                    txtSelectedOperativeRsi.Text = $"ATTRS: BEL {op.Belief} | FOC {op.Focus} | PER {op.Perception} | REA {op.Reason} | VIT {op.Vitality}";
+                    txtStatus.Foreground = Brushes.Lime;
+                    txtStatus.Text = $"Saved attributes for operative '{op.Handle}' (BEL {op.Belief}, FOC {op.Focus}, PER {op.Perception}, REA {op.Reason}, VIT {op.Vitality}).";
+                    dlg.Close();
+                }
+                else
+                {
+                    statusTxt.Foreground = Brushes.Red;
+                    statusTxt.Text = msg;
+                }
+            };
+
+            btnRow.Children.Add(btnSave);
+            btnRow.Children.Add(btnCancel);
+            root.Children.Add(btnRow);
+
+            dlg.Content = root;
+            dlg.ShowDialog();
+        }
+
+        private void ShowCreateOperativeDialog()
+        {
+            var dlg = new Window
+            {
+                Title = "ZION MAINFRAME // CREATE NEW OPERATIVE",
+                Width = 540,
+                Height = 620,
+                WindowStartupLocation = WindowStartupLocation.CenterOwner,
+                Owner = this,
+                ResizeMode = ResizeMode.NoResize,
+                Background = new SolidColorBrush(Color.FromRgb(4, 14, 6)),
+                Foreground = new SolidColorBrush(Color.FromRgb(57, 255, 20)),
+                FontFamily = new FontFamily("Consolas")
+            };
+
+            var root = new StackPanel { Margin = new Thickness(18) };
+            root.Children.Add(new TextBlock
+            {
+                Text = "╔═ CREATE NEW REDPILL OPERATIVE ═╗",
+                FontSize = 16,
+                FontWeight = FontWeights.Bold,
+                TextAlignment = TextAlignment.Center,
+                Margin = new Thickness(0, 0, 0, 10)
+            });
+
+            var formGrid = new Grid { Margin = new Thickness(0, 0, 0, 10) };
+            formGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(160) });
+            formGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            for (int r = 0; r < 5; r++) formGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+
+            void AddFormRow(int r, string label, UIElement ctrl)
+            {
+                var lbl = new TextBlock { Text = label, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 4, 8, 4), Foreground = Brushes.LightGreen };
+                Grid.SetRow(lbl, r); Grid.SetColumn(lbl, 0);
+                if (ctrl is FrameworkElement fe) fe.Margin = new Thickness(0, 4, 0, 4);
+                Grid.SetRow(ctrl, r); Grid.SetColumn(ctrl, 1);
+                formGrid.Children.Add(lbl);
+                formGrid.Children.Add(ctrl);
+            }
+
+            var txtHandle = new TextBox { Text = "", FontSize = 14 };
+            var txtFirst = new TextBox { Text = "Redpill", FontSize = 13 };
+            var txtLast = new TextBox { Text = "Operative", FontSize = 13 };
+
+            var cmbAlignment = new ComboBox { FontSize = 13, SelectedIndex = 0 };
+            cmbAlignment.Items.Add("1 - Zion (Hovercraft Resistance)");
+            cmbAlignment.Items.Add("2 - Machines (System Enforcement)");
+            cmbAlignment.Items.Add("3 - Merovingian (Exile Syndicate)");
+
+            var cmbProf = new ComboBox { FontSize = 13, SelectedIndex = 0 };
+            cmbProf.Items.Add("1 - Hacker (Viral / Reason)");
+            cmbProf.Items.Add("2 - Coder / Support (Constructs)");
+            cmbProf.Items.Add("3 - Martial Artist (Close Combat)");
+            cmbProf.Items.Add("4 - Spy (Stealth / Infiltration)");
+            cmbProf.Items.Add("5 - Gunner / Soldier (Ballistics)");
+
+            AddFormRow(0, "OPERATIVE HANDLE:", txtHandle);
+            AddFormRow(1, "FIRST NAME:", txtFirst);
+            AddFormRow(2, "LAST NAME:", txtLast);
+            AddFormRow(3, "ORGANIZATION:", cmbAlignment);
+            AddFormRow(4, "DISCIPLINE:", cmbProf);
+            root.Children.Add(formGrid);
+
+            int[] vals = new int[] { 8, 8, 8, 8, 8 };
+            string[] attrNames = { "BELIEF", "FOCUS", "PERCEPTION", "REASON", "VITALITY" };
+            TextBlock[] valLabels = new TextBlock[5];
+            const int startBudget = 45;
+
+            var lblPool = new TextBlock
+            {
+                FontSize = 12,
+                FontWeight = FontWeights.Bold,
+                Foreground = Brushes.Cyan,
+                TextAlignment = TextAlignment.Center,
+                Margin = new Thickness(0, 4, 0, 6)
+            };
+            void UpdatePool() => lblPool.Text = $"STARTING ATTRIBUTES (Points Remaining: {startBudget - vals.Sum()} / {startBudget})";
+            root.Children.Add(lblPool);
+
+            for (int i = 0; i < 5; i++)
+            {
+                int idx = i;
+                var row = new Grid { Margin = new Thickness(0, 2, 0, 2) };
+                row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+                row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(32) });
+                row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(42) });
+                row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(32) });
+
+                var nl = new TextBlock { Text = attrNames[idx], VerticalAlignment = VerticalAlignment.Center, Foreground = Brushes.LightGreen };
+                var bm = new Button { Content = "-", Height = 24 };
+                var vl = new TextBlock { Text = vals[idx].ToString(), VerticalAlignment = VerticalAlignment.Center, HorizontalAlignment = HorizontalAlignment.Center, FontWeight = FontWeights.Bold };
+                var bp = new Button { Content = "+", Height = 24 };
+                valLabels[idx] = vl;
+
+                bm.Click += (s, ev) => { if (vals[idx] > 7) { vals[idx]--; vl.Text = vals[idx].ToString(); UpdatePool(); } };
+                bp.Click += (s, ev) => { if (vals[idx] < 25 && vals.Sum() < startBudget) { vals[idx]++; vl.Text = vals[idx].ToString(); UpdatePool(); } };
+
+                Grid.SetColumn(nl, 0); Grid.SetColumn(bm, 1); Grid.SetColumn(vl, 2); Grid.SetColumn(bp, 3);
+                row.Children.Add(nl); row.Children.Add(bm); row.Children.Add(vl); row.Children.Add(bp);
+                root.Children.Add(row);
+            }
+            UpdatePool();
+
+            var statusTxt = new TextBlock
+            {
+                Text = "Enter an operative handle (letters/numbers, no spaces) or launch the 3D RSI Creator.",
+                FontSize = 11,
+                Foreground = Brushes.LightGreen,
+                TextAlignment = TextAlignment.Center,
+                TextWrapping = TextWrapping.Wrap,
+                Margin = new Thickness(0, 8, 0, 8)
+            };
+            root.Children.Add(statusTxt);
+
+            async Task<OperativeProfile?> CreateOperativeNowAsync()
+            {
+                string handle = txtHandle.Text.Trim();
+                if (string.IsNullOrWhiteSpace(handle) || handle.Contains(' '))
+                {
+                    statusTxt.Foreground = Brushes.Red;
+                    statusTxt.Text = "ERROR: Operative handle is required and cannot contain spaces.";
+                    return null;
+                }
+                var payload = new
+                {
+                    username = _authenticatedUser,
+                    password = _authenticatedPassword,
+                    handle = handle,
+                    firstName = string.IsNullOrWhiteSpace(txtFirst.Text) ? handle : txtFirst.Text.Trim(),
+                    lastName = string.IsNullOrWhiteSpace(txtLast.Text) ? "Operative" : txtLast.Text.Trim(),
+                    sex = 0,
+                    alignment = cmbAlignment.SelectedIndex + 1,
+                    profession = cmbProf.SelectedIndex + 1,
+                    district = 1
+                };
+                try
+                {
+                    var json = JsonSerializer.Serialize(payload);
+                    var content = new StringContent(json, Encoding.UTF8, "application/json");
+                    using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(6));
+                    var resp = await _httpClient.PostAsync($"http://{_currentServerIp}/api/characters/create", content, cts.Token);
+                    var body = await resp.Content.ReadAsStringAsync();
+                    if (!resp.IsSuccessStatusCode)
+                    {
+                        try
+                        {
+                            using var doc = JsonDocument.Parse(body);
+                            if (doc.RootElement.TryGetProperty("message", out var mp))
+                            {
+                                statusTxt.Foreground = Brushes.Red;
+                                statusTxt.Text = mp.GetString() ?? "Creation failed.";
+                                return null;
+                            }
+                        }
+                        catch { }
+                        statusTxt.Foreground = Brushes.Red;
+                        statusTxt.Text = $"Creation failed ({resp.StatusCode}): {body}";
+                        return null;
+                    }
+
+                    long newCharId = 0;
+                    try
+                    {
+                        using var doc = JsonDocument.Parse(body);
+                        if (doc.RootElement.TryGetProperty("character", out var ch) && ch.TryGetProperty("charId", out var idP))
+                            newCharId = idP.GetInt64();
+                    }
+                    catch { }
+
+                    if (newCharId > 0)
+                    {
+                        await SaveAttributesToServerAsync(newCharId, vals[0], vals[1], vals[2], vals[3], vals[4]);
+                    }
+
+                    var newOp = new OperativeProfile
+                    {
+                        Id = newCharId,
+                        Handle = handle,
+                        FirstName = payload.firstName,
+                        LastName = payload.lastName,
+                        Level = 1,
+                        Profession = payload.profession,
+                        District = "Slums",
+                        Belief = vals[0],
+                        Focus = vals[1],
+                        Perception = vals[2],
+                        Reason = vals[3],
+                        Vitality = vals[4]
+                    };
+                    _operativesList.Insert(0, newOp);
+                    DisplayOperativeRoster(_operativesList);
+                    return newOp;
+                }
+                catch (Exception ex)
+                {
+                    statusTxt.Foreground = Brushes.Red;
+                    statusTxt.Text = $"Error creating operative: {ex.Message}";
+                    return null;
+                }
+            }
+
+            var btnRow1 = new Grid { Margin = new Thickness(0, 0, 0, 6) };
+            btnRow1.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            btnRow1.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+
+            var btnCreateOnly = new Button { Content = "[+] CREATE OPERATIVE", Height = 36, FontWeight = FontWeights.Bold, Margin = new Thickness(0, 0, 4, 0) };
+            var btnCreateAndLaunch = new Button { Content = "⚡ CREATE & JACK IN", Height = 36, FontWeight = FontWeights.Bold, Margin = new Thickness(4, 0, 0, 0) };
+            Grid.SetColumn(btnCreateOnly, 0); Grid.SetColumn(btnCreateAndLaunch, 1);
+            btnRow1.Children.Add(btnCreateOnly); btnRow1.Children.Add(btnCreateAndLaunch);
+            root.Children.Add(btnRow1);
+
+            var btnRow2 = new Grid();
+            btnRow2.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(2, GridUnitType.Star) });
+            btnRow2.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+
+            var btn3dCreator = new Button { Content = "🕶️ LAUNCH 3D RSI CREATOR (IN-GAME)", Height = 32, Margin = new Thickness(0, 0, 4, 0) };
+            var btnCancel = new Button { Content = "CANCEL", Height = 32, Margin = new Thickness(4, 0, 0, 0) };
+            Grid.SetColumn(btn3dCreator, 0); Grid.SetColumn(btnCancel, 1);
+            btnRow2.Children.Add(btn3dCreator); btnRow2.Children.Add(btnCancel);
+            root.Children.Add(btnRow2);
+
+            btnCancel.Click += (s, ev) => dlg.Close();
+            btnCreateOnly.Click += async (s, ev) =>
+            {
+                btnCreateOnly.IsEnabled = false; btnCreateAndLaunch.IsEnabled = false;
+                var created = await CreateOperativeNowAsync();
+                btnCreateOnly.IsEnabled = true; btnCreateAndLaunch.IsEnabled = true;
+                if (created != null)
+                {
+                    txtStatus.Foreground = Brushes.Lime;
+                    txtStatus.Text = $"Operative '{created.Handle}' created and selected. Ready to Jack In!";
+                    dlg.Close();
+                }
+            };
+            btnCreateAndLaunch.Click += async (s, ev) =>
+            {
+                btnCreateOnly.IsEnabled = false; btnCreateAndLaunch.IsEnabled = false;
+                var created = await CreateOperativeNowAsync();
+                btnCreateOnly.IsEnabled = true; btnCreateAndLaunch.IsEnabled = true;
+                if (created != null)
+                {
+                    txtStatus.Foreground = Brushes.Lime;
+                    txtStatus.Text = $"Operative '{created.Handle}' created! Jacking in as '{created.Handle}'...";
+                    dlg.Close();
+                    JackIn(_authenticatedUser, _authenticatedPassword, created.Handle, createNewChar: false);
+                }
+            };
+            btn3dCreator.Click += (s, ev) =>
+            {
+                txtStatus.Foreground = Brushes.Lime;
+                txtStatus.Text = "ACCESS GRANTED. Launching 3D RSI Character Creation (empty world slot)...";
+                dlg.Close();
+                JackIn(_authenticatedUser, _authenticatedPassword, null, createNewChar: true);
+            };
+
+            dlg.Content = root;
+            dlg.ShowDialog();
         }
 
         private void btnLogout_Click(object sender, RoutedEventArgs e)
@@ -2076,6 +2568,16 @@ namespace ZionLauncher
                                     else if (distProp.ValueKind == JsonValueKind.Number && distProp.TryGetInt32(out int distId))
                                         op.District = GetDistrictName(distId);
                                 }
+                                if (c.TryGetProperty("belief", out var belProp) && belProp.ValueKind == JsonValueKind.Number && belProp.TryGetInt32(out int belVal))
+                                    op.Belief = belVal;
+                                if (c.TryGetProperty("focus", out var focProp) && focProp.ValueKind == JsonValueKind.Number && focProp.TryGetInt32(out int focVal))
+                                    op.Focus = focVal;
+                                if (c.TryGetProperty("perception", out var perProp) && perProp.ValueKind == JsonValueKind.Number && perProp.TryGetInt32(out int perVal))
+                                    op.Perception = perVal;
+                                if (c.TryGetProperty("reason", out var reaProp) && reaProp.ValueKind == JsonValueKind.Number && reaProp.TryGetInt32(out int reaVal))
+                                    op.Reason = reaVal;
+                                if (c.TryGetProperty("vitality", out var vitProp) && vitProp.ValueKind == JsonValueKind.Number && vitProp.TryGetInt32(out int vitVal))
+                                    op.Vitality = vitVal;
 
                                 if (!string.IsNullOrWhiteSpace(op.Handle))
                                 {
@@ -2422,7 +2924,7 @@ namespace ZionLauncher
             return false;
         }
 
-        private async void JackIn(string username, string password, string? operativeHandle = null)
+        private async void JackIn(string username, string password, string? operativeHandle = null, bool createNewChar = false)
         {
             txtStatus.Foreground = Brushes.Lime;
             txtStatus.Text = $"Synchronizing Zion mainframe ({_currentServerIp})...";
@@ -2520,7 +3022,10 @@ namespace ZionLauncher
                 catch { }
 
                 string charArg = !string.IsNullOrWhiteSpace(operativeHandle) ? operativeHandle : username;
-                string launchArgs = $"-clone -nopatch -configsection HighDetail -user \"{username}\" -pwd \"{password}\" -char \"{charArg}\"";
+                string charFlagPart = (createNewChar || string.IsNullOrWhiteSpace(operativeHandle))
+                    ? "-newchar"
+                    : $"-char \"{operativeHandle}\"";
+                string launchArgs = $"-clone -nopatch -configsection HighDetail -user \"{username}\" -pwd \"{password}\" {charFlagPart}";
                 string cmdLine = $"\"{clientExe}\" {launchArgs}";
                 string workDir = Path.GetDirectoryName(clientExe)!;
 
@@ -2533,7 +3038,7 @@ namespace ZionLauncher
                 string retailHook = RetailHookDll;
                 if (IsRetailClient(retailExe) && File.Exists(retailHook))
                 {
-                    string retailArgs = $"-clone -LocalTest -nopatch -noeula -autojackin -configsection HighDetail -user \"{username}\" -pwd \"{password}\" -char \"{charArg}\"";
+                    string retailArgs = $"-clone -LocalTest -nopatch -noeula -autojackin -configsection HighDetail -user \"{username}\" -pwd \"{password}\" {charFlagPart}";
                     string retailCmd = $"\"{retailExe}\" {retailArgs}";
                     string retailDir = Path.GetDirectoryName(retailExe)!;
 
@@ -3469,5 +3974,10 @@ namespace ZionLauncher
         public int Level { get; set; } = 1;
         public int Profession { get; set; }
         public string District { get; set; } = "";
+        public int Belief { get; set; } = 8;
+        public int Focus { get; set; } = 8;
+        public int Perception { get; set; } = 8;
+        public int Reason { get; set; } = 8;
+        public int Vitality { get; set; } = 8;
     }
 }

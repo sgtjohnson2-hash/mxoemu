@@ -18,6 +18,7 @@
 //
 // ***************************************************************************
 
+#include <fstream>
 #include "Common.h"
 #include "CombatSystem.h"
 #include "PlayerObject.h"
@@ -322,6 +323,12 @@ int RunCombatTestSuite()
 		// ---------------------------------------------------------------- loadout (N1)
 		TestHumanClient humanClient;
 		Actor human = makeHuman(&humanClient, 9100001, 10000.0, 10000.0);
+		// Each discipline block assumes a live, full-HP caster; an earlier fight can leave it dead.
+		auto reviveHuman = [&]() {
+			sCombatSys.EndInterlock(human.go, false);
+			human.po->setDead(false);
+			human.po->setCurrentHealth(human.po->getMaximumHealth());
+		};
 		check(human.po != nullptr, "human test character constructed");
 		if (!human.po)
 		{
@@ -860,6 +867,7 @@ int RunCombatTestSuite()
 
 		// ---------------------------------------------------------------- Hacker & Coder/Support disciplines
 		{
+			reviveHuman();
 			// 1. Template Classification
 			const AbilityTemplate* hackT = sDataLoader.GetAbilityTemplate(57); // LogicBlast1Ability
 			check(hackT != nullptr, "LogicBlast1Ability template is registered");
@@ -939,6 +947,7 @@ int RunCombatTestSuite()
 
 		// ---------------------------------------------------------------- Soldier / Gunner & Spy disciplines
 		{
+			reviveHuman();
 			// 1. Template Classification
 			const AbilityTemplate* soldierT = sDataLoader.GetAbilityTemplate(14); // PowerShotAbility
 			check(soldierT != nullptr, "PowerShotAbility template is registered");
@@ -1273,6 +1282,7 @@ int RunCombatTestSuite()
 
 		// ---------------------------------------------------------------- 13. Martial Arts Disciplines & Animation Synchronization Suite
 		{
+			reviveHuman();
 			// A. Four Core Martial Arts Forms & Stance Crush Pairings
 			// 1. Kung Fu (Wushu) Power vs Speed Stance Crush
 			InterlockAnimPair kfPair = CombatAnimationMatrix::GetAnimationPair(
@@ -1471,6 +1481,7 @@ int RunCombatTestSuite()
 		// ------------------------------------------------------------------
 		std::cout << "\n[15. Dynamic ILDB Combat Move Query & Mission Live Feedback]" << std::endl;
 		{
+			reviveHuman();
 			// 1. Dynamic ILDB Move Selection in SelectInterlockMove
 			Actor humanOperative = makeHuman(&humanClient, 9100088, 10000.0, 10000.0);
 			Actor enemyBot = makeBot(9200088, 10050.0, 10000.0, 1, 100);
@@ -1630,6 +1641,61 @@ int RunCombatTestSuite()
 			humanOperative.po->HandleCommand(buyCmd);
 			check(humanClient.sawText("[VENDOR] Purchased 9mm Pistol Ammo Clip for 50 Information Bits."), "HandleCommand(0x810e) executes RPC_HandleVendorBuy with success notice");
 			check(humanOperative.po->getInfo() == cashBeforeBuy - 50, "Operative Info Bits deducted by 50");
+
+			// 4b. Inventory mirrored to the client: 0x5E on add, 0x65 on move, clothing mount/unmount
+			{
+				const uint32 coatTpl = 46568; // Area K Trenchcoat (mxoClothing.csv: FEMALE COAT, model 15, colour 1)
+				if (!sDataLoader.GetItemTemplate(coatTpl))
+				{
+					// the suite does not run LoadAll; load just this row (the full table shares ids
+					// 1001/1003/1050/1051 with the suite's invented weapon templates)
+					std::ofstream f("test_clothing.csv");
+					f << "GoidDecimal;GoidLittleEndian;GoidBigEndian;ClothesType;ShortName;ItemName;ModelId;ColorId\n"
+					  << "46568;0xe8b50000;0x0000b5e8;FEMALE COAT;01areaKTrenchF;Area K Trenchcoat;15;1\n";
+					f.close();
+					sDataLoader.LoadClothing("test_clothing.csv");
+				}
+				const ItemTemplate* ct = sDataLoader.GetItemTemplate(coatTpl);
+				check(ct && ct->clothesSlot == "Coat" && ct->rsiDataId == 15 && ct->rsiColorId == 1,
+					"clothing template carries clothes type, model and colour (got " + (ct ? ("'" + ct->clothesSlot + "' model " + std::to_string(ct->rsiDataId) + " colour " + std::to_string(int(ct->rsiColorId)) + " type " + std::to_string(int(ct->type))) : std::string("no template")) + ")");
+				auto findRpc = [&](uint8 op, size_t len) -> std::string {
+					for (const std::string& m : humanClient.captured)
+						if (m.size() == len && uint8(m[0]) == op) return m;
+					return std::string();
+				};
+				humanClient.captured.clear();
+				const uint8 bagSlot = 40;
+				humanOperative.po->getInventory()->addItem(std::make_shared<Item>(777001, coatTpl), bagSlot);
+				std::string add = findRpc(0x5E, 12);
+				check(!add.empty() && uint8(add[1]) == bagSlot && uint8(add[3]) == (coatTpl & 0xFF) && uint8(add[4]) == ((coatTpl >> 8) & 0xFF) && uint8(add[11]) == 1,
+					"adding an item sends RPC 0x5E (slot, item id, personal flag)");
+				humanClient.captured.clear();
+				ByteBuffer mountCmd;
+				mountCmd << (uint8)0x80 << (uint8)0x63 << (uint8)bagSlot << (uint8)0;
+				humanOperative.po->HandleCommand(mountCmd);
+				auto worn = humanOperative.po->getInventory()->getItemBySlot(0x65);
+				check(worn && worn->getTemplateId() == coatTpl, "mounting a coat moves it to wear slot 0x65");
+				std::string mv = findRpc(0x65, 6);
+				check(!mv.empty() && uint8(mv[1]) == bagSlot && uint8(mv[3]) == 0x65, "mount confirms the move with RPC 0x65 (bag slot -> 0x65)");
+				humanClient.captured.clear();
+				ByteBuffer unmountCmd;
+				unmountCmd << (uint8)0x80 << (uint8)0x64 << (uint8)0x65 << (uint8)0;
+				humanOperative.po->HandleCommand(unmountCmd);
+				check(!humanOperative.po->getInventory()->getItemBySlot(0x65), "unmounting empties wear slot 0x65");
+				check(!findRpc(0x65, 6).empty(), "unmount confirms the move with RPC 0x65");
+				humanClient.captured.clear();
+				ByteBuffer moveCmd;
+				uint8 from = humanOperative.po->getInventory()->getItemByGoId(777001) ? 0 : 0;
+				for (uint8 sl = 1; sl < 0x60; sl++)
+					if (auto it = humanOperative.po->getInventory()->getItemBySlot(sl))
+						if (it->getGoId() == 777001) { from = sl; break; }
+				moveCmd << (uint8)0x80 << (uint8)0x65 << (uint16)from << (uint16)90;
+				humanOperative.po->HandleCommand(moveCmd);
+				auto moved = humanOperative.po->getInventory()->getItemBySlot(90);
+				check(moved && moved->getGoId() == 777001, "0x8065 move reads u16 slots (item lands in slot 90)");
+				check(!findRpc(0x65, 6).empty(), "0x8065 move is confirmed with RPC 0x65");
+				humanOperative.po->getInventory()->removeItem(777001);
+			}
 
 			// 5. Static Vendor Selling (Opcode 0x8111)
 			uint64 cashBeforeSell = humanOperative.po->getInfo();
@@ -3601,6 +3667,99 @@ int RunCombatTestSuite()
 				check(!sFactionWarMgr.OnWorldBossDefeated(0, 0) &&
 					  !sFactionWarMgr.OnWorldBossDefeated(0xDEADBEEF, opSquadA.go),
 					"Edge case: OnWorldBossDefeated returns false for zero or non-existent boss GoId");
+
+				// --- Phase 17: Attribute Allocation (0x80B5 / 0x80B6 / 0x80B2) & Ability Upgrade Delta (0x80B7) ---
+				{
+					opSquadA.po->setFocus(8);
+					opSquadA.po->setBelief(8);
+					opSquadA.po->setVitality(8);
+					opSquadA.po->setPerception(8);
+					opSquadA.po->setReason(8);
+
+					p13ClientA.captured.clear();
+					opSquadA.po->sendAttributes();
+
+					// Verify 5 PlayerAttributeMsg (0x80b2) packets sent on sendAttributes()
+					int attr80b2Count = 0;
+					for (const auto& pkt : p13ClientA.captured)
+					{
+						if (pkt.size() == 8 &&
+							static_cast<uint8>(pkt[0]) == 0x80 &&
+							static_cast<uint8>(pkt[1]) == 0xB2 &&
+							static_cast<uint8>(pkt[6]) == 0x08 &&
+							static_cast<uint8>(pkt[7]) == 0x02)
+							attr80b2Count++;
+					}
+					check(attr80b2Count == 5, "sendAttributes sends all 5 primary attribute 0x80B2 packets (Focus, Belief, Vitality, Perception, Reason)");
+
+					// Send RPC 0x80B5 (LevelUp_ApplyAttributes): +2 Focus (0x4E), +3 Reason (0x51), +1 Vitality (0x54)
+					ByteBuffer attrReq;
+					attrReq << uint8(0x80) << uint8(0xB5);
+					attrReq << uint16(0x0002); // arrayOffset = 2
+					attrReq << uint16(3);      // count = 3
+					// Entry 0: Focus (0x4E) +2
+					attrReq << uint8(0) << uint32(0x4E) << uint8(2);
+					// Entry 1: Reason (0x51) +3
+					attrReq << uint8(0) << uint32(0x51) << uint8(3);
+					// Entry 2: Vitality (0x54) +1
+					attrReq << uint8(0) << uint32(0x54) << uint8(1);
+
+					p13ClientA.captured.clear();
+					opSquadA.po->HandleCommand(attrReq);
+
+					check(opSquadA.po->getFocus() == 10 &&
+						  opSquadA.po->getReason() == 11 &&
+						  opSquadA.po->getVitality() == 9 &&
+						  opSquadA.po->getBelief() == 8 &&
+						  opSquadA.po->getPerceptionAttr() == 8,
+						"RPC 0x80B5 (RPC_HandleApplyAttributes) increments Focus (+2->10), Reason (+3->11), and Vitality (+1->9)");
+
+					// Verify 0x80B6 response wire layout: [80 B6] [06 00] [00 00 00 00] [03 00] + 3 * 6-byte entries = 28 bytes
+					bool sawValid80b6 = false;
+					for (const auto& pkt : p13ClientA.captured)
+					{
+						if (pkt.size() == 28 &&
+							static_cast<uint8>(pkt[0]) == 0x80 &&
+							static_cast<uint8>(pkt[1]) == 0xB6)
+						{
+							uint16 off = uint16(static_cast<uint8>(pkt[2])) | (uint16(static_cast<uint8>(pkt[3])) << 8);
+							uint32 resCode = uint32(static_cast<uint8>(pkt[4])) | (uint32(static_cast<uint8>(pkt[5])) << 8) |
+											 (uint32(static_cast<uint8>(pkt[6])) << 16) | (uint32(static_cast<uint8>(pkt[7])) << 24);
+							uint16 cnt = uint16(static_cast<uint8>(pkt[8])) | (uint16(static_cast<uint8>(pkt[9])) << 8);
+							uint32 id0 = uint32(static_cast<uint8>(pkt[11])) | (uint32(static_cast<uint8>(pkt[12])) << 8) |
+										 (uint32(static_cast<uint8>(pkt[13])) << 16) | (uint32(static_cast<uint8>(pkt[14])) << 24);
+							uint8 val0 = static_cast<uint8>(pkt[15]);
+							if (off == 6 && resCode == 0 && cnt == 3 && id0 == 0x4E && val0 == 10)
+								sawValid80b6 = true;
+						}
+					}
+					check(sawValid80b6, "RPC 0x80B6 (AttributeUpgradeRspMsg) matches client.dll 0x6213b450 layout (arrayOffset=6, resultCode=0, count=3)");
+
+					// Edge case: truncated 0x80B5 packet and clamping at 60
+					ByteBuffer shortAttr;
+					shortAttr << uint8(0x80) << uint8(0xB5) << uint8(0x02);
+					opSquadA.po->HandleCommand(shortAttr);
+					check(opSquadA.po->getFocus() == 10, "Edge case: truncated 0x80B5 packet is ignored safely without corrupting attributes");
+
+					ByteBuffer clampAttr;
+					clampAttr << uint8(0x80) << uint8(0xB5) << uint16(0x0002) << uint16(1)
+							  << uint8(0) << uint32(0x4E) << uint8(200);
+					opSquadA.po->HandleCommand(clampAttr);
+					check(opSquadA.po->getFocus() == 60, "Edge case: RPC 0x80B5 clamps attribute value at maximum 60");
+
+					// Verify RPC 0x80B7 (RPC_HandleUpgradeAbility) treats 5th byte as levelDelta (+1 upgrades level 1 -> 2)
+					if (opSquadA.po->m_abilitySystem)
+					{
+						opSquadA.po->m_abilitySystem->loadAbility(12, 1, 0);
+						ByteBuffer upgReq;
+						upgReq << uint8(0x80) << uint8(0xB7) << uint16(12) << uint16(0) << uint8(1); // delta = +1
+						p13ClientA.captured.clear();
+						opSquadA.po->HandleCommand(upgReq);
+						auto ab12 = opSquadA.po->m_abilitySystem->getAbility(12);
+						check(ab12 != nullptr && ab12->getLevel() == 2,
+							"RPC 0x80B7 (RPC_HandleUpgradeAbility) adds levelDelta (+1) to upgrade ability 12 from level 1 to level 2");
+					}
+				}
 			}
 		}
 	}

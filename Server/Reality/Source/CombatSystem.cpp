@@ -1558,7 +1558,10 @@ CombatSystem::AttackResult CombatSystem::ResolveAttack(PlayerObject* attacker, P
 
 		// H1: the kill reward is paid by PlayerObject::die(), which runs for every death
 		// (zero-delay deaths inside takeDamage and the delayed takedown deaths alike).
-		if (GameServer::getSingletonPtr() != nullptr && MatrixThreatHeatmap::getSingletonPtr() != nullptr &&
+		// Threat heat / Agent intervention is not retail behaviour; it follows the same switch as the
+		// heatmap update (World.ThreatEscalation, default off).
+		if (sConfig.GetBoolDefault("World.ThreatEscalation", false) &&
+			GameServer::getSingletonPtr() != nullptr && MatrixThreatHeatmap::getSingletonPtr() != nullptr &&
 			!attacker->getClient().isBot() && target->getHandle().find("Dojo") == std::string::npos)
 		{
 			LocationVector aPos = attacker->getPosition();

@@ -18,6 +18,8 @@
 #include "Database/PreparedStatement.h"
 #include "Log.h"
 #include "DataLoader.h"
+#include "MessageTypes.h"
+#include "GameClient.h"
 #include "ItemSerializer.h"
 #include "MessageTypes.h"
 #include "GameClient.h"
@@ -155,6 +157,24 @@ void InventorySystem::saveToDB(bool force)
     }
 }
 
+uint32 InventorySystem::ClientItemData(const Item &item)
+{
+    const uint16 stack = item.getStackCount();
+    return stack > 1 ? (uint32(stack & 0xFF) << 18) : 0x0C000000u;
+}
+
+static bool InventoryClientLive(PlayerObject* owner)
+{
+    // loadFromDB fills m_items directly, so only real changes reach this path
+    return owner && !owner->getClient().isBot();
+}
+
+void InventorySystem::notifyMove(uint8 fromSlot, uint8 toSlot)
+{
+    if (InventoryClientLive(m_owner))
+        m_owner->getClient().QueueCommand(std::make_shared<InventoryItemMoveMsg>(fromSlot, toSlot));
+}
+
 bool InventorySystem::addItem(shared_ptr<Item> item, uint8 slot)
 {
     if (m_items.find(slot) != m_items.end())
@@ -163,6 +183,10 @@ bool InventorySystem::addItem(shared_ptr<Item> item, uint8 slot)
     m_items[slot] = item;
     m_goIdToSlot[item->getGoId()] = slot;
     m_dirty = true;
+    // the client only learns about items through the login margin data or RPC 0x5E
+    if (InventoryClientLive(m_owner) && item->getTemplateId() > 1)
+        m_owner->getClient().QueueCommand(std::make_shared<InventoryItemAddMsg>(
+            slot, item->getTemplateId(), ClientItemData(*item)));
     return true;
 }
 
@@ -192,6 +216,8 @@ bool InventorySystem::removeItem(uint32 goId)
         m_items.erase(slot);
         m_goIdToSlot.erase(it);
         m_dirty = true;
+        if (InventoryClientLive(m_owner))
+            m_owner->getClient().QueueCommand(std::make_shared<InventoryItemRemoveMsg>(slot));
         return true;
     }
     return false;

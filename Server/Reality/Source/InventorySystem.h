@@ -53,6 +53,12 @@ public:
     // Send inventory to client
     void sendFullInventory();
 
+    // Value the client keeps per inventory item next to the item id (margin section 0x05 and
+    // RPC 0x5E "Data"): stack count << 18 for stacks, purity << 26 otherwise.
+    static uint32 ClientItemData(const Item &item);
+    // Mirror slot changes to the owner's client (RPC 0x5E / 0x5F / 0x65). Off while loading.
+    void notifyMove(uint8 fromSlot, uint8 toSlot);
+
 private:
     PlayerObject* m_owner;
     bool m_dirty = false;

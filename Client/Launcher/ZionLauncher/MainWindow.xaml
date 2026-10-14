@@ -177,6 +177,7 @@
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="Auto"/>
                                 <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="Auto"/>
                             </Grid.ColumnDefinitions>
                             <Border Width="56" Height="56" Background="#002208" BorderBrush="#00FF66" BorderThickness="1" CornerRadius="4" Margin="0,0,14,0">
                                 <TextBlock x:Name="txtSelectedOperativeIcon" Text="🕶️" FontSize="32" HorizontalAlignment="Center" VerticalAlignment="Center"/>
@@ -186,6 +187,7 @@
                                 <TextBlock x:Name="txtSelectedOperativeStats" Text="DISCIPLINE: Level 50 Hacker | SECTOR: Slums" FontSize="12" Foreground="#88FF88" Margin="0,2,0,0"/>
                                 <TextBlock x:Name="txtSelectedOperativeRsi" Text="RSI STATUS: 100% HEALTHY // READY FOR BROADCAST" FontSize="11" Foreground="#00FFAA" Margin="0,2,0,0"/>
                             </StackPanel>
+                            <Button x:Name="btnEditAttributes" Grid.Column="2" Content="⚙ ATTRIBUTES" Width="112" Height="34" VerticalAlignment="Center" Margin="8,0,0,0" FontSize="11" FontWeight="Bold" Click="btnEditAttributes_Click"/>
                         </Grid>
                     </Border>
 

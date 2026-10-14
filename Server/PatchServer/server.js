@@ -405,7 +405,7 @@ const server = http.createServer(async (req, res) => {
             let characters = [];
             try {
                 const [chars] = await pool.execute(
-                    'SELECT charId, handle, firstName, lastName, level, profession, district FROM characters WHERE userId = ? ORDER BY charId DESC',
+                    'SELECT charId, handle, firstName, lastName, level, profession, district, belief, focus, perception, reason, vitality FROM characters WHERE userId = ? ORDER BY charId DESC',
                     [user.userId]
                 );
                 characters = chars;
@@ -463,7 +463,7 @@ const server = http.createServer(async (req, res) => {
 
             const userId = users[0].userId;
             const [characters] = await pool.execute(
-                'SELECT charId, handle, firstName, lastName, level, profession, district FROM characters WHERE userId = ? ORDER BY charId DESC',
+                'SELECT charId, handle, firstName, lastName, level, profession, district, belief, focus, perception, reason, vitality FROM characters WHERE userId = ? ORDER BY charId DESC',
                 [userId]
             );
 
@@ -477,6 +477,120 @@ const server = http.createServer(async (req, res) => {
             console.error('[PatchServer] Characters error:', err.message);
             res.writeHead(500);
             res.end(JSON.stringify({ success: false, message: err.message }));
+        }
+        return;
+    }
+
+    // 3b2. Launcher operative management (create / attributes / delete). Each call re-checks the
+    // account passcode; there is no master password.
+    async function verifyAccount(username, password) {
+        if (!username || !password || !pool) return null;
+        const [uRows] = await pool.execute('SELECT userId, passwordSalt, passwordHash FROM users WHERE LOWER(username) = LOWER(?) LIMIT 1', [username]);
+        if (uRows.length === 0) return null;
+        const user = uRows[0];
+        if (hashPassword(user.passwordSalt, password).toLowerCase() !== String(user.passwordHash).toLowerCase()) return null;
+        return user;
+    }
+    // client.dll 0x625c5320 / 0x625c5350: attribute minimum 7
+    const clampAttr = (v) => Math.max(7, Math.min(60, parseInt(v, 10) || 8));
+
+    if (pathname === '/api/characters/create' && req.method === 'POST') {
+        res.setHeader('Content-Type', 'application/json');
+        try {
+            const data = await parseJsonBody(req);
+            const username = (data.username || '').trim();
+            const handle = (data.handle || '').trim();
+            const firstName = (data.firstName || handle || 'Redpill').trim().slice(0, 32);
+            const lastName = (data.lastName || 'Operative').trim().slice(0, 32);
+            const profession = Math.max(1, Math.min(5, parseInt(data.profession, 10) || 1));
+            const alignment = Math.max(0, Math.min(3, parseInt(data.alignment, 10) || 1));
+            const district = Math.max(1, Math.min(4, parseInt(data.district, 10) || 1));
+            const sex = (data.sex === 1 || String(data.gender || '').toLowerCase() === 'female') ? 1 : 0;
+            const attrs = ['belief', 'focus', 'perception', 'reason', 'vitality'].map(k => clampAttr(data[k]));
+            if (!handle || !/^[a-zA-Z0-9_-]{2,24}$/.test(handle)) {
+                res.writeHead(400);
+                res.end(JSON.stringify({ ok: false, success: false, message: 'Handle must be 2-24 letters, numbers, _ or - (no spaces).' }));
+                return;
+            }
+            if (!pool) { res.writeHead(503); res.end(JSON.stringify({ ok: false, success: false, message: 'Database service unavailable.' })); return; }
+            const user = await verifyAccount(username, data.password || '');
+            if (!user) { res.writeHead(401); res.end(JSON.stringify({ ok: false, success: false, message: 'Invalid username or passcode.' })); return; }
+            const [existingHandle] = await pool.execute('SELECT charId FROM characters WHERE LOWER(handle) = LOWER(?) LIMIT 1', [handle]);
+            if (existingHandle.length > 0) {
+                res.writeHead(409);
+                res.end(JSON.stringify({ ok: false, success: false, message: `Operative handle '${handle}' is already taken.` }));
+                return;
+            }
+            const [insRes] = await pool.execute(
+                'INSERT INTO characters (userId, worldId, status, handle, firstName, lastName, background, x, y, z, rot, healthC, healthM, innerStrC, innerStrM, level, profession, alignment, pvpflag, exp, cash, district, adminFlags, isOnline, belief, focus, perception, reason, vitality, info_allocation) VALUES (?, 1, 2, ?, ?, ?, ?, -10579.6, 572.0, -22592.3, 0, 250, 250, 100, 100, 1, ?, ?, 0, 0, 500, ?, 0, 0, ?, ?, ?, ?, ?, 0)',
+                [user.userId, handle, firstName, lastName, 'Awakened Redpill Operative', profession, alignment, district, ...attrs]
+            );
+            const newCharId = insRes.insertId;
+            // same default look MarginSocket gives characters created in the client
+            await pool.execute(
+                'INSERT IGNORE INTO rsivalues (charId, sex, body, hat, face, shirt, coat, pants, shoes, gloves, glasses, hair, facialdetail, shirtcolor, pantscolor, coatcolor, shoecolor, glassescolor, haircolor, skintone, tattoo, facialdetailcolor, leggings) VALUES (?, ?, 0, 0, 0, 2, 10, 1, 6, 6, 4, 1, 0, 41, 16, 0, 0, 15, 1, 1, 0, 0, 0)',
+                [newCharId, sex]
+            );
+            const [belief, focus, perception, reason, vitality] = attrs;
+            console.log(`[PatchServer] Created operative '${handle}' (charId=${newCharId}) for userId=${user.userId}`);
+            res.writeHead(200);
+            res.end(JSON.stringify({ ok: true, success: true, charId: newCharId,
+                character: { charId: newCharId, handle, firstName, lastName, level: 1, profession, alignment, district, belief, focus, perception, reason, vitality } }));
+        } catch (err) {
+            console.error('[PatchServer] Create character error:', err.message);
+            res.writeHead(500);
+            res.end(JSON.stringify({ ok: false, success: false, message: 'Could not create the operative.' }));
+        }
+        return;
+    }
+
+    if (pathname === '/api/characters/attributes' && req.method === 'POST') {
+        res.setHeader('Content-Type', 'application/json');
+        try {
+            const data = await parseJsonBody(req);
+            const charId = parseInt(data.charId, 10) || 0;
+            const attrs = ['belief', 'focus', 'perception', 'reason', 'vitality'].map(k => clampAttr(data[k]));
+            if (!charId) { res.writeHead(400); res.end(JSON.stringify({ ok: false, success: false, message: 'charId required.' })); return; }
+            if (!pool) { res.writeHead(503); res.end(JSON.stringify({ ok: false, success: false, message: 'Database service unavailable.' })); return; }
+            const user = await verifyAccount((data.username || '').trim(), data.password || '');
+            if (!user) { res.writeHead(401); res.end(JSON.stringify({ ok: false, success: false, message: 'Invalid username or passcode.' })); return; }
+            const [upd] = await pool.execute(
+                'UPDATE characters SET belief = ?, focus = ?, perception = ?, reason = ?, vitality = ? WHERE charId = ? AND userId = ?',
+                [...attrs, charId, user.userId]);
+            if (!upd.affectedRows) { res.writeHead(404); res.end(JSON.stringify({ ok: false, success: false, message: 'Operative not found on this account.' })); return; }
+            const [belief, focus, perception, reason, vitality] = attrs;
+            res.writeHead(200);
+            res.end(JSON.stringify({ ok: true, success: true, charId, belief, focus, perception, reason, vitality, message: 'Attributes saved to Zion Mainframe.' }));
+        } catch (err) {
+            console.error('[PatchServer] Save attributes error:', err.message);
+            res.writeHead(500);
+            res.end(JSON.stringify({ ok: false, success: false, message: 'Could not save attributes.' }));
+        }
+        return;
+    }
+
+    if (pathname === '/api/characters/delete' && req.method === 'POST') {
+        res.setHeader('Content-Type', 'application/json');
+        try {
+            const data = await parseJsonBody(req);
+            const charId = parseInt(data.charId, 10) || 0;
+            if (!charId) { res.writeHead(400); res.end(JSON.stringify({ ok: false, success: false, message: 'charId required.' })); return; }
+            if (!pool) { res.writeHead(503); res.end(JSON.stringify({ ok: false, success: false, message: 'Database service unavailable.' })); return; }
+            const user = await verifyAccount((data.username || '').trim(), data.password || '');
+            if (!user) { res.writeHead(401); res.end(JSON.stringify({ ok: false, success: false, message: 'Invalid username or passcode.' })); return; }
+            // ownership first: nothing is touched for a character on another account
+            const [own] = await pool.execute('SELECT charId FROM characters WHERE charId = ? AND userId = ? LIMIT 1', [charId, user.userId]);
+            if (own.length === 0) { res.writeHead(404); res.end(JSON.stringify({ ok: false, success: false, message: 'Operative not found on this account.' })); return; }
+            for (const t of ['rsivalues', 'inventory', 'abilities', 'hardline_lockers', 'code_fragments', 'character_missions', 'crew_members']) {
+                try { await pool.execute(`DELETE FROM \`${t}\` WHERE charId = ?`, [charId]); } catch (e) { }
+            }
+            await pool.execute('DELETE FROM characters WHERE charId = ? AND userId = ?', [charId, user.userId]);
+            res.writeHead(200);
+            res.end(JSON.stringify({ ok: true, success: true, charId }));
+        } catch (err) {
+            console.error('[PatchServer] Delete character error:', err.message);
+            res.writeHead(500);
+            res.end(JSON.stringify({ ok: false, success: false, message: 'Could not delete the operative.' }));
         }
         return;
     }
