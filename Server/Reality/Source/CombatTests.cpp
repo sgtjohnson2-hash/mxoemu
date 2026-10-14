@@ -3223,8 +3223,8 @@ int RunCombatTestSuite()
 					"HandleStateUpdate(0x08) synchronizes SpatialGrid cell so human client is discoverable at (45010, 45020)");
 
 				// B. Phase 9.3: O(1) ObjectMgr::getGOId and O(1) reverse view lookup (m_goToViews)
-				check(sObjMgr.getGOId(&p9Client) == p9Human.go,
-					"ObjectMgr::getGOId resolves client->GetPlayerGoId() in O(1)");
+				check(sObjMgr.getGOId(p9Human.po) == p9Human.go,
+					"ObjectMgr::getGOId resolves forWhichObj->getGoId() in O(1)");
 				Actor p9Bot = makeBot(9200311, 45050.0, 45050.0, 1, 100);
 				uint16 vAlloc = sObjMgr.getViewForGO(&p9Client, p9Bot.go);
 				check(vAlloc >= 3 && vAlloc < 128, "getViewForGO allocates valid viewId in [3..127]");
@@ -3232,9 +3232,9 @@ int RunCombatTestSuite()
 					"Shared-lock O(1) m_goToViews fast path returns identical viewId on repeat lookup");
 				check(sObjMgr.getGOForView(&p9Client, vAlloc) == p9Bot.go,
 					"Forward viewsOfClient map matches reverse m_goToViews map");
-				sObjMgr.releaseViewForGO(&p9Client, vAlloc);
+				sObjMgr.releaseDynamicView(&p9Client, vAlloc);
 				check(sObjMgr.getGOForView(&p9Client, vAlloc) == 0,
-					"releaseViewForGO erases both forward and reverse view mappings cleanly");
+					"releaseDynamicView erases both forward and reverse view mappings cleanly");
 
 				// C. Phase 10.2: InventorySystem & AbilitySystem dirty-flag persistence
 				auto invSys = p9Human.po->getInventory();
