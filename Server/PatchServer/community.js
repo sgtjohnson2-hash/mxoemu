@@ -1625,7 +1625,7 @@ function renderCommunityHubHtml() {
 '                    if (ws.active_world_events && ws.active_world_events.length > 0) {\n' +
 '                        var ev = ws.active_world_events[0];\n' +
 '                        evEl.style.color = "#ff3333";\n' +
-'                        evEl.innerHTML = "⚠️ <b>ACTIVE RAID:</b> " + ev.boss_name + " @ " + ev.district_name + " (HP: " + ev.current_hp + "/" + ev.max_hp + ")";\n' +
+'                        evEl.innerHTML = "⚠️ <b>ACTIVE RAID (" + ws.active_world_events.length + "):</b> " + ev.boss_name + " @ " + ev.district_name + " [" + (ev.type || ev.faction || "Boss") + "]";\n' +
 '                    } else {\n' +
 '                        evEl.style.color = "#88ffaa";\n' +
 '                        evEl.innerText = "Sector Clear (No Active World Bosses)";\n' +
