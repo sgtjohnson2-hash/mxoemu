@@ -1914,16 +1914,21 @@ void PlayerObject::ParsePlayerCommand( string theCmd )
 			}
 		}
 
-		if (targetCivId == 0) {
-			targetCivId = m_targetGoId;
+		LocationVector pos = this->getPosition();
+		if (targetCivId == 0 && m_targetGoId != 0) {
+			PlayerObject* tpo = sObjMgr.getGOPtrSafe(m_targetGoId);
+			if (tpo && !tpo->isDead() && tpo->m_dojoOwnerGoId == 0 &&
+			    pos.DistanceSq(tpo->getPosition()) <= 1200.0f * 1200.0f) {
+				targetCivId = m_targetGoId;
+			}
 		}
 
-		LocationVector pos = this->getPosition();
 		if (targetCivId == 0 || !sObjMgr.getGOPtrSafe(targetCivId)) {
-			float bestDistSq = 3000.0f * 3000.0f;
+			float bestDistSq = 1200.0f * 1200.0f;
 			for (uint32 gid : sObjMgr.getAllGOIds()) {
 				PlayerObject* po = sObjMgr.getGOPtrSafe(gid);
-				if (po && po != this && !po->isDead() && (po->getClient().isBot() || po->getFactionName() == "Civilian")) {
+				if (po && po != this && !po->isDead() && po->m_dojoOwnerGoId == 0 &&
+				    (po->getClient().isBot() || po->getFactionName() == "Civilian")) {
 					float d = (float)pos.DistanceSq(po->getPosition());
 					if (d < bestDistSq) {
 						bestDistSq = d;

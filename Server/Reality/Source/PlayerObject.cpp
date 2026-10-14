@@ -1138,6 +1138,8 @@ void PlayerObject::FlushAndRefreshAoI()
 		             m_pos.Distance2DSq(otherObj->getPosition()) > STREAM_OUT_RADIUS_SQ);
 		if (cull)
 		{
+			if (m_targetGoId == knownGoId) m_targetGoId = 0;
+			if (m_lastDojoBotGoId == knownGoId) m_lastDojoBotGoId = 0;
 			noteEntityDeleted(knownGoId);
 			try { m_parent.QueueState(make_shared<DeletePlayerMsg>(knownGoId)); } catch (...) {}
 			culledNow++;
