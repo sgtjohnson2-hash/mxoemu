@@ -674,6 +674,12 @@ static ByteBuffer BuildMarginInventorySection(uint64 charId)
 
 // Ability entries: [slot u16][client ability GOID + level]; GOID = 0x80000000 + AbilityID * 0x400
 // (hd_reference/data/abilityIDs.csv). A loaded entry's slot is the ability's index in the known list.
+// Retail 7.6005 client.dll (0x621DE5B0 / 0x621CD550 / 0x621E0BD4): CPlayerAbilityMgr (0x629EA4E8)
+// stores known ability entries in a fixed 520-element (0x0208) array of 8-byte structs at +0x06DC..+0x171B,
+// immediately followed at +0x171C (0x629EBC04) by the std::vector for rl.cfg recipes (0x621DDA60).
+// Unpacker 0x621CD550 writes `mov [ecx + esi*8 + 0x6dc], edi` without a `< 0x0208` check, so any
+// slot >= 0x0208 overwrites 0x629EBC04 (`vector._Myfirst`) and crashes at client.dll+0x1DDAE4!
+static constexpr uint16 kMaxClientAbilitySlots = 0x0208; // 520 slots (0x0000 .. 0x0207)
 struct MarginAbility { uint16 slot; uint32 abilityId; uint16 level; };
 static std::vector<MarginAbility> DecodeMarginAbilities(const unsigned char* data, size_t len)
 {
@@ -684,6 +690,7 @@ static std::vector<MarginAbility> DecodeMarginAbilities(const unsigned char* dat
 	{
 		const unsigned char* e = data + 4 + k;
 		const uint16 slot = uint16(e[0]) | (uint16(e[1]) << 8);
+		if (slot >= kMaxClientAbilitySlots) continue;
 		const uint32 val = uint32(e[2]) | (uint32(e[3]) << 8) | (uint32(e[4]) << 16) | (uint32(e[5]) << 24);
 		MarginAbility a;
 		a.slot = slot;
@@ -697,14 +704,17 @@ static ByteBuffer EncodeMarginAbilities(const std::vector<MarginAbility> &list)
 {
 	ByteBuffer entries;
 	for (const MarginAbility &a : list)
+	{
+		if (a.slot >= kMaxClientAbilitySlots) continue;
 		entries << uint16(a.slot) << uint32(0x80000000u + (a.abilityId << 10) + (a.level & 0x3FF));
+	}
 	ByteBuffer out;
 	out << uint8(0x10) << uint8(0x00) << uint16(entries.size());
 	if (entries.size())
 		out.append(entries.contents(), entries.size());
 	return out;
 }
-// Known = captured known list + any loadout ability it lacks (appended).
+// Known = captured known list + any loadout ability it lacks (inserted into free/unloaded slots < 0x0208).
 // Loaded = captured loadout (innates like Hyper Jump / Hyper Sprint) + the character's own loadout
 // from `abilities`, each at its known-list slot. Margin.DbAbilities = 0 sends the captures unchanged.
 static void BuildMarginAbilitySections(uint64 charId, const unsigned char* knownCap, size_t knownLen,
@@ -713,14 +723,19 @@ static void BuildMarginAbilitySections(uint64 charId, const unsigned char* known
 	std::vector<MarginAbility> known = DecodeMarginAbilities(knownCap, knownLen);
 	std::vector<MarginAbility> loaded = DecodeMarginAbilities(loadedCap, loadedLen);
 	std::map<uint32, size_t> knownIdx;
-	uint16 nextSlot = 0;
+	std::set<uint16> usedSlots;
 	for (size_t i = 0; i < known.size(); i++)
 	{
 		if (!knownIdx.count(known[i].abilityId)) knownIdx[known[i].abilityId] = i;
-		nextSlot = std::max<uint16>(nextSlot, uint16(known[i].slot + 1));
+		usedSlots.insert(known[i].slot);
 	}
 	std::map<uint32, bool> loadedIds;
-	for (const MarginAbility &a : loaded) loadedIds[a.abilityId] = true;
+	std::set<uint16> loadedSlots;
+	for (const MarginAbility &a : loaded)
+	{
+		loadedIds[a.abilityId] = true;
+		loadedSlots.insert(a.slot);
+	}
 
 	PreparedStatement stmt("SELECT `abilityId`, `level` FROM `abilities` WHERE `charId` = ?0");
 	stmt.SetUInt64(0, charId);
@@ -737,19 +752,53 @@ static void BuildMarginAbilitySections(uint64 charId, const unsigned char* known
 			auto k = knownIdx.find(abilityId);
 			if (k == knownIdx.end())
 			{
-				MarginAbility a; a.slot = nextSlot++; a.abilityId = abilityId; a.level = level;
-				knownIdx[abilityId] = known.size();
-				known.push_back(a);
-				k = knownIdx.find(abilityId);
+				// 1. Prefer an unused slot < 0x0208 (e.g. slots 399, 451 in packet9)
+				uint16 chosenSlot = kMaxClientAbilitySlots;
+				for (uint16 s = 0; s < kMaxClientAbilitySlots; ++s)
+				{
+					if (!usedSlots.count(s))
+					{
+						chosenSlot = s;
+						break;
+					}
+				}
+				if (chosenSlot < kMaxClientAbilitySlots)
+				{
+					MarginAbility a; a.slot = chosenSlot; a.abilityId = abilityId; a.level = level;
+					usedSlots.insert(chosenSlot);
+					knownIdx[abilityId] = known.size();
+					known.push_back(a);
+					k = knownIdx.find(abilityId);
+				}
+				else
+				{
+					// 2. Replace a non-loaded tail entry in known (keeping its valid slot < 0x0208)
+					for (size_t idx = known.size(); idx > 0; --idx)
+					{
+						size_t r = idx - 1;
+						if (known[r].slot < kMaxClientAbilitySlots &&
+						    !loadedSlots.count(known[r].slot) &&
+						    !loadedIds.count(known[r].abilityId))
+						{
+							knownIdx.erase(known[r].abilityId);
+							known[r].abilityId = abilityId;
+							known[r].level = level;
+							knownIdx[abilityId] = r;
+							k = knownIdx.find(abilityId);
+							break;
+						}
+					}
+				}
 			}
 			else if (known[k->second].level < level)
 				known[k->second].level = level;
-			if (!loadedIds.count(abilityId))
+			if (k != knownIdx.end() && !loadedIds.count(abilityId))
 			{
 				MarginAbility a = known[k->second];
 				a.level = level;
 				loaded.push_back(a);
 				loadedIds[abilityId] = true;
+				loadedSlots.insert(a.slot);
 				added++;
 			}
 		} while (result->NextRow());
