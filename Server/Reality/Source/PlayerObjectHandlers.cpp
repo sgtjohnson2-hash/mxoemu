@@ -4261,6 +4261,8 @@ void PlayerObject::RPC_HandleDynamicObjInteraction( ByteBuffer &srcCmd )
 
 void PlayerObject::RPC_HandleStaticObjInteraction( ByteBuffer &srcCmd )
 {
+	if (srcCmd.remaining() < 6)
+		return;
 	uint32 staticObjId = srcCmd.read<uint32>();
 	uint16 interaction = srcCmd.read<uint16>();
 
@@ -4317,6 +4319,44 @@ void PlayerObject::RPC_HandleStaticObjInteraction( ByteBuffer &srcCmd )
 				"{c:00FF00}[TAILOR] Custom dye available! Use /dye <coat|shirt|pants|shoes|glasses|hair> <0-31> to alter your appearance palette.{/c}"
 			));
 		}
+		return;
+	}
+
+	// HDS ObjectInteractionHandler.cs:9-18:
+	// 0x01 = COLLECTOR, 0x03 = DOOR, 0x04 = HARDLINE_UPLOAD, 0x05 = HARDLINE_LAEXIT, 0x08 = HARDLINE_SYNC
+	if (interaction == 0x01) // COLLECTOR (Archive / Data Node)
+	{
+		sMissionSys.AdvanceObjective(this, ObjectiveCommand::HACK, staticObjId);
+		addInfo(25);
+		saveCashToDB();
+		m_parent.QueueCommand(std::make_shared<SetInformationCmd>(m_cash));
+		m_parent.QueueCommand(make_shared<SystemChatMsg>(
+			(format("{c:00FFCC}[ARCHIVE COLLECTOR] Extracted 25 Information Bits from static node 0x%1$08X.{/c}") % staticObjId).str()));
+		return;
+	}
+
+	if (interaction == 0x04 || interaction == 0x08) // HARDLINE_UPLOAD (0x04) / HARDLINE_SYNC (0x08)
+	{
+		const HardlineNode* nearest = GetNearestHardline(m_district, m_pos.x, m_pos.z);
+		if (!nearest)
+			nearest = GetNearestHardline(1, m_pos.x, m_pos.z);
+		m_parent.QueueState(std::make_shared<JackoutEffectMsg>(m_goId, false));
+		if (nearest)
+		{
+			INFO_LOG(format("HardlineSync: %1% synchronized with Hardline #%2% (%3%) in District %4% via 0x80c8 interaction %5%")
+				% m_handle % (int)nearest->hardlineId % nearest->name % (int)nearest->districtId % (int)interaction);
+			m_parent.QueueCommand(make_shared<SystemChatMsg>(
+				(format("{c:00FFCC}[HARDLINE] Synchronized with %1% (District %2%, Node #%3%).{/c}")
+					% nearest->name % (int)nearest->districtId % (int)nearest->hardlineId).str()));
+		}
+		return;
+	}
+
+	if (interaction == 0x05) // HARDLINE_LAEXIT (HDS EnviromentPackets.cs:48-59 SendHardlineExit 0x80fb: 95 00 00 00 01)
+	{
+		INFO_LOG(format("HardlineExit: %1% triggered HARDLINE_LAEXIT (0x05) on static object 0x%2$08X") % m_handle % staticObjId);
+		m_parent.QueueCommand(std::make_shared<HexGenericMsg>("80fb9500000001"));
+		m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:00FF00}[HARDLINE] Hardline exit carrier confirmed.{/c}"));
 		return;
 	}
 
@@ -4936,6 +4976,23 @@ void PlayerObject::RPC_HandleVendorSell(ByteBuffer& srcCmd)
 		(format("{c:00FF00}[VENDOR] Sold %1% for %2% Information Bits.{/c}") % itemName % sellValue).str()
 	));
 }
+
+// 0x8110 - retail client vendor close notification
+// Primary source: Client\client.dll+0x10A170 (0x6210A170) and 0x6210A200 (0x6210A200),
+// registered in the "Trading" RPC table at .rdata 0x6287D570..0x6287D5AC (0x010e, 0x0110, 0x0111).
+// 0x6210A170 allocates a 7-byte packet: [0x81, 0x10][uint32 0x00000000][uint8 0x01].
+void PlayerObject::RPC_HandleVendorClose(ByteBuffer& srcCmd)
+{
+	uint32 vendorCtx = 0;
+	uint8 closeFlag = 0;
+	if (srcCmd.remaining() >= 4)
+		vendorCtx = srcCmd.read<uint32>();
+	if (srcCmd.remaining() >= 1)
+		closeFlag = srcCmd.read<uint8>();
+	INFO_LOG(format("(%1%) %2%:%3% RPC_HandleVendorClose: ctx=%4% flag=%5%")
+		% m_parent.Address() % m_handle % m_goId % vendorCtx % uint32(closeFlag));
+}
+
 void PlayerObject::RPC_HandleCraftRequest(ByteBuffer& srcCmd)
 {
 	if (srcCmd.remaining() < 4) return;

@@ -3070,6 +3070,132 @@ int RunCombatTestSuite()
 				check(p5Human.po->knowsEntity(dtBot.go),
 					"FlushAndRefreshAoI() spawns nearby dtBot into m_knownEntities on arrival in Downtown");
 			}
+
+			// 24. Phases 6-8: Crew Mission Objective Sharing, Static Object Interactions (0x80c8), Vendor Close (0x8110) & Non-Lethal PvP Sparring Duels
+			{
+				// A. Phase 6.1: Crew / Organization Mission Objective Sharing within 50m
+				TestHumanClient crewClientA, crewClientB;
+				Actor crewA = makeHuman(&crewClientA, 9100300, 12000.0, 12000.0);
+				Actor crewB = makeHuman(&crewClientB, 9100301, 12100.0, 12000.0); // 1m away (within 50m)
+				crewA.po->setDistrict(1);
+				crewB.po->setDistrict(1);
+				crewA.po->setOrgId(77);
+				crewB.po->setOrgId(77);
+
+				MissionTemplate crewMission;
+				crewMission.missionId = 99006;
+				crewMission.title = "Phase 6 Crew Shared Recon";
+				crewMission.description = "Synchronize crew objective completion.";
+				crewMission.expReward = 250;
+				crewMission.infoReward = 100;
+				{
+					MissionObjective obj1;
+					obj1.command = ObjectiveCommand::DEFEAT;
+					obj1.targetNpcId = 8801;
+					obj1.description = "Eliminate Exile Courier";
+					crewMission.objectives.push_back(obj1);
+
+					MissionObjective obj2;
+					obj2.command = ObjectiveCommand::HACK;
+					obj2.targetNpcId = 8802;
+					obj2.description = "Decrypt Archive Terminal";
+					crewMission.objectives.push_back(obj2);
+				}
+				sMissionSys.AddMissionTemplate(crewMission);
+				sMissionSys.AssignMission(crewA.po, 99006);
+				sMissionSys.AssignMission(crewB.po, 99006);
+
+				ActiveObjectiveInfo infoA, infoB;
+				check(sMissionSys.GetActiveObjectiveInfo(crewA.go, infoA) && infoA.objectiveIndex == 0,
+					"Crewmate A starts at objective 0 of shared mission 99006");
+				check(sMissionSys.GetActiveObjectiveInfo(crewB.go, infoB) && infoB.objectiveIndex == 0,
+					"Crewmate B starts at objective 0 of shared mission 99006");
+
+				// Crewmate A advances objective 0 (DEFEAT target 8801) -> Crewmate B within 50m advances automatically
+				crewClientB.captured.clear();
+				sMissionSys.AdvanceObjective(crewA.po, ObjectiveCommand::DEFEAT, 8801);
+				check(sMissionSys.GetActiveObjectiveInfo(crewA.go, infoA) && infoA.objectiveIndex == 1,
+					"Crewmate A advances to objective 1 after DEFEAT 8801");
+				check(sMissionSys.GetActiveObjectiveInfo(crewB.go, infoB) && infoB.objectiveIndex == 1 &&
+					  crewClientB.sawText("[CREW MISSION]"),
+					"Crewmate B within 50m in same Organization automatically advances to objective 1 and receives [CREW MISSION]");
+
+				sMissionSys.AbortMission(crewA.po, "test cleanup");
+				sMissionSys.AbortMission(crewB.po, "test cleanup");
+
+				// B. Phase 6.2: Static Object Interactions (0x80c8) — Collector (0x01), Hardline Sync (0x08), Hardline Exit (0x05 -> 0x80fb)
+				PlayerObject::LoadHardlines();
+				uint64 cashBeforeCollector = crewA.po->getInformation();
+				ByteBuffer collectorPkt;
+				collectorPkt << (uint8)0x80 << (uint8)0xc8 << (uint32)0x12345678 << (uint16)0x01;
+				crewClientA.captured.clear();
+				crewA.po->HandleCommand(collectorPkt);
+				check(crewA.po->getInformation() == cashBeforeCollector + 25 && crewClientA.sawText("[ARCHIVE COLLECTOR]"),
+					"0x80c8 interaction 0x01 (COLLECTOR) awards 25 Information Bits and confirms extraction");
+
+				ByteBuffer hlSyncPkt;
+				hlSyncPkt << (uint8)0x80 << (uint8)0xc8 << (uint32)0x00000010 << (uint16)0x08;
+				crewClientA.captured.clear();
+				crewA.po->HandleCommand(hlSyncPkt);
+				check(crewClientA.sawText("[HARDLINE] Synchronized with"),
+					"0x80c8 interaction 0x08 (HARDLINE_SYNC) synchronizes with nearest district Hardline");
+
+				ByteBuffer hlExitPkt;
+				hlExitPkt << (uint8)0x80 << (uint8)0xc8 << (uint32)0x00000010 << (uint16)0x05;
+				crewClientA.captured.clear();
+				crewA.po->HandleCommand(hlExitPkt);
+				bool saw80fb = false;
+				for (const auto& pkt : crewClientA.captured)
+				{
+					if (pkt.size() == 7 && (uint8)pkt[0] == 0x80 && (uint8)pkt[1] == 0xfb &&
+						(uint8)pkt[2] == 0x95 && (uint8)pkt[6] == 0x01)
+					{
+						saw80fb = true;
+						break;
+					}
+				}
+				check(saw80fb && crewClientA.sawText("[HARDLINE] Hardline exit carrier confirmed"),
+					"0x80c8 interaction 0x05 (HARDLINE_LAEXIT) queues retail 0x80fb (80 fb 95 00 00 00 01) carrier packet");
+
+				// C. Phase 7.1: Retail Vendor Close RPC (0x8110, cited to client.dll+0x10A170)
+				ByteBuffer vendorClosePkt;
+				vendorClosePkt << (uint8)0x81 << (uint8)0x10 << (uint32)0x00000000 << (uint8)0x01;
+				crewA.po->HandleCommand(vendorClosePkt);
+				check(vendorClosePkt.remaining() == 0,
+					"RPC_HandleVendorClose (0x8110) consumes full 5-byte retail payload (00 00 00 00 01) from client.dll+0x10A170");
+
+				// D. Phase 7.2: Non-Lethal PvP Sparring Duel Resolution
+				crewA.po->setMaximumHealth(200);
+				crewA.po->setCurrentHealth(200);
+				crewB.po->setMaximumHealth(200);
+				crewB.po->setCurrentHealth(50);
+
+				// Challenge via /duel and accept via /duel accept
+				crewA.po->setTargetGoId(crewB.go);
+				ByteBuffer duelReqCmd;
+				duelReqCmd << (uint8)0x28 << (uint8)0x10 << (uint16)swap16(8) << (uint32)0;
+				duelReqCmd.writeString("&duel");
+				crewA.po->HandleCommand(duelReqCmd);
+				check(crewB.po->getDuelChallenger() == crewA.go,
+					"&duel sets challenger GoId on target operative");
+
+				ByteBuffer duelAccCmd;
+				duelAccCmd << (uint8)0x28 << (uint8)0x10 << (uint16)swap16(8) << (uint32)0;
+				duelAccCmd.writeString("&duel accept");
+				crewB.po->HandleCommand(duelAccCmd);
+				check(crewA.po->isDueling() && crewB.po->isDueling() &&
+					  crewA.po->getDuelPartner() == crewB.go && crewB.po->getDuelPartner() == crewA.go,
+					"&duel accept establishes mutual sparring duel state between two same-faction operatives");
+
+				uint64 expBeforeDuel = crewA.po->getExperience();
+				crewB.po->takeDamage(crewA.go, 120, 0, false);
+				check(!crewB.po->isDead() && crewB.po->getCurrentHealth() == crewB.po->getMaximumHealth(),
+					"Defeated duelist does NOT die and is immediately restored to full HP upon sparring conclusion");
+				check(!crewA.po->isDueling() && !crewB.po->isDueling(),
+					"Sparring duel clears duelPartner state on both operatives after non-lethal victory");
+				check(crewA.po->getExperience() >= expBeforeDuel + 100,
+					"Sparring duel victor receives +100 sparring XP upon non-lethal victory");
+			}
 		}
 	}
 	catch (const std::exception& e)

@@ -1488,7 +1488,9 @@ CombatSystem::AttackResult CombatSystem::ResolveAttack(PlayerObject* attacker, P
     }
     
     // Item 32: Takedown Moves & Interlock Animation Dispatch
-    if (res.hit && target->getCurrentHealth() <= res.damageTaken) {
+    // Sparring duels resolve non-lethally inside takeDamage -> die() without a 3s death timer.
+    const bool isSparringDuel = (target->isDueling() && target->getDuelPartner() == attacker->getGoId());
+    if (res.hit && !isSparringDuel && target->getCurrentHealth() <= res.damageTaken) {
         // arm the 3 s takedown timer only once; a second lethal hit must not push death out
         if (target->m_deathDelayMS == 0)
         {

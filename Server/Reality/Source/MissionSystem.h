@@ -178,7 +178,7 @@ public:
     void SavePlayerMission(PlayerObject* player, uint32 missionId, uint32 currentObjective, uint8 state);
 
     void AssignMission(PlayerObject* player, uint32 missionId);
-    void AdvanceObjective(PlayerObject* player, ObjectiveCommand command, uint32 targetId);
+    void AdvanceObjective(PlayerObject* player, ObjectiveCommand command, uint32 targetId, bool shareWithCrew = true);
     
     void SendMissionObjectiveDialog(PlayerObject* player);
     void CompleteMission(PlayerObject* player, MissionTemplate& templ);

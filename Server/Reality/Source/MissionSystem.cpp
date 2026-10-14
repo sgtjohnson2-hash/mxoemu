@@ -635,7 +635,7 @@ void MissionSystem::AssignMission(PlayerObject* player, uint32 missionId)
     INFO_LOG(format("Player %1% assigned mission %2%") % player->getHandle() % missionId);
 }
 
-void MissionSystem::AdvanceObjective(PlayerObject* player, ObjectiveCommand command, uint32 targetId)
+void MissionSystem::AdvanceObjective(PlayerObject* player, ObjectiveCommand command, uint32 targetId, bool shareWithCrew)
 {
     std::unique_lock<std::recursive_mutex> lock(m_missionMutex);
     if (!player) return;
@@ -649,6 +649,7 @@ void MissionSystem::AdvanceObjective(PlayerObject* player, ObjectiveCommand comm
     if (state.currentObjectiveIndex >= templ.objectives.size()) return; // Mission complete
 
     MissionObjective& currentObj = templ.objectives[state.currentObjectiveIndex];
+    const uint32 completedTargetNpcId = currentObj.targetNpcId;
 
     bool objectiveMet = false;
 
@@ -885,6 +886,47 @@ void MissionSystem::AdvanceObjective(PlayerObject* player, ObjectiveCommand comm
             // We must unlock the mutex before assigning a new mission to avoid deadlock
             lock.unlock();
             AssignMission(player, jumpMissionId);
+        } else {
+            lock.unlock();
+        }
+
+        // Phase 6: Crew / Organization Mission Objective Sharing (within 50m = 5000.0 units)
+        if (shareWithCrew && player->getOrgId() != 0)
+        {
+            const uint32 orgId = player->getOrgId();
+            const uint8 distId = player->getDistrict();
+            const LocationVector pPos = player->getPosition();
+            const uint32 shareTargetId = (completedTargetNpcId != 0) ? completedTargetNpcId : targetId;
+            auto allIds = sObjMgr.getAllGOIds();
+            for (uint32 otherGoId : allIds)
+            {
+                if (otherGoId == goId) continue;
+                PlayerObject* crewmate = sObjMgr.getGOPtrSafe(otherGoId);
+                if (!crewmate || crewmate->getOrgId() != orgId || crewmate->getDistrict() != distId)
+                    continue;
+                LocationVector cPos = crewmate->getPosition();
+                double dx = cPos.x - pPos.x;
+                double dz = cPos.z - pPos.z;
+                if ((dx * dx + dz * dz) > (5000.0 * 5000.0))
+                    continue;
+                ActiveObjectiveInfo beforeInfo;
+                if (!GetActiveObjectiveInfo(otherGoId, beforeInfo))
+                    continue;
+                AdvanceObjective(crewmate, command, shareTargetId, false);
+                ActiveObjectiveInfo afterInfo;
+                bool stillActive = GetActiveObjectiveInfo(otherGoId, afterInfo);
+                if (!stillActive || afterInfo.objectiveIndex != beforeInfo.objectiveIndex || afterInfo.missionId != beforeInfo.missionId)
+                {
+                    INFO_LOG(format("MissionSystem: Shared objective progress from %1% to crewmate %2% (Org %3%)")
+                        % player->getHandle() % crewmate->getHandle() % orgId);
+                    if (!crewmate->getClient().isBot())
+                    {
+                        crewmate->getClient().QueueCommand(std::make_shared<SystemChatMsg>(
+                            (format("{c:00FFCC}[CREW MISSION] Objective progress synchronized from crewmate %1%!{/c}")
+                                % player->getHandle()).str()));
+                    }
+                }
+            }
         }
     }
 }

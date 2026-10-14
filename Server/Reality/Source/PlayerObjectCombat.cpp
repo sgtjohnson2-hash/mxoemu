@@ -546,11 +546,20 @@ void PlayerObject::die( uint32 killerGoId )
 		clearDuel();
 		if (partner) partner->clearDuel();
 		
+		m_deathDelayMS = 0;
+		m_deathDelayKillerId = 0;
+		sCombatSys.StopFreeFire(m_goId);
+		sCombatSys.LeaveInterlock(m_goId);
 		m_inCombat = false;
 		leaveInterlock();
 		if (partner) {
+			partner->m_deathDelayMS = 0;
+			partner->m_deathDelayKillerId = 0;
+			sCombatSys.StopFreeFire(partnerId);
+			sCombatSys.LeaveInterlock(partnerId);
 			partner->m_inCombat = false;
 			partner->leaveInterlock();
+			partner->awardCombatExperience(100);
 		}
 		
 		sGame.AnnounceCommand(&m_parent, make_shared<SystemChatMsg>(
@@ -558,11 +567,13 @@ void PlayerObject::die( uint32 killerGoId )
 		));
 		
 		m_healthC = m_healthM;
+		m_innerStrC = m_innerStrM;
 		sendHealthUpdate();
 		sendVitals();
 		
 		if (partner) {
 			partner->m_healthC = partner->m_healthM;
+			partner->m_innerStrC = partner->m_innerStrM;
 			partner->sendHealthUpdate();
 			partner->sendVitals();
 		}

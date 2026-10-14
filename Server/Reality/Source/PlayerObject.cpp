@@ -1428,6 +1428,7 @@ void PlayerObject::HandleCommand( ByteBuffer &srcCmd )
 		m_RPCshort[0x8071] = &PlayerObject::RPC_HandlePartyLeave;
 		m_RPCshort[0x80b7] = &PlayerObject::RPC_HandleUpgradeAbility;
 		m_RPCshort[0x810e] = &PlayerObject::RPC_HandleVendorBuy;
+		m_RPCshort[0x8110] = &PlayerObject::RPC_HandleVendorClose;
 		m_RPCshort[0x8111] = &PlayerObject::RPC_HandleVendorSell;
 		m_RPCshort[0x8121] = &PlayerObject::RPC_HandleMarketOpen;
 		m_RPCshort[0x8063] = &PlayerObject::RPC_HandleItemMountRSI;
