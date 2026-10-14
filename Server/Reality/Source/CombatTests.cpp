@@ -3209,9 +3209,9 @@ int RunCombatTestSuite()
 				bool foundAtDestBefore = (std::find(nearDestBefore.begin(), nearDestBefore.end(), &p9Client) != nearDestBefore.end());
 				check(!foundAtDestBefore, "Before 0x03 movement packet: Human client is not in destination SpatialGrid cell (45000, 45000)");
 
-				// Build authentic 0x03 movement state packet (viewId=VIEWID_SELF(2), shouldBeOne=1, updateType=0x08, x:f32, y:f32, z:f32)
+				// Build authentic 0x03 movement state packet (opcode=0x03, viewId=VIEWID_SELF(2), shouldBeOne=1, updateType=0x08, x:f32, y:f32, z:f32)
 				ByteBuffer moveStatePkt;
-				moveStatePkt << (uint16)VIEWID_SELF << (uint8)1 << (uint8)0x08;
+				moveStatePkt << (uint8)0x03 << (uint16)VIEWID_SELF << (uint8)1 << (uint8)0x08;
 				moveStatePkt << (float)45010.0f << (float)572.0f << (float)45020.0f;
 				p9Human.po->HandleStateUpdate(moveStatePkt);
 
@@ -3244,7 +3244,7 @@ int RunCombatTestSuite()
 				{
 					invSys->saveToDB(true);
 					check(!invSys->isDirty(), "InventorySystem::saveToDB clears m_dirty flag");
-					p9Human.po->giveItem(20201);
+					invSys->addItemAuto(std::make_shared<Item>(sObjMgr.getNewItemId(), 20201));
 					check(invSys->isDirty(), "Adding an item marks InventorySystem dirty");
 					invSys->saveToDB();
 					check(!invSys->isDirty(), "Subsequent InventorySystem::saveToDB flushes dirty state");
