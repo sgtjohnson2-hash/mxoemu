@@ -895,7 +895,7 @@ void PlayerObject::ParsePlayerCommand( string theCmd )
 			"claimhl", "send", "sendCmd", "socket", "bullettime", "gotoPos", "incX", "incY", "incZ",
 			"goThru", "random", "update", "gotoPlayer", "go", "bottest", "overwrite", "agentstrike", "agent",
 			// world-state and free-movement commands any player could run (audit 2026-10-13)
-			"tension", "outbreak", "glitch", "anomaly", "choosepill", "subway", NULL };
+			"tension", "outbreak", "glitch", "anomaly", "choosepill", "subway", "district", NULL };
 		for (int i = 0; devCommands[i] != NULL; i++)
 		{
 			if (iequals(command, devCommands[i]) && !m_isAdmin)
@@ -3187,6 +3187,169 @@ void PlayerObject::ParsePlayerCommand( string theCmd )
         }
 
         SubmitBugReport(rest);
+        return;
+    }
+    else if (iequals(command, "heat"))
+    {
+        float hx = getPosition().x;
+        float hz = getPosition().z;
+        float heat = sMatrixThreatHeatmap.GetHeat(hx, hz);
+        HeatTier tier = sMatrixThreatHeatmap.GetTier(hx, hz);
+        uint32 dId = sMatrixThreatHeatmap.GetDistrictAt(hx, hz);
+        std::string dName = (dId == 1) ? "Richland" : ((dId == 2) ? "Downtown" : ((dId == 3) ? "International" : "The Slums"));
+        bool sabotaged = sMatrixThreatHeatmap.IsDistrictSabotaged(dId);
+        INFO_LOG(format("ThreatHeatmap: Player %1% queried heat in %2% (heat=%3$.1f, tier=%4%)") % m_handle % dName % heat % (int)tier);
+        m_parent.QueueCommand(make_shared<SystemChatMsg>(
+            (format("{c:FFFF55}[Heatmap] District: %1% (ID %2%) | Heat: %3$.1f | Heat Tier: %4% | Sabotaged: %5%{/c}")
+             % dName % dId % heat % (int)tier % (sabotaged ? "YES" : "NO")).str()
+        ));
+        return;
+    }
+    else if (iequals(command, "district"))
+    {
+        std::string targetDistrict;
+        cmdStream >> targetDistrict;
+        boost::to_lower(targetDistrict);
+        LocationVector targetPos(99640.0f, 572.0f, 8350.0f);
+        std::string distName = "The Slums";
+        uint32 newDistrictId = 1;
+
+        if (targetDistrict == "dt" || targetDistrict == "downtown") {
+            targetPos = LocationVector(39216.0f, 572.0f, -21475.0f);
+            distName = "Downtown";
+            newDistrictId = 2;
+        } else if (targetDistrict == "it" || targetDistrict == "international") {
+            targetPos = LocationVector(-37444.0f, 572.0f, 23659.0f);
+            distName = "International";
+            newDistrictId = 3;
+        } else if (targetDistrict == "richland") {
+            targetPos = LocationVector(-15000.0f, 572.0f, -15000.0f);
+            distName = "Richland";
+            newDistrictId = 4;
+        } else if (targetDistrict == "slums") {
+            targetPos = LocationVector(99640.0f, 572.0f, 8350.0f);
+            distName = "The Slums";
+            newDistrictId = 1;
+        } else {
+            m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FF5555}Unknown district. Valid: slums, dt, it, richland{/c}"));
+            return;
+        }
+
+        this->setPosition(targetPos);
+        this->setDistrict(newDistrictId);
+        this->saveDataToDB();
+        sGame.AnnounceStateUpdate(NULL, make_shared<PositionStateMsg>(m_goId));
+        this->FlushAndRefreshAoI();
+        m_parent.QueueState(make_shared<JackoutEffectMsg>(m_goId, false));
+        m_parent.QueueCommand(make_shared<SystemChatMsg>((format("{c:00FFCC}[Transit] Transferred to %1% hardline network (District %2%).{/c}") % distName % newDistrictId).str()));
+        return;
+    }
+    else if (iequals(command, "vendor") || iequals(command, "shop"))
+    {
+        std::string sub;
+        cmdStream >> sub;
+        if (iequals(sub, "buy")) {
+            uint32 tplId = 0;
+            cmdStream >> tplId;
+            if (tplId > 0) {
+                ByteBuffer buyCmd;
+                buyCmd << uint32(tplId) << uint32(0);
+                RPC_HandleVendorBuy(buyCmd);
+            } else {
+                m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FF4444}Usage: /vendor buy <itemTemplateId>{/c}"));
+            }
+            return;
+        }
+        if (iequals(sub, "sell")) {
+            uint32 itemId = 0;
+            cmdStream >> itemId;
+            if (itemId > 0) {
+                ByteBuffer sellCmd;
+                sellCmd << uint32(itemId) << uint32(0);
+                RPC_HandleVendorSell(sellCmd);
+            } else {
+                m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FF4444}Usage: /vendor sell <itemId>{/c}"));
+            }
+            return;
+        }
+
+        auto vendors = sEconomySys.GetVendorsForDistrict(m_district);
+        if (vendors.empty()) vendors = sEconomySys.GetVendorsForDistrict(1);
+        if (!vendors.empty()) {
+            const HardlineVendor* nearest = &vendors[0];
+            double bestDist = 1e9;
+            for (const auto& v : vendors) {
+                double d = (m_pos.x - v.x)*(m_pos.x - v.x) + (m_pos.z - v.z)*(m_pos.z - v.z);
+                if (d < bestDist) {
+                    bestDist = d;
+                    nearest = &v;
+                }
+            }
+            INFO_LOG(format("Vendor: Player %1% opened vendor %2% (ID %3%)") % m_handle % nearest->name % nearest->staticId);
+            m_parent.QueueCommand(std::make_shared<VendorOpenMsg>(
+                500.0f, nearest->x, nearest->y, nearest->z, nearest->inventoryTemplates
+            ));
+            std::stringstream ss;
+            ss << "{c:00FFCC}[VENDOR] " << nearest->name << " (ID: " << nearest->staticId << ") Catalog:\n";
+            size_t count = 0;
+            for (uint32 tplId : nearest->inventoryTemplates) {
+                if (++count > 8) { ss << "... and " << (nearest->inventoryTemplates.size() - 8) << " more items."; break; }
+                const ItemTemplate* tpl = sDataLoader.GetItemTemplate(tplId);
+                std::string name = tpl ? tpl->name : (format("Item %1%") % tplId).str();
+                uint32 price = tpl && tpl->value > 0 ? tpl->value : sEconomySys.GetItemPrice(tplId);
+                ss << " - " << name << " (ID " << tplId << "): " << price << " $Info\n";
+            }
+            ss << "{/c}";
+            m_parent.QueueCommand(make_shared<SystemChatMsg>(ss.str()));
+        } else {
+            m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FF4444}[VENDOR] No active district vendors found.{/c}"));
+        }
+        return;
+    }
+    else if (iequals(command, "who"))
+    {
+        auto allIds = sObjMgr.getAllGOIds();
+        uint32 humanCount = 0;
+        for (auto id : allIds) {
+            PlayerObject* p = sObjMgr.getGOPtrSafe(id);
+            if (p && !p->getClient().isBot()) humanCount++;
+        }
+        size_t botCount = sBotMgr.GetBotCount();
+        m_parent.QueueCommand(make_shared<SystemChatMsg>(
+            (format("{c:00FF00}[Zion Census] Operators Jacked In: %1% | Active Construct Bots: %2% | Hardlines: 135{/c}")
+             % humanCount % botCount).str()
+        ));
+        return;
+    }
+    else if (iequals(command, "stats"))
+    {
+        LocationVector pos = getPosition();
+        uint32 dId = sMatrixThreatHeatmap.GetDistrictAt(pos.x, pos.z);
+        std::string dName = (dId == 1) ? "Richland" : ((dId == 2) ? "Downtown" : ((dId == 3) ? "International" : "The Slums"));
+        std::ostringstream ss;
+        ss << std::fixed << std::setprecision(0);
+        ss << "{c:00FFFF}[Operator Stats] Handle: " << m_handle
+           << " | Level: " << (int)getLevel()
+           << " | HP: " << (int)getCurrentHealth() << "/" << (int)getMaximumHealth()
+           << " | IS: " << (int)getCurrentIS() << "/" << (int)getMaximumIS()
+           << " | District: " << dName
+           << " | Pos: (" << pos.x << ", " << pos.y << ", " << pos.z << "){/c}";
+        m_parent.QueueCommand(make_shared<SystemChatMsg>(ss.str()));
+        return;
+    }
+    else if (iequals(command, "stuck"))
+    {
+        LocationVector nearestHl = sBotMgr.GetNearestHardline(getPosition().x, getPosition().z);
+        nearestHl.y += 20.0f;
+        this->setPosition(nearestHl);
+        sGame.AnnounceStateUpdate(NULL, make_shared<PositionStateMsg>(m_goId));
+        m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FFFF55}[Emergency Unstuck] Repositioned operator to nearest safe Hardline phone booth.{/c}"));
+        return;
+    }
+    else if (iequals(command, "jackout") || iequals(command, "exit"))
+    {
+        ByteBuffer dummy;
+        RPC_HandleJackoutRequest(dummy);
         return;
     }
     else if (iequals(command, "help") || iequals(command, "?"))

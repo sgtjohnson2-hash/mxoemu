@@ -1123,6 +1123,7 @@ void PlayerObject::FlushAndRefreshAoI()
 		std::lock_guard<std::mutex> l(m_knownMutex);
 		known.assign(m_knownEntities.begin(), m_knownEntities.end());
 	}
+	size_t culledNow = 0;
 	for (uint32 knownGoId : known)
 	{
 		PlayerObject* otherObj = sObjMgr.getGOPtrSafe(knownGoId);
@@ -1134,6 +1135,7 @@ void PlayerObject::FlushAndRefreshAoI()
 		{
 			noteEntityDeleted(knownGoId);
 			try { m_parent.QueueState(make_shared<DeletePlayerMsg>(knownGoId)); } catch (...) {}
+			culledNow++;
 		}
 	}
 
@@ -1162,6 +1164,8 @@ void PlayerObject::FlushAndRefreshAoI()
 		}
 	}
 	m_lastAoIUpdateMs = 0;
+	INFO_LOG(format("AoI flush on transit for %1%:%2% (district %3%, culled %4%, spawned %5%)")
+		% m_handle % m_goId % (int)m_district % culledNow % spawnedNow);
 }
 
 void PlayerObject::ensureEntityKnown(PlayerObject* other)
