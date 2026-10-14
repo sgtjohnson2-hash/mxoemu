@@ -1,5 +1,6 @@
 #include "MatrixThreatHeatmap.h"
 #include "AgentPossessionManager.h"
+#include "../FactionWarManager.h"
 #include "Config.h"
 #include "Log.h"
 #include "BotManager.h"
@@ -31,6 +32,7 @@ void MatrixThreatHeatmap::Initialize()
         cell.peakHeat = 0.0f;
         cell.lastIncidentMs = 0;
         cell.lastInterventionMs = 0;
+        cell.lastWorldEventMs = 0;
     }
     std::fill(m_diffuseBuffer.begin(), m_diffuseBuffer.end(), 0.0f);
     m_sabotagedDistricts.clear();
@@ -106,6 +108,45 @@ void MatrixThreatHeatmap::RecordDisruption(float worldX, float worldY, float wor
     if (newHeat >= 110.0f) {
         CheckAndTriggerIntervention(worldX, worldY, worldZ, 0);
     }
+    if (newHeat >= 180.0f) {
+        CheckAndTriggerWorldEvent(worldX, worldY, worldZ);
+    }
+}
+
+uint32 MatrixThreatHeatmap::CheckAndTriggerWorldEvent(float worldX, float worldY, float worldZ)
+{
+    int gx, gz;
+    WorldToGrid(worldX, worldZ, gx, gz);
+
+    uint32 districtId = GetDistrictAt(worldX, worldZ);
+    {
+        std::lock_guard<std::recursive_mutex> lock(m_mutex);
+        int idx = gz * GRID_WIDTH + gx;
+        DisruptionCell& cell = m_grid[idx];
+        float thresholdMultiplier = IsDistrictSabotaged(districtId) ? 2.5f : 1.0f;
+        if (cell.heat < 180.0f * thresholdMultiplier) {
+            return 0;
+        }
+        uint32 now = getMSTime();
+        if (cell.lastWorldEventMs != 0 && now >= cell.lastWorldEventMs && (now - cell.lastWorldEventMs) < 300000) {
+            return 0;
+        }
+        cell.lastWorldEventMs = (now != 0) ? now : 1;
+    }
+
+    if (FactionWarManager::getSingletonPtr() != nullptr) {
+        for (const auto& ev : sFactionWarMgr.GetActiveWorldEvents()) {
+            if (ev.active && ev.districtId == districtId) {
+                return 0;
+            }
+        }
+        uint32 ctrlFaction = sFactionWarMgr.GetDistrictControllingFaction(districtId);
+        WorldEventType evType = (ctrlFaction == FACTION_MEROVINGIAN)
+            ? WorldEventType::MEROVINGIAN_EXILE_RAID
+            : WorldEventType::MACHINE_SENTINEL_INCURSION;
+        return sFactionWarMgr.TriggerWorldEvent(districtId, evType, worldX, (worldY > 100.0f) ? worldY : 572.0f, worldZ);
+    }
+    return 0;
 }
 
 bool MatrixThreatHeatmap::CheckAndTriggerIntervention(float worldX, float worldY, float worldZ, uint32 targetGoId)

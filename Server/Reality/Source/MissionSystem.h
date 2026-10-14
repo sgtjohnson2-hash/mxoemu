@@ -3,6 +3,7 @@
 
 #include "Common.h"
 #include "Singleton.h"
+#include "LocationVector.h"
 #include <string>
 #include <vector>
 #include <map>
@@ -158,6 +159,22 @@ struct ContactQuest
     uint32 rewardItemTemplateId;
 };
 
+struct MissionInteriorInstance
+{
+    uint32 instanceId = 0;
+    uint32 ownerGoId = 0;
+    uint32 orgId = 0;
+    uint32 missionId = 0;
+    uint32 bossDoorId = 0;
+    bool bossDoorUnlocked = false;
+    bool bossSpawned = false;
+    uint32 bossGoId = 0;
+    MissionNpc lieutenantTemplate;
+    std::vector<uint32> guardGoIds;
+    std::vector<uint32> memberGoIds;
+    LocationVector interiorPos;
+};
+
 class MissionSystem : public Singleton<MissionSystem>
 {
 public:
@@ -211,6 +228,14 @@ public:
     uint32 SynthesizeProceduralMission(PlayerObject* player, ProceduralMissionArchetype archetype);
     uint32 GenerateFactionTensionMission(PlayerObject* player);
 
+    // Phase 13: Instanced Construct Arenas & Multi-Floor Lair Scripting
+    uint32 EnterMissionInterior(PlayerObject* player, uint32 missionId = 0, uint32 bossDoorId = 0,
+                                const std::vector<MissionNpc>& roomGuards = {},
+                                const MissionNpc* lieutenant = nullptr);
+    bool ExitMissionInterior(PlayerObject* player);
+    bool OnInteriorNpcDefeated(PlayerObject* killer, uint32 defeatedNpcGoId);
+    const MissionInteriorInstance* GetInteriorInstance(uint32 instanceId) const;
+
     // Snapshot of the current objective; false when the player has no active mission.
     bool GetActiveObjectiveInfo(uint32 playerGoId, ActiveObjectiveInfo& out);
     // Really abort the active mission: despawn its NPCs, leave the mission instance.
@@ -235,6 +260,8 @@ private:
     std::vector<BountyContract> m_activeBounties;
     std::vector<ContactQuest> m_contactQuests;
     std::map<uint64, std::map<uint32, uint32>> m_playerContactProgress; // Key: charId -> (questId -> step)
+    std::map<uint32, MissionInteriorInstance> m_interiorInstances; // instanceId -> MissionInteriorInstance
+    uint32 m_nextInstanceId = 50000;
 };
 
 #define sMissionSys MissionSystem::getSingleton()

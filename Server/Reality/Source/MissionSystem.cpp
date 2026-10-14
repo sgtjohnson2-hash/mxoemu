@@ -640,6 +640,11 @@ void MissionSystem::AdvanceObjective(PlayerObject* player, ObjectiveCommand comm
     std::unique_lock<std::recursive_mutex> lock(m_missionMutex);
     if (!player) return;
 
+    if (command == ObjectiveCommand::DEFEAT && targetId != 0)
+    {
+        OnInteriorNpcDefeated(player, targetId);
+    }
+
     uint32 goId = player->getGoId();
     if (m_activeMissions.find(goId) == m_activeMissions.end()) return;
 
@@ -1818,3 +1823,304 @@ uint32 MissionSystem::GenerateFactionTensionMission(PlayerObject* player)
     int pick = rand() % 3;
     return SynthesizeProceduralMission(player, archetypes[pick]);
 }
+
+uint32 MissionSystem::EnterMissionInterior(PlayerObject* player, uint32 missionId, uint32 bossDoorId,
+                                           const std::vector<MissionNpc>& roomGuards,
+                                           const MissionNpc* lieutenant)
+{
+    if (!player) return 0;
+    std::lock_guard<std::recursive_mutex> lock(m_missionMutex);
+
+    uint32 orgId = player->getOrgId();
+    uint32 effectiveMissionId = missionId;
+    if (effectiveMissionId == 0)
+    {
+        auto itAct = m_activeMissions.find(player->getGoId());
+        if (itAct != m_activeMissions.end())
+            effectiveMissionId = itAct->second.missionId;
+        else
+            effectiveMissionId = 10111;
+    }
+
+    // If operative belongs to an Organization squad, share the squad's active interior construct instance
+    if (orgId != 0)
+    {
+        for (auto& kv : m_interiorInstances)
+        {
+            MissionInteriorInstance& existing = kv.second;
+            if (existing.orgId == orgId && (missionId == 0 || existing.missionId == effectiveMissionId))
+            {
+                player->setSavedPos(player->getPosition());
+                player->getClient().m_instanceId = existing.instanceId;
+                sSpatialGrid.UpdateClientPosition(&player->getClient(), (float)player->getPosition().x, (float)player->getPosition().z);
+
+                if (std::find(existing.memberGoIds.begin(), existing.memberGoIds.end(), player->getGoId()) == existing.memberGoIds.end())
+                {
+                    existing.memberGoIds.push_back(player->getGoId());
+                }
+
+                if (!player->getClient().isBot())
+                {
+                    for (uint32 gId : existing.guardGoIds)
+                    {
+                        if (PlayerObject* gPo = sObjMgr.getGOPtrSafe(gId))
+                            player->ensureEntityKnown(gPo);
+                    }
+                    if (existing.bossGoId != 0)
+                    {
+                        if (PlayerObject* bPo = sObjMgr.getGOPtrSafe(existing.bossGoId))
+                            player->ensureEntityKnown(bPo);
+                    }
+                    player->getClient().QueueCommand(std::make_shared<SystemChatMsg>(
+                        (format("{c:00FFCC}[CONSTRUCT INTERIOR] Joined Organization squad construct instance #%1% (Boss Door: 0x%2$08X).{/c}")
+                            % existing.instanceId % existing.bossDoorId).str()));
+                }
+
+                INFO_LOG(format("MissionSystem: Player %1% joined shared Organization (%2%) interior instance #%3%")
+                    % player->getHandle() % orgId % existing.instanceId);
+                return existing.instanceId;
+            }
+        }
+    }
+
+    uint32 instanceId = ++m_nextInstanceId;
+    MissionInteriorInstance inst;
+    inst.instanceId = instanceId;
+    inst.ownerGoId = player->getGoId();
+    inst.orgId = orgId;
+    inst.missionId = effectiveMissionId;
+    inst.bossDoorId = (bossDoorId != 0) ? bossDoorId : (0xD0010000u + (instanceId & 0xFFFFu));
+    inst.interiorPos = player->getPosition();
+    inst.memberGoIds.push_back(player->getGoId());
+
+    player->setSavedPos(player->getPosition());
+    player->getClient().m_instanceId = instanceId;
+    sSpatialGrid.UpdateClientPosition(&player->getClient(), (float)inst.interiorPos.x, (float)inst.interiorPos.z);
+
+    // Ensure the inner boss door is registered in the in-memory ObjectMgr door cache
+    sObjMgr.RegisterDoor(player->getDistrict(), inst.bossDoorId,
+                         inst.interiorPos.x + 600.0, inst.interiorPos.y, inst.interiorPos.z + 600.0,
+                         inst.interiorPos.rot, 1);
+
+    std::vector<MissionNpc> guardsToSpawn = roomGuards;
+    if (guardsToSpawn.empty())
+    {
+        MissionNpc g1;
+        g1.type = "HOSTILE";
+        g1.anchored = true;
+        g1.x = (float)inst.interiorPos.x + 300.0f;
+        g1.y = (float)inst.interiorPos.y;
+        g1.z = (float)inst.interiorPos.z + 200.0f;
+        g1.idNpc = 9801 + (instanceId & 0xFF);
+        g1.handle = "Lair Security Guard Alpha";
+        g1.level = std::max<uint32>(1, player->getLevel());
+        g1.maxHP = 180;
+        g1.rsi = 0x13050008u;
+
+        MissionNpc g2 = g1;
+        g2.x = (float)inst.interiorPos.x - 300.0f;
+        g2.idNpc = 9802 + (instanceId & 0xFF);
+        g2.handle = "Lair Security Guard Beta";
+
+        guardsToSpawn.push_back(g1);
+        guardsToSpawn.push_back(g2);
+    }
+
+    for (const auto& g : guardsToSpawn)
+    {
+        MissionNpc placed = g;
+        if (!placed.anchored)
+        {
+            placed.x = (float)inst.interiorPos.x + 300.0f;
+            placed.y = (float)inst.interiorPos.y;
+            placed.z = (float)inst.interiorPos.z + 250.0f;
+            placed.anchored = true;
+        }
+        uint32 gGoId = sBotMgr.SpawnMissionBot(placed, instanceId);
+        if (gGoId != 0)
+        {
+            inst.guardGoIds.push_back(gGoId);
+            if (!player->getClient().isBot())
+            {
+                if (PlayerObject* gPo = sObjMgr.getGOPtrSafe(gGoId))
+                    player->ensureEntityKnown(gPo);
+            }
+        }
+    }
+
+    if (lieutenant != nullptr)
+    {
+        inst.lieutenantTemplate = *lieutenant;
+        if (!inst.lieutenantTemplate.anchored)
+        {
+            inst.lieutenantTemplate.x = (float)inst.interiorPos.x + 700.0f;
+            inst.lieutenantTemplate.y = (float)inst.interiorPos.y;
+            inst.lieutenantTemplate.z = (float)inst.interiorPos.z + 700.0f;
+            inst.lieutenantTemplate.anchored = true;
+        }
+    }
+    else
+    {
+        inst.lieutenantTemplate.type = "HOSTILE";
+        inst.lieutenantTemplate.anchored = true;
+        inst.lieutenantTemplate.x = (float)inst.interiorPos.x + 700.0f;
+        inst.lieutenantTemplate.y = (float)inst.interiorPos.y;
+        inst.lieutenantTemplate.z = (float)inst.interiorPos.z + 700.0f;
+        inst.lieutenantTemplate.idNpc = 9900 + (instanceId & 0xFF);
+        inst.lieutenantTemplate.handle = "Mission Lieutenant Cypher";
+        inst.lieutenantTemplate.level = std::max<uint32>(2, player->getLevel() + 1);
+        inst.lieutenantTemplate.maxHP = 450;
+        inst.lieutenantTemplate.rsi = 0x13050008u;
+    }
+
+    m_interiorInstances[instanceId] = inst;
+
+    if (!player->getClient().isBot())
+    {
+        player->getClient().QueueCommand(std::make_shared<SystemChatMsg>(
+            (format("{c:00FFCC}[CONSTRUCT INTERIOR] Entered isolated mission interior (Instance #%1%, Guards: %2%, Boss Door: 0x%3$08X).{/c}")
+                % instanceId % inst.guardGoIds.size() % inst.bossDoorId).str()));
+    }
+
+    INFO_LOG(format("MissionSystem: Allocated isolated interior instance #%1% for %2% (Org %3%, Guards %4%, Door 0x%5$08X)")
+        % instanceId % player->getHandle() % orgId % inst.guardGoIds.size() % inst.bossDoorId);
+    return instanceId;
+}
+
+bool MissionSystem::ExitMissionInterior(PlayerObject* player)
+{
+    if (!player) return false;
+    std::lock_guard<std::recursive_mutex> lock(m_missionMutex);
+
+    uint32 instanceId = player->getClient().m_instanceId;
+    if (instanceId == 0) return false;
+
+    player->getClient().m_instanceId = 0;
+    LocationVector saved = player->getSavedPos();
+    if (saved.x != 0.0 || saved.y != 0.0 || saved.z != 0.0)
+    {
+        player->setPosition(saved);
+    }
+    LocationVector cur = player->getPosition();
+    sSpatialGrid.UpdateClientPosition(&player->getClient(), (float)cur.x, (float)cur.z);
+
+    auto it = m_interiorInstances.find(instanceId);
+    if (it != m_interiorInstances.end())
+    {
+        MissionInteriorInstance& inst = it->second;
+        inst.memberGoIds.erase(
+            std::remove(inst.memberGoIds.begin(), inst.memberGoIds.end(), player->getGoId()),
+            inst.memberGoIds.end());
+
+        bool anyStillInside = false;
+        for (uint32 mId : inst.memberGoIds)
+        {
+            PlayerObject* mPo = sObjMgr.getGOPtrSafe(mId);
+            if (mPo && mPo->getClient().m_instanceId == instanceId)
+            {
+                anyStillInside = true;
+                break;
+            }
+        }
+
+        if (!anyStillInside)
+        {
+            for (uint32 gId : inst.guardGoIds)
+                sBotMgr.DespawnBot(gId);
+            if (inst.bossGoId != 0)
+                sBotMgr.DespawnBot(inst.bossGoId);
+            m_interiorInstances.erase(it);
+        }
+    }
+
+    if (!player->getClient().isBot())
+    {
+        player->getClient().QueueCommand(std::make_shared<SystemChatMsg>(
+            (format("{c:00FFCC}[CONSTRUCT INTERIOR] Exited mission interior #%1% back to Mega City street matrix.{/c}")
+                % instanceId).str()));
+    }
+
+    INFO_LOG(format("MissionSystem: Player %1% exited interior instance #%2% to public dimension 0")
+        % player->getHandle() % instanceId);
+    return true;
+}
+
+bool MissionSystem::OnInteriorNpcDefeated(PlayerObject* killer, uint32 defeatedNpcGoId)
+{
+    if (defeatedNpcGoId == 0) return false;
+    std::lock_guard<std::recursive_mutex> lock(m_missionMutex);
+
+    for (auto& kv : m_interiorInstances)
+    {
+        MissionInteriorInstance& inst = kv.second;
+        auto gIt = std::find(inst.guardGoIds.begin(), inst.guardGoIds.end(), defeatedNpcGoId);
+        if (gIt == inst.guardGoIds.end())
+            continue;
+
+        inst.guardGoIds.erase(gIt);
+
+        // Also prune any guards that are already dead or despawned
+        inst.guardGoIds.erase(
+            std::remove_if(inst.guardGoIds.begin(), inst.guardGoIds.end(), [](uint32 gid) {
+                PlayerObject* po = sObjMgr.getGOPtrSafe(gid);
+                return (!po || po->isDead());
+            }),
+            inst.guardGoIds.end());
+
+        if (inst.guardGoIds.empty() && !inst.bossDoorUnlocked)
+        {
+            inst.bossDoorUnlocked = true;
+
+            // Unlock and animate inner boss door via ObjectMgr in-memory door cache for all squad members
+            bool openedForKiller = false;
+            for (uint32 mId : inst.memberGoIds)
+            {
+                PlayerObject* mPo = sObjMgr.getGOPtrSafe(mId);
+                if (mPo)
+                {
+                    sObjMgr.OpenDoor(inst.bossDoorId, &mPo->getClient());
+                    if (killer && mPo->getGoId() == killer->getGoId())
+                        openedForKiller = true;
+                }
+            }
+            if (killer && !openedForKiller)
+            {
+                sObjMgr.OpenDoor(inst.bossDoorId, &killer->getClient());
+            }
+
+            // Spawn the mission lieutenant inside this isolated instance
+            uint32 ltGoId = sBotMgr.SpawnMissionBot(inst.lieutenantTemplate, inst.instanceId);
+            inst.bossSpawned = (ltGoId != 0);
+            inst.bossGoId = ltGoId;
+
+            for (uint32 mId : inst.memberGoIds)
+            {
+                PlayerObject* mPo = sObjMgr.getGOPtrSafe(mId);
+                if (!mPo || mPo->getClient().isBot())
+                    continue;
+                if (ltGoId != 0)
+                {
+                    if (PlayerObject* ltPo = sObjMgr.getGOPtrSafe(ltGoId))
+                        mPo->ensureEntityKnown(ltPo);
+                }
+                mPo->getClient().QueueCommand(std::make_shared<SystemChatMsg>(
+                    (format("{c:00FF00}[LAIR CLEAR] All room guards defeated! Inner boss door (0x%1$08X) unlocked — Lieutenant %2% has spawned!{/c}")
+                        % inst.bossDoorId % inst.lieutenantTemplate.handle).str()));
+            }
+
+            INFO_LOG(format("MissionSystem: Instance #%1% room cleared; unlocked door 0x%2$08X and spawned Lieutenant %3% (GoID %4%)")
+                % inst.instanceId % inst.bossDoorId % inst.lieutenantTemplate.handle % ltGoId);
+            return true;
+        }
+        return false;
+    }
+    return false;
+}
+
+const MissionInteriorInstance* MissionSystem::GetInteriorInstance(uint32 instanceId) const
+{
+    std::lock_guard<std::recursive_mutex> lock(m_missionMutex);
+    auto it = m_interiorInstances.find(instanceId);
+    return (it != m_interiorInstances.end()) ? &it->second : nullptr;
+}
+

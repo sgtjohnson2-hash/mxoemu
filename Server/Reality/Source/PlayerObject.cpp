@@ -38,6 +38,7 @@
 #include "ObjectMgr.h"
 #include "SpatialGrid.h"
 #include "MissionSystem.h"
+#include "FactionWarManager.h"
 #include "Config.h"
 #include "AbilitySystem.h"
 #include "ItemSerializer.h"
@@ -1856,12 +1857,18 @@ void PlayerObject::regenerateVitals()
         return;
 
     uint32 now = getMSTime();
-    if (now - m_lastRegenTickMs < tickMs)
+    if (m_lastRegenTickMs != 0 && now - m_lastRegenTickMs < tickMs)
         return;
     m_lastRegenTickMs = now;
 
     if (m_isDead || m_healthC == 0 || m_deathDelayMS > 0)
         return;
+
+    // Phase 14: +5% Inner Strength regeneration bonus inside a friendly-controlled district
+    float districtIsBonus = (FactionWarManager::getSingletonPtr() != nullptr)
+        ? sFactionWarMgr.GetDistrictISRegenBonus(m_district, getFaction())
+        : 0.0f;
+    uint32 districtBonusPct = uint32(std::lround(districtIsBonus * 100.0f));
 
     // Health only comes back out of the fight. Inner Strength still ticks during one,
     // slower than the calm rate, or a special drains the bar and never returns.
@@ -1870,20 +1877,21 @@ void PlayerObject::regenerateVitals()
     {
         if (m_innerStrC >= m_innerStrM)
             return;
-        uint32 combatPct = std::max<uint32>(1, isPct / 2);
+        uint32 combatPct = std::max<uint32>(1, isPct / 2) + districtBonusPct;
         uint32 is = uint32(m_innerStrC) + std::max<uint32>(1, uint32(m_innerStrM) * combatPct / 100);
         m_innerStrC = uint16(std::min<uint32>(is, m_innerStrM));
         sendVitals();
         return;
     }
 
-    if (now - m_lastDamageTakenMs < calmMs)
+    if (m_lastDamageTakenMs != 0 && now - m_lastDamageTakenMs < calmMs)
         return;
     if (m_healthC >= m_healthM && m_innerStrC >= m_innerStrM)
         return;
 
+    uint32 effectiveIsPct = isPct + districtBonusPct;
     uint32 hp = uint32(m_healthC) + std::max<uint32>(1, uint32(m_healthM) * hpPct / 100);
-    uint32 is = uint32(m_innerStrC) + std::max<uint32>(1, uint32(m_innerStrM) * isPct / 100);
+    uint32 is = uint32(m_innerStrC) + std::max<uint32>(1, uint32(m_innerStrM) * effectiveIsPct / 100);
     m_healthC = uint16(std::min<uint32>(hp, m_healthM));
     m_innerStrC = uint16(std::min<uint32>(is, m_innerStrM));
     sendHealthUpdate();

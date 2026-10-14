@@ -292,6 +292,7 @@ void GameServer::SimulationLoop()
 				lastTelemetryLogMs = currentMs;
 				size_t activeBots = sBotMgr.GetBotCount();
 				size_t hardlines = sBotMgr.GetHardlines().size();
+				sFactionWarMgr.WriteWorldStatusJsonFile("world_status.json");
 				INFO_LOG(format("SimulationLoop: Tick %1% | TPS: %2% | Active Bots: %3% | Hardlines: %4%")
 					% currentMs % tps % activeBots % hardlines);
 			}

@@ -13,9 +13,14 @@
 #include "HackerSystem.h"
 #include "DataLoader.h"
 #include "BehaviorTree.h"
+#include "EconomySystem.h"
 #include "AI/PedestrianEcology.h"
+#include "AI/MatrixThreatHeatmap.h"
 #include <cmath>
 #include <algorithm>
+#include <fstream>
+#include <sstream>
+#include <iomanip>
 
 createFileSingleton(FactionWarManager);
 
@@ -149,6 +154,11 @@ void FactionWarManager::initialize()
         }
     }
     
+    // Phase 14: Ensure district_control table exists and load persistent district ownership
+    EnsureDistrictControlTable();
+    LoadDistrictControlFromDB();
+    updateDistrictFrontlines(0);
+
     INFO_LOG(format("FactionWarManager Initialized with %1% Control Nodes across %2% Strategic Districts.") 
              % m_controlNodes.size() % m_districtStatus.size());
 }
@@ -173,6 +183,7 @@ void FactionWarManager::update(uint32 deltaMs)
 {
     m_timeSinceLastSync += deltaMs;
     m_lastStrategicTickMs += deltaMs;
+    m_worldEventTimerMs += deltaMs;
     
     updateControlNodes(deltaMs);
     updateDistrictFrontlines(deltaMs);
@@ -181,6 +192,25 @@ void FactionWarManager::update(uint32 deltaMs)
     if (m_lastStrategicTickMs >= 30000) {
         updateFactionCommanders(m_lastStrategicTickMs);
         m_lastStrategicTickMs = 0;
+    }
+
+    // Phase 15: Dynamic Live Event Director periodic check (every 15 minutes = 900,000 ms)
+    if (m_worldEventTimerMs >= 900000) {
+        m_worldEventTimerMs = 0;
+        bool hasActiveEvent = false;
+        for (const auto& ev : m_activeWorldEvents) {
+            if (ev.active) {
+                hasActiveEvent = true;
+                break;
+            }
+        }
+        if (!hasActiveEvent) {
+            uint32 targetDistrict = GetHighestTensionDistrict();
+            WorldEventType eventType = ((m_nextEventId % 2) == 0)
+                ? WorldEventType::MEROVINGIAN_EXILE_RAID
+                : WorldEventType::MACHINE_SENTINEL_INCURSION;
+            TriggerWorldEvent(targetDistrict, eventType);
+        }
     }
 
     updateStrikeSquads(deltaMs);
@@ -254,6 +284,15 @@ void FactionWarManager::updateDistrictFrontlines(uint32 deltaMs)
                 d.dominantFaction = FACTION_ZION;
             else
                 d.dominantFaction = FACTION_MEROVINGIAN;
+        }
+        auto ovIt = m_districtControlOverride.find(pair.first);
+        if (ovIt != m_districtControlOverride.end() && ovIt->second != 0) {
+            d.dominantFaction = ovIt->second;
+            if (d.totalNodes == 0) {
+                d.machineInfluence = (ovIt->second == FACTION_MACHINES) ? 1.0f : 0.0f;
+                d.zionInfluence    = (ovIt->second == FACTION_ZION) ? 1.0f : 0.0f;
+                d.meroInfluence    = (ovIt->second == FACTION_MEROVINGIAN) ? 1.0f : 0.0f;
+            }
         }
     }
 }
@@ -668,14 +707,15 @@ void FactionWarManager::captureNode(uint32 id, uint32 newFaction)
             sDatabase.ExecutePrepared(&scoreStmt);
         }
 
+        uint32 distId = m_controlNodes[id].districtId;
+        m_districtControlOverride[distId] = newFaction;
         m_factionScores[newFaction] += 25;
         updateDistrictFrontlines(0);
+        SaveDistrictControlToDB(distId);
         
-        string factionStr = "Machines";
-        if (newFaction == FACTION_ZION) factionStr = "Zion";
-        else if (newFaction == FACTION_MEROVINGIAN) factionStr = "Merovingian";
+        string factionStr = GetFactionControlName(newFaction);
 
-        string districtBuff = GetActiveDistrictBuffName(m_controlNodes[id].districtId);
+        string districtBuff = GetActiveDistrictBuffName(distId);
         string broadcastMsg = (format("{c:FFFF00}[Radio Free Zion] : Hardline Uplink %1% has been CAPTURED by %2%! Dynamic District Buff: %3%{/c}") % id % factionStr % districtBuff).str();
         auto players = sObjMgr.getAllGOIds();
         for (auto goId : players)
@@ -875,8 +915,17 @@ bool FactionWarManager::getClosestEnemyNode(uint32 myFaction, float x, float y, 
 
 bool FactionWarManager::HasDistrictDominance(uint32 districtId, uint32 faction) const
 {
+    if (faction == 0) return false;
+    auto ovIt = m_districtControlOverride.find(districtId);
+    if (ovIt != m_districtControlOverride.end() && ovIt->second != 0) {
+        return ovIt->second == faction;
+    }
+
     auto it = m_districtStatus.find(districtId);
-    if (it == m_districtStatus.end() || it->second.totalNodes == 0) return false;
+    if (it == m_districtStatus.end()) return false;
+    if (it->second.totalNodes == 0) {
+        return it->second.dominantFaction == faction;
+    }
 
     const DistrictStatus& d = it->second;
     uint32 factionNodes = 0;
@@ -889,9 +938,9 @@ bool FactionWarManager::HasDistrictDominance(uint32 districtId, uint32 faction) 
 
 std::string FactionWarManager::GetActiveDistrictBuffName(uint32 districtId) const
 {
-    if (HasDistrictDominance(districtId, FACTION_MACHINES)) return "Machine Shield Overclock (+15% Health Regen, +10% Armor)";
-    if (HasDistrictDominance(districtId, FACTION_ZION)) return "Zion Operator Uplink (+20% Wire-Fu Leap, +15% IS Recovery)";
-    if (HasDistrictDominance(districtId, FACTION_MEROVINGIAN)) return "Merovingian Corruption Index (+25% Info Drops, +10% CDR)";
+    if (HasDistrictDominance(districtId, FACTION_MACHINES)) return "Machine Territory Control (+5% IS Regen, +5% $Info Drops, +15% Health Regen)";
+    if (HasDistrictDominance(districtId, FACTION_ZION)) return "Zion Territory Control (+5% IS Regen, +5% $Info Drops, +20% Wire-Fu Leap)";
+    if (HasDistrictDominance(districtId, FACTION_MEROVINGIAN)) return "Merovingian Territory Control (+5% IS Regen, +5% $Info Drops)";
     return "None (Contested Territory)";
 }
 
@@ -907,9 +956,15 @@ float FactionWarManager::GetDistrictWireFuBonus(uint32 districtId, uint32 factio
     return 0.0f;
 }
 
+float FactionWarManager::GetDistrictISRegenBonus(uint32 districtId, uint32 faction) const
+{
+    if (faction != 0 && HasDistrictDominance(districtId, faction)) return 0.05f;
+    return 0.0f;
+}
+
 float FactionWarManager::GetDistrictInfoGainBonus(uint32 districtId, uint32 faction) const
 {
-    if (faction == FACTION_MEROVINGIAN && HasDistrictDominance(districtId, FACTION_MEROVINGIAN)) return 0.25f;
+    if (faction != 0 && HasDistrictDominance(districtId, faction)) return 0.05f;
     return 0.0f;
 }
 
@@ -972,3 +1027,406 @@ std::string FactionWarManager::GetDistrictName(uint32 districtId) const
         default: return "MegaCity Sector " + std::to_string(districtId);
     }
 }
+
+std::string FactionWarManager::GetFactionControlName(uint32 faction) const
+{
+    if (faction == FACTION_ZION) return "Zion";
+    if (faction == FACTION_MACHINES) return "Machine";
+    if (faction == FACTION_MEROVINGIAN) return "Merovingian";
+    return "Neutral";
+}
+
+void FactionWarManager::EnsureDistrictControlTable()
+{
+    if (Database_Main == nullptr) return;
+    sDatabase.Execute(
+        "CREATE TABLE IF NOT EXISTS `district_control` ("
+        "`district_id` INT UNSIGNED NOT NULL PRIMARY KEY, "
+        "`district_name` VARCHAR(64) NOT NULL DEFAULT '', "
+        "`controlling_faction` INT UNSIGNED NOT NULL DEFAULT 2, "
+        "`faction_name` VARCHAR(32) NOT NULL DEFAULT 'Machine', "
+        "`zion_nodes` INT UNSIGNED NOT NULL DEFAULT 0, "
+        "`machine_nodes` INT UNSIGNED NOT NULL DEFAULT 0, "
+        "`mero_nodes` INT UNSIGNED NOT NULL DEFAULT 0, "
+        "`updated_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP"
+        ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4"
+    );
+}
+
+void FactionWarManager::SaveDistrictControlToDB(uint32 districtId)
+{
+    uint32 controllingFaction = GetDistrictControllingFaction(districtId);
+    std::string factionName = GetFactionControlName(controllingFaction);
+    std::string districtName = GetDistrictName(districtId);
+    uint32 zionNodes = 0, machineNodes = 0, meroNodes = 0;
+    auto it = m_districtStatus.find(districtId);
+    if (it != m_districtStatus.end()) {
+        zionNodes = it->second.zionNodes;
+        machineNodes = it->second.machineNodes;
+        meroNodes = it->second.meroNodes;
+    }
+
+    m_lastDistrictControlSql = (format(
+        "REPLACE INTO `district_control` (`district_id`, `district_name`, `controlling_faction`, `faction_name`, `zion_nodes`, `machine_nodes`, `mero_nodes`) "
+        "VALUES (%1%, '%2%', %3%, '%4%', %5%, %6%, %7%)"
+    ) % districtId % districtName % controllingFaction % factionName % zionNodes % machineNodes % meroNodes).str();
+
+    if (Database_Main != nullptr)
+    {
+        PreparedStatement stmt(
+            "REPLACE INTO `district_control` (`district_id`, `district_name`, `controlling_faction`, `faction_name`, `zion_nodes`, `machine_nodes`, `mero_nodes`) "
+            "VALUES (?0, ?1, ?2, ?3, ?4, ?5, ?6)"
+        );
+        stmt.SetUInt32(0, districtId);
+        stmt.SetString(1, districtName.c_str());
+        stmt.SetUInt32(2, controllingFaction);
+        stmt.SetString(3, factionName.c_str());
+        stmt.SetUInt32(4, zionNodes);
+        stmt.SetUInt32(5, machineNodes);
+        stmt.SetUInt32(6, meroNodes);
+        sDatabase.ExecutePrepared(&stmt);
+    }
+}
+
+void FactionWarManager::LoadDistrictControlFromDB()
+{
+    if (Database_Main != nullptr)
+    {
+        scoped_ptr<QueryResult> result(sDatabase.Query(
+            "SELECT `district_id`, `district_name`, `controlling_faction`, `zion_nodes`, `machine_nodes`, `mero_nodes` FROM `district_control`"
+        ));
+        if (result)
+        {
+            do
+            {
+                Field* field = result->Fetch();
+                uint32 distId = field[0].GetUInt32();
+                std::string distName = field[1].GetString();
+                uint32 faction = field[2].GetUInt32();
+                uint32 zionNodes = field[3].GetUInt32();
+                uint32 machineNodes = field[4].GetUInt32();
+                uint32 meroNodes = field[5].GetUInt32();
+
+                m_districtControlOverride[distId] = faction;
+                if (m_districtStatus.find(distId) == m_districtStatus.end()) {
+                    m_districtStatus[distId] = {distId, distName, zionNodes + machineNodes + meroNodes, machineNodes, zionNodes, meroNodes, 0.0f, 0.0f, 0.0f, faction, {}};
+                } else {
+                    m_districtStatus[distId].dominantFaction = faction;
+                }
+            } while (result->NextRow());
+        }
+        else
+        {
+            // Seed initial district_control rows if empty
+            updateDistrictFrontlines(0);
+            for (const auto& pair : m_districtStatus) {
+                SaveDistrictControlToDB(pair.first);
+            }
+        }
+    }
+}
+
+void FactionWarManager::SetDistrictControl(uint32 districtId, uint32 faction, bool persistToDb)
+{
+    m_districtControlOverride[districtId] = faction;
+    if (m_districtStatus.find(districtId) == m_districtStatus.end()) {
+        m_districtStatus[districtId] = {districtId, GetDistrictName(districtId), 0, 0, 0, 0, 0.0f, 0.0f, 0.0f, faction, {}};
+    }
+    for (auto& pair : m_controlNodes) {
+        if (pair.second.districtId == districtId) {
+            pair.second.controllingFaction = faction;
+        }
+    }
+    updateDistrictFrontlines(0);
+    m_districtStatus[districtId].dominantFaction = faction;
+    if (persistToDb) {
+        SaveDistrictControlToDB(districtId);
+    }
+}
+
+uint32 FactionWarManager::GetDistrictControllingFaction(uint32 districtId) const
+{
+    auto ovIt = m_districtControlOverride.find(districtId);
+    if (ovIt != m_districtControlOverride.end() && ovIt->second != 0) {
+        return ovIt->second;
+    }
+    auto it = m_districtStatus.find(districtId);
+    if (it != m_districtStatus.end()) {
+        return it->second.dominantFaction;
+    }
+    return FACTION_MACHINES;
+}
+
+uint32 FactionWarManager::TriggerWorldEvent(uint32 districtId, WorldEventType type, float spawnX, float spawnY, float spawnZ)
+{
+    if (districtId == 0) districtId = 1;
+    if (type == WorldEventType::NONE) {
+        type = WorldEventType::MACHINE_SENTINEL_INCURSION;
+    }
+
+    // Default district coordinates if not specified
+    if (spawnX == 0.0f && spawnZ == 0.0f) {
+        for (const auto& pair : m_controlNodes) {
+            if (pair.second.districtId == districtId) {
+                spawnX = pair.second.x;
+                spawnY = pair.second.y;
+                spawnZ = pair.second.z;
+                break;
+            }
+        }
+        if (spawnX == 0.0f && spawnZ == 0.0f) {
+            spawnX = -15360.0f + float(districtId * 1200);
+            spawnY = 572.0f;
+            spawnZ = -21125.0f + float(districtId * 1200);
+        }
+    }
+
+    uint32 eventId = ++m_nextEventId;
+    ActiveWorldEvent ev;
+    ev.eventId = eventId;
+    ev.type = type;
+    ev.districtId = districtId;
+    ev.spawnPos = LocationVector(spawnX, spawnY, spawnZ);
+    ev.startTimeMs = getMSTime();
+    ev.active = true;
+
+    std::string bossRsi = "6e060040";
+    if (type == WorldEventType::MACHINE_SENTINEL_INCURSION) {
+        ev.faction = FACTION_MACHINES;
+        ev.eventName = "Machine Sentinel Incursion";
+        ev.bossName = "The General's Sentinel Command Unit";
+        bossRsi = "6e060040";
+    } else {
+        ev.faction = FACTION_MEROVINGIAN;
+        ev.eventName = "Merovingian Exile Raid";
+        ev.bossName = "The Assassin";
+        bossRsi = "4b010040";
+    }
+
+    auto bossBot = sBotMgr.SpawnSingleBot(spawnX, spawnY, spawnZ, ev.faction);
+    if (bossBot) {
+        bossBot->SetFaction((mxoFaction)ev.faction);
+        ev.bossGoId = bossBot->GetPlayerGoId();
+        PlayerObject* poBoss = sObjMgr.getGOPtrSafe(ev.bossGoId);
+        if (poBoss) {
+            poBoss->setHandle(ev.bossName);
+            poBoss->setFaction(ev.faction);
+            poBoss->setFactionName(GetFactionControlName(ev.faction));
+            poBoss->setLevel(60);
+            poBoss->setMaximumHealth(8000);
+            poBoss->setCurrentHealth(8000);
+            poBoss->setRsiHex(bossRsi);
+            poBoss->setDistrict(districtId);
+        }
+    }
+
+    // Spawn 2 elite escorts
+    for (int i = 0; i < 2; ++i) {
+        float offsetX = (i == 0) ? 350.0f : -350.0f;
+        auto escortBot = sBotMgr.SpawnSingleBot(spawnX + offsetX, spawnY, spawnZ + 250.0f, ev.faction);
+        if (escortBot) {
+            escortBot->SetFaction((mxoFaction)ev.faction);
+            uint32 escortGoId = escortBot->GetPlayerGoId();
+            ev.escortGoIds.push_back(escortGoId);
+            PlayerObject* poEscort = sObjMgr.getGOPtrSafe(escortGoId);
+            if (poEscort) {
+                std::string escortName = (type == WorldEventType::MACHINE_SENTINEL_INCURSION)
+                    ? ("Sentinel_Enforcer_" + std::to_string(eventId) + "_" + std::to_string(i + 1))
+                    : ("Exile_Bloodhound_" + std::to_string(eventId) + "_" + std::to_string(i + 1));
+                poEscort->setHandle(escortName);
+                poEscort->setFaction(ev.faction);
+                poEscort->setFactionName(GetFactionControlName(ev.faction));
+                poEscort->setLevel(52);
+                poEscort->setMaximumHealth(3000);
+                poEscort->setCurrentHealth(3000);
+                poEscort->setRsiHex(bossRsi);
+                poEscort->setDistrict(districtId);
+            }
+        }
+    }
+
+    m_activeWorldEvents.push_back(ev);
+
+    std::string distName = GetDistrictName(districtId);
+    std::string warnMsg = (format("{c:FF2200}[WORLD EVENT ALERT] %1% detected in %2% (District %3%)! World Boss '%4%' [Lv60] has materialized near (%5%, %6%)! All Operatives converge!{/c}")
+        % ev.eventName % distName % districtId % ev.bossName % int(spawnX) % int(spawnZ)).str();
+
+    auto allGoIds = sObjMgr.getAllGOIds();
+    for (uint32 goId : allGoIds) {
+        PlayerObject* p = sObjMgr.getGOPtrSafe(goId);
+        if (p && !p->getClient().isBot()) {
+            p->getClient().QueueCommand(std::make_shared<SystemChatMsg>(warnMsg));
+        }
+    }
+
+    INFO_LOG(format("FactionWarManager: Triggered World Event #%1% (%2%) in District %3%, Boss GoID=0x%4$x (%5%).")
+             % eventId % ev.eventName % districtId % ev.bossGoId % ev.bossName);
+    return eventId;
+}
+
+void FactionWarManager::RecordWorldBossDamage(uint32 bossGoId, uint32 attackerGoId, uint32 damage)
+{
+    if (bossGoId == 0 || attackerGoId == 0 || damage == 0) return;
+    for (auto& ev : m_activeWorldEvents) {
+        if (ev.active && ev.bossGoId == bossGoId) {
+            ev.damageContributors[attackerGoId] += damage;
+            return;
+        }
+    }
+}
+
+std::vector<uint32> FactionWarManager::GetWorldBossLootTable(WorldEventType type) const
+{
+    if (type == WorldEventType::MACHINE_SENTINEL_INCURSION) {
+        // Machine Sentinel Incursion rare drops: SMG + Armored Coat + Red Pill
+        return { 1002, 2001, 3001 };
+    } else if (type == WorldEventType::MEROVINGIAN_EXILE_RAID) {
+        // Merovingian Exile Raid rare drops: Beretta 92FS + Sunglasses + Code Fragment
+        return { 1001, 2002, 4001 };
+    }
+    return { 3001, 4001 };
+}
+
+bool FactionWarManager::OnWorldBossDefeated(uint32 bossGoId, uint32 killerGoId)
+{
+    if (bossGoId == 0) return false;
+    for (auto& ev : m_activeWorldEvents) {
+        if (ev.active && ev.bossGoId == bossGoId) {
+            ev.active = false;
+            if (killerGoId != 0 && ev.damageContributors[killerGoId] == 0) {
+                ev.damageContributors[killerGoId] = 100;
+            }
+
+            uint32 totalDamage = 0;
+            for (const auto& kv : ev.damageContributors) {
+                totalDamage += kv.second;
+            }
+            if (totalDamage == 0) totalDamage = 1;
+
+            std::vector<uint32> lootTable = GetWorldBossLootTable(ev.type);
+
+            for (const auto& kv : ev.damageContributors) {
+                uint32 contributorGoId = kv.first;
+                uint32 dmg = kv.second;
+                if (dmg == 0) continue;
+
+                PlayerObject* player = sObjMgr.getGOPtrSafe(contributorGoId);
+                if (!player) continue;
+
+                float share = std::clamp(float(dmg) / float(totalDamage), 0.10f, 1.0f);
+                uint32 infoReward = std::max<uint32>(500, uint32(std::lround(5000.0f * share)));
+                uint32 xpReward   = std::max<uint32>(250, uint32(std::lround(2500.0f * share)));
+
+                // Apply Phase 14 friendly district +5% $I bonus if applicable
+                float distBonus = GetDistrictInfoGainBonus(player->getDistrict(), player->getFaction());
+                if (distBonus > 0.0f) {
+                    infoReward += std::max<uint32>(1, uint32(std::lround(float(infoReward) * distBonus)));
+                }
+
+                player->addInformation(infoReward);
+                player->awardCombatExperience(xpReward);
+
+                uint32 awardedItem = 0;
+                if (!lootTable.empty()) {
+                    size_t idx = (contributorGoId + ev.eventId) % lootTable.size();
+                    awardedItem = lootTable[idx];
+                    player->giveItem(awardedItem);
+                }
+
+                if (!player->getClient().isBot()) {
+                    player->getClient().QueueCommand(std::make_shared<SystemChatMsg>(
+                        (format("{c:00FF66}[WORLD EVENT VICTORY] You contributed %1% dmg against '%2%'! Rewarded +%3% $Info, +%4% XP, and Spoils Item #%5%!{/c}")
+                            % dmg % ev.bossName % infoReward % xpReward % awardedItem).str()
+                    ));
+                }
+            }
+
+            // Despawn remaining escorts
+            for (uint32 escortGoId : ev.escortGoIds) {
+                if (escortGoId != 0) {
+                    sBotMgr.DespawnBot(escortGoId);
+                }
+            }
+
+            INFO_LOG(format("FactionWarManager: World Event #%1% ('%2%') defeated! Distributed multi-player spoils to %3% contributors.")
+                     % ev.eventId % ev.bossName % ev.damageContributors.size());
+            return true;
+        }
+    }
+    return false;
+}
+
+const ActiveWorldEvent* FactionWarManager::GetWorldEventByBossGoId(uint32 bossGoId) const
+{
+    for (const auto& ev : m_activeWorldEvents) {
+        if (ev.bossGoId == bossGoId) {
+            return &ev;
+        }
+    }
+    return nullptr;
+}
+
+std::string FactionWarManager::BuildWorldStatusJson() const
+{
+    float circadianHour = sPedestrianEcology.GetMatrixHour();
+    bool isNight = (sPedestrianEcology.GetCircadianPeriod() == PERIOD_REST_NIGHT);
+
+    std::ostringstream oss;
+    oss << std::fixed << std::setprecision(2);
+    oss << "{\n";
+    oss << "  \"status\": \"online\",\n";
+    oss << "  \"megacity_circadian_hour\": " << circadianHour << ",\n";
+    oss << "  \"is_night_window\": " << (isNight ? "true" : "false") << ",\n";
+    oss << "  \"districts\": [\n";
+
+    bool firstDist = true;
+    for (const auto& pair : m_districtStatus) {
+        if (!firstDist) oss << ",\n";
+        firstDist = false;
+        uint32 distId = pair.first;
+        uint32 ctrlFaction = GetDistrictControllingFaction(distId);
+        std::string facName = GetFactionControlName(ctrlFaction);
+        std::string distName = GetDistrictName(distId);
+        std::string buffName = GetActiveDistrictBuffName(distId);
+        oss << "    {"
+            << "\"district_id\": " << distId << ", "
+            << "\"name\": \"" << distName << "\", "
+            << "\"controlling_faction\": \"" << facName << "\", "
+            << "\"faction_id\": " << ctrlFaction << ", "
+            << "\"is_regen_bonus_pct\": 5, "
+            << "\"info_drop_bonus_pct\": 5, "
+            << "\"active_buff\": \"" << buffName << "\""
+            << "}";
+    }
+    oss << "\n  ],\n";
+    oss << "  \"active_world_events\": [\n";
+
+    bool firstEv = true;
+    for (const auto& ev : m_activeWorldEvents) {
+        if (!ev.active) continue;
+        if (!firstEv) oss << ",\n";
+        firstEv = false;
+        oss << "    {"
+            << "\"event_id\": " << ev.eventId << ", "
+            << "\"type\": \"" << ev.eventName << "\", "
+            << "\"boss_name\": \"" << ev.bossName << "\", "
+            << "\"boss_goid\": " << ev.bossGoId << ", "
+            << "\"district_id\": " << ev.districtId << ", "
+            << "\"district_name\": \"" << GetDistrictName(ev.districtId) << "\", "
+            << "\"faction\": \"" << GetFactionControlName(ev.faction) << "\""
+            << "}";
+    }
+    oss << "\n  ]\n";
+    oss << "}\n";
+    return oss.str();
+}
+
+bool FactionWarManager::WriteWorldStatusJsonFile(const std::string& filePath) const
+{
+    std::ofstream ofs(filePath, std::ios::out | std::ios::trunc);
+    if (!ofs.is_open()) return false;
+    ofs << BuildWorldStatusJson();
+    ofs.close();
+    return true;
+}
+

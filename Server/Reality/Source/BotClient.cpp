@@ -91,6 +91,14 @@ BotClient::BotClient(uint64 charUID)
 
 BotClient::~BotClient()
 {
+    if (m_playerGoId != 0)
+    {
+        if (sObjMgr.getGOPtrSafe(m_playerGoId) != nullptr)
+        {
+            sObjMgr.destroyObject(m_playerGoId);
+        }
+        m_playerGoId = 0;
+    }
 }
 
 void BotClient::FlushQueue(bool alsoResend)

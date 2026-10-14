@@ -90,6 +90,27 @@ private:
     uint32 m_lastEvalMs;
 };
 
+enum class WorldEventType : uint8 {
+    NONE = 0,
+    MACHINE_SENTINEL_INCURSION = 1,
+    MEROVINGIAN_EXILE_RAID = 2
+};
+
+struct ActiveWorldEvent {
+    uint32 eventId = 0;
+    WorldEventType type = WorldEventType::NONE;
+    uint32 districtId = 1;
+    uint32 faction = 2;
+    std::string eventName;
+    std::string bossName;
+    uint32 bossGoId = 0;
+    LocationVector spawnPos;
+    uint32 startTimeMs = 0;
+    bool active = false;
+    std::map<uint32, uint32> damageContributors; // attackerGoId -> totalDamage
+    std::vector<uint32> escortGoIds;
+};
+
 class FactionWarManager : public Singleton<FactionWarManager> {
 public:
     FactionWarManager();
@@ -121,11 +142,20 @@ public:
     bool DeployStrikeSquad(uint32 faction, uint32 targetNodeId);
     void BroadcastSquadCallout(const StrikeSquad& squad, const std::string& roleStr, const std::string& msg);
 
-    // Phase 8: Dynamic Territory Buffs
+    // Phase 8 & Phase 14: Dynamic Territory Buffs & Persistent District Control (`district_control`)
+    void EnsureDistrictControlTable();
+    void SaveDistrictControlToDB(uint32 districtId = 0);
+    void LoadDistrictControlFromDB();
+    void SetDistrictControl(uint32 districtId, uint32 faction, bool persistToDb = true);
+    uint32 GetDistrictControllingFaction(uint32 districtId) const;
+    std::string GetFactionControlName(uint32 faction) const;
+    const std::string& GetLastDistrictControlSql() const { return m_lastDistrictControlSql; }
+
     bool HasDistrictDominance(uint32 districtId, uint32 faction) const;
     std::string GetActiveDistrictBuffName(uint32 districtId) const;
     float GetDistrictHealthRegenBonus(uint32 districtId, uint32 faction) const;
     float GetDistrictWireFuBonus(uint32 districtId, uint32 faction) const;
+    float GetDistrictISRegenBonus(uint32 districtId, uint32 faction) const;
     float GetDistrictInfoGainBonus(uint32 districtId, uint32 faction) const;
 
     // Epoch II: Dynamic City Tension & Frontline Synthesis Queries
@@ -133,6 +163,18 @@ public:
     uint32 GetHighestTensionDistrict() const;
     uint32 GetLeadingEnemyFaction(uint32 myFaction, uint32 districtId) const;
     std::string GetDistrictName(uint32 districtId) const;
+
+    // Phase 15: Dynamic Live Event Director & General/Assassin World Bosses
+    uint32 TriggerWorldEvent(uint32 districtId, WorldEventType type, float spawnX = 0.0f, float spawnY = 572.0f, float spawnZ = 0.0f);
+    void RecordWorldBossDamage(uint32 bossGoId, uint32 attackerGoId, uint32 damage);
+    bool OnWorldBossDefeated(uint32 bossGoId, uint32 killerGoId);
+    const std::vector<ActiveWorldEvent>& GetActiveWorldEvents() const { return m_activeWorldEvents; }
+    const ActiveWorldEvent* GetWorldEventByBossGoId(uint32 bossGoId) const;
+    std::vector<uint32> GetWorldBossLootTable(WorldEventType type) const;
+
+    // Phase 16: ZionLauncher & Community Hub Live Telemetry Status Export
+    std::string BuildWorldStatusJson() const;
+    bool WriteWorldStatusJsonFile(const std::string& filePath = "world_status.json") const;
 
 private:
     void syncToDatabase();
@@ -144,13 +186,22 @@ private:
     std::map<uint32, uint32> m_factionScores;
     std::map<uint32, ControlNode> m_controlNodes;
     std::map<uint32, DistrictStatus> m_districtStatus;
+    std::map<uint32, uint32> m_districtControlOverride; // districtId -> controllingFaction persisted in district_control
+    std::string m_lastDistrictControlSql;
     std::vector<StrategicFactionCommander> m_commanders;
     std::vector<StrikeSquad> m_strikeSquads;
+    std::vector<ActiveWorldEvent> m_activeWorldEvents;
     uint32 m_nextSquadId;
+    uint32 m_nextEventId = 0;
     uint32 m_timeSinceLastSync;
     uint32 m_lastStrategicTickMs;
+    uint32 m_worldEventTimerMs = 0;
 };
 
+using WorldEventManager = FactionWarManager;
+
 #define sFactionWarMgr Singleton<FactionWarManager>::getSingleton()
+#define sWorldEventMgr Singleton<FactionWarManager>::getSingleton()
 
 #endif // MXOEMU_FACTION_WAR_MANAGER_H
+

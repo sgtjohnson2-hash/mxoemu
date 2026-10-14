@@ -21,6 +21,7 @@
 #include "HackerSystem.h"
 #include "Config.h"
 #include "AgentPossessionManager.h"
+#include "FactionWarManager.h"
 #include "AI/PedestrianEcology.h"
 #include <boost/property_tree/ptree.hpp>
 #include <boost/property_tree/json_parser.hpp>
@@ -2556,6 +2557,14 @@ void CombatSystem::AwardKill(PlayerObject* killer, PlayerObject* victim)
     }
     
     uint32 infoAmount = (uint32)(baseInfo * multiplier);
+
+    // Phase 14: +5% Information ($I) drop bonus when fighting inside a friendly-controlled district
+    if (FactionWarManager::getSingletonPtr() != nullptr) {
+        float districtBonus = sFactionWarMgr.GetDistrictInfoGainBonus(killer->getDistrict(), killer->getFaction());
+        if (districtBonus > 0.0f) {
+            infoAmount += std::max<uint32>(1, uint32(std::lround(float(infoAmount) * districtBonus)));
+        }
+    }
     
     // Dynamic Agent Defeat Demorphing
     if (AgentPossessionManager::getSingletonPtr() && sAgentPossessionMgr.IsEntityPossessed(victim->getGoId())) {

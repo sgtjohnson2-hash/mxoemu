@@ -359,6 +359,11 @@ void PlayerObject::takeDamage( uint32 attackerGoId, uint16 damage, uint32 fxId, 
 	else
 		m_healthC -= actualDamage;
 
+	if (FactionWarManager::getSingletonPtr() != nullptr && actualDamage > 0 && attackerGoId != 0 && attackerGoId != m_goId)
+	{
+		sFactionWarMgr.RecordWorldBossDamage(m_goId, attackerGoId, actualDamage);
+	}
+
 	// Phase A observability: log every hit that involves a human player (bot-vs-bot
 	// background fights would flood the log at server scale).
 	{
@@ -633,6 +638,11 @@ void PlayerObject::die( uint32 killerGoId )
 		sCombatSys.AwardKill(killer, this);
 		// DEFEAT objectives were never advanced by anything (only LOOT was, below)
 		try { sMissionSys.AdvanceObjective(killer, ObjectiveCommand::DEFEAT, m_goId); } catch (...) {}
+		try { sMissionSys.OnInteriorNpcDefeated(killer, m_goId); } catch (...) {}
+	}
+	if (FactionWarManager::getSingletonPtr() != nullptr)
+	{
+		try { sFactionWarMgr.OnWorldBossDefeated(m_goId, killerGoId); } catch (...) {}
 	}
     
     // Authentic Loot Engine (Only bots drop loot)

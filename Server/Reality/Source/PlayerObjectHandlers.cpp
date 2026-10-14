@@ -3512,6 +3512,61 @@ void PlayerObject::ParsePlayerCommand( string theCmd )
         m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FFFF55}/org <create|leave>{/c} - Syndicate organization management"));
         m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FFFF55}/dojo <1v1|clear|leave>{/c} - Sparring partner construct"));
         m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FFFF55}/contact <list|call <name>>{/c} - Uplink with canonical mission contacts"));
+        m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FFFF55}/worldstatus | &worldstatus{/c} - District faction control, circadian hour & active world events"));
+        m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FFFF55}/lair <enter|exit>{/c} - Enter or exit active instanced mission interior"));
+        return;
+    }
+    else if (iequals(command, "worldstatus"))
+    {
+        sFactionWarMgr.WriteWorldStatusJsonFile("world_status.json");
+        std::string jsonPayload = sFactionWarMgr.BuildWorldStatusJson();
+        float circadianHour = sPedestrianEcology.GetMatrixHour();
+        std::ostringstream summary;
+        summary << std::fixed << std::setprecision(2);
+        summary << "{c:00FFCC}[WORLD STATUS] Circadian Hour: " << circadianHour << ":00";
+        for (const auto& pair : sFactionWarMgr.GetDistricts()) {
+            uint32 dId = pair.first;
+            uint32 ctrl = sFactionWarMgr.GetDistrictControllingFaction(dId);
+            summary << " | D" << dId << "(" << sFactionWarMgr.GetDistrictName(dId) << "): " << sFactionWarMgr.GetFactionControlName(ctrl);
+        }
+        size_t activeEvents = 0;
+        for (const auto& ev : sFactionWarMgr.GetActiveWorldEvents()) {
+            if (ev.active) activeEvents++;
+        }
+        summary << " | Active World Events: " << activeEvents << "{/c}";
+        m_parent.QueueCommand(make_shared<SystemChatMsg>(summary.str()));
+        m_parent.QueueCommand(make_shared<SystemChatMsg>("[WORLD_STATUS_JSON] " + jsonPayload));
+        return;
+    }
+    else if (iequals(command, "lair"))
+    {
+        std::string subCmd;
+        cmdStream >> subCmd;
+        if (iequals(subCmd, "exit") || iequals(subCmd, "leave")) {
+            sMissionSys.ExitMissionInterior(this);
+        } else {
+            uint32 missionId = 0;
+            uint32 doorId = 9101;
+            if (!cmdStream.eof()) cmdStream >> missionId;
+            if (!cmdStream.eof()) cmdStream >> doorId;
+            sMissionSys.EnterMissionInterior(this, missionId, doorId);
+        }
+        return;
+    }
+    else if (iequals(command, "worldevent"))
+    {
+        if (!m_isAdmin) {
+            m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FF0000}That command is restricted to admins.{/c}"));
+            return;
+        }
+        std::string evTypeStr;
+        uint32 distId = getDistrict() != 0 ? getDistrict() : 1;
+        cmdStream >> evTypeStr;
+        if (!cmdStream.eof()) cmdStream >> distId;
+        WorldEventType evType = iequals(evTypeStr, "mero")
+            ? WorldEventType::MEROVINGIAN_EXILE_RAID
+            : WorldEventType::MACHINE_SENTINEL_INCURSION;
+        sFactionWarMgr.TriggerWorldEvent(distId, evType, getPosition().x, getPosition().y, getPosition().z);
         return;
     }
 	else
@@ -3561,7 +3616,7 @@ void PlayerObject::RPC_HandleChat( ByteBuffer &srcCmd )
 	if (!m_isAdmin && theMessage[0] == '/')
 	{
 		static const char* adminSlash[] = { "/crisis", "/sabotage", "/repair", "/district", "/teleport", "/tp ",
-			"/tension", "/outbreak", "/glitch", "/anomaly", NULL };
+			"/tension", "/outbreak", "/glitch", "/anomaly", "/worldevent", NULL };
 		for (int i = 0; adminSlash[i] != NULL; i++)
 		{
 			if (boost::istarts_with(theMessage, adminSlash[i]))
@@ -3626,7 +3681,10 @@ void PlayerObject::RPC_HandleChat( ByteBuffer &srcCmd )
 									  boost::istarts_with(theMessage, "/faction") ||
 									  boost::istarts_with(theMessage, "/teleport") ||
 									  boost::istarts_with(theMessage, "/tp ") ||
-									  boost::iequals(theMessage, "/tp"))))
+									  boost::iequals(theMessage, "/tp") ||
+									  boost::istarts_with(theMessage, "/worldstatus") ||
+									  boost::istarts_with(theMessage, "/lair") ||
+									  boost::istarts_with(theMessage, "/worldevent"))))
 	{
 		INFO_LOG(format("(%1%) %2%:%3% chat command: %4%") % m_parent.Address() % m_handle % m_goId % theMessage);
 		ParsePlayerCommand(theMessage.substr(1));

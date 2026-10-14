@@ -410,6 +410,9 @@ public:
 
     bool consumeInformation(uint32 amount) { if (m_cash < amount) return false; m_cash -= amount; return true; }
     LocationVector getSavedPos() const { return m_savedPos; }
+    void setSavedPos(const LocationVector& pos) { m_savedPos = pos; }
+    void setLastRegenTickMs(uint32 t) { m_lastRegenTickMs = t; }
+    void setLastDamageTakenMs(uint32 t) { m_lastDamageTakenMs = t; }
 
 	// Possession and State
     uint32 m_pkKills = 0;

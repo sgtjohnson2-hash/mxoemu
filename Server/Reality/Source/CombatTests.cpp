@@ -155,6 +155,9 @@ namespace
 	{
 		Actor a;
 		a.client = client;
+		uint32 prevGo = client->GetPlayerGoId();
+		if (prevGo != 0 && sObjMgr.getGOPtrSafe(prevGo) != nullptr)
+			sObjMgr.destroyObject(prevGo);
 		// isBot=true here only means "memory-only character"; the CLIENT is non-bot so all
 		// human branches (chat feedback, loadout, rewards) run.
 		uint32 go = sObjMgr.constructPlayer(client, uid, true);
@@ -3295,6 +3298,241 @@ int RunCombatTestSuite()
 				p9Human.po->HandleCommand(orgCreateCmd);
 				check(p9Human.po->getOrgId() != 0 && p9Client.sawText("Phase12Syndicate"),
 					"/orgcreate routes through unified ParsePlayerCommand and creates organization");
+			}
+		}
+
+		// =========================================================================
+		// 26. Phases 13-16: Instanced Construct Arenas, Persistent District Control
+		//     & +5% Buffs, Dynamic Live Event Director World Bosses, & World Status JSON
+		// =========================================================================
+		std::cout << "\n[26] Phases 13-16: Instanced Lairs, District Buffs, World Bosses & Telemetry" << std::endl;
+		{
+			TestHumanClient p13ClientA, p13ClientB, p13ClientSolo;
+			Actor opSquadA = makeHuman(&p13ClientA, 9300101, -15000.0, -21000.0);
+			Actor opSquadB = makeHuman(&p13ClientB, 9300102, -15010.0, -21010.0);
+			Actor opSolo   = makeHuman(&p13ClientSolo, 9300103, -15020.0, -21020.0);
+
+			check(opSquadA.po && opSquadB.po && opSolo.po, "Constructed Phase 13-16 test operatives");
+			if (opSquadA.po && opSquadB.po && opSolo.po)
+			{
+				opSquadA.po->setFaction(FACTION_ZION);
+				opSquadB.po->setFaction(FACTION_ZION);
+				opSolo.po->setFaction(FACTION_MACHINES);
+
+				// --- Phase 13: Instanced Construct Arenas & Multi-Floor Lair Scripting ---
+				opSquadA.po->setOrgId(777);
+				opSquadB.po->setOrgId(777);
+				opSolo.po->setOrgId(0);
+				opSquadA.po->setDistrict(1);
+				opSquadB.po->setDistrict(1);
+				opSolo.po->setDistrict(1);
+
+				uint32 instSquadA = sMissionSys.EnterMissionInterior(opSquadA.po, 101, 0xBEEF0101);
+				uint32 instSquadB = sMissionSys.EnterMissionInterior(opSquadB.po, 101, 0xBEEF0101);
+				uint32 instSolo   = sMissionSys.EnterMissionInterior(opSolo.po,   101, 0xBEEF0101);
+
+				check(instSquadA >= 5000 && instSquadA == instSquadB,
+					"Phase 13.1: Same-Organization squadmates entering mission interior share isolated m_instanceId");
+				check(instSolo >= 5000 && instSolo != instSquadA,
+					"Phase 13.1: Solo operative or different squad receives separate isolated m_instanceId dimension");
+
+				auto clientsInSquadInst = sSpatialGrid.GetClientsInRadius(
+					(float)opSquadA.po->getPosition().x, (float)opSquadA.po->getPosition().z, 5000.0f, instSquadA);
+				bool foundSquadA = (std::find(clientsInSquadInst.begin(), clientsInSquadInst.end(), &p13ClientA) != clientsInSquadInst.end());
+				bool foundSoloInSquadInst = (std::find(clientsInSquadInst.begin(), clientsInSquadInst.end(), &p13ClientSolo) != clientsInSquadInst.end());
+				check(foundSquadA && !foundSoloInSquadInst,
+					"Phase 13.1: SpatialGrid instance filtering isolates squad construct from cross-team players");
+
+				const MissionInteriorInstance* instPtr = sMissionSys.GetInteriorInstance(instSquadA);
+				check(instPtr != nullptr && instPtr->guardGoIds.size() >= 2 && !instPtr->bossDoorUnlocked && !instPtr->bossSpawned,
+					"Phase 13.2: Mission interior instance initializes room guard wave and locked inner boss door");
+
+				if (instPtr && instPtr->guardGoIds.size() >= 2)
+				{
+					std::vector<uint32> guards = instPtr->guardGoIds;
+					PlayerObject* guard1 = sObjMgr.getGOPtrSafe(guards[0]);
+					check(guard1 != nullptr && guard1->getClient().m_instanceId == instSquadA,
+						"Phase 13.2: Room guard 1 spawned inside isolated m_instanceId");
+					if (guard1)
+					{
+						guard1->die(opSquadA.go);
+					}
+					instPtr = sMissionSys.GetInteriorInstance(instSquadA);
+					check(instPtr && !instPtr->bossDoorUnlocked && !instPtr->bossSpawned,
+						"Phase 13.2: Inner boss door remains locked while remaining room guards are alive");
+
+					for (size_t gi = 1; gi < guards.size(); ++gi)
+					{
+						PlayerObject* gPo = sObjMgr.getGOPtrSafe(guards[gi]);
+						if (gPo && !gPo->isDead())
+						{
+							gPo->die(opSquadA.go);
+						}
+					}
+					instPtr = sMissionSys.GetInteriorInstance(instSquadA);
+					check(instPtr && instPtr->bossDoorUnlocked && sObjMgr.HasDoor(1, instPtr->bossDoorId),
+						"Phase 13.2: Clearing all room guards unlocks inner boss door via ObjectMgr in-memory door cache");
+					check(instPtr && instPtr->bossSpawned && instPtr->bossGoId != 0,
+						"Phase 13.2: Clearing all room guards spawns the mission lieutenant inside the instance");
+					if (instPtr && instPtr->bossGoId != 0)
+					{
+						PlayerObject* ltPo = sObjMgr.getGOPtrSafe(instPtr->bossGoId);
+						check(ltPo != nullptr && ltPo->getClient().m_instanceId == instSquadA,
+							"Phase 13.2: Spawned mission lieutenant resides in the squad's isolated m_instanceId");
+					}
+				}
+
+				bool exitedA = sMissionSys.ExitMissionInterior(opSquadA.po);
+				sMissionSys.ExitMissionInterior(opSquadB.po);
+				sMissionSys.ExitMissionInterior(opSolo.po);
+				check(exitedA && opSquadA.po->getClient().m_instanceId == 0,
+					"Phase 13.1: ExitMissionInterior restores operative to street dimension (m_instanceId == 0)");
+
+				// --- Phase 14: Persistent Organization Territory Control & District Buffs ---
+				sFactionWarMgr.registerControlNode(9901, 1, -15000.0f, 572.0f, -21000.0f);
+				sFactionWarMgr.SetDistrictControl(1, FACTION_MACHINES, true);
+				sFactionWarMgr.captureNode(9901, FACTION_ZION);
+				check(sFactionWarMgr.GetDistrictControllingFaction(1) == FACTION_ZION,
+					"Phase 14.1: Capturing district hardline updates district controlling faction to Zion");
+				std::string lastSql = sFactionWarMgr.GetLastDistrictControlSql();
+				check(lastSql.find("REPLACE INTO `district_control`") != std::string::npos &&
+					  lastSql.find("'Zion'") != std::string::npos,
+					"Phase 14.1: Hardline capture persists district_control row (Zion) to MariaDB");
+
+				sFactionWarMgr.SetDistrictControl(2, FACTION_MEROVINGIAN, true);
+				check(sFactionWarMgr.GetDistrictControllingFaction(2) == FACTION_MEROVINGIAN &&
+					  sFactionWarMgr.GetLastDistrictControlSql().find("'Merovingian'") != std::string::npos,
+					"Phase 14.1: Merovingian district control persists to district_control table");
+
+				// Verify +5% Inner Strength regeneration bonus in friendly vs enemy district
+				check(std::abs(sFactionWarMgr.GetDistrictISRegenBonus(1, FACTION_ZION) - 0.05f) < 0.001f &&
+					  std::abs(sFactionWarMgr.GetDistrictISRegenBonus(2, FACTION_ZION) - 0.0f) < 0.001f,
+					"Phase 14.2: GetDistrictISRegenBonus returns +5% (0.05) in friendly district and 0% in enemy district");
+
+				opSquadA.po->setFaction(FACTION_ZION);
+				opSquadA.po->setInnerStrength(100, 200);
+				opSquadA.po->setCombatStance(false);
+				opSquadA.po->setLastDamageTakenMs(0);
+
+				// Enemy district (District 2 = Merovingian) IS regen tick
+				opSquadA.po->setDistrict(2);
+				opSquadA.po->setInnerStrength(100, 200);
+				opSquadA.po->setLastRegenTickMs(0);
+				opSquadA.po->regenerateVitals();
+				uint16 isGainEnemyDist = opSquadA.po->getCurrentIS() - 100;
+
+				// Friendly district (District 1 = Zion) IS regen tick
+				opSquadA.po->setDistrict(1);
+				opSquadA.po->setInnerStrength(100, 200);
+				opSquadA.po->setLastRegenTickMs(0);
+				opSquadA.po->regenerateVitals();
+				uint16 isGainFriendlyDist = opSquadA.po->getCurrentIS() - 100;
+
+				check(isGainFriendlyDist > isGainEnemyDist && (isGainFriendlyDist - isGainEnemyDist) == 10,
+					"Phase 14.2: PlayerObject::regenerateVitals grants +5% Inner Strength regeneration inside friendly-controlled district");
+
+				// Verify +5% Information ($I) drop bonus in friendly vs enemy district
+				check(std::abs(sFactionWarMgr.GetDistrictInfoGainBonus(1, FACTION_ZION) - 0.05f) < 0.001f &&
+					  std::abs(sFactionWarMgr.GetDistrictInfoGainBonus(2, FACTION_ZION) - 0.0f) < 0.001f,
+					"Phase 14.2: GetDistrictInfoGainBonus returns +5% (0.05) in friendly district and 0% in enemy district");
+
+				Actor dummyVictim = makeBot(9300199, -15005.0, -21005.0, FACTION_MACHINES, 500);
+				if (dummyVictim.po)
+				{
+					dummyVictim.po->setLevel(20);
+					dummyVictim.po->setHandle("Sentinel_Subroutine");
+
+					opSquadA.po->setDistrict(2); // Enemy district
+					uint64 infoBeforeEnemy = opSquadA.po->getInformation();
+					sCombatSys.AwardKill(opSquadA.po, dummyVictim.po);
+					uint32 infoGainEnemy = uint32(opSquadA.po->getInformation() - infoBeforeEnemy);
+
+					opSquadA.po->setDistrict(1); // Friendly district (Zion)
+					uint64 infoBeforeFriendly = opSquadA.po->getInformation();
+					sCombatSys.AwardKill(opSquadA.po, dummyVictim.po);
+					uint32 infoGainFriendly = uint32(opSquadA.po->getInformation() - infoBeforeFriendly);
+
+					check(infoGainFriendly > infoGainEnemy &&
+						  infoGainFriendly == infoGainEnemy + std::max<uint32>(1, uint32(std::lround(float(infoGainEnemy) * 0.05f))),
+						"Phase 14.2: CombatSystem::AwardKill grants +5% Information ($I) drop bonus in friendly-controlled district");
+				}
+
+				// --- Phase 15: Dynamic Live Event Director & General/Assassin World Bosses ---
+				p13ClientA.captured.clear();
+				uint32 sentinelEvId = sFactionWarMgr.TriggerWorldEvent(
+					3, WorldEventType::MACHINE_SENTINEL_INCURSION, -14800.0f, 572.0f, -20800.0f);
+				check(sentinelEvId != 0 && p13ClientA.sawText("[WORLD EVENT ALERT]"),
+					"Phase 15.1: TriggerWorldEvent(MACHINE_SENTINEL_INCURSION) spawns General's Sentinel boss and broadcasts warning");
+
+				uint32 meroEvId = sFactionWarMgr.TriggerWorldEvent(
+					4, WorldEventType::MEROVINGIAN_EXILE_RAID, -14600.0f, 572.0f, -20600.0f);
+				check(meroEvId != 0,
+					"Phase 15.1: TriggerWorldEvent(MEROVINGIAN_EXILE_RAID) spawns The Assassin world boss raid");
+
+				// Find the spawned boss for sentinelEvId and test multi-player contribution loot table
+				uint32 bossGoId = 0;
+				for (const auto& ev : sFactionWarMgr.GetActiveWorldEvents())
+				{
+					if (ev.eventId == sentinelEvId)
+					{
+						bossGoId = ev.bossGoId;
+						break;
+					}
+				}
+				PlayerObject* bossPo = sObjMgr.getGOPtrSafe(bossGoId);
+				check(bossPo != nullptr && bossPo->getLevel() == 60 && bossPo->getMaximumHealth() == 8000,
+					"Phase 15.2: World Boss spawned at Level 60 with 8000 HP and escort squad");
+
+				if (bossPo)
+				{
+					uint64 infoA0 = opSquadA.po->getInformation();
+					uint64 infoB0 = opSquadB.po->getInformation();
+					p13ClientA.captured.clear();
+					p13ClientB.captured.clear();
+
+					// Both operatives deal damage to the World Boss
+					bossPo->takeDamage(opSquadA.go, 3000, 0x05, false);
+					bossPo->takeDamage(opSquadB.go, 2000, 0x05, false);
+					bossPo->die(opSquadA.go);
+
+					check(opSquadA.po->getInformation() > infoA0 && opSquadB.po->getInformation() > infoB0,
+						"Phase 15.2: Defeating World Boss distributes multi-player contribution $Info rewards to all contributors");
+					check(p13ClientA.sawText("[WORLD EVENT VICTORY]") && p13ClientB.sawText("[WORLD EVENT VICTORY]"),
+						"Phase 15.2: All contributing operatives receive [WORLD EVENT VICTORY] spoils notification and loot item");
+				}
+
+				// --- Phase 16: Launcher Telemetry World Status JSON & /worldstatus Command ---
+				std::string worldJson = sFactionWarMgr.BuildWorldStatusJson();
+				check(worldJson.find("\"megacity_circadian_hour\"") != std::string::npos &&
+					  worldJson.find("\"districts\"") != std::string::npos &&
+					  worldJson.find("\"active_world_events\"") != std::string::npos,
+					"Phase 16.1: BuildWorldStatusJson exports circadian hour, district faction control, and active world events");
+
+				bool wroteFile = sFactionWarMgr.WriteWorldStatusJsonFile("world_status.json");
+				check(wroteFile, "Phase 16.1: WriteWorldStatusJsonFile writes world_status.json cleanly");
+
+				ByteBuffer wsCmd;
+				wsCmd << (uint8)0x28 << (uint8)0x10 << (uint16)swap16(8) << (uint32)0;
+				wsCmd.writeString("/worldstatus");
+				p13ClientA.captured.clear();
+				opSquadA.po->HandleCommand(wsCmd);
+				check(p13ClientA.sawText("[WORLD STATUS]") && p13ClientA.sawText("[WORLD_STATUS_JSON]"),
+					"Phase 16.1: /worldstatus command outputs live district control, circadian hour, and JSON telemetry");
+
+				// --- Edge Cases & Boundary Value Checks (Phases 13-16) ---
+				check(sMissionSys.EnterMissionInterior(nullptr, 0, 0) == 0,
+					"Edge case: EnterMissionInterior(nullptr) returns 0 safely");
+				check(!sMissionSys.ExitMissionInterior(opSquadA.po),
+					"Edge case: ExitMissionInterior returns false when operative is already in street dimension (0)");
+				check(!sMissionSys.OnInteriorNpcDefeated(nullptr, 0),
+					"Edge case: OnInteriorNpcDefeated(nullptr, 0) returns false safely");
+				check(sFactionWarMgr.GetDistrictISRegenBonus(99, 0) == 0.0f &&
+					  sFactionWarMgr.GetDistrictInfoGainBonus(99, 0) == 0.0f,
+					"Edge case: District bonuses return 0.0f for unknown district (99) or neutral faction (0)");
+				sFactionWarMgr.RecordWorldBossDamage(0, 0, 0);
+				check(!sFactionWarMgr.OnWorldBossDefeated(0, 0) &&
+					  !sFactionWarMgr.OnWorldBossDefeated(0xDEADBEEF, opSquadA.go),
+					"Edge case: OnWorldBossDefeated returns false for zero or non-existent boss GoId");
 			}
 		}
 	}
