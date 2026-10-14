@@ -811,9 +811,9 @@ void PlayerObject::PopulateWorld()
 	}
 	m_worldPopulated=true;
 
+	// The item listing used to be pushed into chat on every login (one line per slot); "&inv" still prints it.
 	if (m_inventorySystem && !m_parent.isBot())
 	{
-		m_inventorySystem->sendFullInventory();
 		if (m_equippedWeaponId != 0)
 			sendEquippedWeaponUpdate();
 	}

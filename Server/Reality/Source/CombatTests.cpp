@@ -292,6 +292,28 @@ int RunCombatTestSuite()
 		check(GetILCombatHandlerGoId() == 55, "IL handler GO id defaults to 55 (HDS GameObjectDefinitions.cs:37009)");
 	}
 
+	// RPC 0x45 round status: field offsets from the client's own printer (FUN_6214e6f0 / FUN_620b9f20)
+	{
+		ILRoundStatus st;
+		st.turn = 3; st.round = 4; st.isAttacker = true;
+		st.player.type = 0; st.player.setting = 1; st.player.combatValue = 42;
+		st.opponent.type = 1; st.opponent.additional = 133; st.opponent.combatValue = 17;
+		st.opponentHandle = 0x002F0005; st.outcomeFlag = 0x3;
+		st.damageTaken = 17; st.opponentDamageTaken = 42; st.lockTimeMs = 0x01020304;
+		ILRoundStatusMsg m(st);
+		const ByteBuffer& mb = m.toBuf();
+		const uint8* b = reinterpret_cast<const uint8*>(mb.contents());
+		auto u16at = [&](size_t o) { uint16 v; memcpy(&v, b + o, 2); return v; };
+		auto u32at = [&](size_t o) { uint32 v; memcpy(&v, b + o, 4); return v; };
+		check(mb.size() == 0x59 && b[0] == 0x45, "0x45 round status is 89 bytes");
+		check(u16at(1) == 3 && u16at(3) == 4 && b[5] == 1, "0x45 CombatTurn @1, CombatRound @3, IsAttacker @5");
+		check(b[7] == 0 && b[8] == 1 && u16at(0xB) == 42, "0x45 PlayerCard: Type @7, Setting @8, CombatValue @0xB");
+		check(b[0x1A] == 1 && u32at(0x20) == 133 && u16at(0x1E) == 17, "0x45 OpponentCard: Type @0x1A, CombatValue @0x1E, Additional (ability) @0x20");
+		check(u32at(0x31) == 0x002F0005 && u32at(0x35) == 0x002F0005, "0x45 TargetID @0x31 == OpponentID @0x35");
+		check(u32at(0x3D) == 3 && u16at(0x45) == 17 && u16at(0x49) == 42, "0x45 OutcomeFlag @0x3D, DamageTaken @0x45, OpponentDamageTaken @0x49");
+		check(u32at(0x4D) == 0x01020304, "0x45 StartTime (lock) @0x4D");
+	}
+
 	try
 	{
 		// ---------------------------------------------------------------- loadout (N1)

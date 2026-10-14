@@ -1665,26 +1665,32 @@ uint8 TacticFromClientSetting(uint8 clientSetting)
 	}
 }
 
-ILRoundStatusMsg::ILRoundStatusMsg(uint16 sequence, uint32 opponentHandle,
-	uint8 viewerSetting, int16 viewerDamage,
-	uint8 opponentSetting, int16 opponentDamage, uint32 lockTimeMs)
+ILRoundStatusMsg::ILRoundStatusMsg(const ILRoundStatus &st)
 {
 	uint8 b[0x59];
 	memset(b, 0, sizeof(b));
 	b[0] = 0x45;
-	memcpy(&b[0x03], &sequence, 2);
-	// viewer record @6
-	b[0x07] = 0;                 // type: 0 = basic tactic (4 = special, FUN_620ba5a0)
-	b[0x08] = viewerSetting;
-	memcpy(&b[0x0B], &viewerDamage, 2);
-	// opponent record @0x19
-	b[0x1A] = 0;
-	b[0x1B] = opponentSetting;
-	memcpy(&b[0x1E], &opponentDamage, 2);
-	// FUN_6219dbb0: the HUD only takes the update when @0x35 is non-zero and equals @0x31
-	memcpy(&b[0x31], &opponentHandle, 4);
-	memcpy(&b[0x35], &opponentHandle, 4);
-	memcpy(&b[0x4D], &lockTimeMs, 4);
+	memcpy(&b[0x01], &st.turn, 2);
+	memcpy(&b[0x03], &st.round, 2);
+	b[0x05] = st.isAttacker ? 1 : 0;
+	const ILCard* cards[2] = { &st.player, &st.opponent };
+	const size_t base[2] = { 0x06, 0x19 };
+	for (int i = 0; i < 2; i++)
+	{
+		uint8* r = &b[base[i]];
+		r[1] = cards[i]->type;
+		r[2] = cards[i]->setting;
+		memcpy(&r[5], &cards[i]->combatValue, 2);
+		memcpy(&r[7], &cards[i]->additional, 4);
+	}
+	b[0x30] = 1; // OpponentCount
+	memcpy(&b[0x31], &st.opponentHandle, 4); // TargetID
+	memcpy(&b[0x35], &st.opponentHandle, 4); // OpponentID
+	memcpy(&b[0x3D], &st.outcomeFlag, 4);
+	memcpy(&b[0x41], &st.combatResult, 4);
+	memcpy(&b[0x45], &st.damageTaken, 2);
+	memcpy(&b[0x49], &st.opponentDamageTaken, 2);
+	memcpy(&b[0x4D], &st.lockTimeMs, 4);
 	m_buf.clear();
 	m_buf.append(b, sizeof(b));
 }

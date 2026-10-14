@@ -38,6 +38,11 @@
 #include "MersenneTwister.h"
 #include "GameClient.h"
 #include "GameServer.h"
+#include "Config.h"
+#include "Item.h"
+#include "ItemSerializer.h"
+#include "DataLoader.h"
+#include <map>
 #include "EncryptedPacket.h"
 #include "Config.h"
 #include "CombatSystem.h"
@@ -624,6 +629,137 @@ bool MarginSocket::UdpReady(GameClient *theClient)
 	return true;
 }
 
+// ---- Character data sections built from the character's own rows -------------------------
+// The load-character replies used to be captured byte arrays, so every character's client showed
+// the same retail inventory and ability loadout whatever the server held for them.
+// Section framing (HDS MarginClient.SendMarginCharData): [0x10 0x00][u16 length][entries].
+
+// Margin.DbInventory = 0 falls back to the old captured inventory.
+// Entry (HDS MarginClient.loadInventory, matches the capture): [slot u8][item id u32][u32 flags]
+// flags: stack count << 18 for stacks (capture: 04 00 = 1, 08 00 = 2, 4c 00 = 19);
+//        otherwise purity << 26 (HDS default 00 00 00 0c).
+static ByteBuffer BuildMarginInventorySection(uint64 charId)
+{
+	ByteBuffer entries;
+	PreparedStatement stmt("SELECT `goid`, `slot`, `item_metadata` FROM `inventory` WHERE `charId` = ?0 ORDER BY `slot`");
+	stmt.SetUInt64(0, charId);
+	scoped_ptr<QueryResult> result(sDatabase.QueryPrepared(&stmt));
+	int count = 0;
+	if (result)
+	{
+		do
+		{
+			Field *field = result->Fetch();
+			const uint32 goId = field[0].GetUInt32();
+			const uint8 slot = field[1].GetUInt8();
+			const std::string metadata = field[2].GetString();
+			shared_ptr<Item> item(new Item(goId, sDataLoader.GetItemTemplate(goId) ? goId : 1));
+			ItemSerializer::Deserialize(item, metadata);
+			const uint32 templateId = item->getTemplateId();
+			if (templateId <= 1)
+				continue; // no client item behind it
+			const uint16 stack = item->getStackCount();
+			const uint32 flags = stack > 1 ? (uint32(stack & 0xFF) << 18) : 0x0C000000u;
+			entries << uint8(slot) << uint32(templateId) << uint32(flags);
+			count++;
+		} while (result->NextRow());
+	}
+	ByteBuffer out;
+	out << uint8(0x10) << uint8(0x00) << uint16(entries.size());
+	if (entries.size())
+		out.append(entries.contents(), entries.size());
+	DEBUG_LOG(format("Margin: inventory section for char %1%: %2% items") % charId % count);
+	return out;
+}
+
+// Ability entries: [slot u16][client ability GOID + level]; GOID = 0x80000000 + AbilityID * 0x400
+// (hd_reference/data/abilityIDs.csv). A loaded entry's slot is the ability's index in the known list.
+struct MarginAbility { uint16 slot; uint32 abilityId; uint16 level; };
+static std::vector<MarginAbility> DecodeMarginAbilities(const unsigned char* data, size_t len)
+{
+	std::vector<MarginAbility> out;
+	if (len < 4 || data[0] != 0x10) return out;
+	const size_t n = std::min<size_t>(len - 4, size_t(data[2]) | (size_t(data[3]) << 8));
+	for (size_t k = 0; k + 6 <= n; k += 6)
+	{
+		const unsigned char* e = data + 4 + k;
+		const uint16 slot = uint16(e[0]) | (uint16(e[1]) << 8);
+		const uint32 val = uint32(e[2]) | (uint32(e[3]) << 8) | (uint32(e[4]) << 16) | (uint32(e[5]) << 24);
+		MarginAbility a;
+		a.slot = slot;
+		a.abilityId = (val - 0x80000000u) >> 10;
+		a.level = uint16((val - 0x80000000u) & 0x3FF);
+		out.push_back(a);
+	}
+	return out;
+}
+static ByteBuffer EncodeMarginAbilities(const std::vector<MarginAbility> &list)
+{
+	ByteBuffer entries;
+	for (const MarginAbility &a : list)
+		entries << uint16(a.slot) << uint32(0x80000000u + (a.abilityId << 10) + (a.level & 0x3FF));
+	ByteBuffer out;
+	out << uint8(0x10) << uint8(0x00) << uint16(entries.size());
+	if (entries.size())
+		out.append(entries.contents(), entries.size());
+	return out;
+}
+// Known = captured known list + any loadout ability it lacks (appended).
+// Loaded = captured loadout (innates like Hyper Jump / Hyper Sprint) + the character's own loadout
+// from `abilities`, each at its known-list slot. Margin.DbAbilities = 0 sends the captures unchanged.
+static void BuildMarginAbilitySections(uint64 charId, const unsigned char* knownCap, size_t knownLen,
+	const unsigned char* loadedCap, size_t loadedLen, ByteBuffer &knownOut, ByteBuffer &loadedOut)
+{
+	std::vector<MarginAbility> known = DecodeMarginAbilities(knownCap, knownLen);
+	std::vector<MarginAbility> loaded = DecodeMarginAbilities(loadedCap, loadedLen);
+	std::map<uint32, size_t> knownIdx;
+	uint16 nextSlot = 0;
+	for (size_t i = 0; i < known.size(); i++)
+	{
+		if (!knownIdx.count(known[i].abilityId)) knownIdx[known[i].abilityId] = i;
+		nextSlot = std::max<uint16>(nextSlot, uint16(known[i].slot + 1));
+	}
+	std::map<uint32, bool> loadedIds;
+	for (const MarginAbility &a : loaded) loadedIds[a.abilityId] = true;
+
+	PreparedStatement stmt("SELECT `abilityId`, `level` FROM `abilities` WHERE `charId` = ?0");
+	stmt.SetUInt64(0, charId);
+	scoped_ptr<QueryResult> result(sDatabase.QueryPrepared(&stmt));
+	int added = 0;
+	if (result)
+	{
+		do
+		{
+			Field *field = result->Fetch();
+			const uint16 abilityId = field[0].GetUInt16();
+			const uint16 level = std::max<uint16>(1, field[1].GetUInt16());
+			if (abilityId == 0 || abilityId >= 0x200000) continue;
+			auto k = knownIdx.find(abilityId);
+			if (k == knownIdx.end())
+			{
+				MarginAbility a; a.slot = nextSlot++; a.abilityId = abilityId; a.level = level;
+				knownIdx[abilityId] = known.size();
+				known.push_back(a);
+				k = knownIdx.find(abilityId);
+			}
+			else if (known[k->second].level < level)
+				known[k->second].level = level;
+			if (!loadedIds.count(abilityId))
+			{
+				MarginAbility a = known[k->second];
+				a.level = level;
+				loaded.push_back(a);
+				loadedIds[abilityId] = true;
+				added++;
+			}
+		} while (result->NextRow());
+	}
+	knownOut = EncodeMarginAbilities(known);
+	loadedOut = EncodeMarginAbilities(loaded);
+	DEBUG_LOG(format("Margin: abilities for char %1%: %2% known, %3% loaded (%4% from the character's loadout)")
+		% charId % known.size() % loaded.size() % added);
+}
+
 void MarginSocket::SendLoadCharacterReplies()
 {
 	readyForUdp = true;
@@ -904,7 +1040,10 @@ void MarginSocket::SendLoadCharacterReplies()
 				0x00, 0x00, 0x00, 0x00, 0x44, 0x6a, 0x86, 0x96, 0x00, 0x00, 0x00, 0x00, 0x00, 0x20,
 			} ;
 
-			SendCharacterReply(0,false,0x05,ByteBuffer(packet7,sizeof(packet7)));
+			if (sConfig.GetBoolDefault("Margin.DbInventory", true))
+				SendCharacterReply(0,false,0x05,BuildMarginInventorySection(charId));
+			else
+				SendCharacterReply(0,false,0x05,ByteBuffer(packet7,sizeof(packet7)));
 
 			unsigned char packet8[] =
 			{
@@ -922,7 +1061,7 @@ void MarginSocket::SendLoadCharacterReplies()
 				0x82, 0x01, 0x00, 0x28, 0x06, 0x80, 0x89, 0x01, 0x32, 0xd0, 0x09, 0x80, 0xa6, 0x01, 0x00, 0x1c, 0x0f, 0x80, 0xe7, 0x01, 0x32, 0x34, 0x11, 0x80, 0xf4, 0x01, 0x32, 0xb8, 0x0f, 0x80,
 			} ;
 
-			SendCharacterReply(0,false,0x06,ByteBuffer(packet8,sizeof(packet8)));
+			// 0x06 is sent after packet9 is known: see the ability sections below
 
 			unsigned char packet9[] =
 			{
@@ -1027,7 +1166,18 @@ void MarginSocket::SendLoadCharacterReplies()
 				0x10, 0x54, 0x0e, 0x84, 0x05, 0x02, 0x13, 0x53, 0x0e, 0x84, 0x06, 0x02, 0x1f, 0x70, 0x04, 0x80, 0x07, 0x02, 0x13, 0x54, 0x0e, 0x84,
 			} ;
 
-			SendCharacterReply(0,false,0x07,ByteBuffer(packet9,sizeof(packet9)));
+			if (sConfig.GetBoolDefault("Margin.DbAbilities", true))
+			{
+				ByteBuffer knownSec, loadedSec;
+				BuildMarginAbilitySections(charId, packet9, sizeof(packet9), packet8, sizeof(packet8), knownSec, loadedSec);
+				SendCharacterReply(0,false,0x06,loadedSec);
+				SendCharacterReply(0,false,0x07,knownSec);
+			}
+			else
+			{
+				SendCharacterReply(0,false,0x06,ByteBuffer(packet8,sizeof(packet8)));
+				SendCharacterReply(0,false,0x07,ByteBuffer(packet9,sizeof(packet9)));
+			}
 
 			unsigned char packet10[] =
 			{

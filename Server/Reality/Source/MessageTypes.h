@@ -1013,23 +1013,46 @@ public:
 	~ServerTacticMsg() {}
 };
 
-// RPC 0x45 server -> client: interlock round status that drives the CViewInterlock HUD
-// (tactic icons, round damage, VS/lock/resolve timers). 89 bytes, layout from the client's
-// default constructor FUN_621264d0 and parser FUN_6219dbb0:
-//   @1 u16 ?            @3 u16 sequence (newer replaces, equal updates; FUN_621a1970)
-//   @5 u8  ?            @6 viewer record (19 bytes): @7 type (<6), @8 setting (<4), @0xb s16 damage
-//   @0x19 opponent record (19 bytes): @0x1a type, @0x1b setting, @0x1e s16 damage
-//   @0x2c u16 ?  @0x2e s16 viewer bonus damage  @0x30 u8 ?
-//   @0x31 u32 opponent handle; @0x35 u32 must equal @0x31 or the HUD ignores the update
-//   @0x39 u16 ?  @0x3b s16 opponent bonus damage  @0x3d u32 effect flags  @0x41 u32 ?
-//   @0x45..@0x4b 4 x u16 ?  @0x4d u32 lock time, sim milliseconds (FUN_620ba830 * 0.001)
-//   @0x51 u32 viewer highlight  @0x55 u32 opponent highlight
+// RPC 0x45, 89 bytes: interlock round status for CViewInterlock (control 0xE). Field names are
+// the client's own, from its message printer FUN_6214e6f0 (client.dll 7.6005); parser FUN_6219dbb0.
+//   @1 u16 CombatTurn  @3 u16 CombatRound  @5 u8 IsAttacker
+//   @6 PlayerCard, @0x19 OpponentCard (19 bytes each, printer FUN_620b9f20):
+//      +1 u8 Type (0 basic tactic, 1 ability, 3/4 special; others suppress the log line)
+//      +2 u8 Setting (0 speed, 1 power, 2 grab, 3 block)  +3 MergeCount  +4 UniqueID
+//      +5 s16 CombatValue (number the HUD shows, + Modifier)  +7 u32 Additional (Type 1: ability id)
+//      +0xb/+0xd/+0xf/+0x11 s16 Melee/Range/Thrown/Viral defense
+//   @0x2c s16 BaseModifier  @0x2e s16 Modifier  @0x30 u8 OpponentCount
+//   @0x31 u32 TargetID  @0x35 u32 OpponentID (must equal TargetID or the HUD ignores the update)
+//   @0x39 s16 OpponentBaseModifier  @0x3b s16 OpponentModifier
+//   @0x3d u32 OutcomeFlag (FUN_620bd3e0: 0x1/0x8 player hit, 0x2/0x8 opponent hit, 0x4 block, 0x100 no log)
+//   @0x41 u32 CombatResult  @0x45 s16 DamageTaken  @0x47 s16 DamageAbsorbed
+//   @0x49 s16 OpponentDamageTaken  @0x4b s16 OpponentDamageAbsorbed
+//   @0x4d u32 StartTime (lock time, sim ms)  @0x51 u32 WeaponEquipped  @0x55 u32 OpponentWeaponEquipped
+struct ILCard
+{
+	uint8 type = 0;
+	uint8 setting = 0;
+	int16 combatValue = 0;
+	uint32 additional = 0;
+};
+struct ILRoundStatus
+{
+	uint16 turn = 0;
+	uint16 round = 0;
+	bool isAttacker = false;
+	ILCard player;
+	ILCard opponent;
+	uint32 opponentHandle = 0;
+	uint32 outcomeFlag = 0;
+	uint32 combatResult = 0;
+	int16 damageTaken = 0;
+	int16 opponentDamageTaken = 0;
+	uint32 lockTimeMs = 0;
+};
 class ILRoundStatusMsg : public StaticMsg
 {
 public:
-	ILRoundStatusMsg(uint16 sequence, uint32 opponentHandle,
-		uint8 viewerSetting, int16 viewerDamage,
-		uint8 opponentSetting, int16 opponentDamage, uint32 lockTimeMs);
+	explicit ILRoundStatusMsg(const ILRoundStatus &st);
 	~ILRoundStatusMsg() {}
 };
 

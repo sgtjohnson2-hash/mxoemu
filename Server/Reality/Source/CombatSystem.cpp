@@ -391,9 +391,28 @@ const CombatMove* CombatSystem::GetDefaultStyleMove(PlayerObject* player)
     return DefaultMelee();
 }
 
-// RPC 0x45 to each human in the interlock: the tactics both sides used, the damage each dealt
-// and when the next round locks. This is what drives the retail interlock HUD (tactic icons,
-// damage, VS / lock timers); without it the HUD never leaves its initial state.
+// RPC 0x45 to each human in the interlock (field map in MessageTypes.h): both sides' cards, who hit,
+// the damage each took and when the next round locks. It drives the retail interlock HUD (tactic
+// icons, numbers, VS / lock timer) and the client's own combat-log lines ("X hit you with their ...").
+static ILCard BuildILCard(uint8 committedTactic, uint16 moveId, int dealt)
+{
+	ILCard c;
+	const uint8 setting = ClientSettingFromTactic(committedTactic);
+	if (setting <= CLIENT_TACTIC_BLOCK)
+	{
+		c.type = 0;		// basic tactic attack: the log names the tactic
+		c.setting = setting;
+	}
+	else
+	{
+		c.type = 1;		// no tactic chosen: the log names the ability that was swung
+		c.setting = 0;
+		c.additional = moveId;
+	}
+	c.combatValue = int16(std::max(0, std::min(dealt, 32767)));
+	return c;
+}
+
 static void SendILRoundStatus(const InterlockSession &session, PlayerObject* pA, PlayerObject* pB,
 	int dmgByA, int dmgByB, uint32 msUntilLock)
 {
@@ -402,28 +421,44 @@ static void SendILRoundStatus(const InterlockSession &session, PlayerObject* pA,
 	// Interlock.HudRpcs = 0 turns the 0x40/0x45 HUD feed off without a rebuild (config reload)
 	if (!sConfig.GetBoolDefault("Interlock.HudRpcs", true))
 		return;
-	uint32 lockMs = uint32(double(sGame.GetSimTime()) * 1000.0 + 0.5) + msUntilLock;
-	uint16 seq = uint16(session.roundNumber + 1);
-	// Interlock.HudDamageMode: which damage goes in which record. 0 = each record carries the
-	// damage that side dealt; 1 = each record carries the damage that side took. Live with mode 0
-	// the HUD showed MISS over the opponent while the player was hitting it for 35-42.
-	// 9 = diagnostic: viewer record 111, opponent record 222, to see where the HUD draws each.
-	const int dmgMode = sConfig.GetIntDefault("Interlock.HudDamageMode", 1);
-	if (dmgMode == 1)
-		std::swap(dmgByA, dmgByB);
-	DEBUG_LOG(format("IL round status seq %1%: A %2% (tactic %3%, record dmg %4%) B %5% (tactic %6%, record dmg %7%) lock +%8%ms")
-		% seq % pA->getHandle() % uint32(session.committedTacticA) % dmgByA
-		% pB->getHandle() % uint32(session.committedTacticB) % dmgByB % msUntilLock);
-	const int16 viewA = int16(dmgMode == 9 ? 111 : dmgByA), oppA = int16(dmgMode == 9 ? 222 : dmgByB);
-	const int16 viewB = int16(dmgMode == 9 ? 111 : dmgByB), oppB = int16(dmgMode == 9 ? 222 : dmgByA);
-	if (!pA->getClient().isBot() && session.otherRefA != 0)
-		pA->getClient().QueueCommand(std::make_shared<ILRoundStatusMsg>(seq, session.otherRefA,
-			ClientSettingFromTactic(session.committedTacticA), viewA,
-			ClientSettingFromTactic(session.committedTacticB), oppA, lockMs));
-	if (!pB->getClient().isBot() && session.otherRefB != 0)
-		pB->getClient().QueueCommand(std::make_shared<ILRoundStatusMsg>(seq, session.otherRefB,
-			ClientSettingFromTactic(session.committedTacticB), viewB,
-			ClientSettingFromTactic(session.committedTacticA), oppB, lockMs));
+	const uint32 lockMs = uint32(double(sGame.GetSimTime()) * 1000.0 + 0.5) + msUntilLock;
+	// Interlock.HudIsAttacker: -1 (default) = viewer is the attacker when it holds IL slot 1,
+	// 0/1 force it. It decides which slot the client names as attacker in its combat log.
+	const int isAttackerCfg = sConfig.GetIntDefault("Interlock.HudIsAttacker", -1);
+	const bool viewerIsAttacker = isAttackerCfg < 0 ? (ILSlotFor(true) == 1) : (isAttackerCfg != 0);
+	// round 0 (interlock start) carries no swing: 0x100 keeps the client from logging a fake exchange
+	const bool opening = session.roundNumber == 0;
+
+	DEBUG_LOG(format("IL round status round %1%: A %2% (tactic %3%, move %4%, dealt %5%) B %6% (tactic %7%, move %8%, dealt %9%) lock +%10%ms")
+		% session.roundNumber % pA->getHandle() % uint32(session.committedTacticA) % session.roundMoveA % dmgByA
+		% pB->getHandle() % uint32(session.committedTacticB) % session.roundMoveB % dmgByB % msUntilLock);
+
+	for (int side = 0; side < 2; side++)
+	{
+		PlayerObject* viewer = side == 0 ? pA : pB;
+		const uint32 otherRef = side == 0 ? session.otherRefA : session.otherRefB;
+		if (viewer->getClient().isBot() || otherRef == 0)
+			continue;
+		const int dealt = side == 0 ? dmgByA : dmgByB;
+		const int taken = side == 0 ? dmgByB : dmgByA;
+		ILRoundStatus st;
+		st.turn = uint16(session.roundNumber);
+		st.round = uint16(session.roundNumber + 1);
+		st.isAttacker = viewerIsAttacker;
+		st.player = BuildILCard(side == 0 ? session.committedTacticA : session.committedTacticB,
+			side == 0 ? session.roundMoveA : session.roundMoveB, dealt);
+		st.opponent = BuildILCard(side == 0 ? session.committedTacticB : session.committedTacticA,
+			side == 0 ? session.roundMoveB : session.roundMoveA, taken);
+		st.opponentHandle = otherRef;
+		if (opening)
+			st.outcomeFlag = 0x100;
+		else
+			st.outcomeFlag = (dealt > 0 ? 0x1u : 0u) | (taken > 0 ? 0x2u : 0u);
+		st.damageTaken = int16(std::max(0, std::min(taken, 32767)));
+		st.opponentDamageTaken = int16(std::max(0, std::min(dealt, 32767)));
+		st.lockTimeMs = lockMs;
+		viewer->getClient().QueueCommand(std::make_shared<ILRoundStatusMsg>(st));
+	}
 }
 
 void CombatSystem::Update()
@@ -2039,6 +2074,8 @@ bool CombatSystem::RunInterlockRound(InterlockSession &session)
 
 	uint8 tacA = session.tacticA;
 	uint8 tacB = session.tacticB;
+	session.roundMoveA = moveA ? uint16(moveA->id) : 0;
+	session.roundMoveB = moveB ? uint16(moveB->id) : 0;
 
 	const bool humanRound = !IsServerDrivenBot(pA) || !IsServerDrivenBot(pB);
 	if (humanRound)
@@ -2071,45 +2108,47 @@ bool CombatSystem::RunInterlockRound(InterlockSession &session)
 	FightingStyle styleA = pA->getFightingStyle();
 	FightingStyle styleB = pB->getFightingStyle();
 
-	// Tactical banner announcements
+	// Tactical banner announcements. Retail showed round outcomes in the interlock HUD and its combat
+	// log (RPC 0x45, SendILRoundStatus), not as chat lines; Interlock.ChatBanners = 1 brings these back.
+	const bool chatBanners = sConfig.GetBoolDefault("Interlock.ChatBanners", false);
 	if (aCrushesB) {
-		if (!pA->getClient().isBot())
+		if (chatBanners && !pA->getClient().isBot())
 			pA->getClient().QueueCommand(std::make_shared<SystemChatMsg>((format("{c:00FF00}[MARTIAL ARTS] Power crushes Speed! Frame advantage secured against %1%! (+35%% Damage){/c}") % pB->getHandle()).str()));
-		if (!pB->getClient().isBot())
+		if (chatBanners && !pB->getClient().isBot())
 			pB->getClient().QueueCommand(std::make_shared<SystemChatMsg>((format("{c:FF4444}[MARTIAL ARTS] %1%'s Power stance crushed your Speed attack!{/c}") % pA->getHandle()).str()));
 	} else if (bCrushesA) {
-		if (!pB->getClient().isBot())
+		if (chatBanners && !pB->getClient().isBot())
 			pB->getClient().QueueCommand(std::make_shared<SystemChatMsg>((format("{c:00FF00}[MARTIAL ARTS] Power crushes Speed! Frame advantage secured against %1%! (+35%% Damage){/c}") % pA->getHandle()).str()));
-		if (!pA->getClient().isBot())
+		if (chatBanners && !pA->getClient().isBot())
 			pA->getClient().QueueCommand(std::make_shared<SystemChatMsg>((format("{c:FF4444}[MARTIAL ARTS] %1%'s Power stance crushed your Speed attack!{/c}") % pB->getHandle()).str()));
 	} else if (aInterruptsB) {
-		if (!pA->getClient().isBot())
+		if (chatBanners && !pA->getClient().isBot())
 			pA->getClient().QueueCommand(std::make_shared<SystemChatMsg>((format("{c:00FF00}[MARTIAL ARTS] Speed interrupts Grab! Fast jab interrupted %1%'s grab maneuver! (+35%% Damage){/c}") % pB->getHandle()).str()));
-		if (!pB->getClient().isBot())
+		if (chatBanners && !pB->getClient().isBot())
 			pB->getClient().QueueCommand(std::make_shared<SystemChatMsg>((format("{c:FF4444}[MARTIAL ARTS] %1%'s Speed strike interrupted your Grab maneuver!{/c}") % pA->getHandle()).str()));
 	} else if (bInterruptsA) {
-		if (!pB->getClient().isBot())
+		if (chatBanners && !pB->getClient().isBot())
 			pB->getClient().QueueCommand(std::make_shared<SystemChatMsg>((format("{c:00FF00}[MARTIAL ARTS] Speed interrupts Grab! Fast jab interrupted %1%'s grab maneuver! (+35%% Damage){/c}") % pA->getHandle()).str()));
-		if (!pA->getClient().isBot())
+		if (chatBanners && !pA->getClient().isBot())
 			pA->getClient().QueueCommand(std::make_shared<SystemChatMsg>((format("{c:FF4444}[MARTIAL ARTS] %1%'s Speed strike interrupted your Grab maneuver!{/c}") % pB->getHandle()).str()));
 	} else if (aBreaksGuardB || aBreaksPowerB) {
 		const char* targetStance = aBreaksGuardB ? "Guard" : "Power";
-		if (!pA->getClient().isBot())
+		if (chatBanners && !pA->getClient().isBot())
 			pA->getClient().QueueCommand(std::make_shared<SystemChatMsg>((format("{c:00FF00}[MARTIAL ARTS] Grab breaks %1%! Unblockable throw executed on %2%! (+%3%%% Damage){/c}") % targetStance % pB->getHandle() % (aBreaksGuardB ? 40 : 35)).str()));
-		if (!pB->getClient().isBot())
+		if (chatBanners && !pB->getClient().isBot())
 			pB->getClient().QueueCommand(std::make_shared<SystemChatMsg>((format("{c:FF0000}[MARTIAL ARTS] Your %1% was broken by %2%'s Grab! Unblockable throw!{/c}") % targetStance % pA->getHandle()).str()));
 	} else if (bBreaksGuardA || bBreaksPowerA) {
 		const char* targetStance = bBreaksGuardA ? "Guard" : "Power";
-		if (!pB->getClient().isBot())
+		if (chatBanners && !pB->getClient().isBot())
 			pB->getClient().QueueCommand(std::make_shared<SystemChatMsg>((format("{c:00FF00}[MARTIAL ARTS] Grab breaks %1%! Unblockable throw executed on %2%! (+%3%%% Damage){/c}") % targetStance % pA->getHandle() % (bBreaksGuardA ? 40 : 35)).str()));
-		if (!pA->getClient().isBot())
+		if (chatBanners && !pA->getClient().isBot())
 			pA->getClient().QueueCommand(std::make_shared<SystemChatMsg>((format("{c:FF0000}[MARTIAL ARTS] Your %1% was broken by %2%'s Grab! Unblockable throw!{/c}") % targetStance % pB->getHandle()).str()));
 	} else if (isClash) {
 		// Both combatants selected identical stance - glancing exchange.
 		// Interlocks animate exclusively through ILCombatStateMsg / ILExchange structures.
 		std::string clashName = (tacA == TACTIC_POWER) ? "Power" : (tacA == TACTIC_SPEED ? "Speed" : (tacA == TACTIC_RETALIATE ? "Grab" : "Guard"));
-		if (!pA->getClient().isBot()) pA->getClient().QueueCommand(std::make_shared<SystemChatMsg>((format("{c:FFFF00}[MARTIAL ARTS] Stance Clash! Both combatants chose %1%. Glancing exchange.{/c}") % clashName).str()));
-		if (!pB->getClient().isBot()) pB->getClient().QueueCommand(std::make_shared<SystemChatMsg>((format("{c:FFFF00}[MARTIAL ARTS] Stance Clash! Both combatants chose %1%. Glancing exchange.{/c}") % clashName).str()));
+		if (chatBanners && !pA->getClient().isBot()) pA->getClient().QueueCommand(std::make_shared<SystemChatMsg>((format("{c:FFFF00}[MARTIAL ARTS] Stance Clash! Both combatants chose %1%. Glancing exchange.{/c}") % clashName).str()));
+		if (chatBanners && !pB->getClient().isBot()) pB->getClient().QueueCommand(std::make_shared<SystemChatMsg>((format("{c:FFFF00}[MARTIAL ARTS] Stance Clash! Both combatants chose %1%. Glancing exchange.{/c}") % clashName).str()));
 
 		// Both combatants exchange glancing blows at 0.90x damage (TacticModifier handles 0.90x)
 		if (moveA) StrikeInterlock(session, pA, pB, *moveA, tacA, tacB, true, false);

@@ -118,6 +118,8 @@ struct InterlockSession
 	uint8 comboStepB = 0;	//1..3 Martial Arts style combo step for combatant B
 	FightingStyle lastStyleA = FightingStyle::None;
 	FightingStyle lastStyleB = FightingStyle::None;
+	uint16 roundMoveA = 0;	//ability/move each side swung in the last round (HUD round status)
+	uint16 roundMoveB = 0;
 };
 
 // Interlock move references (interlock database rez 0x24000B8B), from captured live exchanges
