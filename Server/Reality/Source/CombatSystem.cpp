@@ -487,6 +487,14 @@ void CombatSystem::Update()
 			const int hpA0 = int(pA->getCurrentHealth());
 			const int hpB0 = int(pB->getCurrentHealth());
 			keepAlive = RunInterlockRound(*it);
+			if (it->withdrewGoId != 0)
+			{
+				// CR2 withdraw succeeded: same grace as an instant withdraw
+				const int graceMs = sConfig.GetIntDefault("Interlock.WithdrawGraceMs", 8000);
+				if (graceMs > 0)
+					m_withdrawGraceUntil[it->withdrewGoId] = getMSTime() + uint32(graceMs);
+				keepAlive = false;
+			}
 
 			// [Item 13] Bullet Time / Dilation Zones
 			float avgDilation = (pA->GetTimeDilation() + pB->GetTimeDilation()) / 2.0f;
@@ -1142,7 +1150,8 @@ void CombatSystem::EndInterlock(uint32 goId, bool byWithdraw)
 				m_withdrawGraceUntil[goId] = getMSTime() + uint32(graceMs);
 		}
 
-		if (byWithdraw && pA && pB && !pA->isDead() && !pB->isDead()) {
+		// The 1.5x "parting shot" on withdraw is an emulator invention (Combat.EmulatorExtras).
+		if (byWithdraw && pA && pB && !pA->isDead() && !pB->isDead() && sConfig.GetBoolDefault("Combat.EmulatorExtras", false)) {
 			// Parting Shot
 			uint32 attackerId = (s.goIdA == goId) ? s.goIdB : s.goIdA;
 			PlayerObject* pAttacker = getPlayerSafe(attackerId);
@@ -2086,8 +2095,12 @@ bool CombatSystem::RunInterlockRound(InterlockSession &session)
 				default:               newTac = (rand() % 2 == 0) ? TACTIC_POWER : TACTIC_SPEED; break;
 			}
 		} else {
-			const uint8 thugTactics[] = { TACTIC_POWER, TACTIC_SPEED, TACTIC_RETALIATE, TACTIC_DEFENSE };
-			newTac = thugTactics[rand() % 4];
+			// Street NPCs press the attack; Block is the exception (a blocking NPC that never
+			// swings made fights drag on). Weights: Speed 35, Power 35, Grab 20, Block 10.
+			const uint8 thugTactics[] = { TACTIC_SPEED, TACTIC_SPEED, TACTIC_SPEED, TACTIC_SPEED, TACTIC_SPEED, TACTIC_SPEED, TACTIC_SPEED,
+				TACTIC_POWER, TACTIC_POWER, TACTIC_POWER, TACTIC_POWER, TACTIC_POWER, TACTIC_POWER, TACTIC_POWER,
+				TACTIC_RETALIATE, TACTIC_RETALIATE, TACTIC_RETALIATE, TACTIC_RETALIATE, TACTIC_DEFENSE, TACTIC_DEFENSE };
+			newTac = thugTactics[rand() % 20];
 		}
 		session.tacticA = newTac;
 
@@ -2107,8 +2120,12 @@ bool CombatSystem::RunInterlockRound(InterlockSession &session)
 				default:               newTac = (rand() % 2 == 0) ? TACTIC_POWER : TACTIC_SPEED; break;
 			}
 		} else {
-			const uint8 thugTactics[] = { TACTIC_POWER, TACTIC_SPEED, TACTIC_RETALIATE, TACTIC_DEFENSE };
-			newTac = thugTactics[rand() % 4];
+			// Street NPCs press the attack; Block is the exception (a blocking NPC that never
+			// swings made fights drag on). Weights: Speed 35, Power 35, Grab 20, Block 10.
+			const uint8 thugTactics[] = { TACTIC_SPEED, TACTIC_SPEED, TACTIC_SPEED, TACTIC_SPEED, TACTIC_SPEED, TACTIC_SPEED, TACTIC_SPEED,
+				TACTIC_POWER, TACTIC_POWER, TACTIC_POWER, TACTIC_POWER, TACTIC_POWER, TACTIC_POWER, TACTIC_POWER,
+				TACTIC_RETALIATE, TACTIC_RETALIATE, TACTIC_RETALIATE, TACTIC_RETALIATE, TACTIC_DEFENSE, TACTIC_DEFENSE };
+			newTac = thugTactics[rand() % 20];
 		}
 		session.tacticB = newTac;
 
@@ -2328,6 +2345,36 @@ bool CombatSystem::RunInterlockRound(InterlockSession &session)
 // The exact retail numbers were server-side and never published: the values below are a
 // reconstruction and every one can be tuned in Reality.conf (Combat.CR2.*).
 // ---------------------------------------------------------------------------------------------
+float CombatSystem::CR2WithdrawChance(PlayerObject* who, PlayerObject* opponent, uint8 opponentTactic)
+{
+	if (!who || !opponent) return 1.0f;
+	float p = sConfig.GetFloatDefault("Combat.CR2.WithdrawBase", 0.50f);
+	const float lvl = (float(who->getLevel()) - float(opponent->getLevel())) * sConfig.GetFloatDefault("Combat.CR2.LevelHit", 0.02f);
+	p += std::max(-0.25f, std::min(0.25f, lvl));
+	// a grabbing opponent holds on; a blocking one is not pressing the attack
+	if (opponentTactic == TACTIC_RETALIATE) p -= sConfig.GetFloatDefault("Combat.CR2.WithdrawVsGrab", 0.15f);
+	else if (opponentTactic == TACTIC_DEFENSE) p += sConfig.GetFloatDefault("Combat.CR2.WithdrawVsBlock", 0.20f);
+	return std::max(0.10f, std::min(0.95f, p));
+}
+
+void CombatSystem::RequestWithdraw(uint32 goId)
+{
+	std::lock_guard<std::recursive_mutex> lock(m_combatMutex);
+	InterlockSession* s = GetInterlockSession(goId);
+	PlayerObject* other = s ? getPlayerSafe(s->goIdA == goId ? s->goIdB : s->goIdA) : nullptr;
+	// legacy rules, contested withdraw switched off, or nobody left to hold on: leave at once
+	if (!s || !UseCR2Interlock() || !sConfig.GetBoolDefault("Interlock.ContestedWithdraw", true) ||
+		!other || other->isDead() || other->getCurrentHealth() == 0)
+	{
+		LeaveInterlock(goId);
+		return;
+	}
+	if (s->goIdA == goId) s->withdrawA = true; else s->withdrawB = true;
+	PlayerObject* me = getPlayerSafe(goId);
+	if (me && !me->getClient().isBot())
+		me->getClient().QueueCommand(std::make_shared<SystemChatMsg>("You attempt to withdraw..."));
+}
+
 bool CombatSystem::UseCR2Interlock()
 {
 	return sConfig.GetStringDefault("Combat.InterlockModel", "cr2") != "legacy";
@@ -2407,9 +2454,26 @@ void CombatSystem::RunCR2Exchange(InterlockSession &session, PlayerObject* pA, P
 	const uint16 stA = session.combatStateA;
 	const uint16 stB = session.combatStateB;
 
+	// Withdraw is contested (CR2): the attempt takes the round, it can fail, and the fighter
+	// trying to leave throws nothing that round.
+	const bool tryA = session.withdrawA, tryB = session.withdrawB;
+	session.withdrawA = session.withdrawB = false;
+	auto attemptWithdraw = [&](PlayerObject* who, PlayerObject* opp, uint8 oppTac) -> bool
+	{
+		const bool ok = (float(rand() % 10000) / 10000.0f) < CR2WithdrawChance(who, opp, oppTac);
+		if (!who->getClient().isBot())
+			who->getClient().QueueCommand(std::make_shared<SystemChatMsg>(ok
+				? "You withdraw from combat."
+				: (format("You fail to withdraw. %1% keeps you engaged.") % opp->getHandle()).str()));
+		if (ok && !opp->getClient().isBot())
+			opp->getClient().QueueCommand(std::make_shared<SystemChatMsg>(
+				(format("%1% withdraws from combat.") % who->getHandle()).str()));
+		return ok;
+	};
+
 	// A blocking fighter throws no basic attack, only a queued special
-	const bool aSwings = moveA && (tacA != TACTIC_DEFENSE || session.queuedMoveA != 0);
-	const bool bSwings = moveB && (tacB != TACTIC_DEFENSE || session.queuedMoveB != 0);
+	const bool aSwings = !tryA && moveA && (tacA != TACTIC_DEFENSE || session.queuedMoveA != 0);
+	const bool bSwings = !tryB && moveB && (tacB != TACTIC_DEFENSE || session.queuedMoveB != 0);
 	// both offense rolls are made before either blow lands
 	const bool aHits = aSwings && (float(rand() % 10000) / 10000.0f) < CR2HitChance(pA, pB, tacA, tacB);
 	const bool bHits = bSwings && (float(rand() % 10000) / 10000.0f) < CR2HitChance(pB, pA, tacB, tacA);
@@ -2440,6 +2504,12 @@ void CombatSystem::RunCR2Exchange(InterlockSession &session, PlayerObject* pA, P
 		else if (!doA && bHits && pB->getCurrentHealth() > 0 && !pB->isDead())
 			resB = swing(pB, pA, *moveB, tacB, tacA, stB, stA);
 	}
+
+	// withdraw attempts resolve after the blows (a fighter dropped this round does not leave)
+	if (tryA && pA->getCurrentHealth() > 0 && pB->getCurrentHealth() > 0 && attemptWithdraw(pA, pB, tacB))
+		session.withdrewGoId = pA->getGoId();
+	else if (tryB && pA->getCurrentHealth() > 0 && pB->getCurrentHealth() > 0 && attemptWithdraw(pB, pA, tacA))
+		session.withdrewGoId = pB->getGoId();
 
 	auto stateFor = [](uint8 t) -> uint16
 	{
@@ -2623,6 +2693,17 @@ bool CombatSystem::UseAbility(PlayerObject* caster, uint16 abilityId, uint32 tar
 
     // Check authentic discipline routing (Hacker viral logic / Coder RSI support)
     const AbilityTemplate* abilTempl = sDataLoader.GetAbilityTemplate(requestedAbilityId);
+    // Retail: programs that need a few uninterrupted seconds cannot be run in close combat;
+    // quick ones work in or out of interlock (Combat.InterlockCastLimitMs, default 1000).
+    if (abilTempl && abilTempl->castTime > 0 && IsInterlocked(caster->getGoId()) &&
+        abilTempl->discipline != DisciplineType::MARTIAL_ARTIST &&
+        int(abilTempl->castTime) > sConfig.GetIntDefault("Combat.InterlockCastLimitMs", 1000))
+    {
+        if (humanCaster)
+            caster->getClient().QueueCommand(std::make_shared<SystemChatMsg>(
+                "That program needs a few uninterrupted seconds. Withdraw from close combat first."));
+        return false;
+    }
     if (abilTempl)
     {
         if (abilTempl->discipline == DisciplineType::HACKER)

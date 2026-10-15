@@ -812,7 +812,7 @@ void PlayerObject::RPC_HandleChangeTactic( ByteBuffer &srcCmd )
 		{
 			INFO_LOG(format("(%1%) %2%:%3% tactic withdraw") % m_parent.Address() % m_handle % m_goId);
 			sCombatSys.StopFreeFire(m_goId);
-			sCombatSys.LeaveInterlock(m_goId);
+			sCombatSys.RequestWithdraw(m_goId);
 			return;
 		}
 		serverTactic = TacticFromClientSetting(uint8(setting));
@@ -854,7 +854,7 @@ void PlayerObject::RPC_HandleLeaveCombat( ByteBuffer &srcCmd )
 		% m_parent.Address() % m_handle % m_goId);
 
 	sCombatSys.StopFreeFire(m_goId);
-	sCombatSys.LeaveInterlock(m_goId);
+	sCombatSys.RequestWithdraw(m_goId);
 }
 
 //0x50 - duel request

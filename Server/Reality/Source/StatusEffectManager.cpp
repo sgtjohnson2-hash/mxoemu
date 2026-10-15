@@ -6,6 +6,8 @@
 #include "SpatialGrid.h"
 #include "GameClient.h"
 #include <functional>
+#include "CombatSystem.h"
+#include "Config.h"
 
 createFileSingleton(StatusEffectManager);
 
@@ -192,7 +194,20 @@ void StatusEffectManager::Update(float deltaTime)
         {
             if (it->payload)
             {
-                deferred.push_back(std::move(it->payload));
+                // Retail: a long program is broken if its caster is pulled into close combat
+                const uint32 casterId = it->casterGoId;
+                const bool longCast = it->totalDelay * 1000.0f > float(sConfig.GetIntDefault("Combat.InterlockCastLimitMs", 1000));
+                auto payload = std::move(it->payload);
+                deferred.push_back([casterId, longCast, payload]() {
+                    if (longCast && CombatSystem::getSingletonPtr() && sCombatSys.IsInterlocked(casterId))
+                    {
+                        PlayerObject* c = sObjMgr.getGOPtrSafe(casterId);
+                        if (c && !c->getClient().isBot())
+                            c->getClient().QueueCommand(make_shared<SystemChatMsg>("Your program was interrupted by close combat."));
+                        return;
+                    }
+                    payload();
+                });
             }
             if (std::next(it) == m_scheduledCasts.end()) {
                 m_scheduledCasts.pop_back();
@@ -226,6 +241,7 @@ void StatusEffectManager::ScheduleCastDelay(uint32 casterGoId, uint32 targetGoId
     sc.targetGoId = targetGoId;
     sc.abilityId = abilityId;
     sc.delayRemaining = delaySec;
+    sc.totalDelay = delaySec;
     sc.payload = std::move(payload);
     m_scheduledCasts.push_back(std::move(sc));
 }

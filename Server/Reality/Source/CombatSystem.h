@@ -136,6 +136,9 @@ struct InterlockSession
 	uint16 combatStateB = 0;
 	uint32 stateRoundA = 0;	//round the state on A was applied (lasts through the next round)
 	uint32 stateRoundB = 0;
+	bool withdrawA = false;	//CR2: a withdraw attempt is pending for this round
+	bool withdrawB = false;
+	uint32 withdrewGoId = 0;	//set when a withdraw attempt succeeded (Update ends the interlock)
 };
 
 // Interlock move references (interlock database rez 0x24000B8B), from captured live exchanges
@@ -181,6 +184,9 @@ public:
 	void QueueAbility(uint32 goId, uint16 moveId);
 	void TriggerForesightPremonition(PlayerObject* player, PlayerObject* opponent, uint8 enemyTactic);
 	void LeaveInterlock(uint32 goId) { EndInterlock(goId,true); }
+	// Player pressed Withdraw. CR2: a contested attempt resolved in the next round; legacy: instant.
+	void RequestWithdraw(uint32 goId);
+	static float CR2WithdrawChance(PlayerObject* who, PlayerObject* opponent, uint8 opponentTactic);
 	void EndInterlock(uint32 goId, bool byWithdraw);
 	void StopFreeFire(uint32 goId);
 	void RemoveCombatant(uint32 goId); //drops a combatant out of everything (death, disconnect)

@@ -48,6 +48,7 @@ struct ScheduledCast {
     uint32 targetGoId;
     uint16 abilityId;
     float delayRemaining;
+    float totalDelay = 0.0f;
     std::function<void()> payload;
 };
 

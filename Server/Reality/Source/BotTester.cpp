@@ -496,7 +496,8 @@ void TesterBrain::DoCombat(PlayerObject* me, uint32 now)
     {
         m_lastTacticMs = now;
         ByteBuffer b = Rpc8(RPC_TACTIC);
-        b << uint16(rand() % 4);
+        // play like a player: mostly Speed/Power/Grab, Block now and then (CR2 Block throws no basic attack)
+        b << uint16((rand() % 10) < 9 ? (rand() % 3) : 3);
         b << uint16(0);
         b << uint16(0);
         if (SendRpc(b, "0x42 tactic")) m_stats.tacticsChanged++;

@@ -379,6 +379,20 @@ int RunCombatTestSuite()
 			check(il && both > 0 && neither > 0 && one > 0,
 				"CR2: rounds resolve independently - both, one and neither land (" + std::to_string(both) + "/" + std::to_string(one) + "/" + std::to_string(neither) + ")");
 			check(dazedSeen > 0, "CR2: a landed Speed hit leaves the opponent Dazed");
+			// contested withdraw: the request does not end the interlock by itself, a later round does
+			bool stillAfterRequest = false, leftEventually = false;
+			for (int attempt = 0; attempt < 40 && sCombatSys.IsInterlocked(human.go); ++attempt)
+			{
+				sCombatSys.RequestWithdraw(human.go);
+				if (attempt == 0) stillAfterRequest = sCombatSys.IsInterlocked(human.go);
+				InterlockSession* live = sCombatSys.GetInterlockSession(human.go);
+				if (live) live->nextRoundTime = 0;
+				sCombatSys.Update();
+			}
+			leftEventually = !sCombatSys.IsInterlocked(human.go);
+			check(stillAfterRequest && leftEventually, "CR2: withdraw is an attempt resolved in the round, and it eventually succeeds");
+			check(CombatSystem::CR2WithdrawChance(human.po, foe.po, TACTIC_RETALIATE) < CombatSystem::CR2WithdrawChance(human.po, foe.po, TACTIC_DEFENSE),
+				"CR2: a grabbing opponent is harder to withdraw from than a blocking one");
 			sCombatSys.EndInterlock(human.go, false);
 			check(human.po->consumeFirearmAmmo(), "retail has no ammo: firing never runs dry (Combat.TrackAmmo off)");
 			human.po->setTactic(TACTIC_NORMAL);
