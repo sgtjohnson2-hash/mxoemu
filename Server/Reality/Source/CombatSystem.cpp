@@ -1293,7 +1293,10 @@ CombatSystem::AttackResult CombatSystem::ResolveAttack(PlayerObject* attacker, P
         }
     }
 
-    if (target->getClient().isBot() && target->getHandle().find("Agent") != std::string::npos && target->getHandle().find("Dojo") == std::string::npos && (rand() % 100 < 30)) {
+    // Emulator extras with no retail source (Agent 30% auto-dodge and 50% damage cut, dual-wield 1.5x)
+    // stay off unless Combat.EmulatorExtras = 1. Retail Agents were tough through their level and stats.
+    const bool emuExtras = sConfig.GetBoolDefault("Combat.EmulatorExtras", false);
+    if (emuExtras && target->getClient().isBot() && target->getHandle().find("Agent") != std::string::npos && target->getHandle().find("Dojo") == std::string::npos && (rand() % 100 < 30)) {
         res.hit = false;
         if (recordHeat) {
             sMatrixThreatHeatmap.RecordDisruption((float)target->getPosition().x, (float)target->getPosition().y, (float)target->getPosition().z, 15.0f, "Agent Wire-Fu Dodge");
@@ -1417,7 +1420,7 @@ CombatSystem::AttackResult CombatSystem::ResolveAttack(PlayerObject* attacker, P
 	// Interlock rounds reuse one style move, so every fight collapsed mid-way. Retail does not do this.
 
     // [Item 19] Dual Wielding Firepower
-    if (move.dmgType == DAMAGE_RANGED && attacker->isDualWielding()) {
+    if (emuExtras && move.dmgType == DAMAGE_RANGED && attacker->isDualWielding()) {
         dmg *= 1.5f; // 50% more damage for off-hand
     }
 
@@ -1435,7 +1438,7 @@ CombatSystem::AttackResult CombatSystem::ResolveAttack(PlayerObject* attacker, P
         }
     }
 
-    if (target->getClient().isBot() && target->getHandle().find("Agent") != std::string::npos && target->getHandle().find("Dojo") == std::string::npos) {
+    if (emuExtras && target->getClient().isBot() && target->getHandle().find("Agent") != std::string::npos && target->getHandle().find("Dojo") == std::string::npos) {
         dmg *= 0.5f; // Agent Resilience (wild Agents only; Dojo sparring dummies take full damage)
     }
 
@@ -2579,7 +2582,7 @@ bool CombatSystem::RunFreeFireShot(FreeFireState &state)
 	}
 
 	ResolveAttack(pA, pB, *moveA, pA->getTactic(), pB->getTactic());
-	if (isDualWield && !pB->isDead())
+	if (isDualWield && !pB->isDead() && sConfig.GetBoolDefault("Combat.EmulatorExtras", false))
 	{
 		// Second volley for dual-wielding handguns
 		ResolveAttack(pA, pB, *moveA, pA->getTactic(), pB->getTactic());

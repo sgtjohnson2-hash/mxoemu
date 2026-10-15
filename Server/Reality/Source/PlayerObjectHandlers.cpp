@@ -1542,6 +1542,11 @@ void PlayerObject::ParsePlayerCommand( string theCmd )
 	}
 	else if (iequals(command, "capture") || iequals(command, "hacknode"))
 	{
+		if (!sConfig.GetBoolDefault("World.FactionWar", false))
+		{
+			m_parent.QueueCommand(make_shared<SystemChatMsg>("Hardline capture is not part of the retail game (World.FactionWar is off)."));
+			return;
+		}
 		uint32 nodeId = 0;
 		cmdStream >> nodeId;
 		if (nodeId == 0)
@@ -2285,6 +2290,11 @@ void PlayerObject::ParsePlayerCommand( string theCmd )
     }
     else if (iequals(command, "claimhl"))
     {
+        if (!sConfig.GetBoolDefault("World.FactionWar", false))
+        {
+            m_parent.QueueCommand(make_shared<SystemChatMsg>("Hardline claiming is not part of the retail game (World.FactionWar is off)."));
+            return;
+        }
         LocationVector loc = this->getPosition();
         uint8 district = this->getDistrict();
         

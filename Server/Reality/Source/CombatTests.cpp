@@ -207,6 +207,9 @@ int RunCombatTestSuite()
 	sSpatialGrid.Initialize(15000.0f);
 	sCombatSys.Init();
 	sDataLoader.EnsureCoreAbilities();
+	// the suites below cover the optional emulator systems too
+	sConfig.SetOverride("World.FactionWar", "1");
+	sConfig.SetOverride("Combat.EmulatorExtras", "1");
 
 	// ---------------------------------------------------------------- IL exchange wire format
 	{

@@ -3280,12 +3280,9 @@ namespace ZionLauncher
                     }
                     if (done.Count > 0)
                     {
-                        // Wait for the 3D world to stream in and dock the widescreen HUD at 20s, 40s, and 60s
-                        for (int pass = 0; pass < 3; pass++)
-                        {
-                            Thread.Sleep(20000);
-                            TryRunDockUiHelper();
-                        }
+                        // The old "widescreen HUD dock" ran harness32.exe --dock-ui three times here. It wrote
+                        // straight into the client's UI memory and left the compass and bars floating in the
+                        // wrong places. The retail client lays out and saves its own HUD (profile ui/*.xml).
                         return;
                     }
                 }

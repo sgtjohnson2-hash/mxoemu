@@ -8,6 +8,12 @@
 #include "PlayerObject.h"
 #include "GameServer.h"
 #include "SpatialGrid.h"
+#include "Config.h"
+
+// Hardline capture, district territory buffs, faction strike squads, "Radio Free Zion" broadcasts and
+// the 15-minute world-event director are emulator inventions; retail MxO had none of them (hardlines
+// were travel and jack-out points). World.FactionWar = 1 turns the system back on.
+static bool FactionWarEnabled() { return sConfig.GetBoolDefault("World.FactionWar", false); }
 #include "BotManager.h"
 #include "CombatSystem.h"
 #include "HackerSystem.h"
@@ -181,6 +187,7 @@ void FactionWarManager::registerControlNode(uint32 id, uint32 districtId, float 
 
 void FactionWarManager::update(uint32 deltaMs)
 {
+    if (!FactionWarEnabled()) return;
     m_timeSinceLastSync += deltaMs;
     m_lastStrategicTickMs += deltaMs;
     m_worldEventTimerMs += deltaMs;
@@ -683,6 +690,7 @@ void FactionWarManager::updateBroadcasts(uint32 deltaMs)
 
 void FactionWarManager::captureNode(uint32 id, uint32 newFaction)
 {
+    if (!FactionWarEnabled()) return;
     if (m_controlNodes.find(id) != m_controlNodes.end())
     {
         uint32 oldFaction = m_controlNodes[id].controllingFaction;
@@ -731,6 +739,7 @@ void FactionWarManager::captureNode(uint32 id, uint32 newFaction)
 
 bool FactionWarManager::AdvanceNodeCapture(uint32 nodeId, uint32 faction, float deltaProgress, PlayerObject* player)
 {
+    if (!FactionWarEnabled()) return false;
     auto it = m_controlNodes.find(nodeId);
     if (it == m_controlNodes.end()) return false;
 
@@ -915,6 +924,7 @@ bool FactionWarManager::getClosestEnemyNode(uint32 myFaction, float x, float y, 
 
 bool FactionWarManager::HasDistrictDominance(uint32 districtId, uint32 faction) const
 {
+    if (!FactionWarEnabled()) return false; // no territory buffs in retail
     if (faction == 0) return false;
     auto ovIt = m_districtControlOverride.find(districtId);
     if (ovIt != m_districtControlOverride.end() && ovIt->second != 0) {
@@ -1160,6 +1170,7 @@ uint32 FactionWarManager::GetDistrictControllingFaction(uint32 districtId) const
 
 uint32 FactionWarManager::TriggerWorldEvent(uint32 districtId, WorldEventType type, float spawnX, float spawnY, float spawnZ)
 {
+    if (!FactionWarEnabled()) return 0;
     if (districtId == 0) districtId = 1;
     if (type == WorldEventType::NONE) {
         type = WorldEventType::MACHINE_SENTINEL_INCURSION;
