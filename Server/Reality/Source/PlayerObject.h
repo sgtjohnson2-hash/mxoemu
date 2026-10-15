@@ -293,6 +293,11 @@ public:
     void setEvadeShield(uint8 shield);
     void consumeEvadeShield(uint8 amount);
     void regenerateEvadeShield(uint32 deltaMs);
+    // Retail Evade Combat (ability 217): an ablative shield against being pulled into interlock
+    bool isEvading() const { return m_evading; }
+    void setEvading(bool on) { m_evading = on; }
+    uint32 getEvadeCooldownUntil() const { return m_evadeCooldownUntil; }
+    void setEvadeCooldownUntil(uint32 t) { m_evadeCooldownUntil = t; }
     void regenerateVitals();          // out-of-combat Health / Inner Strength recovery
     uint32 getLastBallisticFireTime() const { return m_lastBallisticFireTime; }
     void setLastBallisticFireTime(uint32 t) { m_lastBallisticFireTime = t; }
@@ -545,6 +550,8 @@ private:
     float m_cameraYaw = 0.0f;
 
     uint8 m_evadeShield = 100;
+    bool m_evading = false;
+    uint32 m_evadeCooldownUntil = 0;
     uint32 m_lastBallisticFireTime = 0;
     uint32 m_lastDamageTakenMs = 0;   // out-of-combat regen waits for this to age
     uint32 m_lastRegenTickMs = 0;

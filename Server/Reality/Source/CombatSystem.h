@@ -186,6 +186,10 @@ public:
 	void LeaveInterlock(uint32 goId) { EndInterlock(goId,true); }
 	// Player pressed Withdraw. CR2: a contested attempt resolved in the next round; legacy: instant.
 	void RequestWithdraw(uint32 goId);
+	// Retail Evade Combat: toggle the evade shield; returns false when it cannot be raised
+	bool ToggleEvadeCombat(PlayerObject* p);
+	// Evade shield vs an interlock attempt: true = the target slipped away (attempt refused)
+	bool EvadeBlocksInterlock(PlayerObject* attacker, PlayerObject* target);
 	static float CR2WithdrawChance(PlayerObject* who, PlayerObject* opponent, uint8 opponentTactic);
 	void EndInterlock(uint32 goId, bool byWithdraw);
 	void StopFreeFire(uint32 goId);

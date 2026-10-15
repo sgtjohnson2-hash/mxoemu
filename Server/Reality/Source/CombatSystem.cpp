@@ -703,6 +703,12 @@ bool CombatSystem::RequestInterlock(uint32 attackerGoId, uint32 targetGoId, uint
 		}
 	}
 
+	// Retail Evade Combat: an evading target's shield soaks interlock attempts until it breaks
+	if (EvadeBlocksInterlock(pA, pB)) {
+		INFO_LOG(format("RequestInterlock %1% -> %2% refused: target evaded (shield %3%)") % attackerGoId % targetGoId % uint32(pB->getEvadeShield()));
+		return false;
+	}
+
 	// Guarantee both combatants know each other and have views spawned on their clients
 	pA->ensureEntityKnown(pB);
 	pB->ensureEntityKnown(pA);
@@ -2296,8 +2302,10 @@ bool CombatSystem::RunInterlockRound(InterlockSession &session)
 
 	}
 
-	session.queuedMoveA = 0;
-	session.queuedMoveB = 0;
+	// CR2: a special queued while blocking is kept for the round the fighter stops blocking
+	const bool keepQueued = UseCR2Interlock() && !sConfig.GetBoolDefault("Combat.CR2.BlockSpecials", false);
+	if (!(keepQueued && tacA == TACTIC_DEFENSE)) session.queuedMoveA = 0;
+	if (!(keepQueued && tacB == TACTIC_DEFENSE)) session.queuedMoveB = 0;
 	session.committedTacticA = tacA;
 	session.committedTacticB = tacB;
 
@@ -2373,6 +2381,85 @@ void CombatSystem::RequestWithdraw(uint32 goId)
 	PlayerObject* me = getPlayerSafe(goId);
 	if (me && !me->getClient().isBot())
 		me->getClient().QueueCommand(std::make_shared<SystemChatMsg>("You attempt to withdraw..."));
+}
+
+// ---------------------------------------------------------------------------------------------
+// Evade Combat (retail Awakened ability 217, EvadeCombatAbility). Sources: fandom wiki Evade_Combat
+// and Combat_Basics, CR2.pdf. "A temporary shield to prevent entry into close combat"; ablative:
+// every attempt to draw you in consumes part of it (and some of your Inner Strength) until it is
+// gone; using the ability again drops it; a waiting period follows before it can be raised again.
+// Combat Evasion (shield strength) vs the attacker's Force Combat and the level gap set the drain.
+// Stance modifiers (Combat_Basics): Grab +100% Force / -65% Evasion, Block -400% Force / +60% Evasion.
+// ---------------------------------------------------------------------------------------------
+bool CombatSystem::ToggleEvadeCombat(PlayerObject* p)
+{
+	if (!p) return false;
+	const bool human = !p->getClient().isBot();
+	const uint32 now = getMSTime();
+	const uint32 cooldown = uint32(sConfig.GetIntDefault("Combat.EvadeCooldownMs", 30000));
+	if (p->isEvading())
+	{
+		p->setEvading(false);
+		p->setEvadeCooldownUntil(now + cooldown);
+		if (human) p->getClient().QueueCommand(std::make_shared<SystemChatMsg>("You stop evading."));
+		return true;
+	}
+	if (IsInterlocked(p->getGoId()))
+	{
+		if (human) p->getClient().QueueCommand(std::make_shared<SystemChatMsg>("You cannot raise your evade shield in close combat."));
+		return false;
+	}
+	if (int32(p->getEvadeCooldownUntil() - now) > 0)
+	{
+		if (human) p->getClient().QueueCommand(std::make_shared<SystemChatMsg>(
+			(format("Your evade shield can be raised again in %1% seconds.") % ((p->getEvadeCooldownUntil() - now + 999) / 1000)).str()));
+		return false;
+	}
+	p->setEvading(true);
+	p->setEvadeShield(100);
+	if (human) p->getClient().QueueCommand(std::make_shared<SystemChatMsg>("You are evading close combat."));
+	return true;
+}
+
+bool CombatSystem::EvadeBlocksInterlock(PlayerObject* attacker, PlayerObject* target)
+{
+	if (!attacker || !target || !target->isEvading() || target->getEvadeShield() == 0)
+		return false;
+	// Force Combat of the attacker (Grab +100%, Block -400% = cannot force at all)
+	float force = 1.0f;
+	if (attacker->getTactic() == TACTIC_RETALIATE) force = 2.0f;
+	else if (attacker->getTactic() == TACTIC_DEFENSE) force = 0.0f;
+	// Combat Evasion of the target (Grab -65%, Block +60%)
+	float evasion = 1.0f;
+	if (target->getTactic() == TACTIC_RETALIATE) evasion = 0.35f;
+	else if (target->getTactic() == TACTIC_DEFENSE) evasion = 1.6f;
+	float lvl = 1.0f + (float(attacker->getLevel()) - float(target->getLevel())) * 0.05f;
+	lvl = std::max(0.5f, std::min(2.0f, lvl));
+	const float base = sConfig.GetFloatDefault("Combat.EvadeDrain", 34.0f);
+	const int drain = int(base * force * lvl / evasion + 0.5f);
+	const uint8 before = target->getEvadeShield();
+	target->consumeEvadeShield(uint8(std::min(255, std::max(0, drain))));
+	const uint16 isCost = uint16(sConfig.GetIntDefault("Combat.EvadeISCost", 5));
+	if (target->getCurrentIS() >= isCost) target->setCurrentIS(target->getCurrentIS() - isCost);
+	const bool human = !target->getClient().isBot();
+	if (target->getEvadeShield() > 0)
+	{
+		if (!attacker->getClient().isBot())
+			attacker->getClient().QueueCommand(std::make_shared<SystemChatMsg>(
+				(format("%1% evades your attempt to engage.") % target->getHandle()).str()));
+		if (human)
+			target->getClient().QueueCommand(std::make_shared<SystemChatMsg>(
+				(format("You evade %1%. Evade shield %2%%%.") % attacker->getHandle() % uint32(target->getEvadeShield())).str()));
+		return true;
+	}
+	// shield broken: the attempt goes through, evading ends and the waiting period starts
+	target->setEvading(false);
+	target->setEvadeCooldownUntil(getMSTime() + uint32(sConfig.GetIntDefault("Combat.EvadeCooldownMs", 30000)));
+	if (human)
+		target->getClient().QueueCommand(std::make_shared<SystemChatMsg>(
+			(format("%1% breaks through your evade shield.") % attacker->getHandle()).str()));
+	INFO_LOG(format("Evade shield of %1% broken by %2% (%3% -> 0)") % target->getHandle() % attacker->getHandle() % uint32(before));
+	return false;
 }
 
 bool CombatSystem::UseCR2Interlock()
@@ -2472,8 +2559,12 @@ void CombatSystem::RunCR2Exchange(InterlockSession &session, PlayerObject* pA, P
 	};
 
 	// A blocking fighter throws no basic attack, only a queued special
-	const bool aSwings = !tryA && moveA && (tacA != TACTIC_DEFENSE || session.queuedMoveA != 0);
-	const bool bSwings = !tryB && moveB && (tacB != TACTIC_DEFENSE || session.queuedMoveB != 0);
+	// Block: -100% damage and accuracy (Combat_Basics) - a blocking fighter throws nothing; a queued
+	// special waits until they change stance (see RunInterlockRound). Combat.CR2.BlockSpecials = 1
+	// restores the older 'specials from Block' behaviour.
+	const bool blockSpecials = sConfig.GetBoolDefault("Combat.CR2.BlockSpecials", false);
+	const bool aSwings = !tryA && moveA && (tacA != TACTIC_DEFENSE || (blockSpecials && session.queuedMoveA != 0));
+	const bool bSwings = !tryB && moveB && (tacB != TACTIC_DEFENSE || (blockSpecials && session.queuedMoveB != 0));
 	// both offense rolls are made before either blow lands
 	const bool aHits = aSwings && (float(rand() % 10000) / 10000.0f) < CR2HitChance(pA, pB, tacA, tacB);
 	const bool bHits = bSwings && (float(rand() % 10000) / 10000.0f) < CR2HitChance(pB, pA, tacB, tacA);
@@ -2482,8 +2573,8 @@ void CombatSystem::RunCR2Exchange(InterlockSession &session, PlayerObject* pA, P
 		uint16 attState, uint16 defState) -> AttackResult
 	{
 		float mul = CR2StanceDamage(at);
-		if (attState & COMBAT_STATE_DAZED) mul *= sConfig.GetFloatDefault("Combat.CR2.DazedDamage", 0.85f);
-		if (defState & COMBAT_STATE_STAGGERED) mul *= sConfig.GetFloatDefault("Combat.CR2.StaggeredDamageTaken", 1.15f);
+		if (attState & COMBAT_STATE_DAZED) mul *= sConfig.GetFloatDefault("Combat.CR2.DazedDamage", 0.90f);
+		if (defState & COMBAT_STATE_STAGGERED) mul *= sConfig.GetFloatDefault("Combat.CR2.StaggeredDamageTaken", 1.05f);
 		m_cr2DamageMul = std::max(0.01f, mul);
 		AttackResult r = StrikeInterlock(session, att, def, mv, at, dt, true, false, false);
 		m_cr2DamageMul = 0.0f;
@@ -2691,6 +2782,10 @@ bool CombatSystem::UseAbility(PlayerObject* caster, uint16 abilityId, uint32 tar
     const bool humanCaster = !caster->getClient().isBot();
     const uint16 requestedAbilityId = abilityId;
 
+    // Retail Awakened ability: Evade Combat (EvadeCombatAbility, id 217)
+    if (requestedAbilityId == 217 && sConfig.GetBoolDefault("Combat.EvadeCombat", true))
+        return ToggleEvadeCombat(caster);
+
     // Check authentic discipline routing (Hacker viral logic / Coder RSI support)
     const AbilityTemplate* abilTempl = sDataLoader.GetAbilityTemplate(requestedAbilityId);
     // Retail: programs that need a few uninterrupted seconds cannot be run in close combat;
@@ -2805,7 +2900,7 @@ bool CombatSystem::UseAbility(PlayerObject* caster, uint16 abilityId, uint32 tar
     // CR2: an Off-Balance fighter (hit by a Grab last round) pays more Inner Strength for specials
     uint16 isCost = move->isCost;
     if (isCost > 0 && UseCR2Interlock() && (GetCombatState(caster->getGoId()) & COMBAT_STATE_OFFBALANCE))
-        isCost = uint16(isCost + isCost / 2);
+        isCost = uint16(isCost + std::max<uint16>(1, isCost / 10)); // StaggeredAbility/OffBalanceAbility data: -5 / -10
     const bool spentIS = isCost > 0;
     if (spentIS && !caster->spendIS(isCost))
     {

@@ -363,6 +363,20 @@ int RunCombatTestSuite()
 			setHP(human, 60000, 60000);
 			setHP(foe, 60000, 60000);
 			human.po->setTactic(TACTIC_SPEED);
+			// retail Evade Combat: the shield soaks interlock attempts, then breaks and starts its cooldown
+			{
+				foe.po->setEvadeCooldownUntil(0);
+				check(sCombatSys.ToggleEvadeCombat(foe.po) && foe.po->isEvading() && foe.po->getEvadeShield() == 100,
+					"Evade Combat raises a full evade shield");
+				bool firstRefused = !sCombatSys.RequestInterlock(human.go, foe.go, 0x002F0000 | 0x1235);
+				int attempts = 1;
+				while (!sCombatSys.IsInterlocked(human.go) && attempts < 20) { sCombatSys.RequestInterlock(human.go, foe.go, 0x002F0000 | 0x1235); attempts++; }
+				check(firstRefused && sCombatSys.IsInterlocked(human.go) && attempts > 1 && !foe.po->isEvading(),
+					"evade shield refuses interlock attempts until it breaks (" + std::to_string(attempts) + " attempts)");
+				check(foe.po->getEvadeCooldownUntil() != 0, "a broken evade shield starts the waiting period");
+				sCombatSys.EndInterlock(human.go, false);
+				human.po->setTactic(TACTIC_SPEED); // leaving an interlock resets the stance
+			}
 			bool il = sCombatSys.RequestInterlock(human.go, foe.go, 0x002F0000 | 0x1235);
 			int both = 0, neither = 0, one = 0, dazedSeen = 0;
 			for (int r = 0; r < 200 && il && sCombatSys.IsInterlocked(human.go); ++r)
