@@ -193,6 +193,9 @@ namespace ZionLauncher
         [System.Runtime.InteropServices.DllImport("kernel32.dll", SetLastError = true)]
         static extern uint WaitForSingleObject(IntPtr hHandle, uint dwMilliseconds);
 
+        [System.Runtime.InteropServices.DllImport("kernel32.dll", SetLastError = true)]
+        static extern bool GetExitCodeProcess(IntPtr hProcess, out uint lpExitCode);
+
         const uint PROCESS_ALL_ACCESS = 0x1F0FFF;
         const uint MEM_COMMIT = 0x00001000;
         const uint MEM_RESERVE = 0x00002000;
@@ -3018,6 +3021,9 @@ namespace ZionLauncher
             }
 
             txtStatus.Text = $"JACKED IN TO {_currentServerIp}. Launching 2005 Monolith Jupiter Client...";
+            IntPtr launchedHandle = IntPtr.Zero;
+            uint launchedPid = 0;
+            string launchNote = "";
             try
             {
                 try
@@ -3062,7 +3068,9 @@ namespace ZionLauncher
                         bool injected = InjectDllIntoHandle(rpi.hProcess, retailHook);
                         uint retailPid = rpi.dwProcessId;
                         CloseHandle(rpi.hThread);
-                        CloseHandle(rpi.hProcess);
+                        launchedHandle = rpi.hProcess; // closed by WaitForGameStartAsync
+                        launchedPid = retailPid;
+                        launchNote = $"retail path, bypass {(patched ? "applied" : "FAILED")}, hook {(injected ? "injected" : "FAILED")} ({retailHook})";
 
                         string clientDirForChild = Path.GetDirectoryName(retailExe) ?? ClientDir;
                         _ = Task.Run(() => WatchRetailChildAndHook((int)retailPid, retailHook, clientDirForChild));
@@ -3087,7 +3095,9 @@ namespace ZionLauncher
                         Thread.Sleep(100);
                         bool injected = InjectDllIntoHandle(pi.hProcess, HookDll);
                         CloseHandle(pi.hThread);
-                        CloseHandle(pi.hProcess);
+                        launchedHandle = pi.hProcess;
+                        launchedPid = pi.dwProcessId;
+                        launchNote = $"suspended path, hook {(injected ? "injected" : "FAILED")}";
 
                         Dispatcher.Invoke(() =>
                         {
@@ -3109,13 +3119,29 @@ namespace ZionLauncher
                         UseShellExecute = false
                     });
 
+                    if (proc != null)
+                    {
+                        launchedPid = (uint)proc.Id;
+                        launchedHandle = OpenProcess(0x1000 /*QUERY_LIMITED_INFORMATION*/ | 0x00100000 /*SYNCHRONIZE*/, false, proc.Id);
+                        launchNote = "plain start";
+                    }
                     if (File.Exists(HookDll))
                     {
                         _ = Task.Run(() => InjectImmediatelyAndWatch(proc));
                     }
                 }
 
-                await Task.Delay(500);
+                // The game used to be reported as "JACKED IN" half a second after starting even when it closed
+                // straight after the splash (tester report 2026-10-15). Wait for a game window or an exit.
+                string? failure = await WaitForGameStartAsync(launchedHandle, launchedPid, launchNote, $"{launchArgs.Replace(password, "******")}");
+                if (failure != null)
+                {
+                    txtStatus.Foreground = Brushes.Red;
+                    txtStatus.Text = failure;
+                    MessageBox.Show(failure + "\n\nA launch log was written to:\n" + LaunchLogPath +
+                        "\n\nPlease send that file to the Zion team.", "Game Closed On Start", MessageBoxButton.OK, MessageBoxImage.Warning);
+                    return;
+                }
                 Dispatcher.Invoke(() =>
                 {
                     ShowPanel(CommunityPanel);
@@ -3127,6 +3153,62 @@ namespace ZionLauncher
             catch (Exception ex)
             {
                 txtStatus.Text = "Launch Error: " + ex.Message;
+            }
+        }
+
+        private string LaunchLogPath => Path.Combine(GameRoot, "ZionLauncher_launch.log");
+
+        private void AppendLaunchLog(string line)
+        {
+            try { File.AppendAllText(LaunchLogPath, $"[{DateTime.Now:yyyy-MM-dd HH:mm:ss}] {line}{Environment.NewLine}"); } catch { }
+        }
+
+        /// <summary>
+        /// Waits up to ~45 s for the client to open its game window. Returns null when the game is up (or still
+        /// loading), or an error text when every matrix.exe process has exited first.
+        /// </summary>
+        private async Task<string?> WaitForGameStartAsync(IntPtr hParent, uint parentPid, string note, string args)
+        {
+            AppendLaunchLog($"launch pid={parentPid} {note} server={_currentServerIp} dir={ClientDir} args={args}");
+            try
+            {
+                for (int i = 0; i < 90; i++)
+                {
+                    await Task.Delay(500);
+                    var procs = Process.GetProcessesByName("matrix").Concat(Process.GetProcessesByName("launcher")).ToArray();
+                    bool anyAlive = false;
+                    foreach (var p in procs)
+                    {
+                        try
+                        {
+                            if (p.HasExited) continue;
+                            anyAlive = true;
+                            p.Refresh();
+                            if (p.MainWindowHandle != IntPtr.Zero && !string.IsNullOrEmpty(p.MainWindowTitle) &&
+                                p.MainWindowTitle.IndexOf("Matrix", StringComparison.OrdinalIgnoreCase) >= 0 && i >= 6)
+                            {
+                                AppendLaunchLog($"game window up: pid={p.Id} '{p.MainWindowTitle}' after {(i + 1) * 500} ms");
+                                return null;
+                            }
+                        }
+                        catch { }
+                    }
+                    if (!anyAlive && i >= 2)
+                    {
+                        uint code = 0;
+                        bool haveCode = hParent != IntPtr.Zero && GetExitCodeProcess(hParent, out code);
+                        string codeText = haveCode ? $"0x{code:X8}" : "unknown";
+                        AppendLaunchLog($"game exited after {(i + 1) * 500} ms, parent exit code {codeText}");
+                        return $"The game closed right after starting (exit code {codeText}). " +
+                               "Run Download/Repair, check your antivirus did not quarantine mxohax_modern.dll, then try again.";
+                    }
+                }
+                AppendLaunchLog("no game window after 45 s; assuming it is still loading");
+                return null;
+            }
+            finally
+            {
+                if (hParent != IntPtr.Zero) CloseHandle(hParent);
             }
         }
 

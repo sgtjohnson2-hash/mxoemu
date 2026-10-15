@@ -336,6 +336,58 @@ int RunCombatTestSuite()
 			return 1;
 		}
 
+		// ---------------------------------------------------------------- CR2 interlock model
+		{
+			sConfig.SetOverride("Combat.InterlockModel", "cr2");
+			sConfig.SetOverride("Combat.TrackAmmo", "0");
+			Actor foe = makeBot(9200900, 10100.0, 10000.0);
+			const uint8 savedLevel = human.po->getLevel();
+			const uint16 savedMaxHp = human.po->getMaximumHealth();
+			foe.po->setFactionName("Machines");
+			human.po->setLevel(10); foe.po->setLevel(10);
+			const float pSpeed = CombatSystem::CR2HitChance(human.po, foe.po, TACTIC_SPEED, TACTIC_NORMAL);
+			const float pVsBlock = CombatSystem::CR2HitChance(human.po, foe.po, TACTIC_SPEED, TACTIC_DEFENSE);
+			const float pGrabVsBlock = CombatSystem::CR2HitChance(human.po, foe.po, TACTIC_RETALIATE, TACTIC_DEFENSE);
+			check(pSpeed > 0.6f && pSpeed < 0.7f, "CR2: Speed vs no stance at even level hits ~65%");
+			check(pVsBlock < pSpeed - 0.2f, "CR2: Block makes the defender much harder to hit");
+			check(pGrabVsBlock > pVsBlock + 0.2f, "CR2: a Grab gets through Block (Block gives up Force Combat)");
+			foe.po->setLevel(20);
+			check(CombatSystem::CR2HitChance(human.po, foe.po, TACTIC_SPEED, TACTIC_NORMAL) < pSpeed - 0.15f,
+				"CR2: a higher-level defender is harder to hit");
+			foe.po->setLevel(10);
+
+			setHP(human, 60000, 60000);
+			setHP(foe, 60000, 60000);
+			human.po->setTactic(TACTIC_SPEED);
+			bool il = sCombatSys.RequestInterlock(human.go, foe.go, 0x002F0000 | 0x1235);
+			int both = 0, neither = 0, one = 0, dazedSeen = 0;
+			for (int r = 0; r < 200 && il && sCombatSys.IsInterlocked(human.go); ++r)
+			{
+				InterlockSession* live = sCombatSys.GetInterlockSession(human.go);
+				if (!live) break;
+				live->nextRoundTime = 0;
+				const uint16 hA = human.po->getCurrentHealth(), hB = foe.po->getCurrentHealth();
+				sCombatSys.Update();
+				const bool aLost = human.po->getCurrentHealth() < hA, bLost = foe.po->getCurrentHealth() < hB;
+				if (aLost && bLost) both++; else if (!aLost && !bLost) neither++; else one++;
+				InterlockSession cp;
+				if (sCombatSys.GetInterlockSessionCopy(human.go, cp) && (cp.combatStateB & COMBAT_STATE_DAZED)) dazedSeen++;
+			}
+			check(il && both > 0 && neither > 0 && one > 0,
+				"CR2: rounds resolve independently - both, one and neither land (" + std::to_string(both) + "/" + std::to_string(one) + "/" + std::to_string(neither) + ")");
+			check(dazedSeen > 0, "CR2: a landed Speed hit leaves the opponent Dazed");
+			sCombatSys.EndInterlock(human.go, false);
+			check(human.po->consumeFirearmAmmo(), "retail has no ammo: firing never runs dry (Combat.TrackAmmo off)");
+			human.po->setTactic(TACTIC_NORMAL);
+			place(foe, 30000.0, 30000.0);
+			human.po->setLevel(savedLevel);
+			setHP(human, savedMaxHp, savedMaxHp);
+			reviveHuman();
+			// the older suites below were written against the emulator's legacy rules
+			sConfig.SetOverride("Combat.InterlockModel", "legacy");
+			sConfig.SetOverride("Combat.TrackAmmo", "1");
+		}
+
 		{
 			std::vector<std::string> loadMsgs;
 			for (const std::string& s : humanClient.captured)

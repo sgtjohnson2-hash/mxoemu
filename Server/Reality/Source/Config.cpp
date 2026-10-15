@@ -25,6 +25,7 @@
 
 #include "Common.h"
 #include "Config.h"
+#include <map>
 #include "DotConfPP/dotconfpp.h"
 
 createFileSingleton(Config);
@@ -58,16 +59,35 @@ bool Config::SetSource(const char *file, bool ignorecase)
 }
 
 
-bool Config::GetString(const char* name, std::string *value)
-{
-    if(!mConf)
-        return false;
+// Runtime overrides (test suites, console). They win over the file.
+static std::map<std::string, std::string> s_configOverrides;
 
+void Config::SetOverride(const char* name, const char* value)
+{
+    if (value) s_configOverrides[name] = value;
+    else s_configOverrides.erase(name);
+}
+
+const char* Config::RawValue(const char* name)
+{
+    auto it = s_configOverrides.find(name);
+    if (it != s_configOverrides.end())
+        return it->second.c_str();
+    if(!mConf)
+        return nullptr;
     DOTCONFDocumentNode *node = (DOTCONFDocumentNode *)mConf->findNode(name);
     if(!node || !node->getValue())
+        return nullptr;
+    return node->getValue();
+}
+
+bool Config::GetString(const char* name, std::string *value)
+{
+    const char* raw = RawValue(name);
+    if(!raw)
         return false;
 
-    *value = node->getValue();
+    *value = raw;
 
     return true;
 }
@@ -75,27 +95,18 @@ bool Config::GetString(const char* name, std::string *value)
 
 std::string Config::GetStringDefault(const char* name, const char* def)
 {
-    if(!mConf)
-		return std::string(def);
-
-    DOTCONFDocumentNode *node = (DOTCONFDocumentNode *)mConf->findNode(name);
-    if(!node || !node->getValue())
-		return std::string(def);
-
-	return std::string(node->getValue());
+    const char* raw = RawValue(name);
+    return raw ? std::string(raw) : std::string(def);
 }
 
 
 bool Config::GetBool(const char* name, bool *value)
 {
-    if(!mConf)
+    const char* raw = RawValue(name);
+    if(!raw)
         return false;
 
-    DOTCONFDocumentNode *node = (DOTCONFDocumentNode *)mConf->findNode(name);
-    if(!node || !node->getValue())
-        return false;
-
-    const char* str = node->getValue();
+    const char* str = raw;
     if(strcmp(str, "true") == 0 || strcmp(str, "TRUE") == 0 ||
         strcmp(str, "yes") == 0 || strcmp(str, "YES") == 0 ||
         strcmp(str, "1") == 0)
@@ -118,14 +129,11 @@ bool Config::GetBoolDefault(const char* name, const bool def)
 
 bool Config::GetInt(const char* name, int *value)
 {
-    if(!mConf)
+    const char* raw = RawValue(name);
+    if(!raw)
         return false;
 
-    DOTCONFDocumentNode *node = (DOTCONFDocumentNode *)mConf->findNode(name);
-    if(!node || !node->getValue())
-        return false;
-
-    *value = (int)strtoul(node->getValue(), NULL, 0);
+    *value = (int)strtoul(raw, NULL, 0);
 
     return true;
 }
@@ -133,14 +141,11 @@ bool Config::GetInt(const char* name, int *value)
 
 bool Config::GetFloat(const char* name, float *value)
 {
-    if(!mConf)
+    const char* raw = RawValue(name);
+    if(!raw)
         return false;
 
-    DOTCONFDocumentNode *node = (DOTCONFDocumentNode *)mConf->findNode(name);
-    if(!node || !node->getValue())
-        return false;
-
-    *value = (float)atof(node->getValue());
+    *value = (float)atof(raw);
 
     return true;
 }

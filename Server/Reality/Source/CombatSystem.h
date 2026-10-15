@@ -51,6 +51,17 @@ typedef enum
 	TACTIC_NORMAL		= 8, //default, no tactic selected
 } mxoTacticType;
 
+// Combat states (client.dll string table ST_* values; StatusCombat_*StateIcon). CR2: a Speed hit
+// leaves the target Dazed (less damage out), a Power hit Staggered (less damage resistance),
+// a Grab hit Off-Balance (specials cost more Inner Strength).
+enum mxoCombatState
+{
+	COMBAT_STATE_DAZED		= 0x02,
+	COMBAT_STATE_OFFBALANCE	= 0x04,
+	COMBAT_STATE_STAGGERED	= 0x08,
+	COMBAT_STATE_STUNNED	= 0x20,
+};
+
 // Oracle premonition helper (the client->server tactic remap that lived here was invented
 // and has been removed: the client sends mxoTacticType values directly)
 class TacticAdapter
@@ -121,6 +132,10 @@ struct InterlockSession
 	uint16 roundMoveA = 0;	//ability/move each side swung in the last round (HUD round status)
 	uint16 roundMoveB = 0;
 	uint32 lastExchangeAttackerGoId = 0; //goId of attacker in the most recently emitted ILExchange
+	uint16 combatStateA = 0;	//CR2 combat states on A (client.dll ST_DAZED 0x2 / ST_OFFBALANCE 0x4 / ST_STAGGERED 0x8)
+	uint16 combatStateB = 0;
+	uint32 stateRoundA = 0;	//round the state on A was applied (lasts through the next round)
+	uint32 stateRoundB = 0;
 };
 
 // Interlock move references (interlock database rez 0x24000B8B), from captured live exchanges
@@ -225,6 +240,11 @@ public:
 	uint32 SelectInterlockMove(const InterlockSession &session, PlayerObject* attacker, PlayerObject* defender,
 		InterlockExchangeOutcome outcome = InterlockExchangeOutcome::NormalHit);
 	bool m_ilExchangeActive = false;
+	// CR2 interlock: damage multiplier for the swing being resolved (stance + Dazed/Staggered). 0 = legacy tactic matrix.
+	float m_cr2DamageMul = 0.0f;
+	static bool UseCR2Interlock();
+	uint16 GetCombatState(uint32 goId);
+	static float CR2HitChance(PlayerObject* attacker, PlayerObject* defender, uint8 attTac, uint8 defTac);
 
 	AttackResult ResolveAttack(PlayerObject* attacker, PlayerObject* target,
 		const CombatMove& move, uint8 attackerTactic, uint8 targetTactic, bool inInterlock = false, bool bypassBlock = false);
@@ -234,6 +254,8 @@ public:
 	static const float FREEFIRE_SHOT_SECONDS;
 private:
 	bool RunInterlockRound(InterlockSession &session); //false = session over, reap it
+	void RunCR2Exchange(InterlockSession &session, PlayerObject* pA, PlayerObject* pB,
+		const CombatMove* moveA, const CombatMove* moveB, uint8 tacA, uint8 tacB);
 	float TacticModifier(uint8 attackerTactic, uint8 targetTactic);
 
 	std::unordered_map<uint16, CombatMove> m_moveTable;

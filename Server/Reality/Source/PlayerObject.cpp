@@ -1869,6 +1869,11 @@ void PlayerObject::degradeEquippedWeapon(uint16 degradationAmount) {
 
 bool PlayerObject::consumeFirearmAmmo()
 {
+	// Retail MxO never tracked ammunition (weapons wore down instead). Combat.TrackAmmo = 1 turns
+	// the emulator's clip/reload system back on.
+	if (!sConfig.GetBoolDefault("Combat.TrackAmmo", false))
+		return true;
+
 	auto weapons = getEquippedWeapons();
 	if (weapons.empty())
 		return true;

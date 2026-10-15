@@ -49,6 +49,10 @@ class Config : public Singleton<Config>
         bool GetFloat(const char* name, float *value);
         float GetFloatDefault(const char* name, const float def);
 
+        // nullptr value removes the override
+        void SetOverride(const char* name, const char* value);
+        const char* RawValue(const char* name);
+
     private:
         class DOTCONFDocument *mConf;
 };

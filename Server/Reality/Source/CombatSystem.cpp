@@ -1411,7 +1411,8 @@ CombatSystem::AttackResult CombatSystem::ResolveAttack(PlayerObject* attacker, P
 	float dmg = move.minDmg + (move.maxDmg - move.minDmg) * ((rand() % 100) / 100.0f);
 	dmg += move.minDmgPerLvl * attacker->getLevel();
 	dmg *= attacker->getDamageScale(); //scaled dojo bots hit harder; everyone else is 1.0
-	dmg *= TacticModifier(attackerTactic, targetTactic);
+	// CR2 interlock passes its stance/state multiplier in; everything else keeps the tactic matrix.
+	dmg *= (m_cr2DamageMul > 0.0f) ? m_cr2DamageMul : TacticModifier(attackerTactic, targetTactic);
 	// Same-move "adaptive" mitigation used to drop a repeated strike to 15% after four hits.
 	// Interlock rounds reuse one style move, so every fight collapsed mid-way. Retail does not do this.
 
@@ -1505,7 +1506,8 @@ CombatSystem::AttackResult CombatSystem::ResolveAttack(PlayerObject* attacker, P
 	res.damageTaken = expected;
     
     // [Item 15] Melee Weapon Durability
-    if (res.hit && move.dmgType == DAMAGE_MELEE) {
+    // retail: equipped weapons (guns too) wear down with use
+    if (res.hit && (move.dmgType == DAMAGE_MELEE || move.dmgType == DAMAGE_RANGED || move.dmgType == DAMAGE_BALLISTIC)) {
         attacker->degradeEquippedWeapon(1);
     }
     
@@ -1902,7 +1904,8 @@ CombatSystem::AttackResult CombatSystem::StrikeInterlock(InterlockSession &sessi
 			lastStyle = &session.lastStyleB;
 		}
 
-		if (comboStep && lastStyle)
+		// The +20% "3-step combo finisher" is not a retail mechanic; the CR2 model leaves it out.
+		if (comboStep && lastStyle && !UseCR2Interlock())
 		{
 			FightingStyle curStyle = attacker->getFightingStyle();
 			if (res.hit && !res.isBlocked && curStyle != FightingStyle::None)
@@ -2125,143 +2128,152 @@ bool CombatSystem::RunInterlockRound(InterlockSession &session)
 			% pB->getHandle() % pB->getGoId() % uint32(tacB) % (moveB ? moveB->name : std::string("<none>")) % pB->getCurrentHealth() % pB->getMaximumHealth());
 	}
 
-	// Deterministic Rock-Paper-Scissors martial arts interlock evaluations:
-	// 1. Power crushes Speed (+35% damage bonus, frame advantage)
-	// 2. Speed interrupts Grab (+35% damage bonus, fast interrupt cancels grab)
-	// 3. Grab breaks Guard (+40% damage bonus, unblockable throw bypasses block)
-	//    Grab breaks Power (+35% damage bonus, unblockable throw counters heavy windup)
-	bool aCrushesB = (tacA == TACTIC_POWER && tacB == TACTIC_SPEED);
-	bool bCrushesA = (tacB == TACTIC_POWER && tacA == TACTIC_SPEED);
-
-	bool aInterruptsB = (tacA == TACTIC_SPEED && tacB == TACTIC_RETALIATE);
-	bool bInterruptsA = (tacB == TACTIC_SPEED && tacA == TACTIC_RETALIATE);
-
-	bool aBreaksGuardB = (tacA == TACTIC_RETALIATE && tacB == TACTIC_DEFENSE);
-	bool bBreaksGuardA = (tacB == TACTIC_RETALIATE && tacA == TACTIC_DEFENSE);
-
-	bool aBreaksPowerB = (tacA == TACTIC_RETALIATE && tacB == TACTIC_POWER);
-	bool bBreaksPowerA = (tacB == TACTIC_RETALIATE && tacA == TACTIC_POWER);
-
-	bool isClash = (tacA == tacB && tacA != TACTIC_NORMAL);
-
-	FightingStyle styleA = pA->getFightingStyle();
-	FightingStyle styleB = pB->getFightingStyle();
-
-	// Tactical banner announcements. Retail showed round outcomes in the interlock HUD and its combat
-	// log (RPC 0x45, SendILRoundStatus), not as chat lines; Interlock.ChatBanners = 1 brings these back.
-	const bool chatBanners = sConfig.GetBoolDefault("Interlock.ChatBanners", false);
-	if (aCrushesB) {
-		if (chatBanners && !pA->getClient().isBot())
-			pA->getClient().QueueCommand(std::make_shared<SystemChatMsg>((format("{c:00FF00}[MARTIAL ARTS] Power crushes Speed! Frame advantage secured against %1%! (+35%% Damage){/c}") % pB->getHandle()).str()));
-		if (chatBanners && !pB->getClient().isBot())
-			pB->getClient().QueueCommand(std::make_shared<SystemChatMsg>((format("{c:FF4444}[MARTIAL ARTS] %1%'s Power stance crushed your Speed attack!{/c}") % pA->getHandle()).str()));
-	} else if (bCrushesA) {
-		if (chatBanners && !pB->getClient().isBot())
-			pB->getClient().QueueCommand(std::make_shared<SystemChatMsg>((format("{c:00FF00}[MARTIAL ARTS] Power crushes Speed! Frame advantage secured against %1%! (+35%% Damage){/c}") % pA->getHandle()).str()));
-		if (chatBanners && !pA->getClient().isBot())
-			pA->getClient().QueueCommand(std::make_shared<SystemChatMsg>((format("{c:FF4444}[MARTIAL ARTS] %1%'s Power stance crushed your Speed attack!{/c}") % pB->getHandle()).str()));
-	} else if (aInterruptsB) {
-		if (chatBanners && !pA->getClient().isBot())
-			pA->getClient().QueueCommand(std::make_shared<SystemChatMsg>((format("{c:00FF00}[MARTIAL ARTS] Speed interrupts Grab! Fast jab interrupted %1%'s grab maneuver! (+35%% Damage){/c}") % pB->getHandle()).str()));
-		if (chatBanners && !pB->getClient().isBot())
-			pB->getClient().QueueCommand(std::make_shared<SystemChatMsg>((format("{c:FF4444}[MARTIAL ARTS] %1%'s Speed strike interrupted your Grab maneuver!{/c}") % pA->getHandle()).str()));
-	} else if (bInterruptsA) {
-		if (chatBanners && !pB->getClient().isBot())
-			pB->getClient().QueueCommand(std::make_shared<SystemChatMsg>((format("{c:00FF00}[MARTIAL ARTS] Speed interrupts Grab! Fast jab interrupted %1%'s grab maneuver! (+35%% Damage){/c}") % pA->getHandle()).str()));
-		if (chatBanners && !pA->getClient().isBot())
-			pA->getClient().QueueCommand(std::make_shared<SystemChatMsg>((format("{c:FF4444}[MARTIAL ARTS] %1%'s Speed strike interrupted your Grab maneuver!{/c}") % pB->getHandle()).str()));
-	} else if (aBreaksGuardB || aBreaksPowerB) {
-		const char* targetStance = aBreaksGuardB ? "Guard" : "Power";
-		if (chatBanners && !pA->getClient().isBot())
-			pA->getClient().QueueCommand(std::make_shared<SystemChatMsg>((format("{c:00FF00}[MARTIAL ARTS] Grab breaks %1%! Unblockable throw executed on %2%! (+%3%%% Damage){/c}") % targetStance % pB->getHandle() % (aBreaksGuardB ? 40 : 35)).str()));
-		if (chatBanners && !pB->getClient().isBot())
-			pB->getClient().QueueCommand(std::make_shared<SystemChatMsg>((format("{c:FF0000}[MARTIAL ARTS] Your %1% was broken by %2%'s Grab! Unblockable throw!{/c}") % targetStance % pA->getHandle()).str()));
-	} else if (bBreaksGuardA || bBreaksPowerA) {
-		const char* targetStance = bBreaksGuardA ? "Guard" : "Power";
-		if (chatBanners && !pB->getClient().isBot())
-			pB->getClient().QueueCommand(std::make_shared<SystemChatMsg>((format("{c:00FF00}[MARTIAL ARTS] Grab breaks %1%! Unblockable throw executed on %2%! (+%3%%% Damage){/c}") % targetStance % pA->getHandle() % (bBreaksGuardA ? 40 : 35)).str()));
-		if (chatBanners && !pA->getClient().isBot())
-			pA->getClient().QueueCommand(std::make_shared<SystemChatMsg>((format("{c:FF0000}[MARTIAL ARTS] Your %1% was broken by %2%'s Grab! Unblockable throw!{/c}") % targetStance % pB->getHandle()).str()));
-	} else if (isClash) {
-		// Both combatants selected identical stance - glancing exchange.
-		// Interlocks animate exclusively through ILCombatStateMsg / ILExchange structures.
-		std::string clashName = (tacA == TACTIC_POWER) ? "Power" : (tacA == TACTIC_SPEED ? "Speed" : (tacA == TACTIC_RETALIATE ? "Grab" : "Guard"));
-		if (chatBanners && !pA->getClient().isBot()) pA->getClient().QueueCommand(std::make_shared<SystemChatMsg>((format("{c:FFFF00}[MARTIAL ARTS] Stance Clash! Both combatants chose %1%. Glancing exchange.{/c}") % clashName).str()));
-		if (chatBanners && !pB->getClient().isBot()) pB->getClient().QueueCommand(std::make_shared<SystemChatMsg>((format("{c:FFFF00}[MARTIAL ARTS] Stance Clash! Both combatants chose %1%. Glancing exchange.{/c}") % clashName).str()));
-
-		// Both combatants exchange glancing blows at 0.90x damage (TacticModifier handles 0.90x).
-		// Emit one paired ILExchange per round so session.exchangeNum and ILRoundStatusMsg stay 1:1.
-		AttackResult resA, resB;
-		bool aSwung = false, bSwung = false;
-		if (moveA) {
-			resA = StrikeInterlock(session, pA, pB, *moveA, tacA, tacB, true, false, false);
-			aSwung = true;
-		}
-		// 0 HP is down even before the reaper sets the dead flag: no swing back from the knocked-out side
-		if (moveB && !pB->isDead() && pB->getCurrentHealth() > 0) {
-			resB = StrikeInterlock(session, pB, pA, *moveB, tacB, tacA, true, false, false);
-			bSwung = true;
-		}
-		if (session.ilViewIdA != 0 || session.ilViewIdB != 0) {
-			if (bSwung && (pA->isDead() || pA->getCurrentHealth() == 0))
-				SendInterlockExchange(session, pB, pA, resB, *moveB, tacB, tacA);
-			else if (aSwung)
-				SendInterlockExchange(session, pA, pB, resA, *moveA, tacA, tacB);
-			else if (bSwung)
-				SendInterlockExchange(session, pB, pA, resB, *moveB, tacB, tacA);
-		}
+	if (UseCR2Interlock())
+	{
+		RunCR2Exchange(session, pA, pB, moveA, moveB, tacA, tacB);
 	}
+	else
+	{
+	// Combat.InterlockModel = legacy: the emulator's earlier rock-paper-scissors rules (not retail).
+		// Deterministic Rock-Paper-Scissors martial arts interlock evaluations:
+		// 1. Power crushes Speed (+35% damage bonus, frame advantage)
+		// 2. Speed interrupts Grab (+35% damage bonus, fast interrupt cancels grab)
+		// 3. Grab breaks Guard (+40% damage bonus, unblockable throw bypasses block)
+		//    Grab breaks Power (+35% damage bonus, unblockable throw counters heavy windup)
+		bool aCrushesB = (tacA == TACTIC_POWER && tacB == TACTIC_SPEED);
+		bool bCrushesA = (tacB == TACTIC_POWER && tacA == TACTIC_SPEED);
 
-	// Execution & Interrupt Resolution:
-	if (aInterruptsB) {
-		// A's Speed interrupts B's Grab. A strikes, B's grab is cancelled!
-		if (moveA) StrikeInterlock(session, pA, pB, *moveA, tacA, tacB, true, false);
-	} else if (bInterruptsA) {
-		// B's Speed interrupts A's Grab. B strikes, A's grab is cancelled!
-		if (moveB) StrikeInterlock(session, pB, pA, *moveB, tacB, tacA, true, false);
-	} else if (aCrushesB) {
-		// A's Power crushes B's Speed with frame advantage
-		if (moveA) StrikeInterlock(session, pA, pB, *moveA, tacA, tacB, true, false);
-	} else if (bCrushesA) {
-		// B's Power crushes A's Speed with frame advantage
-		if (moveB) StrikeInterlock(session, pB, pA, *moveB, tacB, tacA, true, false);
-	} else if (aBreaksPowerB || aBreaksGuardB) {
-		// A's Grab counters B's heavy Power attack or breaks Guard with an unblockable throw.
-		if (moveA) StrikeInterlock(session, pA, pB, *moveA, tacA, tacB, true, true);
-	} else if (bBreaksPowerA || bBreaksGuardA) {
-		// B's Grab counters A's heavy Power attack or breaks Guard with an unblockable throw.
-		if (moveB) StrikeInterlock(session, pB, pA, *moveB, tacB, tacA, true, true);
-	} else if (!isClash) {
-		// Standard exchange: defenders only strike if an active special is queued.
-		// Emit one paired ILExchange per round so session.exchangeNum and ILRoundStatusMsg stay 1:1.
-		AttackResult resA, resB;
-		bool aSwung = false, bSwung = false;
-		bool specialFromA = (session.queuedMoveA != 0);
-		if (tacA != TACTIC_DEFENSE || specialFromA) {
+		bool aInterruptsB = (tacA == TACTIC_SPEED && tacB == TACTIC_RETALIATE);
+		bool bInterruptsA = (tacB == TACTIC_SPEED && tacA == TACTIC_RETALIATE);
+
+		bool aBreaksGuardB = (tacA == TACTIC_RETALIATE && tacB == TACTIC_DEFENSE);
+		bool bBreaksGuardA = (tacB == TACTIC_RETALIATE && tacA == TACTIC_DEFENSE);
+
+		bool aBreaksPowerB = (tacA == TACTIC_RETALIATE && tacB == TACTIC_POWER);
+		bool bBreaksPowerA = (tacB == TACTIC_RETALIATE && tacA == TACTIC_POWER);
+
+		bool isClash = (tacA == tacB && tacA != TACTIC_NORMAL);
+
+		FightingStyle styleA = pA->getFightingStyle();
+		FightingStyle styleB = pB->getFightingStyle();
+
+		// Tactical banner announcements. Retail showed round outcomes in the interlock HUD and its combat
+		// log (RPC 0x45, SendILRoundStatus), not as chat lines; Interlock.ChatBanners = 1 brings these back.
+		const bool chatBanners = sConfig.GetBoolDefault("Interlock.ChatBanners", false);
+		if (aCrushesB) {
+			if (chatBanners && !pA->getClient().isBot())
+				pA->getClient().QueueCommand(std::make_shared<SystemChatMsg>((format("{c:00FF00}[MARTIAL ARTS] Power crushes Speed! Frame advantage secured against %1%! (+35%% Damage){/c}") % pB->getHandle()).str()));
+			if (chatBanners && !pB->getClient().isBot())
+				pB->getClient().QueueCommand(std::make_shared<SystemChatMsg>((format("{c:FF4444}[MARTIAL ARTS] %1%'s Power stance crushed your Speed attack!{/c}") % pA->getHandle()).str()));
+		} else if (bCrushesA) {
+			if (chatBanners && !pB->getClient().isBot())
+				pB->getClient().QueueCommand(std::make_shared<SystemChatMsg>((format("{c:00FF00}[MARTIAL ARTS] Power crushes Speed! Frame advantage secured against %1%! (+35%% Damage){/c}") % pA->getHandle()).str()));
+			if (chatBanners && !pA->getClient().isBot())
+				pA->getClient().QueueCommand(std::make_shared<SystemChatMsg>((format("{c:FF4444}[MARTIAL ARTS] %1%'s Power stance crushed your Speed attack!{/c}") % pB->getHandle()).str()));
+		} else if (aInterruptsB) {
+			if (chatBanners && !pA->getClient().isBot())
+				pA->getClient().QueueCommand(std::make_shared<SystemChatMsg>((format("{c:00FF00}[MARTIAL ARTS] Speed interrupts Grab! Fast jab interrupted %1%'s grab maneuver! (+35%% Damage){/c}") % pB->getHandle()).str()));
+			if (chatBanners && !pB->getClient().isBot())
+				pB->getClient().QueueCommand(std::make_shared<SystemChatMsg>((format("{c:FF4444}[MARTIAL ARTS] %1%'s Speed strike interrupted your Grab maneuver!{/c}") % pA->getHandle()).str()));
+		} else if (bInterruptsA) {
+			if (chatBanners && !pB->getClient().isBot())
+				pB->getClient().QueueCommand(std::make_shared<SystemChatMsg>((format("{c:00FF00}[MARTIAL ARTS] Speed interrupts Grab! Fast jab interrupted %1%'s grab maneuver! (+35%% Damage){/c}") % pA->getHandle()).str()));
+			if (chatBanners && !pA->getClient().isBot())
+				pA->getClient().QueueCommand(std::make_shared<SystemChatMsg>((format("{c:FF4444}[MARTIAL ARTS] %1%'s Speed strike interrupted your Grab maneuver!{/c}") % pB->getHandle()).str()));
+		} else if (aBreaksGuardB || aBreaksPowerB) {
+			const char* targetStance = aBreaksGuardB ? "Guard" : "Power";
+			if (chatBanners && !pA->getClient().isBot())
+				pA->getClient().QueueCommand(std::make_shared<SystemChatMsg>((format("{c:00FF00}[MARTIAL ARTS] Grab breaks %1%! Unblockable throw executed on %2%! (+%3%%% Damage){/c}") % targetStance % pB->getHandle() % (aBreaksGuardB ? 40 : 35)).str()));
+			if (chatBanners && !pB->getClient().isBot())
+				pB->getClient().QueueCommand(std::make_shared<SystemChatMsg>((format("{c:FF0000}[MARTIAL ARTS] Your %1% was broken by %2%'s Grab! Unblockable throw!{/c}") % targetStance % pA->getHandle()).str()));
+		} else if (bBreaksGuardA || bBreaksPowerA) {
+			const char* targetStance = bBreaksGuardA ? "Guard" : "Power";
+			if (chatBanners && !pB->getClient().isBot())
+				pB->getClient().QueueCommand(std::make_shared<SystemChatMsg>((format("{c:00FF00}[MARTIAL ARTS] Grab breaks %1%! Unblockable throw executed on %2%! (+%3%%% Damage){/c}") % targetStance % pA->getHandle() % (bBreaksGuardA ? 40 : 35)).str()));
+			if (chatBanners && !pA->getClient().isBot())
+				pA->getClient().QueueCommand(std::make_shared<SystemChatMsg>((format("{c:FF0000}[MARTIAL ARTS] Your %1% was broken by %2%'s Grab! Unblockable throw!{/c}") % targetStance % pB->getHandle()).str()));
+		} else if (isClash) {
+			// Both combatants selected identical stance - glancing exchange.
+			// Interlocks animate exclusively through ILCombatStateMsg / ILExchange structures.
+			std::string clashName = (tacA == TACTIC_POWER) ? "Power" : (tacA == TACTIC_SPEED ? "Speed" : (tacA == TACTIC_RETALIATE ? "Grab" : "Guard"));
+			if (chatBanners && !pA->getClient().isBot()) pA->getClient().QueueCommand(std::make_shared<SystemChatMsg>((format("{c:FFFF00}[MARTIAL ARTS] Stance Clash! Both combatants chose %1%. Glancing exchange.{/c}") % clashName).str()));
+			if (chatBanners && !pB->getClient().isBot()) pB->getClient().QueueCommand(std::make_shared<SystemChatMsg>((format("{c:FFFF00}[MARTIAL ARTS] Stance Clash! Both combatants chose %1%. Glancing exchange.{/c}") % clashName).str()));
+
+			// Both combatants exchange glancing blows at 0.90x damage (TacticModifier handles 0.90x).
+			// Emit one paired ILExchange per round so session.exchangeNum and ILRoundStatusMsg stay 1:1.
+			AttackResult resA, resB;
+			bool aSwung = false, bSwung = false;
 			if (moveA) {
 				resA = StrikeInterlock(session, pA, pB, *moveA, tacA, tacB, true, false, false);
 				aSwung = true;
 			}
-		}
-		// B at 0 HP is knocked out even before the reaper sets the dead flag. It used to swing back
-		// after the killing blow (live 10:58:09, exchange 148 from a 0 HP Dojo Street Brawler).
-		if (!pB->isDead() && pB->getCurrentHealth() > 0) {
-			bool specialFromB = (session.queuedMoveB != 0);
-			if (tacB != TACTIC_DEFENSE || specialFromB) {
-				if (moveB) {
-					resB = StrikeInterlock(session, pB, pA, *moveB, tacB, tacA, true, false, false);
-					bSwung = true;
-				}
+			// 0 HP is down even before the reaper sets the dead flag: no swing back from the knocked-out side
+			if (moveB && !pB->isDead() && pB->getCurrentHealth() > 0) {
+				resB = StrikeInterlock(session, pB, pA, *moveB, tacB, tacA, true, false, false);
+				bSwung = true;
+			}
+			if (session.ilViewIdA != 0 || session.ilViewIdB != 0) {
+				if (bSwung && (pA->isDead() || pA->getCurrentHealth() == 0))
+					SendInterlockExchange(session, pB, pA, resB, *moveB, tacB, tacA);
+				else if (aSwung)
+					SendInterlockExchange(session, pA, pB, resA, *moveA, tacA, tacB);
+				else if (bSwung)
+					SendInterlockExchange(session, pB, pA, resB, *moveB, tacB, tacA);
 			}
 		}
-		if (session.ilViewIdA != 0 || session.ilViewIdB != 0) {
-			if (bSwung && (pA->isDead() || pA->getCurrentHealth() == 0))
-				SendInterlockExchange(session, pB, pA, resB, *moveB, tacB, tacA);
-			else if (aSwung)
-				SendInterlockExchange(session, pA, pB, resA, *moveA, tacA, tacB);
-			else if (bSwung)
-				SendInterlockExchange(session, pB, pA, resB, *moveB, tacB, tacA);
+
+		// Execution & Interrupt Resolution:
+		if (aInterruptsB) {
+			// A's Speed interrupts B's Grab. A strikes, B's grab is cancelled!
+			if (moveA) StrikeInterlock(session, pA, pB, *moveA, tacA, tacB, true, false);
+		} else if (bInterruptsA) {
+			// B's Speed interrupts A's Grab. B strikes, A's grab is cancelled!
+			if (moveB) StrikeInterlock(session, pB, pA, *moveB, tacB, tacA, true, false);
+		} else if (aCrushesB) {
+			// A's Power crushes B's Speed with frame advantage
+			if (moveA) StrikeInterlock(session, pA, pB, *moveA, tacA, tacB, true, false);
+		} else if (bCrushesA) {
+			// B's Power crushes A's Speed with frame advantage
+			if (moveB) StrikeInterlock(session, pB, pA, *moveB, tacB, tacA, true, false);
+		} else if (aBreaksPowerB || aBreaksGuardB) {
+			// A's Grab counters B's heavy Power attack or breaks Guard with an unblockable throw.
+			if (moveA) StrikeInterlock(session, pA, pB, *moveA, tacA, tacB, true, true);
+		} else if (bBreaksPowerA || bBreaksGuardA) {
+			// B's Grab counters A's heavy Power attack or breaks Guard with an unblockable throw.
+			if (moveB) StrikeInterlock(session, pB, pA, *moveB, tacB, tacA, true, true);
+		} else if (!isClash) {
+			// Standard exchange: defenders only strike if an active special is queued.
+			// Emit one paired ILExchange per round so session.exchangeNum and ILRoundStatusMsg stay 1:1.
+			AttackResult resA, resB;
+			bool aSwung = false, bSwung = false;
+			bool specialFromA = (session.queuedMoveA != 0);
+			if (tacA != TACTIC_DEFENSE || specialFromA) {
+				if (moveA) {
+					resA = StrikeInterlock(session, pA, pB, *moveA, tacA, tacB, true, false, false);
+					aSwung = true;
+				}
+			}
+			// B at 0 HP is knocked out even before the reaper sets the dead flag. It used to swing back
+			// after the killing blow (live 10:58:09, exchange 148 from a 0 HP Dojo Street Brawler).
+			if (!pB->isDead() && pB->getCurrentHealth() > 0) {
+				bool specialFromB = (session.queuedMoveB != 0);
+				if (tacB != TACTIC_DEFENSE || specialFromB) {
+					if (moveB) {
+						resB = StrikeInterlock(session, pB, pA, *moveB, tacB, tacA, true, false, false);
+						bSwung = true;
+					}
+				}
+			}
+			if (session.ilViewIdA != 0 || session.ilViewIdB != 0) {
+				if (bSwung && (pA->isDead() || pA->getCurrentHealth() == 0))
+					SendInterlockExchange(session, pB, pA, resB, *moveB, tacB, tacA);
+				else if (aSwung)
+					SendInterlockExchange(session, pA, pB, resA, *moveA, tacA, tacB);
+				else if (bSwung)
+					SendInterlockExchange(session, pB, pA, resB, *moveB, tacB, tacA);
+			}
 		}
+
 	}
 
 	session.queuedMoveA = 0;
@@ -2300,6 +2312,175 @@ bool CombatSystem::RunInterlockRound(InterlockSession &session)
 	}
 
 	return !pA->isDead() && !pB->isDead();
+}
+
+// ---------------------------------------------------------------------------------------------
+// CR2 interlock (Combat Revamp 2, the model retail shipped from 2006 to shutdown).
+// Sources: CR2 overview (files.mxoemu.info/CR2.pdf), the developer Q&As, the MxO archive combat
+// page. Each round both fighters roll offense against the other's defense independently, so
+// both, one or neither can land ("zero-sum outcomes were removed"). Stances shift the odds:
+// Speed +accuracy -defense; Power +damage -accuracy; Grab +defense -damage; Block large defense,
+// no basic attack, restores Inner Strength and shakes off states. A landed Speed hit leaves the
+// target Dazed, Power Staggered, Grab Off-Balance. Level difference moves the odds.
+// The exact retail numbers were server-side and never published: the values below are a
+// reconstruction and every one can be tuned in Reality.conf (Combat.CR2.*).
+// ---------------------------------------------------------------------------------------------
+bool CombatSystem::UseCR2Interlock()
+{
+	return sConfig.GetStringDefault("Combat.InterlockModel", "cr2") != "legacy";
+}
+
+uint16 CombatSystem::GetCombatState(uint32 goId)
+{
+	std::lock_guard<std::recursive_mutex> lock(m_combatMutex);
+	InterlockSession* s = GetInterlockSession(goId);
+	if (!s) return 0;
+	return (goId == s->goIdA) ? s->combatStateA : s->combatStateB;
+}
+
+static float CR2StanceAccuracy(uint8 t)
+{
+	switch (t)
+	{
+		case TACTIC_SPEED:   return sConfig.GetFloatDefault("Combat.CR2.SpeedAccuracy", 0.10f);
+		case TACTIC_POWER:   return -sConfig.GetFloatDefault("Combat.CR2.PowerAccuracyPenalty", 0.05f);
+		case TACTIC_DEFENSE: return -sConfig.GetFloatDefault("Combat.CR2.BlockAccuracyPenalty", 0.15f);
+		default:             return 0.0f;
+	}
+}
+
+static float CR2StanceDefense(uint8 t)
+{
+	switch (t)
+	{
+		case TACTIC_SPEED:     return -sConfig.GetFloatDefault("Combat.CR2.SpeedDefensePenalty", 0.10f);
+		case TACTIC_POWER:     return -sConfig.GetFloatDefault("Combat.CR2.PowerDefensePenalty", 0.05f);
+		case TACTIC_RETALIATE: return sConfig.GetFloatDefault("Combat.CR2.GrabDefense", 0.10f);
+		case TACTIC_DEFENSE:   return sConfig.GetFloatDefault("Combat.CR2.BlockDefense", 0.25f);
+		default:               return 0.0f;
+	}
+}
+
+static float CR2StanceDamage(uint8 t)
+{
+	switch (t)
+	{
+		case TACTIC_POWER:     return sConfig.GetFloatDefault("Combat.CR2.PowerDamage", 1.20f);
+		case TACTIC_RETALIATE: return sConfig.GetFloatDefault("Combat.CR2.GrabDamage", 0.85f);
+		case TACTIC_DEFENSE:   return sConfig.GetFloatDefault("Combat.CR2.BlockDamage", 0.50f);
+		default:               return 1.0f;
+	}
+}
+
+float CombatSystem::CR2HitChance(PlayerObject* attacker, PlayerObject* defender, uint8 attTac, uint8 defTac)
+{
+	if (!attacker || !defender) return 0.0f;
+	float p = sConfig.GetFloatDefault("Combat.CR2.BaseHit", 0.55f);
+	const float perLevel = sConfig.GetFloatDefault("Combat.CR2.LevelHit", 0.02f);
+	const float lvl = (float(attacker->getLevel()) - float(defender->getLevel())) * perLevel;
+	p += std::max(-0.25f, std::min(0.25f, lvl));
+	p += CR2StanceAccuracy(attTac);
+	// Block's bonus is Evade Combat and it gives up Force Combat, which is what resists a Grab
+	if (attTac == TACTIC_RETALIATE && defTac == TACTIC_DEFENSE)
+		p += sConfig.GetFloatDefault("Combat.CR2.GrabVsBlock", 0.10f);
+	else
+		p -= CR2StanceDefense(defTac);
+	return std::max(0.05f, std::min(0.95f, p));
+}
+
+void CombatSystem::RunCR2Exchange(InterlockSession &session, PlayerObject* pA, PlayerObject* pB,
+	const CombatMove* moveA, const CombatMove* moveB, uint8 tacA, uint8 tacB)
+{
+	const uint32 round = session.roundNumber;
+	// a state lasts through the round after the hit that caused it
+	if (session.combatStateA != 0 && round > session.stateRoundA + 1) session.combatStateA = 0;
+	if (session.combatStateB != 0 && round > session.stateRoundB + 1) session.combatStateB = 0;
+
+	// Block restores Inner Strength and shakes off states
+	const int blockIS = sConfig.GetIntDefault("Combat.CR2.BlockIS", 5);
+	if (tacA == TACTIC_DEFENSE) { if (blockIS > 0) pA->restoreIS(uint16(blockIS)); session.combatStateA = 0; }
+	if (tacB == TACTIC_DEFENSE) { if (blockIS > 0) pB->restoreIS(uint16(blockIS)); session.combatStateB = 0; }
+
+	const uint16 stA = session.combatStateA;
+	const uint16 stB = session.combatStateB;
+
+	// A blocking fighter throws no basic attack, only a queued special
+	const bool aSwings = moveA && (tacA != TACTIC_DEFENSE || session.queuedMoveA != 0);
+	const bool bSwings = moveB && (tacB != TACTIC_DEFENSE || session.queuedMoveB != 0);
+	// both offense rolls are made before either blow lands
+	const bool aHits = aSwings && (float(rand() % 10000) / 10000.0f) < CR2HitChance(pA, pB, tacA, tacB);
+	const bool bHits = bSwings && (float(rand() % 10000) / 10000.0f) < CR2HitChance(pB, pA, tacB, tacA);
+
+	auto swing = [&](PlayerObject* att, PlayerObject* def, const CombatMove& mv, uint8 at, uint8 dt,
+		uint16 attState, uint16 defState) -> AttackResult
+	{
+		float mul = CR2StanceDamage(at);
+		if (attState & COMBAT_STATE_DAZED) mul *= sConfig.GetFloatDefault("Combat.CR2.DazedDamage", 0.85f);
+		if (defState & COMBAT_STATE_STAGGERED) mul *= sConfig.GetFloatDefault("Combat.CR2.StaggeredDamageTaken", 1.15f);
+		m_cr2DamageMul = std::max(0.01f, mul);
+		AttackResult r = StrikeInterlock(session, att, def, mv, at, dt, true, false, false);
+		m_cr2DamageMul = 0.0f;
+		return r;
+	};
+
+	AttackResult resA, resB;
+	resA.hit = false; resA.isBlocked = (aSwings && tacB == TACTIC_DEFENSE);
+	resB.hit = false; resB.isBlocked = (bSwings && tacA == TACTIC_DEFENSE);
+	// The blows are simultaneous. Resolve in random order so neither side always lands first
+	// (a fighter dropped to 0 HP by the first blow does not get the second).
+	const bool aFirst = (rand() % 2) == 0;
+	for (int k = 0; k < 2; k++)
+	{
+		const bool doA = (k == 0) == aFirst;
+		if (doA && aHits && pA->getCurrentHealth() > 0 && !pA->isDead())
+			resA = swing(pA, pB, *moveA, tacA, tacB, stA, stB);
+		else if (!doA && bHits && pB->getCurrentHealth() > 0 && !pB->isDead())
+			resB = swing(pB, pA, *moveB, tacB, tacA, stB, stA);
+	}
+
+	auto stateFor = [](uint8 t) -> uint16
+	{
+		switch (t)
+		{
+			case TACTIC_SPEED:     return COMBAT_STATE_DAZED;
+			case TACTIC_POWER:     return COMBAT_STATE_STAGGERED;
+			case TACTIC_RETALIATE: return COMBAT_STATE_OFFBALANCE;
+			default:               return 0;
+		}
+	};
+	if (resA.hit && !resA.isBlocked && tacB != TACTIC_DEFENSE && stateFor(tacA))
+	{
+		session.combatStateB |= stateFor(tacA);
+		session.stateRoundB = round;
+	}
+	if (resB.hit && !resB.isBlocked && tacA != TACTIC_DEFENSE && stateFor(tacB))
+	{
+		session.combatStateA |= stateFor(tacB);
+		session.stateRoundA = round;
+	}
+
+	if (pA->getClient().isBot() == false || pB->getClient().isBot() == false)
+	{
+		INFO_LOG(format("Interlock CR2 round %1%: %2% %3% (p=%4$.2f) %5% | %6% %7% (p=%8$.2f) %9% | states A=0x%10$x B=0x%11$x")
+			% round
+			% pA->getHandle() % (aSwings ? (aHits ? "hit" : "miss") : "no swing") % CR2HitChance(pA, pB, tacA, tacB) % resA.damageTaken
+			% pB->getHandle() % (bSwings ? (bHits ? "hit" : "miss") : "no swing") % CR2HitChance(pB, pA, tacB, tacA) % resB.damageTaken
+			% session.combatStateA % session.combatStateB);
+	}
+
+	// One ILExchange per round (keeps exchangeNum 1:1 with the 0x45 round status). Show the blow
+	// that landed, the bigger one when both did, otherwise the attempt that was thrown.
+	if (session.ilViewIdA == 0 && session.ilViewIdB == 0)
+		return;
+	bool showA;
+	if (resA.hit && resB.hit) showA = resA.damageTaken >= resB.damageTaken;
+	else if (resA.hit) showA = true;
+	else if (resB.hit) showA = false;
+	else showA = aSwings || !bSwings;
+	if (showA && moveA)
+		SendInterlockExchange(session, pA, pB, resA, *moveA, tacA, tacB);
+	else if (!showA && moveB)
+		SendInterlockExchange(session, pB, pA, resB, *moveB, tacB, tacA);
 }
 
 bool CombatSystem::RunFreeFireShot(FreeFireState &state)
@@ -2537,13 +2718,17 @@ bool CombatSystem::UseAbility(PlayerObject* caster, uint16 abilityId, uint32 tar
 
     // Hacker, coder, soldier, and spy already spend Inner Strength on their own path.
     // Martial and generic moves did not, so every special was free.
-    const bool spentIS = move->isCost > 0;
-    if (spentIS && !caster->spendIS(move->isCost))
+    // CR2: an Off-Balance fighter (hit by a Grab last round) pays more Inner Strength for specials
+    uint16 isCost = move->isCost;
+    if (isCost > 0 && UseCR2Interlock() && (GetCombatState(caster->getGoId()) & COMBAT_STATE_OFFBALANCE))
+        isCost = uint16(isCost + isCost / 2);
+    const bool spentIS = isCost > 0;
+    if (spentIS && !caster->spendIS(isCost))
     {
         if (humanCaster)
             caster->getClient().QueueCommand(std::make_shared<SystemChatMsg>(
                 (format("{c:FF0000}[COMBAT] Not enough Inner Strength for %1% (%2% required).{/c}")
-                    % move->name % move->isCost).str()));
+                    % move->name % isCost).str()));
         return false;
     }
 
@@ -2561,7 +2746,7 @@ bool CombatSystem::UseAbility(PlayerObject* caster, uint16 abilityId, uint32 tar
     {
         if (targetGoId == 0 || !RequestInterlock(caster->getGoId(), targetGoId))
         {
-            if (spentIS) caster->restoreIS(move->isCost);
+            if (spentIS) caster->restoreIS(isCost);
             INFO_LOG(format("UseAbility: %1%:%2% %3% needs an interlock but none could be opened (target go %4%)")
                 % caster->getHandle() % caster->getGoId() % move->name % targetGoId);
             if (humanCaster)
@@ -2572,7 +2757,7 @@ bool CombatSystem::UseAbility(PlayerObject* caster, uint16 abilityId, uint32 tar
     }
     if (move->freefireOnly && IsInterlocked(caster->getGoId()))
     {
-        if (spentIS) caster->restoreIS(move->isCost);
+        if (spentIS) caster->restoreIS(isCost);
         return false;
     }
     
@@ -2582,7 +2767,7 @@ bool CombatSystem::UseAbility(PlayerObject* caster, uint16 abilityId, uint32 tar
     }
     if (!RequestRangedCombat(caster->getGoId(), targetGoId, abilityId))
     {
-        if (spentIS) caster->restoreIS(move->isCost);
+        if (spentIS) caster->restoreIS(isCost);
         return false;
     }
     return true;
