@@ -126,6 +126,23 @@ bool HackerSystem::ExecuteHackerAbility(PlayerObject* caster, uint16 abilityId, 
         if (!c || c->isDead()) return;
         if (!tgt || tgt->isDead()) return;
 
+        // Hostile programs roll against the target like any attack (retail viral defense);
+        // they used to land every time. Combat.ViralHitRoll = 0 restores always-hit.
+        if (targetId != casterId && abilName.find("Firewall") == std::string::npos &&
+            sConfig.GetBoolDefault("Combat.ViralHitRoll", true))
+        {
+            float p = sConfig.GetFloatDefault("Combat.ViralBaseHit", 0.75f);
+            p += std::max(-0.25f, std::min(0.25f, (float(c->getLevel()) - float(tgt->getLevel())) * 0.02f));
+            p = std::max(0.10f, std::min(0.95f, p));
+            if ((float(rand() % 10000) / 10000.0f) >= p)
+            {
+                if (!c->getClient().isBot())
+                    c->getClient().QueueCommand(std::make_shared<SystemChatMsg>(
+                        (format("%1% resisted your %2%.") % tgt->getHandle() % abilName).str()));
+                return;
+            }
+        }
+
         if (abilityId == 57) // LogicBlast1Ability
         {
             tgt->takeDamage(casterId, 45, 0x280006DF);

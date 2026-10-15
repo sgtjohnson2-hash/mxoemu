@@ -210,6 +210,7 @@ int RunCombatTestSuite()
 	// the suites below cover the optional emulator systems too
 	sConfig.SetOverride("World.FactionWar", "1");
 	sConfig.SetOverride("Combat.EmulatorExtras", "1");
+	sConfig.SetOverride("Combat.ViralHitRoll", "0"); // deterministic program damage in the checks below
 
 	// ---------------------------------------------------------------- IL exchange wire format
 	{
