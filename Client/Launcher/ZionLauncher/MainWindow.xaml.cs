@@ -196,6 +196,15 @@ namespace ZionLauncher
         [System.Runtime.InteropServices.DllImport("kernel32.dll", SetLastError = true)]
         static extern bool GetExitCodeProcess(IntPtr hProcess, out uint lpExitCode);
 
+        [System.Runtime.InteropServices.DllImport("kernel32.dll", SetLastError = true)]
+        static extern bool ReadProcessMemory(IntPtr hProcess, IntPtr lpBaseAddress, byte[] lpBuffer, uint nSize, out IntPtr lpNumberOfBytesRead);
+
+        [System.Runtime.InteropServices.DllImport("user32.dll")]
+        static extern bool GetClientRect(IntPtr hWnd, out RECT lpRect);
+
+        [System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Sequential)]
+        struct RECT { public int Left, Top, Right, Bottom; }
+
         const uint PROCESS_ALL_ACCESS = 0x1F0FFF;
         const uint MEM_COMMIT = 0x00001000;
         const uint MEM_RESERVE = 0x00002000;
@@ -3133,6 +3142,11 @@ namespace ZionLauncher
 
                 // The game used to be reported as "JACKED IN" half a second after starting even when it closed
                 // straight after the splash (tester report 2026-10-15). Wait for a game window or an exit.
+                // The client lays its HUD out in its own idea of the screen size. In windowed mode under the
+                // DXVK d3d9 layer it finds no matching display mode and keeps 800x600, so every HUD piece
+                // lands in a box in the top-left corner. Tell it the real window size (2 numbers) while it
+                // is still at login, before the in-world views are built.
+                _ = Task.Run(() => KeepInterfaceSizeInSync());
                 string? failure = await WaitForGameStartAsync(launchedHandle, launchedPid, launchNote, $"{launchArgs.Replace(password, "******")}");
                 if (failure != null)
                 {
@@ -3210,6 +3224,61 @@ namespace ZionLauncher
             {
                 if (hParent != IntPtr.Zero) CloseHandle(hParent);
             }
+        }
+
+        // client.dll 7.6005 (fixed base 0x62000000): g_pInterfaceMgr at 0x629f84e8; its GetScreenWidth /
+        // GetScreenHeight (vtable +0x104 / +0x108, 0x6232e040 / 0x6232e050) return [this+0x24] / [this+0x28],
+        // which CView snapping (FUN_620192f0) and clamping (FUN_62019460) use.
+        private void KeepInterfaceSizeInSync()
+        {
+            const uint PROCESS_VM_READ = 0x0010, PROCESS_VM_WRITE = 0x0020, PROCESS_VM_OPERATION = 0x0008, PROCESS_QUERY_INFORMATION = 0x0400;
+            var logged = new System.Collections.Generic.HashSet<string>();
+            try
+            {
+                for (int i = 0; i < 1800; i++) // up to 60 min, every 2 s
+                {
+                    Thread.Sleep(2000);
+                    bool anyAlive = false;
+                    foreach (var p in Process.GetProcessesByName("matrix"))
+                    {
+                        try
+                        {
+                            if (p.HasExited) continue;
+                            anyAlive = true;
+                            p.Refresh();
+                            IntPtr hwnd = p.MainWindowHandle;
+                            if (hwnd == IntPtr.Zero || !GetClientRect(hwnd, out RECT rc)) continue;
+                            int w = rc.Right - rc.Left, h = rc.Bottom - rc.Top;
+                            if (w < 640 || h < 480) continue;
+                            IntPtr hp = OpenProcess(PROCESS_VM_READ | PROCESS_VM_WRITE | PROCESS_VM_OPERATION | PROCESS_QUERY_INFORMATION, false, p.Id);
+                            if (hp == IntPtr.Zero) continue;
+                            try
+                            {
+                                var buf = new byte[4];
+                                if (!ReadProcessMemory(hp, (IntPtr)0x629f84e8, buf, 4, out _)) continue;
+                                uint pInterface = BitConverter.ToUInt32(buf, 0);
+                                if (pInterface < 0x10000) continue;
+                                var cur = new byte[8];
+                                if (!ReadProcessMemory(hp, (IntPtr)(pInterface + 0x24), cur, 8, out _)) continue;
+                                int cw = BitConverter.ToInt32(cur, 0), ch = BitConverter.ToInt32(cur, 4);
+                                if (cw == w && ch == h) continue;
+                                if (cw <= 0 || ch <= 0 || cw > 16384 || ch > 16384) continue; // not the object we expect
+                                var nv = new byte[8];
+                                BitConverter.GetBytes(w).CopyTo(nv, 0);
+                                BitConverter.GetBytes(h).CopyTo(nv, 4);
+                                bool ok = WriteProcessMemory(hp, (IntPtr)(pInterface + 0x24), nv, 8, out _);
+                                string key = $"{p.Id}:{cw}x{ch}->{w}x{h}";
+                                if (logged.Add(key))
+                                    AppendLaunchLog($"interface size pid={p.Id} {cw}x{ch} -> {w}x{h} ({(ok ? "ok" : "write failed")})");
+                            }
+                            finally { CloseHandle(hp); }
+                        }
+                        catch { }
+                    }
+                    if (!anyAlive && i > 30) return;
+                }
+            }
+            catch { }
         }
 
         private void TryRunDockUiHelper()
