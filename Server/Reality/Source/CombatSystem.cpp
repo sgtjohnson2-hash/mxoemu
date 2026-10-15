@@ -1218,19 +1218,25 @@ CombatSystem::AttackResult CombatSystem::ResolveAttack(PlayerObject* attacker, P
 	res.isBlocked = false;
 	res.isGlancing = false;
 
+    const bool isDojoBout = (attacker->m_lastDojoBotGoId != 0 || target->m_lastDojoBotGoId != 0 ||
+                             attacker->m_dojoOwnerGoId != 0 || target->m_dojoOwnerGoId != 0 ||
+                             attacker->getHandle().find("Dojo") != std::string::npos || target->getHandle().find("Dojo") != std::string::npos ||
+                             attacker->getHandle().find("Sparring") != std::string::npos || target->getHandle().find("Sparring") != std::string::npos);
+    const bool recordHeat = (GameServer::getSingletonPtr() == nullptr) ||
+                            (!attacker->getClient().isBot() && !isDojoBout && sConfig.GetBoolDefault("World.ThreatEscalation", false));
+
     // Firearms & Ballistics line-of-sight validation (prevent shooting through buildings)
     if (move.dmgType == DAMAGE_RANGED || move.dmgType == DAMAGE_BALLISTIC) {
         LocationVector aPos = attacker->getPosition();
         LocationVector tPos = target->getPosition();
-        bool isDojo = (attacker->m_lastDojoBotGoId != 0 || target->m_lastDojoBotGoId != 0 ||
-                       attacker->m_dojoOwnerGoId != 0 || target->m_dojoOwnerGoId != 0 ||
-                       attacker->getHandle().find("Dojo") != std::string::npos || target->getHandle().find("Dojo") != std::string::npos ||
-                       attacker->getHandle().find("Sparring") != std::string::npos || target->getHandle().find("Sparring") != std::string::npos);
+        bool isDojo = isDojoBout;
         // Check line of sight through static building geometry at chest height (+100.0f)
         bool hasLOS = isDojo || sStaticObjMgr.CheckLineOfSight(aPos.x, aPos.y + 100.0f, aPos.z, tPos.x, tPos.y + 100.0f, tPos.z);
         if (!hasLOS) {
             res.hit = false;
-            sMatrixThreatHeatmap.RecordDisruption((float)aPos.x, (float)aPos.y, (float)aPos.z, 5.0f, "Ballistic Impact on Building Cover");
+            if (recordHeat) {
+                sMatrixThreatHeatmap.RecordDisruption((float)aPos.x, (float)aPos.y, (float)aPos.z, 5.0f, "Ballistic Impact on Building Cover");
+            }
             if (!attacker->getClient().isBot()) {
                 attacker->getClient().QueueCommand(std::make_shared<SystemChatMsg>(
                     "{c:FF5555}[BALLISTICS] Line of sight obstructed! Bullet intercepted by building geometry.{/c}"
@@ -1289,7 +1295,9 @@ CombatSystem::AttackResult CombatSystem::ResolveAttack(PlayerObject* attacker, P
 
     if (target->getClient().isBot() && target->getHandle().find("Agent") != std::string::npos && target->getHandle().find("Dojo") == std::string::npos && (rand() % 100 < 30)) {
         res.hit = false;
-        sMatrixThreatHeatmap.RecordDisruption((float)target->getPosition().x, (float)target->getPosition().y, (float)target->getPosition().z, 15.0f, "Agent Wire-Fu Dodge");
+        if (recordHeat) {
+            sMatrixThreatHeatmap.RecordDisruption((float)target->getPosition().x, (float)target->getPosition().y, (float)target->getPosition().z, 15.0f, "Agent Wire-Fu Dodge");
+        }
         return res; // Agent Dodge
     }
     
@@ -1333,7 +1341,9 @@ CombatSystem::AttackResult CombatSystem::ResolveAttack(PlayerObject* attacker, P
 				}
 				sGame.AnnounceStateUpdate(&target->getClient(), std::make_shared<CombatHitFxMsg>(target->getGoId(), deflectFx, target->nextHitCounter()));
 
-				sMatrixThreatHeatmap.RecordDisruption((float)target->getPosition().x, (float)target->getPosition().y, (float)target->getPosition().z, 15.0f, "Bullet Dodge");
+				if (recordHeat) {
+					sMatrixThreatHeatmap.RecordDisruption((float)target->getPosition().x, (float)target->getPosition().y, (float)target->getPosition().z, 15.0f, "Bullet Dodge");
+				}
 
 				if (!target->getClient().isBot())
 				{
@@ -1416,10 +1426,12 @@ CombatSystem::AttackResult CombatSystem::ResolveAttack(PlayerObject* attacker, P
         dmg *= ComputeBallisticDistanceMultiplier(dist, double(move.range), move.id);
     }
 
-    if (isBallistic) {
-        sMatrixThreatHeatmap.RecordDisruption((float)attacker->getPosition().x, (float)attacker->getPosition().y, (float)attacker->getPosition().z, 8.0f, "Ballistic Fire");
-    } else {
-        sMatrixThreatHeatmap.RecordDisruption((float)attacker->getPosition().x, (float)attacker->getPosition().y, (float)attacker->getPosition().z, 12.0f, "Melee Interlock");
+    if (recordHeat) {
+        if (isBallistic) {
+            sMatrixThreatHeatmap.RecordDisruption((float)attacker->getPosition().x, (float)attacker->getPosition().y, (float)attacker->getPosition().z, 8.0f, "Ballistic Fire");
+        } else {
+            sMatrixThreatHeatmap.RecordDisruption((float)attacker->getPosition().x, (float)attacker->getPosition().y, (float)attacker->getPosition().z, 12.0f, "Melee Interlock");
+        }
     }
 
     if (target->getClient().isBot() && target->getHandle().find("Agent") != std::string::npos && target->getHandle().find("Dojo") == std::string::npos) {
@@ -2540,7 +2552,9 @@ bool CombatSystem::UseAbility(PlayerObject* caster, uint16 abilityId, uint32 tar
         caster->getClient().QueueCommand(std::make_shared<CastBarMsg>(abilityId, move->castTime));
     
     // Disruption from special ability execution
-    sMatrixThreatHeatmap.RecordDisruption((float)caster->getPosition().x, (float)caster->getPosition().y, (float)caster->getPosition().z, 12.0f, move->name);
+    if (GameServer::getSingletonPtr() == nullptr || (humanCaster && sConfig.GetBoolDefault("World.ThreatEscalation", false))) {
+        sMatrixThreatHeatmap.RecordDisruption((float)caster->getPosition().x, (float)caster->getPosition().y, (float)caster->getPosition().z, 12.0f, move->name);
+    }
 
     // melee abilities pressed outside an interlock open one against the selected target
     if (move->interlockOnly && !IsInterlocked(caster->getGoId()))
@@ -2579,8 +2593,10 @@ void CombatSystem::AwardKill(PlayerObject* killer, PlayerObject* victim)
     if (!killer || !victim) return;
     
     // Record elimination on Matrix Threat Heatmap
-    sMatrixThreatHeatmap.RecordDisruption((float)victim->getPosition().x, (float)victim->getPosition().y, (float)victim->getPosition().z, 
-                                         killer->getClient().isBot() ? 30.0f : 50.0f, "Combat Elimination");
+    if (GameServer::getSingletonPtr() == nullptr || (!killer->getClient().isBot() && sConfig.GetBoolDefault("World.ThreatEscalation", false))) {
+        sMatrixThreatHeatmap.RecordDisruption((float)victim->getPosition().x, (float)victim->getPosition().y, (float)victim->getPosition().z, 
+                                             killer->getClient().isBot() ? 30.0f : 50.0f, "Combat Elimination");
+    }
 
     // Original experience logic
     uint32 exp = victim->getLevel() * 100;

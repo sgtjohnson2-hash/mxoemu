@@ -234,6 +234,7 @@ bool AgentPossessionManager::DemorphAgent(uint32 agentId)
                 po->setMaximumHealth(agent.originalHealthM);
                 po->setCurrentHealth(agent.originalHealthC);
                 po->setCombatStance(false);
+                po->GenerateProceduralAppearance((uint32)po->getCharacterUID(), FACTION_NONE, agent.originalCivilianName);
             }
         }
         if (auto bot = sBotMgr.GetBotByGOID(agent.civilianGoId)) {

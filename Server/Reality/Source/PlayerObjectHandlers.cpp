@@ -1929,15 +1929,7 @@ void PlayerObject::ParsePlayerCommand( string theCmd )
 		}
 
 		LocationVector pos = this->getPosition();
-		if (targetCivId == 0 && m_targetGoId != 0) {
-			PlayerObject* tpo = sObjMgr.getGOPtrSafe(m_targetGoId);
-			if (tpo && !tpo->isDead() && tpo->m_dojoOwnerGoId == 0 &&
-			    pos.DistanceSq(tpo->getPosition()) <= 1200.0f * 1200.0f) {
-				targetCivId = m_targetGoId;
-			}
-		}
-
-		if (targetCivId == 0 || !sObjMgr.getGOPtrSafe(targetCivId)) {
+		if (targetCivId == 0 && BotManager::getSingletonPtr() == nullptr) {
 			float bestDistSq = 1200.0f * 1200.0f;
 			for (uint32 gid : sObjMgr.getAllGOIds()) {
 				PlayerObject* po = sObjMgr.getGOPtrSafe(gid);
@@ -1952,17 +1944,21 @@ void PlayerObject::ParsePlayerCommand( string theCmd )
 			}
 		}
 
-		if (targetCivId == 0 || !sObjMgr.getGOPtrSafe(targetCivId)) {
-			// Spawn a civilian bot 4m in front of player at authentic pavement level
+		bool spawnedDedicatedHost = false;
+		if ((targetCivId == 0 || !sObjMgr.getGOPtrSafe(targetCivId)) && BotManager::getSingletonPtr() != nullptr) {
+			// Spawn a dedicated civilian host 4m in front of player at authentic pavement level (autoSpawnSelf = false
+			// so ObjectCreateMsg 0x02 is sent after PossessCivilian sets the Agent handle and appearance)
 			const LocationVector botPos = DojoPlaceInFront(pos, 4.0f, 0.0f);
-			auto bot = sBotMgr.SpawnSingleBot((float)botPos.x, (float)pos.y, (float)botPos.z, FACTION_NONE);
+			auto bot = sBotMgr.SpawnSingleBot((float)botPos.x, (float)pos.y, (float)botPos.z, FACTION_NONE, false);
 			if (bot) {
 				targetCivId = bot->GetPlayerGoId();
 				if (auto po = sObjMgr.getGOPtrSafe(targetCivId)) {
 					po->setHandle("Thomas Anderson");
 					po->setFactionName("Civilian");
 					po->setPosition(botPos);
-					noteEntitySpawned(targetCivId);
+					po->m_despawnOnDeath = true;
+					po->m_dojoOwnerGoId = m_goId;
+					spawnedDedicatedHost = true;
 				}
 			}
 		}
@@ -1970,6 +1966,12 @@ void PlayerObject::ParsePlayerCommand( string theCmd )
 		if (targetCivId != 0) {
 			uint32 agentId = sAgentPossessionMgr.PossessCivilian(targetCivId, agentName, m_goId, isSmith);
 			if (agentId != 0) {
+				if (spawnedDedicatedHost) {
+					if (auto agentPo = sObjMgr.getGOPtrSafe(targetCivId)) {
+						agentPo->SpawnSelf();
+					}
+					noteEntitySpawned(targetCivId);
+				}
 				setTargetGoId(targetCivId);
 				m_lastDojoBotGoId = targetCivId;
 

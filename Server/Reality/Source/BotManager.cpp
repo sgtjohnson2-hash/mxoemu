@@ -132,9 +132,11 @@ std::shared_ptr<BotClient> BotManager::SpawnSingleBot(float x, float y, float z,
     };
 
     // Phase 2: Bot Population Ceiling & Spatial Recycling
-    {
+    // Never recycle an existing viewport bot when autoSpawnSelf is false (e.g. Dojo/Mission spawns),
+    // because recycling a GoId already in a human player's m_spawnedEntities preserves its old client nameplate.
+    if (autoSpawnSelf) {
         std::lock_guard<std::recursive_mutex> lock(m_botMutex);
-        size_t activeBotLimit = (size_t)sConfig.GetIntDefault("BotManager.ActiveBotLimit", 500);
+        size_t activeBotLimit = (size_t)sConfig.GetIntDefault("BotManager.ActiveBotLimit", 2500);
         if (activeBotLimit > MAX_BOT_POPULATION_CEILING) activeBotLimit = MAX_BOT_POPULATION_CEILING;
         if (m_bots.size() >= activeBotLimit && !m_bots.empty()) {
             size_t idx = (m_recycleBotIndex++) % m_bots.size();

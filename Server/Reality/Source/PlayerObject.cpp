@@ -386,8 +386,6 @@ std::string PlayerObject::getRsiHex() const
 
 void PlayerObject::setRsiHex(const std::string& hexStr)
 {
-	if (hexStr.empty()) return;
-
 	std::vector<byte> bytes;
 	for (size_t i = 0; i + 1 < hexStr.size(); i += 2) {
 		std::string byteString = hexStr.substr(i, 2);
@@ -398,8 +396,6 @@ void PlayerObject::setRsiHex(const std::string& hexStr)
 			break;
 		}
 	}
-
-	if (bytes.empty()) return;
 
 	if (bytes.size() >= 15) {
 		uint8 sex = (bytes[0] & 0x80) ? 1 : 0;
@@ -421,7 +417,7 @@ void PlayerObject::setRsiHex(const std::string& hexStr)
 		return;
 	}
 
-	// For bots with short archetype hashes (e.g. mob_parsed.csv 4-byte ids like b0010058),
+	// For bots with empty rsiHex or short archetype hashes (e.g. mob_parsed.csv 4-byte ids like b0010058),
 	// dynamically generate procedural appearances seeded by the archetype hash + unique NPC UID/handle.
 	uint32 seed = 0;
 	for (size_t i = 0; i < bytes.size(); ++i)
@@ -923,10 +919,9 @@ void PlayerObject::GenerateProceduralAppearance(uint32 seed, int faction, const 
 
 	RsiData &ref = *m_rsi;
 	ref["Sex"] = isFemale ? 1 : 0;
-	// Valid Body IDs in newrsiIDs.csv: Female = {1, 2, 3}, Male = {0, 1, 2}
-	static const uint8 femaleBodyIds[] = { 1, 2, 3 };
-	static const uint8 maleBodyIds[]   = { 0, 1, 2 };
-	ref["Body"] = isFemale ? pickFrom(femaleBodyIds, sizeof(femaleBodyIds)) : pickFrom(maleBodyIds, sizeof(maleBodyIds));
+	// Standard human body proportions in newrsiIDs.csv: Male RSIMBody001 = 0, Female RSIFBody001 = 1
+	// (Higher body IDs 1..3 are oversized Brute/Giant meshes)
+	ref["Body"] = isFemale ? 1 : 0;
 	ref["Hat"] = 0;
 
 	// Head & Face mesh (validated in newrsiIDs.csv)
