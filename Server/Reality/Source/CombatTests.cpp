@@ -559,11 +559,11 @@ int RunCombatTestSuite()
 			check(stepStarted && std::fabs(stepDist - 150.0) < 1.0, "interlock participants step into 1.5m melee range (got " + std::to_string(stepDist) + " units)");
 			LocationVector finalPosA = stepA.po->getPosition();
 			LocationVector finalPosB = stepB.po->getPosition();
-			// Retail Matrix Online client convention: forward is (-sin(rot), -cos(rot))
-			double fxA = -std::sin(finalPosA.rot), fzA = -std::cos(finalPosA.rot);
+			// Retail Matrix Online client convention: forward is (+sin(rot), +cos(rot))
+			double fxA = std::sin(finalPosA.rot), fzA = std::cos(finalPosA.rot);
 			double txA = (finalPosB.x - finalPosA.x) / stepDist, tzA = (finalPosB.z - finalPosA.z) / stepDist;
 			double dotA = fxA * txA + fzA * tzA;
-			double fxB = -std::sin(finalPosB.rot), fzB = -std::cos(finalPosB.rot);
+			double fxB = std::sin(finalPosB.rot), fzB = std::cos(finalPosB.rot);
 			double txB = (finalPosA.x - finalPosB.x) / stepDist, tzB = (finalPosA.z - finalPosB.z) / stepDist;
 			double dotB = fxB * txB + fzB * tzB;
 			check(dotA >= 0.999 && dotB >= 0.999, "interlock participants face each other squarely (dotA=" + std::to_string(dotA) + ", dotB=" + std::to_string(dotB) + ")");
@@ -2544,10 +2544,10 @@ int RunCombatTestSuite()
 			check(sObjMgr.getGOForView(&testClient, botView1) == 0,
 				"releaseRelevantSet clears all allocated views for disconnected client");
 
-			// 9. Verify CombatantModeMsg wire layout matching retail 7.6005 CLTDistrObjView::UnpackAttributes (0x623217B0)
-			// Attribute 31 (PlayerAttrOther::CombatantMode) packs into Group 4 bit 3:
-			// Headers: 0x80 0x80 0x80 0x80 0x08, value: 0x01 (mode 1), terminated with nomoreattribs uint16(0).
-			// Total wire size must be exactly 11 bytes with NO count prefix.
+			// 9. Verify CombatantModeMsg wire layout matching retail 7.6005 CLTDistrObjView::UnpackAttributeUpdate (0x623215B0)
+			// Component 1 (0x02 = CLTGOCmpPlayerCharacterClient 0x623259E0), Attribute 31 (PlayerAttrOther::CombatantMode) in Group 4 bit 3:
+			// Component mask: 0x02, Headers: 0x80 0x80 0x80 0x80 0x08, value: 0x01 (mode 1), terminated with nomoreattribs uint16(0).
+			// Total wire size must be exactly 12 bytes with NO count prefix.
 			TestHumanClient modeClient;
 			modeClient.SetPlayerGoId(33000);
 			uint32 testBotGoId = 33269;
@@ -2555,15 +2555,16 @@ int RunCombatTestSuite()
 			CombatantModeMsg combatantMsg(testBotGoId, 1);
 			combatantMsg.setReceiver(&modeClient);
 			const ByteBuffer& combatantBuf = combatantMsg.toBuf();
-			check(combatantBuf.size() == 11, "CombatantModeMsg size is authentic 11 bytes (no count prefix)");
+			check(combatantBuf.size() == 12, "CombatantModeMsg size is authentic 12 bytes (component 0x02 + groups + value + term)");
 			check(combatantBuf.read<uint8>(0) == 0x03, "CombatantModeMsg opcode is 0x03");
 			check(combatantBuf.read<uint16>(1) == testBotViewId, "CombatantModeMsg viewId matches botViewId");
-			check(combatantBuf.read<uint8>(3) == 0x80 && combatantBuf.read<uint8>(4) == 0x80 &&
-				combatantBuf.read<uint8>(5) == 0x80 && combatantBuf.read<uint8>(6) == 0x80 &&
-				combatantBuf.read<uint8>(7) == 0x08,
+			check(combatantBuf.read<uint8>(3) == 0x02, "CombatantModeMsg component mask is 0x02 (CLTGOCmpPlayerCharacterClient)");
+			check(combatantBuf.read<uint8>(4) == 0x80 && combatantBuf.read<uint8>(5) == 0x80 &&
+				combatantBuf.read<uint8>(6) == 0x80 && combatantBuf.read<uint8>(7) == 0x80 &&
+				combatantBuf.read<uint8>(8) == 0x08,
 				"CombatantModeMsg group headers match 7-bit groups 0..4 (0x80 0x80 0x80 0x80 0x08)");
-			check(combatantBuf.read<uint8>(8) == 0x01, "CombatantModeMsg Attribute 31 value is 0x01 (combat mode)");
-			check(combatantBuf.read<uint16>(9) == 0, "CombatantModeMsg terminated with nomoreattribs uint16(0)");
+			check(combatantBuf.read<uint8>(9) == 0x01, "CombatantModeMsg Attribute 31 value is 0x01 (combat mode)");
+			check(combatantBuf.read<uint16>(10) == 0, "CombatantModeMsg terminated with nomoreattribs uint16(0)");
 
 			// 10. Verify SelfCombatantModeMsg wire layout for local player (View 2 / VIEWID_SELF)
 			// Attribute 43 (PlayerAttrSelf::CombatantMode) packs into Group 6 bit 1:
@@ -2624,9 +2625,11 @@ int RunCombatTestSuite()
 				PlayerAppearanceMsg appMsg(harahel->getGoId());
 				appMsg.setReceiver(&modeClient);
 				const ByteBuffer& appBuf = appMsg.toBuf();
-				check(appBuf.size() > 0, "PlayerAppearanceMsg serializes cleanly for Harahel bot");
+				check(appBuf.size() == 23, "PlayerAppearanceMsg serializes to 23 bytes (0x03 + viewId:2 + comp:1(0x02) + grp:1(0x09) + useRsi:1 + rsi:15 + term:2)");
 				check(appBuf.read<uint8>(0) == 0x03, "PlayerAppearanceMsg opcode is 0x03");
 				check(appBuf.read<uint16>(1) == botView, "PlayerAppearanceMsg viewId matches allocated view");
+				check(appBuf.read<uint8>(3) == 0x02, "PlayerAppearanceMsg component mask is 0x02 (CLTGOCmpPlayerCharacterClient)");
+				check(appBuf.read<uint8>(4) == 0x09, "PlayerAppearanceMsg group 0 header is 0x09 (UseRSIDescription | RSIDescription)");
 			}
 
 			// 13. Verify Procedural Appearance Diversity across bots
@@ -3758,6 +3761,173 @@ int RunCombatTestSuite()
 						auto ab12 = opSquadA.po->m_abilitySystem->getAbility(12);
 						check(ab12 != nullptr && ab12->getLevel() == 2,
 							"RPC 0x80B7 (RPC_HandleUpgradeAbility) adds levelDelta (+1) to upgrade ability 12 from level 1 to level 2");
+					}
+
+					// Verify &discipline command is not shadowed by &style
+					{
+						opSquadA.po->setAdmin(true);
+						ByteBuffer discCmd;
+						discCmd << (uint8)0x28 << (uint8)0x10 << (uint16)swap16(8) << (uint32)0;
+						discCmd.writeString("&discipline hacker");
+						p13ClientA.captured.clear();
+						opSquadA.po->HandleCommand(discCmd);
+						check(p13ClientA.sawText("[DISCIPLINE] Hacker kit loaded"),
+							"&discipline hacker routes to discipline kit handler without being shadowed by &style");
+					}
+
+					// Verify ILRoundStatusMsg (0x45) isAttacker, outcomeFlag, and round == exchangeNum sync
+					{
+						sCombatSys.EndInterlock(opSquadA.go, false);
+						sCombatSys.EndInterlock(opSquadB.go, false);
+						opSquadA.po->setFaction(FACTION_ZION);
+						opSquadB.po->setFaction(FACTION_MACHINES);
+						opSquadA.po->setMaximumHealth(500);
+						opSquadA.po->setCurrentHealth(500);
+						opSquadB.po->setMaximumHealth(500);
+						opSquadB.po->setCurrentHealth(500);
+						opSquadA.po->setPosition(LocationVector(10000.0, 0.0, 10000.0));
+						opSquadB.po->setPosition(LocationVector(10100.0, 0.0, 10000.0));
+						opSquadA.po->setTactic(TACTIC_POWER);
+						opSquadB.po->setTactic(TACTIC_RETALIATE); // B's Grab breaks A's Power -> B is exchange attacker!
+
+						p13ClientA.captured.clear();
+						p13ClientB.captured.clear();
+						bool ilStarted = sCombatSys.RequestInterlock(opSquadA.go, opSquadB.go);
+						check(ilStarted, "Interlock starts between two human operatives A and B for 0x45 perspective test");
+						if (ilStarted)
+						{
+							sCombatSys.SetTactic(opSquadA.go, TACTIC_POWER);
+							sCombatSys.SetTactic(opSquadB.go, TACTIC_RETALIATE);
+							sCombatSys.WithInterlockSession(opSquadA.go, [](InterlockSession& s) {
+								s.nextRoundTime = 0;
+							});
+							p13ClientA.captured.clear();
+							p13ClientB.captured.clear();
+							sCombatSys.Update();
+
+							InterlockSession snap;
+							bool gotSnap = sCombatSys.GetInterlockSessionCopy(opSquadA.go, snap);
+							check(gotSnap && snap.exchangeNum == 2 && snap.lastExchangeAttackerGoId == opSquadB.go,
+								"Round 1 (B's Grab vs A's Power) emits exchange #2 with B as exchange attacker");
+
+							// Inspect 0x45 ILRoundStatusMsg (89 bytes) on A (defender of exchange #2) and B (attacker of exchange #2)
+							bool aSaw0x45 = false, bSaw0x45 = false;
+							for (const auto& pkt : p13ClientA.captured)
+							{
+								if (pkt.size() == 89 && static_cast<uint8>(pkt[0]) == 0x45)
+								{
+									uint16 rNum = uint16(static_cast<uint8>(pkt[3])) | (uint16(static_cast<uint8>(pkt[4])) << 8);
+									uint8 isAtt = static_cast<uint8>(pkt[5]);
+									uint32 outFlag = uint32(static_cast<uint8>(pkt[0x3d])) | (uint32(static_cast<uint8>(pkt[0x3e])) << 8) |
+													 (uint32(static_cast<uint8>(pkt[0x3f])) << 16) | (uint32(static_cast<uint8>(pkt[0x40])) << 24);
+									if (rNum == 2 && isAtt == 0 && outFlag == 0x1u)
+										aSaw0x45 = true;
+								}
+							}
+							for (const auto& pkt : p13ClientB.captured)
+							{
+								if (pkt.size() == 89 && static_cast<uint8>(pkt[0]) == 0x45)
+								{
+									uint16 rNum = uint16(static_cast<uint8>(pkt[3])) | (uint16(static_cast<uint8>(pkt[4])) << 8);
+									uint8 isAtt = static_cast<uint8>(pkt[5]);
+									uint32 outFlag = uint32(static_cast<uint8>(pkt[0x3d])) | (uint32(static_cast<uint8>(pkt[0x3e])) << 8) |
+													 (uint32(static_cast<uint8>(pkt[0x3f])) << 16) | (uint32(static_cast<uint8>(pkt[0x40])) << 24);
+									if (rNum == 2 && isAtt == 1 && outFlag == 0x1u)
+										bSaw0x45 = true;
+								}
+							}
+							check(aSaw0x45 && bSaw0x45,
+								"0x45 ILRoundStatusMsg sets isAttacker=0, outcomeFlag=0x1 on defender A and isAttacker=1, outcomeFlag=0x1 on attacker B (matching client.dll 0x620bd3fa)");
+
+							// Round 2: Clash (both Power vs Power) -> both deal damage, 1 exchange emitted (#3), outcomeFlag=0x3
+							sCombatSys.SetTactic(opSquadA.go, TACTIC_POWER);
+							sCombatSys.SetTactic(opSquadB.go, TACTIC_POWER);
+							sCombatSys.WithInterlockSession(opSquadA.go, [](InterlockSession& s) {
+								s.nextRoundTime = 0;
+							});
+							p13ClientA.captured.clear();
+							p13ClientB.captured.clear();
+							sCombatSys.Update();
+
+							gotSnap = sCombatSys.GetInterlockSessionCopy(opSquadA.go, snap);
+							check(gotSnap && snap.exchangeNum == 3,
+								"Two-sided Clash round increments exchangeNum by 1 (to #3) so st.round matches [ebx+0x18]");
+							sCombatSys.EndInterlock(opSquadA.go, false);
+
+							// ---------------------------------------------------------------- NPC Bot Facing, Patrol Home Anchor & Procedural RSI Diversity
+							{
+								LocationVector origin(1000.0, 572.0, 1000.0);
+								const double cardDirs[4][2] = { { 0.0, 500.0 }, { 500.0, 0.0 }, { 0.0, -500.0 }, { -500.0, 0.0 } };
+								bool allFacingOk = true;
+								for (int d = 0; d < 4; ++d)
+								{
+									LocationVector dest(origin.x + cardDirs[d][0], 572.0, origin.z + cardDirs[d][1]);
+									double ang = origin.CalcAngTo(dest);
+									double fx = std::sin(ang), fz = std::cos(ang);
+									double tx = cardDirs[d][0] / 500.0, tz = cardDirs[d][1] / 500.0;
+									if (fx * tx + fz * tz < 0.999)
+										allFacingOk = false;
+								}
+								check(allFacingOk, "LocationVector::CalcAngTo aligns (+sin(rot), +cos(rot)) with all 4 cardinal directions");
+
+								auto patrolBot = sBotMgr.SpawnSingleBot(25000.0f, 572.0f, 25000.0f, FACTION_ZION, false);
+								check(patrolBot != nullptr && patrolBot->m_hasHome &&
+									std::fabs(patrolBot->GetSpawnX() - 25000.0f) < 1.0f &&
+									std::fabs(patrolBot->GetSpawnZ() - 25000.0f) < 1.0f,
+									"SpawnSingleBot initializes m_hasHome and anchors spawn/home coordinates at (25000, 25000)");
+								if (patrolBot)
+								{
+									PlayerObject* pPo = sObjMgr.getGOPtr(patrolBot->GetPlayerGoId());
+									check(pPo != nullptr && pPo->getHandle().rfind("Bot_", 0) != 0,
+										"SpawnSingleBot assigns lore-appropriate archetype handle ('" + (pPo ? pPo->getHandle() : "") + "') instead of Bot_<uid>");
+									patrolBot->UpdateBotAI(0.25f);
+									if (pPo)
+									{
+										LocationVector afterPos = pPo->getPosition();
+										double distFromHome = std::hypot(afterPos.x - 25000.0, afterPos.z - 25000.0);
+										check(distFromHome < 500.0 && patrolBot->GetLocomotionAnimation() != 30,
+											"Street bot stays near home on UpdateBotAI instead of sprinting toward (0,0)");
+									}
+								}
+
+								std::set<std::string> uniqueRsiHexes;
+								bool allModelsValid = true;
+								int maleCount = 0, femaleCount = 0;
+								for (int i = 0; i < 24; ++i)
+								{
+									opSquadA.po->setHandle("Citizen_" + std::to_string(i));
+									opSquadA.po->GenerateProceduralAppearance(1000u + uint32(i * 7919u), i % 4, "Street_" + std::to_string(i));
+									byte rsiBytes[16] = { 0 };
+									uint8 rsiLen = opSquadA.po->getRsiData(rsiBytes, sizeof(rsiBytes));
+									ByteBuffer rsiBuf;
+									rsiBuf.append(rsiBytes, rsiLen);
+									uniqueRsiHexes.insert(Bin2Hex(rsiBuf));
+									RsiData baseRsi;
+									baseRsi.FromBytes(rsiBytes, rsiLen);
+									bool isFem = (baseRsi["Sex"] == 1);
+									if (isFem)
+									{
+										femaleCount++;
+										RsiDataFemale rf;
+										rf.FromBytes(rsiBytes, rsiLen);
+										if (rf["Body"] < 1 || rf["Body"] > 3) allModelsValid = false;
+										if (rf["Coat"] == 12) allModelsValid = false;
+										if (rf["Glasses"] == 17) allModelsValid = false;
+									}
+									else
+									{
+										maleCount++;
+										RsiDataMale rm;
+										rm.FromBytes(rsiBytes, rsiLen);
+										if (rm["Body"] > 2) allModelsValid = false;
+										if (rm["Shirt"] == 0 || rm["Shirt"] > 11) allModelsValid = false;
+									}
+								}
+								check(uniqueRsiHexes.size() >= 18 && maleCount > 0 && femaleCount > 0 && allModelsValid,
+									"GenerateProceduralAppearance produces diverse male+female outfits with strictly valid retail RSI IDs (unique=" +
+									std::to_string(uniqueRsiHexes.size()) + "/24)");
+							}
+						}
 					}
 				}
 			}

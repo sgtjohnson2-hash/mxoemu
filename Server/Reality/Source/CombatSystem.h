@@ -120,6 +120,7 @@ struct InterlockSession
 	FightingStyle lastStyleB = FightingStyle::None;
 	uint16 roundMoveA = 0;	//ability/move each side swung in the last round (HUD round status)
 	uint16 roundMoveB = 0;
+	uint32 lastExchangeAttackerGoId = 0; //goId of attacker in the most recently emitted ILExchange
 };
 
 // Interlock move references (interlock database rez 0x24000B8B), from captured live exchanges
@@ -215,7 +216,7 @@ public:
 	};
 
 	AttackResult StrikeInterlock(InterlockSession &session, PlayerObject* attacker, PlayerObject* target,
-		const CombatMove& move, uint8 attackerTactic, uint8 targetTactic, bool inInterlock, bool bypassBlock);
+		const CombatMove& move, uint8 attackerTactic, uint8 targetTactic, bool inInterlock, bool bypassBlock, bool emitExchange = true);
 	ILExchange BuildExchange(const InterlockSession &session, PlayerObject* viewer, PlayerObject* attacker,
 		PlayerObject* defender, uint16 number, uint32 attackerPreMove, uint32 defenderPreMove, uint32 mainMove,
 		const InterlockAnimPair* animPair = nullptr);

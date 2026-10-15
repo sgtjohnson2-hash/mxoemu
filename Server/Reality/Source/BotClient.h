@@ -108,7 +108,14 @@ public:
     bool IsInCombat() const { return m_targetGoId != 0; }
     uint32 GetNextActionTime() const { return m_nextActionTime; }
     void SetNextActionTime(uint32 time) { m_nextActionTime = time; }
-    void SetSpawnLocation(float x, float y, float z) { m_spawnX = x; m_spawnY = y; m_spawnZ = z; }
+    void SetSpawnLocation(float x, float y, float z) {
+        m_spawnX = x; m_spawnY = y; m_spawnZ = z;
+        m_homeX = x; m_homeY = y; m_homeZ = z;
+        m_hasHome = true;
+        m_patrolInitialized = false;
+        m_pathWaypoints.clear();
+        m_currentWaypointIndex = 0;
+    }
     float GetSpawnX() const { return m_spawnX; }
     float GetSpawnY() const { return m_spawnY; }
     float GetSpawnZ() const { return m_spawnZ; }

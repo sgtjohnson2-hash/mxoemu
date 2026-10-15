@@ -422,15 +422,16 @@ void PlayerObject::setRsiHex(const std::string& hexStr)
 	}
 
 	// For bots with short archetype hashes (e.g. mob_parsed.csv 4-byte ids like b0010058),
-	// dynamically generate procedural appearances seeded by the archetype hash.
+	// dynamically generate procedural appearances seeded by the archetype hash + unique NPC UID/handle.
 	uint32 seed = 0;
 	for (size_t i = 0; i < bytes.size(); ++i)
 	{
 		seed = (seed << 8) | bytes[i];
 	}
-	if (seed == 0)
+	seed = seed * 1664525u + (uint32)m_characterUID * 2654435761u;
+	for (char c : m_handle)
 	{
-		for (char c : m_handle) seed = seed * 31 + (uint8)c;
+		seed = seed * 131u + (uint8)c;
 	}
 	GenerateProceduralAppearance(seed, getFaction(), m_handle);
 }
@@ -861,10 +862,9 @@ void PlayerObject::setMartialArtistAppearance(FightingStyle style)
 
 void PlayerObject::GenerateProceduralAppearance(uint32 seed, int faction, const std::string& archetype)
 {
-	// Bots.ProceduralAppearance (default 0): the random head/hair/clothing indices below are not
-	// checked against the client's RSI tables. The fixed RSI is the client-verified retail default
-	// that avoids the client.dll NULL demeanor lookup crash. Enable only after a live crash-free run.
-	if (!sConfig.GetBoolDefault("Bots.ProceduralAppearance", false))
+	// Bots.ProceduralAppearance (default true): every model ID below is strictly validated
+	// against retail hd_reference/data/newrsiIDs.csv and mxoClothing_previos_version.csv.
+	if (!sConfig.GetBoolDefault("Bots.ProceduralAppearance", true))
 	{
 		m_rsi.reset(new RsiDataMale);
 		const byte defaultRsiValues[] = {0x00,0x0C,0x71,0x48,0x18,0x0C,0xE2,0x00,0x23,0x00,0xB0,0x00,0x40,0x00,0x00};
@@ -877,16 +877,19 @@ void PlayerObject::GenerateProceduralAppearance(uint32 seed, int faction, const 
 		seed = (uint32)m_characterUID;
 		if (seed == 0)
 		{
-			for (char c : m_handle) seed = seed * 37 + (uint8)c;
+			seed = (uint32)m_goId * 2654435761u + 1013904223u;
 		}
 	}
+	for (char c : m_handle) seed = seed * 131u + (uint8)c;
+	for (char c : archetype) seed = seed * 37u + (uint8)c;
 
 	std::string handleLower = m_handle;
 	std::transform(handleLower.begin(), handleLower.end(), handleLower.begin(), ::tolower);
 	std::string archLower = archetype;
 	std::transform(archLower.begin(), archLower.end(), archLower.begin(), ::tolower);
+	std::string combined = handleLower + " " + archLower;
 
-	if (handleLower.find("agent") != std::string::npos || archLower.find("agent") != std::string::npos)
+	if (combined.find("agent") != std::string::npos)
 	{
 		setAgentAppearance();
 		return;
@@ -901,6 +904,9 @@ void PlayerObject::GenerateProceduralAppearance(uint32 seed, int faction, const 
 	auto nextRand = [&seed]() -> uint32 {
 		seed = seed * 1664525u + 1013904223u;
 		return seed;
+	};
+	auto pickFrom = [&nextRand](const uint8* arr, size_t count) -> uint8 {
+		return arr[(nextRand() >> 8) % count];
 	};
 
 	// Gender selection: 50% Male, 50% Female
@@ -917,105 +923,187 @@ void PlayerObject::GenerateProceduralAppearance(uint32 seed, int faction, const 
 
 	RsiData &ref = *m_rsi;
 	ref["Sex"] = isFemale ? 1 : 0;
-	ref["Body"] = (nextRand() >> 8) % 3; // 0=Slender, 1=Average, 2=Heavy
-	ref["Hat"] = 0; // Default no hat
+	// Valid Body IDs in newrsiIDs.csv: Female = {1, 2, 3}, Male = {0, 1, 2}
+	static const uint8 femaleBodyIds[] = { 1, 2, 3 };
+	static const uint8 maleBodyIds[]   = { 0, 1, 2 };
+	ref["Body"] = isFemale ? pickFrom(femaleBodyIds, sizeof(femaleBodyIds)) : pickFrom(maleBodyIds, sizeof(maleBodyIds));
+	ref["Hat"] = 0;
 
-	// Head & Face mesh
+	// Head & Face mesh (validated in newrsiIDs.csv)
 	if (isFemale)
 	{
 		ref["Face"] = (nextRand() >> 4) % 20; // RSIFHead001 - RSIFHead020 (0..19)
 		ref["Hair"] = (nextRand() >> 6) % 19; // RSIFHair001 - RSIFHair019 (0..18)
 		ref["Leggings"] = 0;
-		ref["FacialDetail"] = (nextRand() >> 7) % 6; // makeup/beauty marks
+		ref["FacialDetail"] = (nextRand() >> 7) % 6; // 0..5
 	}
 	else
 	{
 		ref["Face"] = (nextRand() >> 4) % 19; // RSIMHead001 - RSIMHead019 (0..18)
 		ref["Hair"] = (nextRand() >> 6) % 18; // RSIMHair001 - RSIMHair018 (0..17)
-		ref["FacialDetail"] = (nextRand() >> 7) % 12; // facial hair (clean, stubble, beard, mustache)
+		ref["FacialDetail"] = (nextRand() >> 7) % 12; // 0..11
 	}
 
-	// Authentic colors
+	// Validated skin & hair palettes (newrsiIDs.csv)
 	static const uint8 skinPalette[] = { 0, 1, 2, 3, 4, 5, 8, 9, 10, 11, 12, 13, 14, 15 };
 	static const uint8 hairPalette[] = { 0, 1, 2, 3, 4, 5, 6, 7, 8, 12, 14, 16 };
-	ref["SkinTone"] = skinPalette[(nextRand() >> 3) % (sizeof(skinPalette) / sizeof(skinPalette[0]))];
-	ref["HairColor"] = hairPalette[(nextRand() >> 5) % (sizeof(hairPalette) / sizeof(hairPalette[0]))];
+	ref["SkinTone"] = pickFrom(skinPalette, sizeof(skinPalette));
+	ref["HairColor"] = pickFrom(hairPalette, sizeof(hairPalette));
 
-	// Clothing by Faction & Archetype
-	if (faction == FACTION_MACHINES)
+	// Validated clothing & eyewear pools from mxoClothing_previos_version.csv + newrsiIDs.csv
+	static const uint8 maleSuitCoats[]   = { 1, 2, 3, 5, 6, 7, 13, 14, 15, 29 };
+	static const uint8 maleTrenchCoats[] = { 0, 4, 8, 9, 10, 11, 12, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28 };
+	static const uint8 maleCasualCoats[] = { 0, 0, 1, 5, 7, 16, 17, 18, 19, 24, 25, 27 };
+	static const uint8 maleShirts[]      = { 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11 };
+	static const uint8 malePants[]       = { 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16 };
+	static const uint8 maleShoes[]       = { 1, 2, 3, 4, 5, 6, 7, 10, 11, 19, 20, 26, 27, 29, 30, 31, 32, 33, 34 };
+	static const uint8 maleGlasses[]     = { 3, 4, 5, 6, 8, 9, 10, 13, 14, 15, 16, 17, 18 };
+	static const uint8 maleGloves[]      = { 1, 2, 3, 4, 5, 6, 8, 11, 12, 13, 14, 15 };
+
+	// Note: Female coat 12 does not exist in retail tables; excluded!
+	static const uint8 femaleTrenchCoats[] = { 0, 1, 2, 3, 4, 5, 6, 7, 8, 11, 16, 17, 18, 19 };
+	static const uint8 femaleFormalCoats[] = { 0, 2, 4, 6, 9, 10, 13, 14, 15, 16 };
+	static const uint8 femaleCasualCoats[] = { 0, 0, 9, 10, 11, 13, 14, 15, 17, 18 };
+	static const uint8 femaleShirts[]      = { 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 26, 28 };
+	static const uint8 femalePants[]       = { 1, 2, 3, 4, 5, 6, 7, 8, 10 };
+	static const uint8 femaleShoes[]       = { 1, 2, 3, 4, 5, 6, 7, 8, 9, 11, 12 };
+	static const uint8 femaleGlasses[]     = { 1, 3, 5, 6, 9, 10, 11, 12, 13 };
+	static const uint8 femaleGloves[]      = { 1, 2, 3, 4, 5, 6, 11, 12, 13, 14, 15 };
+	static const uint8 femaleLeggings[]    = { 0, 1, 2, 3, 4 };
+
+	bool isPoliceOrGuard = (combined.find("police") != std::string::npos ||
+	                        combined.find("mcu") != std::string::npos ||
+	                        combined.find("swat") != std::string::npos ||
+	                        combined.find("security") != std::string::npos ||
+	                        combined.find("officer") != std::string::npos ||
+	                        combined.find("guard") != std::string::npos);
+	bool isGangOrPunk = (combined.find("gang") != std::string::npos ||
+	                     combined.find("thug") != std::string::npos ||
+	                     combined.find("punk") != std::string::npos ||
+	                     combined.find("demon") != std::string::npos ||
+	                     combined.find("skull") != std::string::npos ||
+	                     combined.find("slasher") != std::string::npos ||
+	                     combined.find("dropkick") != std::string::npos ||
+	                     combined.find("marauder") != std::string::npos);
+
+	if (isPoliceOrGuard)
 	{
-		// Machines Operatives / Informants: Dark formal suits, sunglasses
-		ref["Shirt"] = isFemale ? 7 : 10;
-		ref["Coat"] = 0;
-		ref["Pants"] = 1;
-		ref["Shoes"] = 1;
-		ref["Gloves"] = 0;
-		ref["Glasses"] = 17; // Sunglasses
-		ref["ShirtColor"] = 32;
-		ref["PantsColor"] = 9;
-		ref["CoatColor"] = 0;
-		ref["ShoeColor"] = 0;
+		// MCU Police / Security / Tactical Guards: dark navy/charcoal uniforms, tactical jackets, boots
+		static const uint8 guardColors[] = { 0, 9, 10, 11, 12, 32, 35 };
+		ref["Shirt"] = isFemale ? pickFrom(femaleShirts, sizeof(femaleShirts)) : pickFrom(maleShirts, sizeof(maleShirts));
+		ref["Coat"]  = isFemale ? pickFrom(femaleFormalCoats, sizeof(femaleFormalCoats)) : pickFrom(maleSuitCoats, sizeof(maleSuitCoats));
+		ref["Pants"] = isFemale ? pickFrom(femalePants, sizeof(femalePants)) : pickFrom(malePants, sizeof(malePants));
+		ref["Shoes"] = isFemale ? pickFrom(femaleShoes, sizeof(femaleShoes)) : pickFrom(maleShoes, sizeof(maleShoes));
+		ref["Gloves"] = ((nextRand() >> 8) % 2 == 0)
+			? (isFemale ? pickFrom(femaleGloves, sizeof(femaleGloves)) : pickFrom(maleGloves, sizeof(maleGloves)))
+			: 0;
+		ref["Glasses"] = ((nextRand() >> 9) % 2 == 0)
+			? (isFemale ? pickFrom(femaleGlasses, sizeof(femaleGlasses)) : pickFrom(maleGlasses, sizeof(maleGlasses)))
+			: 0;
+		ref["ShirtColor"] = pickFrom(guardColors, sizeof(guardColors));
+		ref["PantsColor"] = pickFrom(guardColors, sizeof(guardColors));
+		ref["CoatColor"]  = pickFrom(guardColors, sizeof(guardColors));
+		ref["ShoeColor"]  = 0;
+		ref["GlassesColor"] = 0;
+	}
+	else if (isGangOrPunk)
+	{
+		// Street Gangs / Punks: leather jackets, vests, bold street colors, combat boots
+		static const uint8 gangColors[] = { 0, 1, 2, 4, 6, 14, 16, 20, 22, 24, 25, 33 };
+		ref["Shirt"] = isFemale ? pickFrom(femaleShirts, sizeof(femaleShirts)) : pickFrom(maleShirts, sizeof(maleShirts));
+		ref["Coat"]  = isFemale ? pickFrom(femaleTrenchCoats, sizeof(femaleTrenchCoats)) : pickFrom(maleTrenchCoats, sizeof(maleTrenchCoats));
+		ref["Pants"] = isFemale ? pickFrom(femalePants, sizeof(femalePants)) : pickFrom(malePants, sizeof(malePants));
+		ref["Shoes"] = isFemale ? pickFrom(femaleShoes, sizeof(femaleShoes)) : pickFrom(maleShoes, sizeof(maleShoes));
+		ref["Gloves"] = ((nextRand() >> 8) % 2 == 0)
+			? (isFemale ? pickFrom(femaleGloves, sizeof(femaleGloves)) : pickFrom(maleGloves, sizeof(maleGloves)))
+			: 0;
+		ref["Glasses"] = ((nextRand() >> 9) % 2 == 0)
+			? (isFemale ? pickFrom(femaleGlasses, sizeof(femaleGlasses)) : pickFrom(maleGlasses, sizeof(maleGlasses)))
+			: 0;
+		if (isFemale) ref["Leggings"] = pickFrom(femaleLeggings, sizeof(femaleLeggings));
+		ref["ShirtColor"] = pickFrom(gangColors, sizeof(gangColors));
+		ref["PantsColor"] = pickFrom(gangColors, sizeof(gangColors));
+		ref["CoatColor"]  = pickFrom(gangColors, sizeof(gangColors));
+		ref["ShoeColor"]  = (nextRand() >> 8) % 4;
+		ref["GlassesColor"] = (nextRand() >> 10) % 4;
+	}
+	else if (faction == FACTION_MACHINES)
+	{
+		// Machine Operatives / Cypherites: tailored suits, overcoats, formal shirts, sleek sunglasses
+		static const uint8 machColors[] = { 0, 1, 8, 9, 10, 11, 12, 31, 32, 35 };
+		ref["Shirt"] = isFemale ? pickFrom(femaleShirts, sizeof(femaleShirts)) : pickFrom(maleShirts, sizeof(maleShirts));
+		ref["Coat"]  = isFemale ? pickFrom(femaleFormalCoats, sizeof(femaleFormalCoats)) : pickFrom(maleSuitCoats, sizeof(maleSuitCoats));
+		ref["Pants"] = isFemale ? pickFrom(femalePants, sizeof(femalePants)) : pickFrom(malePants, sizeof(malePants));
+		ref["Shoes"] = isFemale ? pickFrom(femaleShoes, sizeof(femaleShoes)) : pickFrom(maleShoes, sizeof(maleShoes));
+		ref["Gloves"] = ((nextRand() >> 8) % 3 == 0)
+			? (isFemale ? pickFrom(femaleGloves, sizeof(femaleGloves)) : pickFrom(maleGloves, sizeof(maleGloves)))
+			: 0;
+		ref["Glasses"] = ((nextRand() >> 9) % 4 != 0)
+			? (isFemale ? pickFrom(femaleGlasses, sizeof(femaleGlasses)) : pickFrom(maleGlasses, sizeof(maleGlasses)))
+			: 0;
+		ref["ShirtColor"] = pickFrom(machColors, sizeof(machColors));
+		ref["PantsColor"] = pickFrom(machColors, sizeof(machColors));
+		ref["CoatColor"]  = pickFrom(machColors, sizeof(machColors));
+		ref["ShoeColor"]  = (nextRand() >> 8) % 3;
 		ref["GlassesColor"] = 0;
 	}
 	else if (faction == FACTION_ZION)
 	{
-		// Zion Operatives: Cyberpunk trench coats, combat tops, cargo pants, combat boots
-		static const uint8 zionShirts[] = { 1, 3, 4, 5, 8, 12 };
-		static const uint8 zionCoats[] = { 0, 1, 2, 3, 4, 5 };
-		static const uint8 zionPants[] = { 1, 2, 3, 5, 6 };
-		static const uint8 zionColors[] = { 0, 1, 4, 9, 12, 16, 20, 24, 32 };
-
-		ref["Shirt"] = zionShirts[(nextRand() >> 4) % (sizeof(zionShirts) / sizeof(zionShirts[0]))];
-		ref["Coat"] = zionCoats[(nextRand() >> 5) % (sizeof(zionCoats) / sizeof(zionCoats[0]))];
-		ref["Pants"] = zionPants[(nextRand() >> 6) % (sizeof(zionPants) / sizeof(zionPants[0]))];
-		ref["Shoes"] = 1 + ((nextRand() >> 7) % 5);
-		ref["Gloves"] = ((nextRand() >> 8) % 3 == 0) ? 1 : 0;
-		ref["Glasses"] = ((nextRand() >> 9) % 2 == 0) ? (1 + ((nextRand() >> 10) % 18)) : 0;
-
-		ref["ShirtColor"] = zionColors[(nextRand() >> 3) % (sizeof(zionColors) / sizeof(zionColors[0]))];
-		ref["PantsColor"] = zionColors[(nextRand() >> 5) % (sizeof(zionColors) / sizeof(zionColors[0]))];
-		ref["CoatColor"] = zionColors[(nextRand() >> 7) % (sizeof(zionColors) / sizeof(zionColors[0]))];
-		ref["ShoeColor"] = (nextRand() >> 8) % 4;
-		ref["GlassesColor"] = 0;
+		// Zion Operatives: cyberpunk trench coats, leather dusters, tactical tops, cargo pants, combat boots
+		static const uint8 zionColors[] = { 0, 1, 4, 9, 12, 16, 18, 20, 24, 28, 32 };
+		ref["Shirt"] = isFemale ? pickFrom(femaleShirts, sizeof(femaleShirts)) : pickFrom(maleShirts, sizeof(maleShirts));
+		ref["Coat"]  = isFemale ? pickFrom(femaleTrenchCoats, sizeof(femaleTrenchCoats)) : pickFrom(maleTrenchCoats, sizeof(maleTrenchCoats));
+		ref["Pants"] = isFemale ? pickFrom(femalePants, sizeof(femalePants)) : pickFrom(malePants, sizeof(malePants));
+		ref["Shoes"] = isFemale ? pickFrom(femaleShoes, sizeof(femaleShoes)) : pickFrom(maleShoes, sizeof(maleShoes));
+		ref["Gloves"] = ((nextRand() >> 8) % 2 == 0)
+			? (isFemale ? pickFrom(femaleGloves, sizeof(femaleGloves)) : pickFrom(maleGloves, sizeof(maleGloves)))
+			: 0;
+		ref["Glasses"] = ((nextRand() >> 9) % 3 != 0)
+			? (isFemale ? pickFrom(femaleGlasses, sizeof(femaleGlasses)) : pickFrom(maleGlasses, sizeof(maleGlasses)))
+			: 0;
+		ref["ShirtColor"] = pickFrom(zionColors, sizeof(zionColors));
+		ref["PantsColor"] = pickFrom(zionColors, sizeof(zionColors));
+		ref["CoatColor"]  = pickFrom(zionColors, sizeof(zionColors));
+		ref["ShoeColor"]  = (nextRand() >> 8) % 4;
+		ref["GlassesColor"] = (nextRand() >> 10) % 3;
 	}
 	else if (faction == FACTION_MEROVINGIAN || faction == FACTION_EXILE)
 	{
-		// Merovingian Exiles: Aristocratic velvet coats, elegant dress shirts, dark formal trousers
-		static const uint8 exileShirts[] = { 2, 4, 6, 7, 10 };
-		static const uint8 exileCoats[] = { 1, 2, 4, 6 };
-		static const uint8 exileColors[] = { 0, 6, 9, 14, 16, 22, 25, 33 };
-
-		ref["Shirt"] = exileShirts[(nextRand() >> 4) % (sizeof(exileShirts) / sizeof(exileShirts[0]))];
-		ref["Coat"] = exileCoats[(nextRand() >> 5) % (sizeof(exileCoats) / sizeof(exileCoats[0]))];
-		ref["Pants"] = 1 + ((nextRand() >> 6) % 4);
-		ref["Shoes"] = 1 + ((nextRand() >> 7) % 4);
-		ref["Gloves"] = 0;
-		ref["Glasses"] = ((nextRand() >> 8) % 3 == 0) ? (1 + ((nextRand() >> 9) % 18)) : 0;
-
-		ref["ShirtColor"] = exileColors[(nextRand() >> 3) % (sizeof(exileColors) / sizeof(exileColors[0]))];
-		ref["PantsColor"] = exileColors[(nextRand() >> 5) % (sizeof(exileColors) / sizeof(exileColors[0]))];
-		ref["CoatColor"] = exileColors[(nextRand() >> 7) % (sizeof(exileColors) / sizeof(exileColors[0]))];
-		ref["ShoeColor"] = 0;
+		// Merovingian Exiles: aristocratic velvet coats, high-fashion shirts/corsets, crimson/violet/black
+		static const uint8 exileColors[] = { 0, 2, 6, 9, 14, 16, 22, 25, 33, 36 };
+		ref["Shirt"] = isFemale ? pickFrom(femaleShirts, sizeof(femaleShirts)) : pickFrom(maleShirts, sizeof(maleShirts));
+		ref["Coat"]  = isFemale ? pickFrom(femaleFormalCoats, sizeof(femaleFormalCoats)) : pickFrom(maleSuitCoats, sizeof(maleSuitCoats));
+		ref["Pants"] = isFemale ? pickFrom(femalePants, sizeof(femalePants)) : pickFrom(malePants, sizeof(malePants));
+		ref["Shoes"] = isFemale ? pickFrom(femaleShoes, sizeof(femaleShoes)) : pickFrom(maleShoes, sizeof(maleShoes));
+		ref["Gloves"] = ((nextRand() >> 8) % 3 == 0)
+			? (isFemale ? pickFrom(femaleGloves, sizeof(femaleGloves)) : pickFrom(maleGloves, sizeof(maleGloves)))
+			: 0;
+		ref["Glasses"] = ((nextRand() >> 9) % 2 == 0)
+			? (isFemale ? pickFrom(femaleGlasses, sizeof(femaleGlasses)) : pickFrom(maleGlasses, sizeof(maleGlasses)))
+			: 0;
+		if (isFemale) ref["Leggings"] = pickFrom(femaleLeggings, sizeof(femaleLeggings));
+		ref["ShirtColor"] = pickFrom(exileColors, sizeof(exileColors));
+		ref["PantsColor"] = pickFrom(exileColors, sizeof(exileColors));
+		ref["CoatColor"]  = pickFrom(exileColors, sizeof(exileColors));
+		ref["ShoeColor"]  = (nextRand() >> 8) % 3;
 		ref["GlassesColor"] = 0;
 	}
 	else
 	{
-		// Bluepill Citizens: Diverse street casual, blazers, sweaters, jeans, slacks
-		static const uint8 civShirts[] = { 1, 2, 3, 5, 6, 8, 9, 11 };
-		static const uint8 civPants[] = { 1, 2, 3, 4, 5, 7 };
-		static const uint8 civColors[] = { 0, 1, 3, 6, 9, 11, 14, 16, 19, 22, 24, 27, 30, 32, 41 };
-
-		ref["Shirt"] = civShirts[(nextRand() >> 4) % (sizeof(civShirts) / sizeof(civShirts[0]))];
-		ref["Coat"] = ((nextRand() >> 5) % 3 == 0) ? (1 + ((nextRand() >> 6) % 5)) : 0;
-		ref["Pants"] = civPants[(nextRand() >> 7) % (sizeof(civPants) / sizeof(civPants[0]))];
-		ref["Shoes"] = 1 + ((nextRand() >> 8) % 5);
+		// Bluepill Citizens: diverse street casual, blazers, sweaters, jeans, slacks, skirts
+		static const uint8 civColors[] = { 0, 1, 3, 5, 6, 9, 11, 14, 16, 19, 22, 24, 27, 30, 32, 38, 41 };
+		ref["Shirt"] = isFemale ? pickFrom(femaleShirts, sizeof(femaleShirts)) : pickFrom(maleShirts, sizeof(maleShirts));
+		ref["Coat"]  = isFemale ? pickFrom(femaleCasualCoats, sizeof(femaleCasualCoats)) : pickFrom(maleCasualCoats, sizeof(maleCasualCoats));
+		ref["Pants"] = isFemale ? pickFrom(femalePants, sizeof(femalePants)) : pickFrom(malePants, sizeof(malePants));
+		ref["Shoes"] = isFemale ? pickFrom(femaleShoes, sizeof(femaleShoes)) : pickFrom(maleShoes, sizeof(maleShoes));
 		ref["Gloves"] = 0;
-		ref["Glasses"] = ((nextRand() >> 9) % 4 == 0) ? (1 + ((nextRand() >> 10) % 15)) : 0;
-
-		ref["ShirtColor"] = civColors[(nextRand() >> 3) % (sizeof(civColors) / sizeof(civColors[0]))];
-		ref["PantsColor"] = civColors[(nextRand() >> 5) % (sizeof(civColors) / sizeof(civColors[0]))];
-		ref["CoatColor"] = civColors[(nextRand() >> 7) % (sizeof(civColors) / sizeof(civColors[0]))];
-		ref["ShoeColor"] = (nextRand() >> 8) % 4;
+		ref["Glasses"] = ((nextRand() >> 9) % 5 == 0)
+			? (isFemale ? pickFrom(femaleGlasses, sizeof(femaleGlasses)) : pickFrom(maleGlasses, sizeof(maleGlasses)))
+			: 0;
+		ref["ShirtColor"] = pickFrom(civColors, sizeof(civColors));
+		ref["PantsColor"] = pickFrom(civColors, sizeof(civColors));
+		ref["CoatColor"]  = pickFrom(civColors, sizeof(civColors));
+		ref["ShoeColor"]  = (nextRand() >> 8) % 4;
 		ref["GlassesColor"] = 0;
 	}
 
@@ -1578,7 +1666,13 @@ vector<msgBaseClassPtr> PlayerObject::getCurrentStatePackets()
 	vector<msgBaseClassPtr> tempVect;
 	tempVect.push_back(make_shared<PlayerSpawnMsg>(m_goId));
 	tempVect.push_back(make_shared<PlayerAppearanceMsg>(m_goId));
-	if (!m_parent.isBot() && (m_currAnimation != 0 || m_currMood != 0))
+	if (m_parent.isBot())
+	{
+		uint8 rotByte = m_pos.getMxoRot();
+		tempVect.push_back(make_shared<RotationStateMsg>(m_goId, rotByte));
+		tempVect.push_back(make_shared<LocomotionStateMsg>(m_goId, m_currAnimation, rotByte));
+	}
+	else if (m_currAnimation != 0 || m_currMood != 0)
 	{
 		tempVect.push_back(make_shared<AnimationStateMsg>(m_goId));
 	}

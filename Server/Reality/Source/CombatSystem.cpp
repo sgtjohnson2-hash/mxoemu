@@ -423,15 +423,15 @@ static void SendILRoundStatus(const InterlockSession &session, PlayerObject* pA,
 	if (!sConfig.GetBoolDefault("Interlock.HudRpcs", true))
 		return;
 	const uint32 lockMs = uint32(double(sGame.GetSimTime()) * 1000.0 + 0.5) + msUntilLock;
-	// Interlock.HudIsAttacker: -1 (default) = viewer is the attacker when it holds IL slot 1,
-	// 0/1 force it. It decides which slot the client names as attacker in its combat log.
+	// Interlock.HudIsAttacker: -1 (default) = viewer is the attacker when it is the attacker of the
+	// current ILExchange (client.dll 0x620bd3fa checks st.isAttacker against [ebx+0x34] attackerSlot
+	// vs [ebx+0x38] defenderSlot and maps outcomeFlag bit 0x1 to attackerSlot, bit 0x2 to defenderSlot).
 	const int isAttackerCfg = sConfig.GetIntDefault("Interlock.HudIsAttacker", -1);
-	const bool viewerIsAttacker = isAttackerCfg < 0 ? (ILSlotFor(true) == 1) : (isAttackerCfg != 0);
 	// round 0 (interlock start) carries no swing: 0x100 keeps the client from logging a fake exchange
 	const bool opening = session.roundNumber == 0;
 
-	DEBUG_LOG(format("IL round status round %1%: A %2% (tactic %3%, move %4%, dealt %5%) B %6% (tactic %7%, move %8%, dealt %9%) lock +%10%ms")
-		% session.roundNumber % pA->getHandle() % uint32(session.committedTacticA) % session.roundMoveA % dmgByA
+	DEBUG_LOG(format("IL round status round %1% (ex %2%): A %3% (tactic %4%, move %5%, dealt %6%) B %7% (tactic %8%, move %9%, dealt %10%) lock +%11%ms")
+		% session.roundNumber % session.exchangeNum % pA->getHandle() % uint32(session.committedTacticA) % session.roundMoveA % dmgByA
 		% pB->getHandle() % uint32(session.committedTacticB) % session.roundMoveB % dmgByB % msUntilLock);
 
 	for (int side = 0; side < 2; side++)
@@ -442,9 +442,12 @@ static void SendILRoundStatus(const InterlockSession &session, PlayerObject* pA,
 			continue;
 		const int dealt = side == 0 ? dmgByA : dmgByB;
 		const int taken = side == 0 ? dmgByB : dmgByA;
+		const uint32 exAttackerGoId = session.lastExchangeAttackerGoId != 0 ? session.lastExchangeAttackerGoId : session.goIdA;
+		const bool viewerIsAttacker = isAttackerCfg < 0 ? (viewer->getGoId() == exAttackerGoId) : (isAttackerCfg != 0);
 		ILRoundStatus st;
 		st.turn = uint16(session.roundNumber);
-		st.round = uint16(session.roundNumber + 1);
+		// client.dll 0x621a199f compares st.round (@3 u16 CombatRound) against [ebx+0x18] (ILExchange::number)
+		st.round = uint16(session.exchangeNum > 0 ? session.exchangeNum : (session.roundNumber + 1));
 		st.isAttacker = viewerIsAttacker;
 		st.player = BuildILCard(side == 0 ? session.committedTacticA : session.committedTacticB,
 			side == 0 ? session.roundMoveA : session.roundMoveB, dealt);
@@ -453,8 +456,10 @@ static void SendILRoundStatus(const InterlockSession &session, PlayerObject* pA,
 		st.opponentHandle = otherRef;
 		if (opening)
 			st.outcomeFlag = 0x100;
-		else
+		else if (viewerIsAttacker)
 			st.outcomeFlag = (dealt > 0 ? 0x1u : 0u) | (taken > 0 ? 0x2u : 0u);
+		else
+			st.outcomeFlag = (taken > 0 ? 0x1u : 0u) | (dealt > 0 ? 0x2u : 0u);
 		st.damageTaken = int16(std::max(0, std::min(taken, 32767)));
 		st.opponentDamageTaken = int16(std::max(0, std::min(dealt, 32767)));
 		st.lockTimeMs = lockMs;
@@ -488,9 +493,11 @@ void CombatSystem::Update()
 			if (avgDilation <= 0.1f) avgDilation = 0.1f; // Prevent infinite division
 
 			it->nextRoundTime = currTime + uint32((INTERLOCK_ROUND_SECONDS * 1000.0f) / avgDilation);
-			it->roundNumber++;
-			SendILRoundStatus(*it, pA, pB, hpB0 - int(pB->getCurrentHealth()),
-				hpA0 - int(pA->getCurrentHealth()), it->nextRoundTime - currTime);
+			if (hpA0 > 0 && hpB0 > 0) {
+				it->roundNumber++;
+				SendILRoundStatus(*it, pA, pB, hpB0 - int(pB->getCurrentHealth()),
+					hpA0 - int(pA->getCurrentHealth()), it->nextRoundTime - currTime);
+			}
 		}
 
 		if (!keepAlive) {
@@ -721,6 +728,7 @@ bool CombatSystem::RequestInterlock(uint32 attackerGoId, uint32 targetGoId, uint
 	session.ilViewIdA = 0;
 	session.ilViewIdB = 0;
 	session.exchangeNum = 1; //exchange 1 is the opening sent with the IL state below
+	session.lastExchangeAttackerGoId = attackerGoId;
 
 	// Step interlock participants into melee range (~1.5m = 150.0 units) and face each other squarely
 	// before issuing InterlockInitMsg, ensuring accurate animation alignment and camera framing.
@@ -749,8 +757,8 @@ bool CombatSystem::RequestInterlock(uint32 attackerGoId, uint32 targetGoId, uint
 		posB.x = midX + (targetMeleeDist * 0.5);
 	}
 
-	posA.rot = std::atan2(-(posB.x - posA.x), -(posB.z - posA.z));
-	posB.rot = std::atan2(-(posA.x - posB.x), -(posA.z - posB.z));
+	posA.rot = std::atan2(posB.x - posA.x, posB.z - posA.z);
+	posB.rot = std::atan2(posA.x - posB.x, posA.z - posB.z);
 	// A bot spawned on a different floor made the exchange play in the air.
 	// The attacker is standing on the floor the fight was started from.
 	posB.y = posA.y;
@@ -1312,7 +1320,8 @@ CombatSystem::AttackResult CombatSystem::ResolveAttack(PlayerObject* attacker, P
 				}
 
 				// Authentic deflection FX 0x2800059c (FX_CHARACTER_DEFLECTION)
-				static const uint32 deflectFx = 0x2800059c;
+				static const uint32 s_cfgDeflectHitFx = (uint32)sConfig.GetIntDefault("Combat.HitFx", 0);
+				const uint32 deflectFx = (s_cfgDeflectHitFx != 0) ? 0x2800059c : 0;
 				// Authentic dodge animation (0x03EC = G_D_XR_DodgeFromHF_GLb)
 				target->setCurrentAnimation(0xEC);
 				target->setCurrentMood(0x03);
@@ -1751,6 +1760,7 @@ void CombatSystem::SendInterlockExchange(InterlockSession &session, PlayerObject
 		return;
 
 	session.exchangeNum++;
+	session.lastExchangeAttackerGoId = attacker ? attacker->getGoId() : 0;
 
 	// Determine exchange outcome for fluid contact synchronization
 	InterlockExchangeOutcome outcome = InterlockExchangeOutcome::NormalHit;
@@ -1858,7 +1868,7 @@ void CombatSystem::SendInterlockExchange(InterlockSession &session, PlayerObject
 }
 
 CombatSystem::AttackResult CombatSystem::StrikeInterlock(InterlockSession &session, PlayerObject* attacker,
-	PlayerObject* target, const CombatMove& move, uint8 attackerTactic, uint8 targetTactic, bool inInterlock, bool bypassBlock)
+	PlayerObject* target, const CombatMove& move, uint8 attackerTactic, uint8 targetTactic, bool inInterlock, bool bypassBlock, bool emitExchange)
 {
 	const bool exchangeDriven = (session.ilViewIdA != 0 || session.ilViewIdB != 0);
 	m_ilExchangeActive = exchangeDriven;
@@ -1920,7 +1930,7 @@ CombatSystem::AttackResult CombatSystem::StrikeInterlock(InterlockSession &sessi
 		}
 	}
 
-	if (exchangeDriven)
+	if (exchangeDriven && emitExchange)
 		SendInterlockExchange(session, attacker, target, res, move, attackerTactic, targetTactic);
 	return res;
 }
@@ -2167,10 +2177,27 @@ bool CombatSystem::RunInterlockRound(InterlockSession &session)
 		if (chatBanners && !pA->getClient().isBot()) pA->getClient().QueueCommand(std::make_shared<SystemChatMsg>((format("{c:FFFF00}[MARTIAL ARTS] Stance Clash! Both combatants chose %1%. Glancing exchange.{/c}") % clashName).str()));
 		if (chatBanners && !pB->getClient().isBot()) pB->getClient().QueueCommand(std::make_shared<SystemChatMsg>((format("{c:FFFF00}[MARTIAL ARTS] Stance Clash! Both combatants chose %1%. Glancing exchange.{/c}") % clashName).str()));
 
-		// Both combatants exchange glancing blows at 0.90x damage (TacticModifier handles 0.90x)
-		if (moveA) StrikeInterlock(session, pA, pB, *moveA, tacA, tacB, true, false);
+		// Both combatants exchange glancing blows at 0.90x damage (TacticModifier handles 0.90x).
+		// Emit one paired ILExchange per round so session.exchangeNum and ILRoundStatusMsg stay 1:1.
+		AttackResult resA, resB;
+		bool aSwung = false, bSwung = false;
+		if (moveA) {
+			resA = StrikeInterlock(session, pA, pB, *moveA, tacA, tacB, true, false, false);
+			aSwung = true;
+		}
 		// 0 HP is down even before the reaper sets the dead flag: no swing back from the knocked-out side
-		if (moveB && !pB->isDead() && pB->getCurrentHealth() > 0) StrikeInterlock(session, pB, pA, *moveB, tacB, tacA, true, false);
+		if (moveB && !pB->isDead() && pB->getCurrentHealth() > 0) {
+			resB = StrikeInterlock(session, pB, pA, *moveB, tacB, tacA, true, false, false);
+			bSwung = true;
+		}
+		if (session.ilViewIdA != 0 || session.ilViewIdB != 0) {
+			if (bSwung && (pA->isDead() || pA->getCurrentHealth() == 0))
+				SendInterlockExchange(session, pB, pA, resB, *moveB, tacB, tacA);
+			else if (aSwung)
+				SendInterlockExchange(session, pA, pB, resA, *moveA, tacA, tacB);
+			else if (bSwung)
+				SendInterlockExchange(session, pB, pA, resB, *moveB, tacB, tacA);
+		}
 	}
 
 	// Execution & Interrupt Resolution:
@@ -2193,11 +2220,15 @@ bool CombatSystem::RunInterlockRound(InterlockSession &session)
 		// B's Grab counters A's heavy Power attack or breaks Guard with an unblockable throw.
 		if (moveB) StrikeInterlock(session, pB, pA, *moveB, tacB, tacA, true, true);
 	} else if (!isClash) {
-		// Standard exchange: defenders only strike if an active special is queued
+		// Standard exchange: defenders only strike if an active special is queued.
+		// Emit one paired ILExchange per round so session.exchangeNum and ILRoundStatusMsg stay 1:1.
+		AttackResult resA, resB;
+		bool aSwung = false, bSwung = false;
 		bool specialFromA = (session.queuedMoveA != 0);
 		if (tacA != TACTIC_DEFENSE || specialFromA) {
 			if (moveA) {
-				StrikeInterlock(session, pA, pB, *moveA, tacA, tacB, true, false);
+				resA = StrikeInterlock(session, pA, pB, *moveA, tacA, tacB, true, false, false);
+				aSwung = true;
 			}
 		}
 		// B at 0 HP is knocked out even before the reaper sets the dead flag. It used to swing back
@@ -2206,9 +2237,18 @@ bool CombatSystem::RunInterlockRound(InterlockSession &session)
 			bool specialFromB = (session.queuedMoveB != 0);
 			if (tacB != TACTIC_DEFENSE || specialFromB) {
 				if (moveB) {
-					StrikeInterlock(session, pB, pA, *moveB, tacB, tacA, true, false);
+					resB = StrikeInterlock(session, pB, pA, *moveB, tacB, tacA, true, false, false);
+					bSwung = true;
 				}
 			}
+		}
+		if (session.ilViewIdA != 0 || session.ilViewIdB != 0) {
+			if (bSwung && (pA->isDead() || pA->getCurrentHealth() == 0))
+				SendInterlockExchange(session, pB, pA, resB, *moveB, tacB, tacA);
+			else if (aSwung)
+				SendInterlockExchange(session, pA, pB, resA, *moveA, tacA, tacB);
+			else if (bSwung)
+				SendInterlockExchange(session, pB, pA, resB, *moveB, tacB, tacA);
 		}
 	}
 

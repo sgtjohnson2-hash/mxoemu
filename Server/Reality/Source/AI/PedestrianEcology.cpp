@@ -480,16 +480,14 @@ void PedestrianEcology::UpdateCivilianFear(BotClient* bot, PlayerObject* me, flo
 
         if (distSq > 9000000.0f) continue; // 30m
 
-        // Agent Smith sightings
-        if (otherBot->isAgent() || otherPo->getHandle().find("Smith") != std::string::npos || otherPo->getHandle().find("Agent") != std::string::npos) {
+        // Agent Smith sightings: only trigger panic when an Agent is actively fighting or infecting nearby
+        if ((otherBot->isAgent() || otherPo->getHandle().find("Smith") != std::string::npos || otherPo->getHandle().find("Agent") != std::string::npos)
+            && (otherBot->IsInCombat() || otherBot->IsInfecting())) {
             smithNearby = true;
             float dist = std::sqrt(std::max(1.0f, distSq));
             float smithFactor = (dist < 1000.0f) ? 0.70f : 0.35f;
             fearDelta += smithFactor * deltaSeconds * (0.9f + personality.neuroticism * 0.5f);
-
-            if (otherBot->IsInCombat()) {
-                fearDelta += 0.25f * deltaSeconds;
-            }
+            fearDelta += 0.25f * deltaSeconds;
         }
 
         // Casualties / dead bodies
@@ -536,10 +534,10 @@ void PedestrianEcology::UpdateCivilian(BotClient* bot, float deltaSeconds)
             return;
         }
 
-        float evacSpeed = 8.5f;
-        dx /= dist;
-        dz /= dist;
-        bot->MoveTo((float)pos.x + dx * evacSpeed * deltaSeconds * 100.0f, (float)pos.y, (float)pos.z + dz * evacSpeed * deltaSeconds * 100.0f);
+        if (!bot->HasPath()) {
+            bot->MoveTo((float)evacTarget.x, (float)evacTarget.y, (float)evacTarget.z);
+        }
+        bot->StepAlongPath(deltaSeconds, 450.0f, 30);
         return;
     }
 
@@ -578,7 +576,11 @@ void PedestrianEcology::ExecuteTier0Normal(BotClient* bot, PlayerObject* me, flo
     float toPdz = targetPOI.z - pos.z;
     float distToPOI = std::sqrt(toPdx * toPdx + toPdz * toPdz);
 
-    if (distToPOI > 1500.0f) {
+    // If the nearest POI is more than 60m away, stroll the local sidewalk patrol circuit
+    // with natural pauses instead of marching across the entire district.
+    if (distToPOI > 6000.0f) {
+        bot->RoamAndSwarm(deltaSeconds);
+    } else if (distToPOI > 600.0f) {
         if (!bot->HasPath()) {
             bot->MoveTo(targetPOI.x, targetPOI.y, targetPOI.z);
         }
@@ -590,9 +592,9 @@ void PedestrianEcology::ExecuteTier0Normal(BotClient* bot, PlayerObject* me, flo
         InteractWithPOI(bot, me, targetPOI);
 
         int roll = rand() % 100;
-        if (roll < 35) {
+        if (roll < 50) {
             bot->RoamAndSwarm(deltaSeconds);
-        } else if (roll < 65) {
+        } else if (roll < 80) {
             auto nearby = sSpatialGrid.GetClientsInRadius(pos.x, pos.z);
             for (GameClient* gc : nearby) {
                 if (gc == bot || !gc->isBot()) continue;
@@ -623,11 +625,13 @@ void PedestrianEcology::ExecuteTier1Uneasy(BotClient* bot, PlayerObject* me, flo
     float toPdz = targetPOI.z - pos.z;
     float distToPOI = std::sqrt(toPdx * toPdx + toPdz * toPdz);
 
-    if (distToPOI > 800.0f) {
+    if (distToPOI > 6000.0f) {
+        bot->RoamAndSwarm(deltaSeconds);
+    } else if (distToPOI > 800.0f) {
         if (!bot->HasPath()) {
             bot->MoveTo(targetPOI.x, targetPOI.y, targetPOI.z);
         }
-        bot->StepAlongPath(deltaSeconds, 320.0f, 3); // Hurry walk
+        bot->StepAlongPath(deltaSeconds, 300.0f, 3); // Brisk walk
     } else {
         if (bot->HasPath()) {
             bot->ClearPath();
@@ -676,9 +680,8 @@ void PedestrianEcology::ExecuteTier2Alarm(BotClient* bot, PlayerObject* me, floa
 
         BotClient* otherBot = dynamic_cast<BotClient*>(gc);
         bool isThreat = false;
-        if (otherBot && otherBot->isAgent()) isThreat = true;
-        if (otherPo->getHandle().find("Smith") != std::string::npos || otherPo->getHandle().find("Agent") != std::string::npos) isThreat = true;
         if (otherBot && otherBot->IsInCombat()) isThreat = true;
+        if (otherBot && otherBot->IsInfecting()) isThreat = true;
 
         if (isThreat) {
             float dx = pos.x - otherPo->getPosition().x;
@@ -701,21 +704,12 @@ void PedestrianEcology::ExecuteTier2Alarm(BotClient* bot, PlayerObject* me, floa
             avoidX /= avoidLen;
             avoidZ /= avoidLen;
         }
-        float evadeSpeed = 5.5f; // Fast, hurried walking pace
-        bot->MoveTo(pos.x + avoidX * evadeSpeed * 100.0f * deltaSeconds, pos.y,
-                    pos.z + avoidZ * evadeSpeed * 100.0f * deltaSeconds);
-    } else {
-        // Steer away from narrow alleyways towards main thoroughfares
-        PointOfInterest mainPlaza = GetNearestPOI(pos.x, pos.z, POI_OFFICE_COMMERCIAL);
-        float toMdx = mainPlaza.x - pos.x;
-        float toMdz = mainPlaza.z - pos.z;
-        float mDist = std::sqrt(toMdx * toMdx + toMdz * toMdz);
-        if (mDist > 500.0f) {
-            toMdx /= mDist;
-            toMdz /= mDist;
-            bot->MoveTo(pos.x + toMdx * 4.5f * 100.0f * deltaSeconds, pos.y,
-                        pos.z + toMdz * 4.5f * 100.0f * deltaSeconds);
+        if (!bot->HasPath()) {
+            bot->MoveTo(pos.x + avoidX * 800.0f, pos.y, pos.z + avoidZ * 800.0f);
         }
+        bot->StepAlongPath(deltaSeconds, 320.0f, 3);
+    } else {
+        bot->RoamAndSwarm(deltaSeconds);
     }
 
     // 3. Nervous glances over shoulder

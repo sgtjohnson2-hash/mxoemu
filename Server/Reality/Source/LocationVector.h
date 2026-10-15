@@ -122,13 +122,13 @@ public:
 		double delta_z = Z - z;
 		return sqrt(delta_x*delta_x + delta_z*delta_z);
 	}
-	// atan2(dx / dz)
+	// atan2(dx, dz): MxO heading 0 faces +Z, +pi/2 faces +X -> forward is (+sin(rot), +cos(rot))
 	double CalcAngTo(const LocationVector & dest) const
 	{
 		double dx = dest.x - x;
 		double dz = dest.z - z;
 		if (dx != 0.0 || dz != 0.0)
-			return atan2(dz, dx);
+			return atan2(dx, dz);
 		else 
 			return 0.0;
 	}
@@ -141,7 +141,7 @@ public:
 		double dx = x - src.x;
 		double dz = z - src.z;
 		if (dx != 0.0 || dz != 0.0)
-			return atan2(dz, dx);
+			return atan2(dx, dz);
 		else
 			return 0.0;
 	}

@@ -1031,7 +1031,7 @@ void PlayerObject::ParsePlayerCommand( string theCmd )
 		m_parent.QueueCommand(make_shared<SystemChatMsg>((format("{c:00FF00}Combat tactic set to %1%.{/c}") % tacStr).str()));
 		return;
 	}
-	else if (iequals(command, "style") || iequals(command, "discipline"))
+	else if (iequals(command, "style"))
 	{
 		string styleStr;
 		cmdStream >> styleStr;
@@ -1704,7 +1704,7 @@ void PlayerObject::ParsePlayerCommand( string theCmd )
 			botPo->setMaximumHealth((uint16)hpF);
 			botPo->setCurrentHealth((uint16)hpF);
 			botPo->setDamageScale(dmgScale);
-			// Stands back up after the takedown (normal 8 s respawn); "&dojo leave" dismisses it.
+			botPo->m_despawnOnDeath = true;
 			botPo->m_dojoOwnerGoId = m_goId;
 
 			if (botName.find("Agent") != std::string::npos) {

@@ -298,7 +298,7 @@ void BotClient::UpdateBotAI(float deltaSeconds)
             }
             loc.x = nx;
             loc.z = nz;
-            loc.rot = std::atan2(dz, dx);
+            loc.rot = std::atan2(dx, dz);
             me->setPosition(loc);
             sSpatialGrid.UpdateClientPosition(this, nx, nz);
             SetLocomotionAnimation(anim);
@@ -307,6 +307,7 @@ void BotClient::UpdateBotAI(float deltaSeconds)
             {
                 m_lastRoamBroadcastMs = nowMs;
                 sGame.AnnounceStateUpdateNear(loc.x, loc.z, 20000.0f, std::make_shared<PositionStateMsg>(m_playerGoId));
+                sGame.AnnounceStateUpdateNear(loc.x, loc.z, 20000.0f, std::make_shared<LocomotionStateMsg>(m_playerGoId, anim, loc.getMxoRot()));
             }
         };
 
@@ -320,7 +321,7 @@ void BotClient::UpdateBotAI(float deltaSeconds)
         {
             m_targetGoId = 0;
             m_pathWaypoints.clear();
-            stepToward(homeX, homeZ, 450.0f, 30);
+            stepToward(homeX, homeZ, 280.0f, 3);
             return;
         }
 
@@ -377,9 +378,9 @@ void BotClient::UpdateBotAI(float deltaSeconds)
         if (m_passive)
             return; // dojo dummy and mission contacts stand still until attacked
 
-        // Take or hold a hardline on this block. Standing inside 15 m is what
-        // advances the capture; the faction war tick already counts bots.
-        if (me->getFaction() >= FACTION_ZION && me->getFaction() <= FACTION_MEROVINGIAN)
+        // Strike squad bots (m_crewId != 0) take or hold a hardline on this block.
+        // Regular ambient street NPCs patrol their sidewalk circuits via RoamAndSwarm.
+        if (m_crewId != 0 && me->getFaction() >= FACTION_ZION && me->getFaction() <= FACTION_MEROVINGIAN)
         {
             const ControlNode* goal = nullptr;
             float best = 8000.0f;
@@ -734,12 +735,12 @@ void BotClient::RoamAndSwarm(float deltaSeconds)
                 m_pathWaypoints.clear();
                 SetLocomotionAnimation(0);
                 sGame.AnnounceStateUpdateNear(loc.x, loc.z, 20000.0f, std::make_shared<PositionStateMsg>(m_playerGoId));
+                sGame.AnnounceStateUpdateNear(loc.x, loc.z, 20000.0f, std::make_shared<LocomotionStateMsg>(m_playerGoId, 0, loc.getMxoRot()));
             }
         } else {
             dist = std::max(0.01f, dist); // Prevent division by zero
 
             // Authentic walking stride velocity: 280.0f units/s = 2.8 m/s
-            SetLocomotionAnimation(3); // 3 = WalkF
             float speed = 280.0f;
             BotVector2D pathVel((dx / dist) * speed, (dz / dist) * speed);
 
@@ -756,19 +757,23 @@ void BotClient::RoamAndSwarm(float deltaSeconds)
                 loc.x = newX;
                 loc.z = newZ;
 
-                // Compute orientation/heading angle facing direction of movement
-                float heading = std::atan2(dz, dx);
+                // Compute orientation/heading angle facing direction of movement (+sin(rot), +cos(rot))
+                float heading = (moveX * moveX + moveZ * moveZ > 1e-4f)
+                    ? std::atan2(moveX, moveZ)
+                    : std::atan2(dx, dz);
                 loc.rot = heading;
 
                 me->setPosition(loc);
                 sSpatialGrid.UpdateClientPosition(this, newX, newZ);
+                SetLocomotionAnimation(3); // 3 = WalkF (after updating loc.rot)
                 m_stuckTicks = 0;
 
                 uint32 nowMs = getMSTime();
                 if (nowMs - m_lastRoamBroadcastMs >= 150) {
                     m_lastRoamBroadcastMs = nowMs;
-                    // PositionStateMsg smoothly interpolates client skeleton without resetting blend tree
+                    // PositionStateMsg + LocomotionStateMsg keep client position, walk cycle, and heading synced
                     sGame.AnnounceStateUpdateNear(loc.x, loc.z, 15000.0f, std::make_shared<PositionStateMsg>(m_playerGoId));
+                    sGame.AnnounceStateUpdateNear(loc.x, loc.z, 15000.0f, std::make_shared<LocomotionStateMsg>(m_playerGoId, 3, loc.getMxoRot()));
                 }
             } else {
                 // Someone is standing on the next step. Sidestep instead of abandoning the walk.
@@ -783,15 +788,17 @@ void BotClient::RoamAndSwarm(float deltaSeconds)
                         continue;
                     loc.x = ax;
                     loc.z = az;
-                    loc.rot = std::atan2(dz, dx);
+                    loc.rot = std::atan2(dx, dz);
                     me->setPosition(loc);
                     sSpatialGrid.UpdateClientPosition(this, ax, az);
+                    SetLocomotionAnimation(3);
                     m_stuckTicks = 0;
 
                     uint32 nowMs = getMSTime();
                     if (nowMs - m_lastRoamBroadcastMs >= 150) {
                         m_lastRoamBroadcastMs = nowMs;
                         sGame.AnnounceStateUpdateNear(loc.x, loc.z, 15000.0f, std::make_shared<PositionStateMsg>(m_playerGoId));
+                        sGame.AnnounceStateUpdateNear(loc.x, loc.z, 15000.0f, std::make_shared<LocomotionStateMsg>(m_playerGoId, 3, loc.getMxoRot()));
                     }
                     moved = true;
                     break;
@@ -857,8 +864,6 @@ void BotClient::AttackTarget(uint32 targetGoId)
         // Try ranged combat. If it fails (e.g. out of ammo or LOS blocked), move closer
         sCombatSys.RequestRangedCombat(m_playerGoId, targetGoId, 0);
         
-        // Approach target with combat sprint animation
-        SetLocomotionAnimation(4); // 4 = DetectDiff_RunF
         float dirX = target->getPosition().x - me->getPosition().x;
         float dirZ = target->getPosition().z - me->getPosition().z;
         float lenSq = dirX*dirX + dirZ*dirZ;
@@ -877,10 +882,12 @@ void BotClient::AttackTarget(uint32 targetGoId)
         float newZ = me->getPosition().z + dirZ * speed * dt;
         if (!sSpatialGrid.CheckCollision(newX, newZ, 1.0f, m_playerGoId)) {
             LocationVector newPos(newX, me->getPosition().y, newZ);
-            newPos.rot = std::atan2(dirZ, dirX);
+            newPos.rot = std::atan2(dirX, dirZ);
             uint8 newRot = newPos.getMxoRot();
             me->setPosition(newPos);
             sSpatialGrid.UpdateClientPosition(this, newX, newZ);
+            // Approach target with combat sprint animation (after updating rotation)
+            SetLocomotionAnimation(4); // 4 = DetectDiff_RunF
 
             uint32 nowMs = getMSTime();
             if (nowMs - m_lastRoamBroadcastMs >= 150) {
@@ -911,6 +918,11 @@ bool BotClient::StepAlongPath(float deltaSeconds, float speed, uint8 locomotionA
     float dist = std::sqrt(dx*dx + dz*dz);
     float step = speed * std::max(0.01f, deltaSeconds);
 
+    if (dist > 0.01f)
+    {
+        loc.rot = std::atan2(dx, dz);
+    }
+
     if (dist <= std::max(50.0f, step))
     {
         loc.x = wp.first;
@@ -921,17 +933,17 @@ bool BotClient::StepAlongPath(float deltaSeconds, float speed, uint8 locomotionA
     {
         loc.x += (dx / dist) * step;
         loc.z += (dz / dist) * step;
-        loc.rot = std::atan2(dz, dx);
     }
     me->setPosition(loc);
     sSpatialGrid.UpdateClientPosition(this, (float)loc.x, (float)loc.z);
 
     bool arrived = !HasPath();
+    uint8 anim = arrived ? 0 : locomotionAnim;
+    SetLocomotionAnimation(anim);
     uint32 nowMs = getMSTime();
     if (arrived || nowMs - m_lastRoamBroadcastMs >= 150)
     {
         m_lastRoamBroadcastMs = nowMs;
-        uint8 anim = arrived ? 0 : locomotionAnim;
         sGame.AnnounceStateUpdateNear(loc.x, loc.z, 15000.0f, std::make_shared<PositionStateMsg>(m_playerGoId));
         sGame.AnnounceStateUpdateNear(loc.x, loc.z, 15000.0f, std::make_shared<LocomotionStateMsg>(m_playerGoId, anim, loc.getMxoRot()));
     }

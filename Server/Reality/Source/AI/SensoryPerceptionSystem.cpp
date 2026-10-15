@@ -82,7 +82,7 @@ bool SensoryPerceptionSystem::CheckVision(PlayerObject* observer, PlayerObject* 
 
     // Observer forward direction from LocationVector rotation
     float obsHeadingRad = (float)obsPos.rot;
-    float targetAngleRad = std::atan2(dz, dx);
+    float targetAngleRad = std::atan2(dx, dz);
     float angleDiffRad = std::abs(targetAngleRad - obsHeadingRad);
     while (angleDiffRad > 3.14159265f) angleDiffRad = std::abs(angleDiffRad - 2.0f * 3.14159265f);
 
@@ -165,7 +165,7 @@ void SensoryPerceptionSystem::EmitSound(float x, float y, float z, SoundEmission
         float decayedIntensity = (intensity * perceivedMultiplier) / (1.0f + alpha * distSq);
         if (decayedIntensity < 0.05f) continue;
 
-        float azimuthRad = std::atan2(dz, dx);
+        float azimuthRad = std::atan2(dx, dz);
 
         if (type == SOUND_BULLET_WHIZ) {
             // Bullet shockwave near civilian triggers instant panic

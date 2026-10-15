@@ -615,7 +615,7 @@ NodeStatus ActionEngageTarget::Tick(BotClient* bot)
         {
             myPos.x = nextX;
             myPos.z = nextZ;
-            myPos.rot = std::atan2(dz, dx);
+            myPos.rot = std::atan2(dx, dz);
             uint8 newRot = myPos.getMxoRot();
             
             me->setPosition(myPos);
@@ -626,7 +626,7 @@ NodeStatus ActionEngageTarget::Tick(BotClient* bot)
             {
                 bot->m_lastRoamBroadcastMs = nowMs;
                 sGame.AnnounceStateUpdateNear(myPos.x, myPos.z, 20000.0f, make_shared<PositionStateMsg>(bot->GetPlayerGoId()));
-                sGame.AnnounceStateUpdateNear(myPos.x, myPos.z, 20000.0f, make_shared<RotationStateMsg>(bot->GetPlayerGoId(), newRot));
+                sGame.AnnounceStateUpdateNear(myPos.x, myPos.z, 20000.0f, make_shared<LocomotionStateMsg>(bot->GetPlayerGoId(), 4, newRot));
             }
         }
         return NodeStatus::RUNNING; // Still moving into range

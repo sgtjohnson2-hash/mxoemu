@@ -2337,7 +2337,12 @@ namespace ZionLauncher
                     sex = 0,
                     alignment = cmbAlignment.SelectedIndex + 1,
                     profession = cmbProf.SelectedIndex + 1,
-                    district = 1
+                    district = 1,
+                    belief = vals[0],
+                    focus = vals[1],
+                    perception = vals[2],
+                    reason = vals[3],
+                    vitality = vals[4]
                 };
                 try
                 {
@@ -2645,7 +2650,7 @@ namespace ZionLauncher
                             await reader.CloseAsync();
                             try
                             {
-                                await using var charCmd = new MySqlCommand("SELECT charId, handle, firstName, lastName, level, profession, district FROM characters WHERE userId = @uid ORDER BY charId DESC", conn);
+                                await using var charCmd = new MySqlCommand("SELECT charId, handle, firstName, lastName, level, profession, district, belief, focus, perception, reason, vitality FROM characters WHERE userId = @uid ORDER BY charId DESC", conn);
                                 charCmd.Parameters.AddWithValue("@uid", userId);
                                 await using var charReader = await charCmd.ExecuteReaderAsync();
                                 while (await charReader.ReadAsync())
@@ -2658,7 +2663,12 @@ namespace ZionLauncher
                                         LastName = charReader["lastName"]?.ToString() ?? "",
                                         Level = charReader["level"] != DBNull.Value ? Convert.ToInt32(charReader["level"]) : 1,
                                         Profession = charReader["profession"] != DBNull.Value ? Convert.ToInt32(charReader["profession"]) : 0,
-                                        District = charReader["district"]?.ToString() ?? ""
+                                        District = charReader["district"]?.ToString() ?? "",
+                                        Belief = charReader["belief"] != DBNull.Value ? Convert.ToInt32(charReader["belief"]) : 10,
+                                        Focus = charReader["focus"] != DBNull.Value ? Convert.ToInt32(charReader["focus"]) : 10,
+                                        Perception = charReader["perception"] != DBNull.Value ? Convert.ToInt32(charReader["perception"]) : 10,
+                                        Reason = charReader["reason"] != DBNull.Value ? Convert.ToInt32(charReader["reason"]) : 10,
+                                        Vitality = charReader["vitality"] != DBNull.Value ? Convert.ToInt32(charReader["vitality"]) : 10
                                     });
                                 }
                             }

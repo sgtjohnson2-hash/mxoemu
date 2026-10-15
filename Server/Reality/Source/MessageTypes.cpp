@@ -321,6 +321,7 @@ const ByteBuffer& PlayerAppearanceMsg::toBuf()
 
 	m_buf << uint8(0x03);
 	m_buf << uint16(viewId);
+	m_buf << uint8(0x02); // CLTDistrObjView::UnpackAttributeUpdate (0x623215B0) Component 1 (0x623259E0)
 	ByteBuffer blockBuf = block.toBuf(false);
 	m_buf.append(blockBuf.contents(), blockBuf.size());
 	m_buf << uint16(0); //nomoreattribs
@@ -1321,6 +1322,7 @@ const ByteBuffer& HealthUpdateMsg::toBuf()
 
 	m_buf << uint8(0x03);
 	m_buf << uint16(viewId);
+	m_buf << uint8(0x02); // CLTDistrObjView::UnpackAttributeUpdate (0x623215B0) Component 1 (0x623259E0)
 	ByteBuffer blockBuf = block.toBuf(false);
 	m_buf.append(blockBuf.contents(),blockBuf.size());
 	m_buf << uint16(0); // nomoreattribs
@@ -1371,6 +1373,7 @@ const ByteBuffer& CombatHitFxMsg::toBuf()
 
 	m_buf << uint8(0x03);
 	m_buf << uint16(viewId);
+	m_buf << uint8(0x02); // CLTDistrObjView::UnpackAttributeUpdate (0x623215B0) Component 1 (0x623259E0)
 	ByteBuffer blockBuf = block.toBuf(false);
 	m_buf.append(blockBuf.contents(),blockBuf.size());
 	m_buf << uint16(0); // nomoreattribs
@@ -1410,6 +1413,7 @@ const ByteBuffer& CombatantModeMsg::toBuf()
 
 	m_buf << uint8(0x03);
 	m_buf << uint16(viewId);
+	m_buf << uint8(0x02); // CLTDistrObjView::UnpackAttributeUpdate (0x623215B0) Component 1 (0x623259E0)
 	ByteBuffer blockBuf = block.toBuf(false);
 	m_buf.append(blockBuf.contents(),blockBuf.size());
 	m_buf << uint16(0); // nomoreattribs
@@ -1502,6 +1506,7 @@ const ByteBuffer& EvadeShieldUpdateMsg::toBuf()
 
 	m_buf << uint8(0x03);
 	m_buf << uint16(viewId);
+	m_buf << uint8(0x02); // CLTDistrObjView::UnpackAttributeUpdate (0x623215B0) Component 1 (0x623259E0)
 	ByteBuffer blockBuf = block.toBuf(false);
 	m_buf.append(blockBuf.contents(),blockBuf.size());
 	m_buf << uint16(0); // nomoreattribs
@@ -1554,6 +1559,7 @@ const ByteBuffer& EquippedItemUpdateMsg::toBuf()
 
 	m_buf << uint8(0x03);
 	m_buf << uint16(viewId);
+	m_buf << uint8(0x02); // CLTDistrObjView::UnpackAttributeUpdate (0x623215B0) Component 1 (0x623259E0)
 	ByteBuffer blockBuf = block.toBuf(false);
 	m_buf.append(blockBuf.contents(),blockBuf.size());
 	m_buf << uint16(0); // nomoreattribs

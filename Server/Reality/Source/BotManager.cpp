@@ -108,6 +108,29 @@ std::shared_ptr<BotClient> BotManager::SpawnSingleBot(float x, float y, float z,
         faction = FactionWarManager::getSingleton().getControllingFactionByLocation(x, y, z);
     }
 
+    auto pickArchetypeHandle = [](int fac, uint32 seedVal) -> std::string {
+        static const char* zionNames[] = {
+            "Zion Operative", "Zion Scout", "Zion Hacker", "Zion Enforcer",
+            "Redpill Martial Artist", "Zion Runner", "Zion Lookout", "Hovercraft Crewman"
+        };
+        static const char* machineNames[] = {
+            "Machine Operative", "MCU Patrol Officer", "System Watchman", "Machine Infiltrator",
+            "Cypherite Informant", "Mainframe Security", "MCU Tactical Guard", "Compliance Officer"
+        };
+        static const char* mervNames[] = {
+            "Merovingian Enforcer", "Exile Assassin", "Chateau Guard", "Lupine Henchman",
+            "Sanguine Velvet", "Frenchman's Operative", "Exile Duelist", "Club Hel Bouncer"
+        };
+        static const char* civNames[] = {
+            "Mega-City Commuter", "Office Worker", "Downtown Pedestrian", "City Courier",
+            "Street Shopper", "Nightshift Worker", "Subway Commuter", "City Resident"
+        };
+        if (fac == FACTION_ZION) return zionNames[seedVal % 8];
+        if (fac == FACTION_MACHINES) return machineNames[seedVal % 8];
+        if (fac == FACTION_MEROVINGIAN) return mervNames[seedVal % 8];
+        return civNames[seedVal % 8];
+    };
+
     // Phase 2: Bot Population Ceiling & Spatial Recycling
     {
         std::lock_guard<std::recursive_mutex> lock(m_botMutex);
@@ -119,15 +142,23 @@ std::shared_ptr<BotClient> BotManager::SpawnSingleBot(float x, float y, float z,
             if (recycledBot && recycledBot->IsTester()) recycledBot.reset();
             if (recycledBot) {
                 recycledBot->SetFaction((mxoFaction)faction);
-                recycledBot->MoveTo(x, y, z);
+                recycledBot->SetSpawnLocation(x, y, z);
                 PlayerObject* po = sObjMgr.getGOPtrSafe(recycledBot->GetPlayerGoId());
                 if (po) {
-                    po->setPosition(LocationVector(x, y, z));
+                    LocationVector spawnLoc(x, y, z);
+                    spawnLoc.rot = ((float)(rand() % 628) / 100.0f) - 3.14159f;
+                    po->setPosition(spawnLoc);
+                    sSpatialGrid.UpdateClientPosition(recycledBot.get(), x, z);
                     std::string factionName = "Civilian";
                     if (faction == FACTION_ZION) factionName = "Zion";
                     else if (faction == FACTION_MACHINES) factionName = "Machines";
                     else if (faction == FACTION_MEROVINGIAN) factionName = "Merovingian";
                     po->setFactionName(factionName);
+                    if (!recycledBot->isAgent()) {
+                        std::string newHandle = pickArchetypeHandle(faction, (uint32)po->getCharacterUID() + (uint32)m_recycleBotIndex);
+                        po->setHandle(newHandle);
+                        po->GenerateProceduralAppearance((uint32)po->getCharacterUID() + (uint32)m_recycleBotIndex * 97u, faction, newHandle);
+                    }
                     if (po->getEquippedWeaponId() == 0 && po->giveItem(1001))
                     {
                         for (auto item : po->getInventory()->getAllItems())
@@ -153,15 +184,17 @@ std::shared_ptr<BotClient> BotManager::SpawnSingleBot(float x, float y, float z,
     }
     std::shared_ptr<BotClient> bot = std::make_shared<BotClient>(uid);
     bot->SetFaction((mxoFaction)faction);
+    bot->SetSpawnLocation(x, y, z);
 
-    // A fresh BotClient's PlayerObject sits at world origin (0,0,0). MoveTo() only plans a
-    // path / updates the spatial grid, so without this the bot is really AT the origin and
-    // walks from there (and is AoI-culled for any player who is not near the origin).
+    // Position the PlayerObject and update the spatial grid BEFORE any pathing so the bot
+    // starts at (x, y, z) with its home anchored there instead of walking back toward (0,0,0).
     PlayerObject* po = sObjMgr.getGOPtr(bot->GetPlayerGoId());
     if (po) {
-        po->setPosition(LocationVector(x, y, z));
+        LocationVector spawnLoc(x, y, z);
+        spawnLoc.rot = ((float)(uid * 1103515245u % 628u) / 100.0f) - 3.14159f;
+        po->setPosition(spawnLoc);
+        sSpatialGrid.UpdateClientPosition(bot.get(), x, z);
     }
-    bot->MoveTo(x, y, z);
     
     // A real pistol in the bag, equipped, with a full magazine. Template 500 was not a weapon,
     // so the bot's inventory never fired. Bots are not written back to the character tables.
@@ -191,7 +224,10 @@ std::shared_ptr<BotClient> BotManager::SpawnSingleBot(float x, float y, float z,
         else if (faction == FACTION_MEROVINGIAN) factionName = "Merovingian";
         po->setFactionName(factionName);
         if (!bot->isAgent()) {
-            po->GenerateProceduralAppearance(uint32(uid), faction, factionName);
+            if (po->getHandle().empty() || po->getHandle().rfind("Bot_", 0) == 0) {
+                po->setHandle(pickArchetypeHandle(faction, uint32(uid)));
+            }
+            po->GenerateProceduralAppearance(uint32(uid), faction, po->getHandle());
         }
         if (autoSpawnSelf) {
             po->SpawnSelf();
@@ -211,9 +247,9 @@ void BotManager::SpawnBot(int count, float x, float y, float z, int faction)
 {
     for (int i = 0; i < count; i++)
     {
-        // Add a small random offset so they don't stack exactly and can trigger Boids separation
-        float randX = ((rand() % 200) / 100.0f) - 1.0f; // -1.0 to 1.0
-        float randZ = ((rand() % 200) / 100.0f) - 1.0f;
+        // Spread multi-bot spawns by 1.5m - 3.5m (150 - 350 units) so they don't stack on one spot
+        float randX = (i == 0) ? 0.0f : float((rand() % 700) - 350);
+        float randZ = (i == 0) ? 0.0f : float((rand() % 700) - 350);
         
         SpawnSingleBot(x + randX, y, z + randZ, faction);
     }
@@ -230,8 +266,6 @@ uint32 BotManager::SpawnMissionBot(const MissionNpc& npcInfo, uint32 instanceId)
     std::shared_ptr<BotClient> bot = std::make_shared<BotClient>(uid);
     int faction = (npcInfo.type == "FRIENDLY") ? FACTION_ZION : FACTION_MACHINES;
     bot->SetFaction((mxoFaction)faction);
-    bot->MoveTo(npcInfo.x, npcInfo.y, npcInfo.z);
-    
     bot->SetSpawnLocation(npcInfo.x, npcInfo.y, npcInfo.z);
     // Quest givers and mission targets stand on their mark. A hostile still
     // fights back once it is hit; it does not wander off before that step.
@@ -242,7 +276,6 @@ uint32 BotManager::SpawnMissionBot(const MissionNpc& npcInfo, uint32 instanceId)
         po->setHandle(npcInfo.handle);
         po->getClient().m_instanceId = instanceId;
         po->setFactionName(npcInfo.type);
-        // a fresh bot sits at the origin until positioned (MoveTo only plans a path)
         po->setPosition(LocationVector(npcInfo.x, npcInfo.y, npcInfo.z));
         sSpatialGrid.UpdateClientPosition(bot.get(), npcInfo.x, npcInfo.z);
         if (npcInfo.level > 0 && npcInfo.level <= 255) po->setLevel((uint8)npcInfo.level);
@@ -251,7 +284,7 @@ uint32 BotManager::SpawnMissionBot(const MissionNpc& npcInfo, uint32 instanceId)
             po->setMaximumHealth(hp);
             po->setCurrentHealth(hp);
         }
-        // npcInfo.idNpc could be stored if we added an idNpc field to PlayerObject, but for now we rely on the handle or instanceId
+        po->GenerateProceduralAppearance(uint32(uid), faction, npcInfo.handle);
         po->SpawnSelf();
     }
 
@@ -349,10 +382,12 @@ void BotManager::Update()
                 std::lock_guard<std::recursive_mutex> lock(m_botMutex);
                 if (m_bots.size() >= 100) return;
             }
-            // Spawn a random pedestrian nearby (radius 20)
-            float rx = p->getPosition().x + ((rand() % 40) - 20);
-            float ry = p->getPosition().y;
-            float rz = p->getPosition().z + ((rand() % 40) - 20);
+            // Spawn a pedestrian on the street 12m - 25m (1200 - 2500 units) away from the player
+            float angle = ((float)(rand() % 628) / 100.0f);
+            float dist = 1200.0f + float(rand() % 1300);
+            float rx = float(p->getPosition().x) + std::sin(angle) * dist;
+            float ry = float(p->getPosition().y);
+            float rz = float(p->getPosition().z) + std::cos(angle) * dist;
             
             SpawnBot(1, rx, ry, rz, FACTION_NONE); // 0 = FACTION_NONE ("Civilian" Neutral Pedestrian)
         });
@@ -639,7 +674,6 @@ void BotManager::PopulateWorld()
         std::shared_ptr<BotClient> bot = std::make_shared<BotClient>(charId);
         bot->SetFaction((mxoFaction)factionId);
         bot->SetSpawnLocation(templ.x, templ.y, templ.z);
-        bot->MoveTo(templ.x, templ.y, templ.z);
 
         std::string nameLower = templ.name;
         std::transform(nameLower.begin(), nameLower.end(), nameLower.begin(), ::tolower);
@@ -659,6 +693,7 @@ void BotManager::PopulateWorld()
             LocationVector loc;
             loc.x = templ.x; loc.y = templ.y; loc.z = templ.z; loc.rot = templ.rot;
             po->setPosition(loc);
+            sSpatialGrid.UpdateClientPosition(bot.get(), templ.x, templ.z);
 
             // Apply authentic RSI appearance
             po->setRsiHex(templ.rsiHex);

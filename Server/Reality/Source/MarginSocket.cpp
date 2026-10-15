@@ -914,6 +914,26 @@ void MarginSocket::SendLoadCharacterReplies()
 			memset(&firstNameLastNameBackground[0x68],0,1024);
 			strncpy((char*)&firstNameLastNameBackground[0x68],m_background.c_str(),std::min<size_t>(1023, m_background.length()));
 
+			if (charId != 0)
+			{
+				PreparedStatement attrStmt("SELECT `focus`, `reason`, `belief`, `vitality` FROM `characters` WHERE `charId` = ?0 LIMIT 1");
+				attrStmt.SetUInt64(0, charId);
+				scoped_ptr<QueryResult> attrRes(sDatabase.QueryPrepared(&attrStmt));
+				if (attrRes)
+				{
+					Field* af = attrRes->Fetch();
+					const uint16 dbFocus    = af[0].GetUInt16();
+					const uint16 dbReason   = af[1].GetUInt16();
+					const uint16 dbBelief   = af[2].GetUInt16();
+					const uint16 dbVitality = af[3].GetUInt16();
+					const size_t blobLen = sizeof(firstNameLastNameBackground);
+					if (dbFocus > 0)    *(uint16*)&firstNameLastNameBackground[blobLen - 20] = dbFocus;
+					if (dbReason > 0)   *(uint16*)&firstNameLastNameBackground[blobLen - 14] = dbReason;
+					if (dbBelief > 0)   *(uint16*)&firstNameLastNameBackground[blobLen - 8]  = dbBelief;
+					if (dbVitality > 0) *(uint16*)&firstNameLastNameBackground[blobLen - 2]  = dbVitality;
+				}
+			}
+
 			SendCharacterReply(0,false,2,ByteBuffer(firstNameLastNameBackground,sizeof(firstNameLastNameBackground)));
 
 			unsigned char packet1[] =
@@ -1592,22 +1612,6 @@ void MarginSocket::HandleCreateCharacterRequest(ByteBuffer &packetData)
 		{
 			Field* f = res->Fetch();
 			charId = f[0].GetUInt64();
-		}
-	}
-
-	if (charId == 0)
-	{
-		PreparedStatement selAnyStmt("SELECT `charId`, `handle` FROM `characters` WHERE `userId` = ?0 ORDER BY `charId` DESC LIMIT 1");
-		selAnyStmt.SetUInt32(0, m_userId);
-		scoped_ptr<QueryResult> resAny(sDatabase.QueryPrepared(&selAnyStmt));
-		if (resAny)
-		{
-			Field* f = resAny->Fetch();
-			charId = f[0].GetUInt64();
-			m_charName = f[1].GetString();
-			handleToUse = m_charName;
-			if (handleToUse.size() > 24)
-				handleToUse = handleToUse.substr(0, 24);
 		}
 	}
 
