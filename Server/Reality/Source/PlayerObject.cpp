@@ -200,7 +200,14 @@ void PlayerObject::loadFromDB( bool updatePos )
 			m_innerStrC = m_innerStrM;
 		if (m_lvl == 0)
 			m_lvl = 1;
-		if (m_district == 0)
+		// 255 marks "tutorial pending" (retail: every redpill starts in the Construct, tutorial_v2).
+		// Plain 0 stays clamped to Richland: legacy rows saved 0 for city characters.
+		if (m_district == 255)
+		{
+			m_district = 0; // LoadWorldCmd::TUTORIAL
+			INFO_LOG(format("Character %1% is tutorial-pending: loading tutorial_v2") % m_handle);
+		}
+		else if (m_district == 0)
 			m_district = 1;
 
 		try
@@ -458,7 +465,7 @@ void PlayerObject::saveDataToDB()
 		% m_healthM
 		% m_innerStrC
 		% m_innerStrM
-		% uint32(m_district)
+		% uint32(m_district == 0 ? 255 : m_district) // still in the tutorial: keep it pending
 		% uint32(m_fightingStyle)
 		% m_equippedWeaponId
 		% m_characterUID );
