@@ -487,6 +487,40 @@ int RunCombatTestSuite()
 				check(fightBy[2] == 0 || winBy[2] * 2 >= fightBy[2], "mission balance: Merovingian heal no longer out-sustains an L1 operative");
 				reviveHuman();
 			}
+			// the same fight with a real tester bot (MakeTester) and its default hotbar (137/17/600)
+			{
+				int wins = 0, fights = 0;
+				for (int f = 0; f < 20; ++f)
+				{
+					Actor t = makeBot(9200980 + f, 34000.0 + f * 600.0, 34000.0, 1, 100);
+					t.bot->MakeTester(90 + f);
+					t.po->setFactionName("Zion");
+					t.po->setLevel(1); setHP(t, 100, 100);
+					Actor mob = makeBot(9201000 + f, 34000.0 + f * 600.0 + 150.0, 34000.0, 1, 72);
+					mob.po->setFactionName(f % 2 ? "Machines" : "Merovingian");
+					mob.po->setHandle("Hostile");
+					if (!sCombatSys.RequestInterlock(t.go, mob.go)) continue;
+					fights++;
+					const uint16 hotbar[3] = { 137, 17, 600 };
+					for (int r = 0; r < 80 && sCombatSys.IsInterlocked(t.go); ++r)
+					{
+						InterlockSession* live = sCombatSys.GetInterlockSession(t.go);
+						if (!live) break;
+						t.po->setTactic(uint8(r % 2 ? TACTIC_SPEED : TACTIC_POWER));
+						sCombatSys.UseAbility(t.po, hotbar[r % 3], mob.go);
+						live = sCombatSys.GetInterlockSession(t.go);
+						if (!live) break;
+						live->nextRoundTime = 0;
+						sCombatSys.Update();
+						if (t.po->getCurrentHealth() == 0 || mob.po->getCurrentHealth() == 0) break;
+					}
+					std::cout << "  tester fight " << f << " tester " << t.po->getCurrentHealth() << " IS " << t.po->getCurrentIS() << " mob " << mob.po->getCurrentHealth() << std::endl;
+					if (mob.po->getCurrentHealth() == 0 && t.po->getCurrentHealth() > 0) wins++;
+					sCombatSys.EndInterlock(t.go, false);
+					place(t, 36000.0, 36000.0 + f * 500.0); place(mob, 37000.0, 37000.0 + f * 500.0);
+				}
+				check(fights >= 15 && wins * 10 >= fights * 6, "mission balance: an L1 tester bot with the default hotbar (137/17/600) beats an L1 72 HP mob in >=60% (" + std::to_string(wins) + "/" + std::to_string(fights) + ")");
+			}
 			// mission data regressions (BOTTEST): courier items are handed out at accept, every XML
 			// objective command is a supported type, the starter 10111 is not re-offered once done
 			{

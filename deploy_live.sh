@@ -45,7 +45,7 @@ docker stats --no-stream mxoemu-reality-server-1
 
 echo ">>> Pruning old rollback images (keeping the 3 newest pre-* tags and the running image)..."
 # KEEP_TAGS="pre-foo pre-bar" pins extra rollback tags (set in the environment or below)
-KEEP_TAGS="${KEEP_TAGS:-pre-withdrawchat pre-8aeefcc4}"
+KEEP_TAGS="${KEEP_TAGS:-pre-withdrawchat pre-8aeefcc4 pre-botfixes pre-cr2cards}"
 RUNNING_ID="$(docker inspect --format '{{.Image}}' mxoemu-reality-server-1 | cut -d: -f2 | cut -c1-12)"
 docker images mxoemu-reality-server --format '{{.CreatedAt}}|{{.Tag}}|{{.ID}}' \
   | grep '|pre-' | sort -r | tail -n +4 \

@@ -1,5 +1,7 @@
+#include <set>
 #include "Common.h"
 #include "CombatSystem.h"
+
 #include "PlayerObject.h"
 #include "ObjectMgr.h"
 #include "GameServer.h"
@@ -25,6 +27,7 @@
 #include "AI/PedestrianEcology.h"
 #include <boost/property_tree/ptree.hpp>
 #include <boost/property_tree/json_parser.hpp>
+static bool IsServerDrivenBot(PlayerObject* p);
 
 const float CombatSystem::INTERLOCK_ROUND_SECONDS = 4.0f; //authentic MxO interlock round
 const float CombatSystem::FREEFIRE_SHOT_SECONDS = 2.0f;
@@ -140,6 +143,7 @@ void CombatSystem::LoadAbilities()
 	// alias each of them to the basic strike (move id 1) under its real name so a hotbar press
 	// resolves to an actual attack instead of being dropped.
 	{
+		std::set<uint16> aliasedToBase; // placeholders the retail table below must replace
 		auto baseIt = m_moveTable.find(1);
 		if (baseIt != m_moveTable.end()) {
 			const CombatMove baseMove = baseIt->second;
@@ -150,6 +154,7 @@ void CombatSystem::LoadAbilities()
 				alias.id = e.abilityId;
 				alias.name = e.name;
 				m_moveTable[alias.id] = alias;
+				aliasedToBase.insert(alias.id);
 			}
 		}
 
@@ -199,7 +204,9 @@ void CombatSystem::LoadAbilities()
 			{ 283, "KnifeThrowerAbility",          15, 16.0f, 24.0f },
 		};
 		for (const auto& rm : s_retailMoves) {
-			if (m_moveTable.find(rm.id) == m_moveTable.end()) {
+			// the loadout aliases ran first, so 17/137/600 (the default hotbar) stayed basic-strike
+			// placeholders and their retail rows were skipped: testers fought with the weakest move
+			if (m_moveTable.find(rm.id) == m_moveTable.end() || aliasedToBase.count(rm.id)) {
 				CombatMove m;
 				m.id = rm.id;
 				m.name = rm.name;
@@ -1429,6 +1436,11 @@ CombatSystem::AttackResult CombatSystem::ResolveAttack(PlayerObject* attacker, P
 	float dmg = move.minDmg + (move.maxDmg - move.minDmg) * ((rand() % 100) / 100.0f);
 	dmg += move.minDmgPerLvl * attacker->getLevel();
 	dmg *= attacker->getDamageScale(); //scaled dojo bots hit harder; everyone else is 1.0
+	// Street mobs (server-driven, not Agents, below L30) hitting a player or tester hit lighter than a
+	// player character of their level: L1 "Hostile" mission targets killed L1 testers twice per mission.
+	if (IsServerDrivenBot(attacker) && !IsServerDrivenBot(target) && attacker->getLevel() < 30 &&
+		attacker->getHandle().find("Agent") == std::string::npos && attacker->getHandle().find("Dojo") == std::string::npos)
+		dmg *= sConfig.GetFloatDefault("Combat.StreetMobDamageScale", 0.8f);
 	// CR2 interlock passes its stance/state multiplier in; everything else keeps the tactic matrix.
 	dmg *= (m_cr2DamageMul > 0.0f) ? m_cr2DamageMul : TacticModifier(attackerTactic, targetTactic);
 	// Same-move "adaptive" mitigation used to drop a repeated strike to 15% after four hits.
@@ -1974,6 +1986,7 @@ CombatSystem::AttackResult CombatSystem::StrikeInterlock(InterlockSession &sessi
 
 // Tester bots (BotTester.cpp) choose their own tactics/moves through the client RPCs like a
 // human does; the server-side bot AI below must not overwrite them.
+
 static bool IsServerDrivenBot(PlayerObject* p)
 {
 	if (!p || !p->getClient().isBot()) return false;
@@ -2070,6 +2083,13 @@ bool CombatSystem::RunInterlockRound(InterlockSession &session)
 					uint16 healAmt = (m && m->minDmg > 0.0f) ? (uint16)m->minDmg : 50;
 					healAmt = std::min<uint16>(healAmt, std::max<uint16>(1, uint16(bot->getMaximumHealth() * 15 / 100)));
 					bot->applyHeal(bot->getGoId(), healAmt);
+					// the heal is the round: it used to be cast AND followed by a style strike, so a
+					// Merovingian mob out-sustained L1 testers (BOTTEST deaths after 31b4457f)
+					(bot == pA ? session.tacticA : session.tacticB) = uint8(TACTIC_DEFENSE);
+					chosenMove = GetDefaultStyleMove(bot);
+					INFO_LOG(format("UseAbility: %1%:%2% uses %3% (requested id 5043, move id 5043) on target go %4% [interlocked=1 castTime=0]")
+						% bot->getHandle() % bot->getGoId() % (m ? m->name : "Restore") % opponent->getGoId());
+					return;
 				}
 				INFO_LOG(format("UseAbility: %1%:%2% uses %3% (requested id 5043, move id 5043) on target go %4% [interlocked=1 castTime=0]")
 					% bot->getHandle() % bot->getGoId() % (m ? m->name : "Restore") % opponent->getGoId());
