@@ -3233,11 +3233,12 @@ namespace ZionLauncher
         {
             const uint PROCESS_VM_READ = 0x0010, PROCESS_VM_WRITE = 0x0020, PROCESS_VM_OPERATION = 0x0008, PROCESS_QUERY_INFORMATION = 0x0400;
             var logged = new System.Collections.Generic.HashSet<string>();
+            var dockedToolbar = new System.Collections.Generic.Dictionary<int, uint>();
             try
             {
-                for (int i = 0; i < 1800; i++) // up to 60 min, every 2 s
+                for (int i = 0; i < 7200; i++) // up to 60 min, every 0.5 s (early enough to beat HUD construction)
                 {
-                    Thread.Sleep(2000);
+                    Thread.Sleep(500);
                     bool anyAlive = false;
                     foreach (var p in Process.GetProcessesByName("matrix"))
                     {
@@ -3255,6 +3256,8 @@ namespace ZionLauncher
                             try
                             {
                                 var buf = new byte[4];
+                                SyncWidgetManagerSize(hp, p.Id, w, h, logged);
+                                DockHudIfNewViews(hp, p.Id, dockedToolbar);
                                 if (!ReadProcessMemory(hp, (IntPtr)0x629f84e8, buf, 4, out _)) continue;
                                 uint pInterface = BitConverter.ToUInt32(buf, 0);
                                 if (pInterface < 0x10000) continue;
@@ -3275,10 +3278,52 @@ namespace ZionLauncher
                         }
                         catch { }
                     }
-                    if (!anyAlive && i > 30) return;
+                    if (!anyAlive && i > 120) return;
                 }
             }
             catch { }
+        }
+
+        // ILTWidgetManager (client.dll 7.6005): pointer at 0x62a32720 (static fallback 0x6299d8a0); WORD width +0x0c,
+        // WORD height +0x0e, flag byte +0x10. Under DXVK windowed it stays 800x600, and CUIWidget positions every
+        // HUD view inside that box (top-left). Verified 2026-10-16: reads 800x600 at login on a 2510x1390 window.
+        private void SyncWidgetManagerSize(IntPtr hp, int pid, int w, int h, System.Collections.Generic.HashSet<string> logged)
+        {
+            var b4 = new byte[4];
+            uint mgr = 0;
+            if (ReadProcessMemory(hp, (IntPtr)0x62a32720, b4, 4, out _)) mgr = BitConverter.ToUInt32(b4, 0);
+            if (mgr < 0x10000) mgr = 0x6299d8a0;
+            var cur = new byte[4];
+            if (!ReadProcessMemory(hp, (IntPtr)(mgr + 0x0c), cur, 4, out _)) return;
+            int cw = BitConverter.ToUInt16(cur, 0), ch = BitConverter.ToUInt16(cur, 2);
+            if (cw == w && ch == h) return;
+            if (cw < 320 || ch < 200 || cw > 16384 || ch > 16384) return; // not initialised / not the object we expect
+            var nv = new byte[5];
+            BitConverter.GetBytes((ushort)w).CopyTo(nv, 0);
+            BitConverter.GetBytes((ushort)h).CopyTo(nv, 2);
+            nv[4] = 1;
+            bool ok = WriteProcessMemory(hp, (IntPtr)(mgr + 0x0c), nv, 5, out _);
+            if (logged.Add($"wm{pid}:{cw}x{ch}"))
+                AppendLaunchLog($"widget manager size pid={pid} {cw}x{ch} -> {w}x{h} ({(ok ? "ok" : "write failed")})");
+        }
+
+        // Views built before the size fix keep their 800x600 placement, so once the in-world Toolbar view (0x24) exists
+        // (and again whenever it is rebuilt, e.g. after a zone change) run harness32 --dock-ui, which re-applies the
+        // full-window layout through the client's own CUIWidget::SetPosition. CViewMgr at [0x629e05bc], slot = +id*4+0x28.
+        private void DockHudIfNewViews(IntPtr hp, int pid, System.Collections.Generic.Dictionary<int, uint> docked)
+        {
+            var b4 = new byte[4];
+            if (!ReadProcessMemory(hp, (IntPtr)0x629e05bc, b4, 4, out _)) return;
+            uint viewMgr = BitConverter.ToUInt32(b4, 0);
+            if (viewMgr < 0x10000) return;
+            if (!ReadProcessMemory(hp, (IntPtr)(viewMgr + 0x24 * 4 + 0x28), b4, 4, out _)) return;
+            uint toolbar = BitConverter.ToUInt32(b4, 0);
+            if (toolbar < 0x10000) return;
+            if (docked.TryGetValue(pid, out uint last) && last == toolbar) return;
+            docked[pid] = toolbar;
+            Thread.Sleep(3000); // let the view finish building
+            TryRunDockUiHelper();
+            AppendLaunchLog($"HUD docked to full window pid={pid} toolbarView=0x{toolbar:X8}");
         }
 
         private void TryRunDockUiHelper()
@@ -3289,6 +3334,7 @@ namespace ZionLauncher
                 {
                     Path.Combine(GameRoot, "harness32.exe"),
                     Path.Combine(GameRoot, "tools", "harness32.exe"),
+                    Path.Combine(GameRoot, "build", "harness32.exe"),
                     Path.Combine(ClientDir, "harness32.exe")
                 };
                 foreach (var exe in candidates)
