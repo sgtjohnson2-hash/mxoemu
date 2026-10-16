@@ -198,6 +198,49 @@ namespace ZionLauncher
 
         [System.Runtime.InteropServices.DllImport("kernel32.dll", SetLastError = true)]
         static extern bool ReadProcessMemory(IntPtr hProcess, IntPtr lpBaseAddress, byte[] lpBuffer, uint nSize, out IntPtr lpNumberOfBytesRead);
+        [System.Runtime.InteropServices.DllImport("ntdll.dll")]
+        static extern int NtWow64QueryInformationProcess64(IntPtr hProcess, int infoClass, byte[] info, int infoLength, out int returnLength);
+        [System.Runtime.InteropServices.DllImport("ntdll.dll")]
+        static extern int NtWow64ReadVirtualMemory64(IntPtr hProcess, ulong address, byte[] buffer, ulong size, out ulong read);
+        [System.Runtime.InteropServices.DllImport("ntdll.dll")]
+        static extern int NtWow64WriteVirtualMemory64(IntPtr hProcess, ulong address, byte[] buffer, ulong size, out ulong written);
+
+        // matrix.exe is a 32-bit (WOW64) process with two PEBs. The client reads -user/-pwd from the
+        // 32-bit one (GetCommandLineA); Task Manager, WMI and Process Explorer read the native 64-bit
+        // PEB. We blank the password only in the 64-bit copy, so other programs see asterisks and the
+        // client still logs in. 64-bit PEB+0x20 -> ProcessParameters, +0x70 -> CommandLine
+        // {u16 len, u16 max, u32 pad, u64 buf}.
+        static bool MaskPasswordInRemoteCommandLine(IntPtr hProcess, string password)
+        {
+            try
+            {
+                if (string.IsNullOrEmpty(password)) return true;
+                byte[] pbi = new byte[48];
+                if (NtWow64QueryInformationProcess64(hProcess, 0, pbi, pbi.Length, out _) != 0) return false;
+                ulong peb = BitConverter.ToUInt64(pbi, 8);
+                byte[] b8 = new byte[8];
+                if (peb == 0 || NtWow64ReadVirtualMemory64(hProcess, peb + 0x20, b8, 8, out _) != 0) return false;
+                ulong pp = BitConverter.ToUInt64(b8, 0);
+                byte[] us = new byte[16];
+                if (pp == 0 || NtWow64ReadVirtualMemory64(hProcess, pp + 0x70, us, 16, out _) != 0) return false;
+                ushort len = BitConverter.ToUInt16(us, 0);
+                ulong buf = BitConverter.ToUInt64(us, 8);
+                if (len == 0 || buf == 0) return false;
+                byte[] cmd = new byte[len];
+                if (NtWow64ReadVirtualMemory64(hProcess, buf, cmd, len, out _) != 0) return false;
+                string s = System.Text.Encoding.Unicode.GetString(cmd);
+                string needle = "-pwd \"" + password + "\"";
+                int at = s.IndexOf(needle, StringComparison.Ordinal);
+                if (at < 0) return false;
+                string masked = s.Substring(0, at) + "-pwd \"" + new string('*', password.Length) + "\"" + s.Substring(at + needle.Length);
+                byte[] outb = System.Text.Encoding.Unicode.GetBytes(masked);
+                return NtWow64WriteVirtualMemory64(hProcess, buf, outb, (ulong)outb.Length, out _) == 0;
+            }
+            catch { return false; }
+        }
+
+        static string RedactPassword(string args) =>
+            System.Text.RegularExpressions.Regex.Replace(args ?? "", "-pwd \"[^\"]*\"", "-pwd \"****\"");
 
         [System.Runtime.InteropServices.DllImport("user32.dll")]
         static extern bool GetClientRect(IntPtr hWnd, out RECT lpRect);
@@ -3076,11 +3119,12 @@ namespace ZionLauncher
                         ResumeThread(rpi.hThread);
                         Thread.Sleep(150);
                         bool injected = InjectDllIntoHandle(rpi.hProcess, retailHook);
+                        bool masked = MaskPasswordInRemoteCommandLine(rpi.hProcess, password);
                         uint retailPid = rpi.dwProcessId;
                         CloseHandle(rpi.hThread);
                         launchedHandle = rpi.hProcess; // closed by WaitForGameStartAsync
                         launchedPid = retailPid;
-                        launchNote = $"retail path, bypass {(patched ? "applied" : "FAILED")}, hook {(injected ? "injected" : "FAILED")} ({retailHook})";
+                        launchNote = $"retail path, bypass {(patched ? "applied" : "FAILED")}, hook {(injected ? "injected" : "FAILED")} ({retailHook}), cmdline password {(masked ? "masked" : "NOT masked")}";
 
                         string clientDirForChild = Path.GetDirectoryName(retailExe) ?? ClientDir;
                         _ = Task.Run(() => WatchRetailChildAndHook((int)retailPid, retailHook, clientDirForChild));
@@ -3104,6 +3148,7 @@ namespace ZionLauncher
                         ResumeThread(pi.hThread);
                         Thread.Sleep(100);
                         bool injected = InjectDllIntoHandle(pi.hProcess, HookDll);
+                        MaskPasswordInRemoteCommandLine(pi.hProcess, password);
                         CloseHandle(pi.hThread);
                         launchedHandle = pi.hProcess;
                         launchedPid = pi.dwProcessId;
@@ -3184,7 +3229,7 @@ namespace ZionLauncher
         /// </summary>
         private async Task<string?> WaitForGameStartAsync(IntPtr hParent, uint parentPid, string note, string args)
         {
-            AppendLaunchLog($"launch pid={parentPid} {note} server={_currentServerIp} dir={ClientDir} args={args}");
+            AppendLaunchLog($"launch pid={parentPid} {note} server={_currentServerIp} dir={ClientDir} args={RedactPassword(args)}");
             try
             {
                 for (int i = 0; i < 90; i++)
