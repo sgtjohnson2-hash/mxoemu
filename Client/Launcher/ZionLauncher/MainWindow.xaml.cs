@@ -1967,6 +1967,7 @@ namespace ZionLauncher
 
         private void btnLaunchSelectedOperative_Click(object sender, RoutedEventArgs e)
         {
+            RotateHookLog(); // before the hook opens it for the new session
             if (_selectedOperative == null && _operativesList.Count > 0)
                 _selectedOperative = _operativesList[0];
 
@@ -3308,6 +3309,23 @@ namespace ZionLauncher
                 AppendLaunchLog($"widget manager size pid={pid} {cw}x{ch} -> {w}x{h} ({(ok ? "ok" : "write failed")})");
         }
 
+        // Client\mxohax.log grows without limit (181 MB seen 2026-10-16) and E: was full. Keep at most ~64 MB:
+        // when it is bigger, the current log becomes mxohax.log.1 (the previous .1 is replaced). Done on each launch, before the hook opens the file.
+        private void RotateHookLog()
+        {
+            try
+            {
+                string log = Path.Combine(ClientDir, "mxohax.log");
+                var fi = new FileInfo(log);
+                if (!fi.Exists || fi.Length < 64L * 1024 * 1024) return;
+                string old = log + ".1";
+                if (File.Exists(old)) File.Delete(old);
+                File.Move(log, old);
+                AppendLaunchLog($"rotated mxohax.log ({fi.Length / (1024 * 1024)} MB) -> mxohax.log.1");
+            }
+            catch (Exception ex) { AppendLaunchLog("mxohax.log rotate skipped: " + ex.Message); }
+        }
+
         // client.dll 7.6005 cvars CombatUINoWWCode (value 0x629e4194) and CombatUINoTacticsBar (0x629e41d0) default to 1
         // and hide every Interlock_* tactic button (CViewInterlock ctor FUN_620bad90 / FUN_620bc550). Found 2026-10-16
         // from the cvar registration at 0x627c7e91..0x627c7ef2. autoexec.cfg also sets both to 0; this is the fallback.
@@ -3333,6 +3351,19 @@ namespace ZionLauncher
             if (!ReadProcessMemory(hp, (IntPtr)0x629e05bc, b4, 4, out _)) return;
             uint viewMgr = BitConverter.ToUInt32(b4, 0);
             if (viewMgr < 0x10000) return;
+            // The interlock tactic panel (view 0x0E) is built fresh for every interlock: dock it as soon as it appears.
+            if (ReadProcessMemory(hp, (IntPtr)(viewMgr + 0x0E * 4 + 0x28), b4, 4, out _))
+            {
+                uint il = BitConverter.ToUInt32(b4, 0);
+                int key = -pid; // separate slot in the same dictionary
+                if (il >= 0x10000 && (!docked.TryGetValue(key, out uint lastIl) || lastIl != il))
+                {
+                    docked[key] = il;
+                    Thread.Sleep(400);
+                    TryRunDockUiHelper();
+                }
+                else if (il < 0x10000) docked.Remove(key);
+            }
             if (!ReadProcessMemory(hp, (IntPtr)(viewMgr + 0x24 * 4 + 0x28), b4, 4, out _)) return;
             uint toolbar = BitConverter.ToUInt32(b4, 0);
             if (toolbar < 0x10000) return;
