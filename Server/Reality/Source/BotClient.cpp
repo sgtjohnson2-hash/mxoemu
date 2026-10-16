@@ -206,6 +206,7 @@ static uint32 NoticeThreat(BotClient* bot, PlayerObject* me)
         }
 
         bool onUs = o->getTargetGoId() == me->getGoId() || o->getInterlockPartner() == me->getGoId();
+        if (!onUs && WorldMobWontAggro(me, o, d)) continue;
         float score = onUs ? d - 5000.0f : d;
         if (score < bestScore)
         {

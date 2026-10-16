@@ -9,6 +9,11 @@
 #include "Singleton.h"
 
 
+class PlayerObject;
+// Retail street-mob aggro rule: a world mob does not start a fight with a target it cons grey to,
+// or one outside its aggro radius. Agent Smith hosts are exempt.
+bool WorldMobWontAggro(PlayerObject* mob, PlayerObject* target, float dist);
+
 class BotManager : public Singleton<BotManager>
 {
 public:

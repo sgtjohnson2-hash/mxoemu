@@ -668,6 +668,15 @@ void PlayerObject::die( uint32 killerGoId )
 		this->addEvent(EVENT_RESPAWN,[goId]() { sBotMgr.DespawnBot(goId); },6.0f);
 		return;
 	}
+	if (m_worldMob)
+	{
+		// retail street exiles come back at their own spot a little while after the takedown
+		static const float s_mobRespawn = sConfig.GetFloatDefault("World.MobRespawnSeconds", 90.0f);
+		static const int s_mobJitter = sConfig.GetIntDefault("World.MobRespawnJitterSeconds", 60);
+		float delay = s_mobRespawn + float(s_mobJitter > 0 ? rand() % (s_mobJitter + 1) : 0);
+		this->addEvent(EVENT_RESPAWN,boost::bind(&PlayerObject::respawn,this),delay);
+		return;
+	}
 	this->addEvent(EVENT_RESPAWN,boost::bind(&PlayerObject::respawn,this),8.0f);
 }
 
@@ -678,6 +687,7 @@ void PlayerObject::respawn()
 
 	m_isDead = false;
 	m_healthC = m_healthM / 2;	//come back at half health
+	if (m_worldMob) m_healthC = m_healthM;
 	m_innerStrC = m_innerStrM;
 	m_tactic = TACTIC_NORMAL;
 	m_hitCounter = 0;
@@ -687,7 +697,14 @@ void PlayerObject::respawn()
 	//respawn at the nearest hardline in this district, if we know any
 	bool movedToHardline = false;
 	{
-		if (s_hardlineCache.count((uint32)m_district) > 0)
+		if (m_worldMob)
+		{
+			// back at the captured retail spawn point, not a hardline
+			m_pos = m_worldSpawn;
+			sGame.AnnounceStateUpdate(NULL,shared_ptr<PositionStateMsg>(new PositionStateMsg(m_goId)));
+			sSpatialGrid.UpdateClientPosition(&m_parent, (float)m_pos.x, (float)m_pos.z);
+		}
+		else if (s_hardlineCache.count((uint32)m_district) > 0)
 		{
 			double bestDistSq = -1;
 			LocationVector bestPos = m_pos;

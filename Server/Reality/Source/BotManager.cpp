@@ -11,6 +11,7 @@
 #include "NavGrid.h"
 #include <execution>
 #include <algorithm>
+#include <cmath>
 #include <cstdlib>
 
 #include "PlayerObject.h"
@@ -382,7 +383,16 @@ void BotManager::Update()
         sObjMgr.ForEachHumanPlayer([this](PlayerObject* p) {
             {
                 std::lock_guard<std::recursive_mutex> lock(m_botMutex);
-                if (m_bots.size() >= 100) return;
+                // the cap is for ambient pedestrians (crowd fleeing / Smith hosts); the retail
+                // street-mob population does not count against it
+                size_t ambient = 0;
+                for (const auto& b : m_bots)
+                {
+                    if (!b) continue;
+                    PlayerObject* bp = sObjMgr.getGOPtr(b->GetPlayerGoId());
+                    if (!bp || !bp->isWorldMob()) ambient++;
+                }
+                if (ambient >= 100) return;
             }
             // Spawn a pedestrian on the street 12m - 25m (1200 - 2500 units) away from the player
             float angle = ((float)(rand() % 628) / 100.0f);
@@ -407,7 +417,10 @@ void BotManager::Update()
             size_t removed = 0;
             for (auto it = m_bots.begin(); it != m_bots.end() && removed < toRemove;)
             {
-                if (*it && !(*it)->IsInCombat() && (*it)->GetFaction() != FACTION_ZION && !(*it)->IsTester())
+                PlayerObject* pruneObj = *it ? sObjMgr.getGOPtr((*it)->GetPlayerGoId()) : nullptr;
+                // retail world mobs are permanent spawn points: never prune them on an empty server
+                if (*it && !(*it)->IsInCombat() && (*it)->GetFaction() != FACTION_ZION && !(*it)->IsTester()
+                    && !(pruneObj && pruneObj->isWorldMob()))
                 {
                     uint32 goId = (*it)->GetPlayerGoId();
                     if (goId != 0) {
@@ -641,6 +654,18 @@ void BotManager::Update()
     }
 }
 
+bool WorldMobWontAggro(PlayerObject* mob, PlayerObject* target, float dist)
+{
+    if (!mob || !target || !mob->isWorldMob()) return false;
+    if (target->getDistrict() != mob->getDistrict()) return true; // different district world
+    if (mob->getHandle().find("Smith") != std::string::npos) return false; // virus hosts hunt everyone
+    static const float s_radius = sConfig.GetFloatDefault("World.MobAggroRadius", 1500.0f);
+    static const int s_greyBase = sConfig.GetIntDefault("World.MobGreyGap", 5);
+    int ml = (int)mob->getLevel(), tl = (int)target->getLevel();
+    if (tl - ml >= s_greyBase + tl / 10) return true; // greys never start fights (retail needed Taunt)
+    return dist > s_radius;
+}
+
 void BotManager::PopulateWorld()
 {
     const auto& npcs = sDataLoader.GetAllNPCs();
@@ -652,13 +677,42 @@ void BotManager::PopulateWorld()
     std::vector<std::shared_ptr<BotClient>> newBots;
     newBots.reserve(std::min(targetPop, npcs.size()));
 
-    int spawnCount = 0;
-    for (auto it = npcs.begin(); it != npcs.end(); ++it)
+    // Retail street population: the open-world districts only (1 slums = Richland/Westview,
+    // 2 Downtown, 3 International), spread evenly over each district's captured spawn points
+    // instead of the first N rows of the file. Shares are configurable.
+    std::vector<const NPCTemplate*> selection;
     {
-        if (newBots.size() >= targetPop) {
-            break;
+        const uint8 districts[3] = { 1, 2, 3 };
+        const float shares[3] = {
+            sConfig.GetFloatDefault("World.MobShareSlums", 0.6f),
+            sConfig.GetFloatDefault("World.MobShareDowntown", 0.2f),
+            sConfig.GetFloatDefault("World.MobShareInternational", 0.2f) };
+        for (int d = 0; d < 3; ++d)
+        {
+            std::vector<const NPCTemplate*> pool;
+            for (const auto& kv : npcs)
+                if (kv.second.districtId == districts[d]) pool.push_back(&kv.second);
+            if (pool.empty()) continue;
+            // spatial order (5000-unit rows, then x) so an even stride covers every neighbourhood
+            std::sort(pool.begin(), pool.end(), [](const NPCTemplate* a, const NPCTemplate* b) {
+                int ra = (int)std::floor(a->z / 5000.0f), rb = (int)std::floor(b->z / 5000.0f);
+                if (ra != rb) return ra < rb;
+                return a->x < b->x;
+            });
+            size_t quota = std::min(pool.size(), (size_t)(targetPop * shares[d] + 0.5f));
+            if (quota == 0) continue;
+            double stride = double(pool.size()) / double(quota);
+            for (size_t i = 0; i < quota; ++i)
+                selection.push_back(pool[std::min(pool.size() - 1, (size_t)(i * stride))]);
+            INFO_LOG(format("BotManager: district %1%: %2% of %3% retail spawn points populated")
+                % (int)districts[d] % quota % pool.size());
         }
-        const NPCTemplate& templ = it->second;
+    }
+
+    int spawnCount = 0;
+    for (const NPCTemplate* tp : selection)
+    {
+        const NPCTemplate& templ = *tp;
         
         int factionId = FACTION_ZION;
         if (templ.faction == "Machines") {
@@ -695,6 +749,8 @@ void BotManager::PopulateWorld()
             LocationVector loc;
             loc.x = templ.x; loc.y = templ.y; loc.z = templ.z; loc.rot = templ.rot;
             po->setPosition(loc);
+            po->setDistrict(templ.districtId);
+            po->setWorldMob(true, loc);
             sSpatialGrid.UpdateClientPosition(bot.get(), templ.x, templ.z);
 
             // Apply authentic RSI appearance

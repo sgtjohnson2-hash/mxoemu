@@ -448,6 +448,10 @@ public:
     uint32 m_dojoOwnerGoId = 0;
     bool IsNearVendor(uint32 itemTemplateId = 0) const;
     bool isSpawnedInWorld() const { return m_spawnedInWorld; }
+	// retail street population (mob_parsed.csv): respawns at its own spawn point, grey-con aggro rule
+	bool isWorldMob() const { return m_worldMob; }
+	void setWorldMob(bool v, const LocationVector& spawn) { m_worldMob = v; m_worldSpawn = spawn; }
+	const LocationVector& getWorldSpawn() const { return m_worldSpawn; }
     uint32 m_lastCCMs = 0; // when the last crowd-control effect landed (diminishing returns reset)
     
     std::string m_crewName;
@@ -527,6 +531,8 @@ private:
 	uint32 testCount;
 
 	bool m_spawnedInWorld;
+	bool m_worldMob = false;
+	LocationVector m_worldSpawn;
 	queue<msgBaseClassPtr> m_sendAfterSpawn;
 	bool m_worldPopulated;
 

@@ -201,6 +201,7 @@ NodeStatus ActionFindTarget::Tick(BotClient* bot)
             LocationVector myPos = me->getPosition();
             LocationVector targetPos = potentialTarget->getPosition();
             float dist = sqrt(pow(myPos.x - targetPos.x, 2) + pow(myPos.y - targetPos.y, 2) + pow(myPos.z - targetPos.z, 2));
+            if (WorldMobWontAggro(me, potentialTarget, dist)) continue;
             
             // 360-degree close acoustic awareness: footsteps / presence within 8m (800 units)
             bool detected = (dist <= 800.0f);

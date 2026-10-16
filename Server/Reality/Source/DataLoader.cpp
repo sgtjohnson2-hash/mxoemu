@@ -1,3 +1,5 @@
+#include <set>
+#include <cmath>
 #include "DataLoader.h"
 #include "Log.h"
 #include "MissionSystem.h"
@@ -696,6 +698,8 @@ bool DataLoader::LoadNPCs(const std::string& filePath)
     }
 
     static uint32 nextNpcId = 1;
+    std::set<std::string> seenSpawns;
+    size_t skipped = 0;
     std::string line;
     while (std::getline(file, line))
     {
@@ -732,6 +736,20 @@ bool DataLoader::LoadNPCs(const std::string& filePath)
                 templ.y = safe_stof(tokens[8]);
                 templ.z = safe_stof(tokens[9]);
                 templ.rot = safe_stof(tokens[10]);
+
+                // Retail capture rows: keep the permanent street population only.
+                templ.districtId = (uint8)safe_stoul(tokens[0]);
+                {
+                    std::string nl = templ.name;
+                    std::transform(nl.begin(), nl.end(), nl.begin(), ::tolower);
+                    // Corrupted = live-event invasion spawns; Randy = GM/test spawn; L>99 = GM/event bosses
+                    if (nl == "corrupted" || nl == "randy" || templ.level > 99) { skipped++; continue; }
+                    // the capture logged the same spawn point many times (one row per sighting)
+                    char key[160];
+                    snprintf(key, sizeof(key), "%u|%d|%d|%s", (unsigned)templ.districtId,
+                        (int)std::floor(templ.x / 200.0f), (int)std::floor(templ.z / 200.0f), nl.c_str());
+                    if (!seenSpawns.insert(key).second) { skipped++; continue; }
+                }
 
                 if (tokens.size() > 15) {
                     templ.weaponHex = tokens[15];
@@ -788,8 +806,10 @@ bool DataLoader::LoadNPCs(const std::string& filePath)
                 }
                 else
                 {
-                    templ.faction = "Civilian";
-                    templ.isHostile = false;
+                    // Every other captured street NPC is a gang exile (Blackwoods, Choppers, Crow Bars,
+                    // Gold Bloods, ...): attackable, aggressive unless it cons grey (see BotManager).
+                    templ.faction = "Merovingian";
+                    templ.isHostile = true;
                 }
                 
                 m_npcs[templ.npcId] = templ;
@@ -798,7 +818,7 @@ bool DataLoader::LoadNPCs(const std::string& filePath)
             }
         }
     }
-    INFO_LOG(format("DataLoader: Successfully loaded %1% authentic NPCs.") % m_npcs.size());
+    INFO_LOG(format("DataLoader: Successfully loaded %1% authentic NPC spawn points (%2% duplicate/event rows skipped).") % m_npcs.size() % skipped);
     return true;
 }
 

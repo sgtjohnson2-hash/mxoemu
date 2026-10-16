@@ -17,6 +17,7 @@ struct NPCTemplate
     uint32 innerStrength;
     std::string faction;
     std::string district;
+    uint8 districtId = 0; // retail district_id column: 1 slums (Richland/Westview), 2 dt, 3 it
     float x;
     float y;
     float z;

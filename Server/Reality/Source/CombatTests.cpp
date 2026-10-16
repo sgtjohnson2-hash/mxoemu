@@ -719,6 +719,29 @@ int RunCombatTestSuite()
 				"RequestInterlock on a friendly contact is refused");
 		}
 
+		// ---------------------------------------------------------------- retail world mobs (2026-10-16)
+		{
+			Actor mob = makeBot(9200301, 10200.0, 10000.0);
+			mob.po->setFactionName("Merovingian");
+			mob.po->setLevel(5);
+			mob.po->setDistrict(1);
+			mob.po->setWorldMob(true, mob.po->getPosition());
+			uint8 savedLevel = (uint8)human.po->getLevel();
+			uint8 savedDistrict = human.po->getDistrict();
+			human.po->setDistrict(1);
+			human.po->setLevel(3);
+			check(!WorldMobWontAggro(mob.po, human.po, 1000.0f), "a level 5 street mob aggroes a level 3 player inside 15 m");
+			check(WorldMobWontAggro(mob.po, human.po, 3000.0f), "a street mob ignores a player outside its aggro radius");
+			human.po->setLevel(15);
+			check(WorldMobWontAggro(mob.po, human.po, 500.0f), "a street mob that cons grey never starts a fight");
+			human.po->setLevel(3);
+			human.po->setDistrict(2);
+			check(WorldMobWontAggro(mob.po, human.po, 500.0f), "a Richland mob ignores a player in another district world");
+			check(sCombatSys.CanAttack(human.po, mob.po), "a human can attack a street gang exile");
+			mob.po->setWorldMob(false, mob.po->getPosition());
+			human.po->setLevel(savedLevel);
+			human.po->setDistrict(savedDistrict);
+		}
 		// ---------------------------------------------------------------- kill reward (H1) + death timer (M2)
 		{
 			Actor victim = makeBot(9200002, 10100.0, 10000.0, 1, 20);

@@ -1202,7 +1202,8 @@ void PlayerObject::PopulateWorld()
 		if (otherGoId == 0 || otherGoId == m_goId) continue;
 
 		PlayerObject* theOtherObject = sObjMgr.getGOPtrSafe(otherGoId);
-		if (theOtherObject != NULL && theOtherObject != this && !theOtherObject->isDead())
+		if (theOtherObject != NULL && theOtherObject != this && !theOtherObject->isDead()
+			&& !(theOtherObject->isWorldMob() && theOtherObject->getDistrict() != m_district))
 		{
 			noteEntitySpawned(otherGoId);
 			vector<msgBaseClassPtr> objectsPackets = theOtherObject->getCurrentStatePackets();
@@ -1261,7 +1262,8 @@ void PlayerObject::UpdateAoIStreaming()
 				if (m_knownEntities.size() >= 50) break;
 			}
 			PlayerObject* otherObj = sObjMgr.getGOPtrSafe(otherGoId);
-			if (otherObj && !otherObj->isDead() && otherObj->getClient().m_instanceId == m_parent.m_instanceId)
+			if (otherObj && !otherObj->isDead() && otherObj->getClient().m_instanceId == m_parent.m_instanceId
+				&& !(otherObj->isWorldMob() && otherObj->getDistrict() != m_district)) // street mobs belong to one district's world
 			{
 				noteEntitySpawned(otherGoId);
 				vector<msgBaseClassPtr> statePackets = otherObj->getCurrentStatePackets();
@@ -1284,6 +1286,7 @@ void PlayerObject::UpdateAoIStreaming()
 	{
 		PlayerObject* otherObj = sObjMgr.getGOPtrSafe(knownGoId);
 		bool cull = (!otherObj || otherObj->isDead() ||
+		             (otherObj->isWorldMob() && otherObj->getDistrict() != m_district) ||
 		             otherObj->getClient().m_instanceId != m_parent.m_instanceId ||
 		             m_pos.Distance2DSq(otherObj->getPosition()) > STREAM_OUT_RADIUS_SQ);
 		if (cull)
@@ -1334,6 +1337,7 @@ void PlayerObject::FlushAndRefreshAoI()
 	{
 		PlayerObject* otherObj = sObjMgr.getGOPtrSafe(knownGoId);
 		bool cull = (!otherObj || otherObj->isDead() ||
+		             (otherObj->isWorldMob() && otherObj->getDistrict() != m_district) ||
 		             otherObj->getClient().m_instanceId != m_parent.m_instanceId ||
 		             (otherObj->getDistrict() != 0 && m_district != 0 && otherObj->getDistrict() != m_district &&
 		              m_pos.Distance2DSq(otherObj->getPosition()) > STREAM_OUT_RADIUS_SQ) ||
@@ -1360,7 +1364,8 @@ void PlayerObject::FlushAndRefreshAoI()
 		if (!knowsEntity(otherGoId))
 		{
 			PlayerObject* otherObj = sObjMgr.getGOPtrSafe(otherGoId);
-			if (otherObj && !otherObj->isDead() && otherObj->getClient().m_instanceId == m_parent.m_instanceId)
+			if (otherObj && !otherObj->isDead() && otherObj->getClient().m_instanceId == m_parent.m_instanceId
+				&& !(otherObj->isWorldMob() && otherObj->getDistrict() != m_district)) // street mobs belong to one district's world
 			{
 				noteEntitySpawned(otherGoId);
 				vector<msgBaseClassPtr> statePackets = otherObj->getCurrentStatePackets();
