@@ -408,6 +408,22 @@ int RunCombatTestSuite()
 			check(stillAfterRequest && leftEventually, "CR2: withdraw is an attempt resolved in the round, and it eventually succeeds");
 			check(CombatSystem::CR2WithdrawChance(human.po, foe.po, TACTIC_RETALIATE) < CombatSystem::CR2WithdrawChance(human.po, foe.po, TACTIC_DEFENSE),
 				"CR2: a grabbing opponent is harder to withdraw from than a blocking one");
+			// CR2 result cards: no rock-paper-scissors outcome in CR2
+			check(CombatSystem::CR2Outcome(true, true, false, false) == InterlockExchangeOutcome::Clash, "CR2 outcome: both landed = trade (Clash clip)");
+			check(CombatSystem::CR2Outcome(true, false, false, false) == InterlockExchangeOutcome::NormalHit, "CR2 outcome: one basic hit = NormalHit");
+			check(CombatSystem::CR2Outcome(true, false, true, true) == InterlockExchangeOutcome::SpecialHit, "CR2 outcome: a landed special = SpecialHit");
+			check(CombatSystem::CR2Outcome(false, false, true, false) == InterlockExchangeOutcome::Blocked, "CR2 outcome: a miss into Block = Blocked");
+			check(CombatSystem::CR2Outcome(false, false, false, false) == InterlockExchangeOutcome::Dodged, "CR2 outcome: a miss otherwise = Dodged");
+			// CR2 fighter AI reads the last stance and blocks when it carries states
+			check(CombatSystem::CR2BotTactic(TACTIC_DEFENSE, true, 0, 1.0f, 99) == TACTIC_RETALIATE, "CR2 AI: an elite grabs through a Block");
+			check(CombatSystem::CR2BotTactic(TACTIC_SPEED, true, 0, 1.0f, 99) == TACTIC_POWER, "CR2 AI: an elite punishes Speed with Power");
+			check(CombatSystem::CR2BotTactic(TACTIC_POWER, true, 0, 1.0f, 99) == TACTIC_SPEED, "CR2 AI: an elite answers Power with Speed");
+			check(CombatSystem::CR2BotTactic(TACTIC_SPEED, true, COMBAT_STATE_DAZED, 0.2f, 10) == TACTIC_DEFENSE, "CR2 AI: a dazed, hurt elite blocks to shake it off");
+			{
+				int blocks = 0, attacks = 0;
+				for (uint32 r = 0; r < 10000; r += 7) { uint8 t = CombatSystem::CR2BotTactic(TACTIC_NORMAL, false, 0, 1.0f, r * 2654435761u); if (t == TACTIC_DEFENSE) blocks++; else attacks++; }
+				check(attacks > blocks * 5, "CR2 AI: street fighters press the attack (" + std::to_string(attacks) + " vs " + std::to_string(blocks) + " blocks)");
+			}
 			sCombatSys.EndInterlock(human.go, false);
 			check(human.po->consumeFirearmAmmo(), "retail has no ammo: firing never runs dry (Combat.TrackAmmo off)");
 			human.po->setTactic(TACTIC_NORMAL);

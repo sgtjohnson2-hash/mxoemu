@@ -139,6 +139,7 @@ struct InterlockSession
 	bool withdrawA = false;	//CR2: a withdraw attempt is pending for this round
 	bool withdrawB = false;
 	uint32 withdrewGoId = 0;	//set when a withdraw attempt succeeded (Update ends the interlock)
+	int8 cr2Outcome = -1;	//CR2: outcome of the exchange about to be sent (-1 = classify from tactics, legacy)
 };
 
 // Interlock move references (interlock database rez 0x24000B8B), from captured live exchanges
@@ -255,6 +256,12 @@ public:
 	static bool UseCR2Interlock();
 	uint16 GetCombatState(uint32 goId);
 	static float CR2HitChance(PlayerObject* attacker, PlayerObject* defender, uint8 attTac, uint8 defTac);
+	// CR2 result card for the exchange shown this round: no rock-paper-scissors outcomes (CR2 removed
+	// them). Both landed = trade (Clash clip), one landed = hit (special clip if a special was swung),
+	// none landed = Blocked when the target held Block, else a dodge.
+	static InterlockExchangeOutcome CR2Outcome(bool shownHit, bool otherHit, bool targetBlocking, bool special);
+	// CR2-aware stance choice for server-driven fighters (bots, agents, mobs). rnd is any random int.
+	static uint8 CR2BotTactic(uint8 opponentLastTactic, bool elite, uint16 ownStates, float hpFrac, uint32 rnd);
 
 	AttackResult ResolveAttack(PlayerObject* attacker, PlayerObject* target,
 		const CombatMove& move, uint8 attackerTactic, uint8 targetTactic, bool inInterlock = false, bool bypassBlock = false);

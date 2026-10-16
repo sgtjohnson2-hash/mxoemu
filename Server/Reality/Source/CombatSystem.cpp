@@ -1796,7 +1796,11 @@ void CombatSystem::SendInterlockExchange(InterlockSession &session, PlayerObject
 
 	// Determine exchange outcome for fluid contact synchronization
 	InterlockExchangeOutcome outcome = InterlockExchangeOutcome::NormalHit;
-	if (res.isBlocked)
+	if (session.cr2Outcome >= 0)
+	{
+		outcome = InterlockExchangeOutcome(session.cr2Outcome);
+	}
+	else if (res.isBlocked)
 	{
 		outcome = InterlockExchangeOutcome::Blocked;
 	}
@@ -2092,7 +2096,10 @@ bool CombatSystem::RunInterlockRound(InterlockSession &session)
 	if (IsServerDrivenBot(pA)) {
 		uint8 newTac = TACTIC_POWER;
 		bool isElite = (pA->getHandle().find("Agent") != std::string::npos || (pA->getLevel() >= 30 && pA->getHandle().find("Dojo") == std::string::npos));
-		if (isElite) {
+		if (UseCR2Interlock()) {
+			const float hpFrac = pA->getMaximumHealth() ? float(pA->getCurrentHealth()) / float(pA->getMaximumHealth()) : 1.0f;
+			newTac = CR2BotTactic(session.committedTacticB, isElite, session.combatStateA, hpFrac, uint32(rand()));
+		} else if (isElite) {
 			switch (session.committedTacticB) {
 				case TACTIC_POWER:     newTac = TACTIC_RETALIATE; break;
 				case TACTIC_SPEED:     newTac = TACTIC_POWER;     break;
@@ -2117,7 +2124,10 @@ bool CombatSystem::RunInterlockRound(InterlockSession &session)
 	if (IsServerDrivenBot(pB)) {
 		uint8 newTac = TACTIC_POWER;
 		bool isElite = (pB->getHandle().find("Agent") != std::string::npos || (pB->getLevel() >= 30 && pB->getHandle().find("Dojo") == std::string::npos));
-		if (isElite) {
+		if (UseCR2Interlock()) {
+			const float hpFrac = pB->getMaximumHealth() ? float(pB->getCurrentHealth()) / float(pB->getMaximumHealth()) : 1.0f;
+			newTac = CR2BotTactic(session.committedTacticA, isElite, session.combatStateB, hpFrac, uint32(rand()));
+		} else if (isElite) {
 			switch (session.committedTacticA) {
 				case TACTIC_POWER:     newTac = TACTIC_RETALIATE; break;
 				case TACTIC_SPEED:     newTac = TACTIC_POWER;     break;
@@ -2641,10 +2651,52 @@ void CombatSystem::RunCR2Exchange(InterlockSession &session, PlayerObject* pA, P
 	else if (resA.hit) showA = true;
 	else if (resB.hit) showA = false;
 	else showA = aSwings || !bSwings;
+	{
+		const AttackResult& shown = showA ? resA : resB;
+		const AttackResult& other = showA ? resB : resA;
+		const uint8 targetTac = showA ? tacB : tacA;
+		const bool special = showA ? (session.queuedMoveA > 1) : (session.queuedMoveB > 1);
+		session.cr2Outcome = int8(CR2Outcome(shown.hit, other.hit, targetTac == TACTIC_DEFENSE, special));
+	}
 	if (showA && moveA)
 		SendInterlockExchange(session, pA, pB, resA, *moveA, tacA, tacB);
 	else if (!showA && moveB)
 		SendInterlockExchange(session, pB, pA, resB, *moveB, tacB, tacA);
+	session.cr2Outcome = -1;
+}
+
+InterlockExchangeOutcome CombatSystem::CR2Outcome(bool shownHit, bool otherHit, bool targetBlocking, bool special)
+{
+	if (shownHit && otherHit) return InterlockExchangeOutcome::Clash;
+	if (shownHit) return special ? InterlockExchangeOutcome::SpecialHit : InterlockExchangeOutcome::NormalHit;
+	return targetBlocking ? InterlockExchangeOutcome::Blocked : InterlockExchangeOutcome::Dodged;
+}
+
+uint8 CombatSystem::CR2BotTactic(uint8 opp, bool elite, uint16 ownStates, float hpFrac, uint32 rnd)
+{
+	const uint32 r = rnd % 100;
+	// Block shakes off states and restores Inner Strength: hurt or dazed fighters use it
+	const uint32 blockPct = (ownStates != 0 ? (elite ? 45u : 25u) : 0u) + (hpFrac < 0.30f ? (elite ? 20u : 10u) : 0u);
+	if (r < blockPct) return TACTIC_DEFENSE;
+	if (elite)
+	{
+		// read last round's stance: Grab through a Block (Block gives up Force Combat), Power into a
+		// Speed fighter (Speed lowers its own defense), Speed against Power/Grab (accuracy vs defense)
+		switch (opp)
+		{
+			case TACTIC_DEFENSE:   return TACTIC_RETALIATE;
+			case TACTIC_SPEED:     return TACTIC_POWER;
+			case TACTIC_POWER:
+			case TACTIC_RETALIATE: return TACTIC_SPEED;
+			default:               return (r & 1) ? TACTIC_POWER : TACTIC_SPEED;
+		}
+	}
+	// street fighters press the attack: Speed 35, Power 35, Grab 20, Block 10
+	const uint32 t = (rnd / 100) % 100;
+	if (t < 35) return TACTIC_SPEED;
+	if (t < 70) return TACTIC_POWER;
+	if (t < 90) return TACTIC_RETALIATE;
+	return TACTIC_DEFENSE;
 }
 
 bool CombatSystem::RunFreeFireShot(FreeFireState &state)
