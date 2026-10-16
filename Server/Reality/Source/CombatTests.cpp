@@ -524,6 +524,25 @@ int RunCombatTestSuite()
 					"missions: a tester that finished 10111 is not handed it again on reload");
 				if (sMissionSys.HasActiveMission(human.go)) sMissionSys.AbortMission(human.po, "test");
 			}
+			// story order: chapter steps in order, own-faction variant first, other factions' never
+			{
+				Actor z = makeBot(9200960, 33000.0, 33000.0); z.po->setFactionName("Zion");
+				Actor m = makeBot(9200961, 33100.0, 33000.0); m.po->setFactionName("Machines");
+				Actor v = makeBot(9200962, 33200.0, 33000.0); v.po->setFactionName("Merovingian");
+				check(sMissionSys.GetAvailableStoryMission(z.po, 0) == 10111, "story: a new Zion operative starts on Chapter 1.1 (10111)");
+				check(sMissionSys.GetAvailableStoryMission(m.po, 0) == 10112, "story: a new Machine operative starts on its Chapter 1.1 (10112)");
+				sMissionSys.RecordCompletedMission(z.go, 10111);
+				sMissionSys.RecordCompletedMission(m.go, 10112);
+				sMissionSys.RecordCompletedMission(v.go, 10113);
+				check(sMissionSys.GetAvailableStoryMission(z.go ? z.po : nullptr, 0) == 10121, "story: Zion goes on to Support Morpheus (1.2, own variant)");
+				check(sMissionSys.GetAvailableStoryMission(m.po, 0) == 10122, "story: Machines go on to Stop Morpheus (1.2, own variant)");
+				check(sMissionSys.GetAvailableStoryMission(v.po, 0) == 10120, "story: Merovingian takes the neutral 1.2 (no own variant)");
+				sMissionSys.RecordCompletedMission(z.go, 10121);
+				const uint32 z3 = sMissionSys.GetAvailableStoryMission(z.po, 0);
+				check(z3 == 10130 || z3 == 10131, "story: after 1.2 comes 1.3, not a later Zion chapter (" + std::to_string(z3) + ")");
+				sMissionSys.RecordCompletedMission(z.go, z3);
+				{ const uint32 z4 = sMissionSys.GetAvailableStoryMission(z.po, 0); check(z4 == 10131, "story: an explicit nextSuccess (1.3 -> Mourning Morpheus) is followed (" + std::to_string(z4) + ")"); sMissionSys.RecordCompletedMission(z.go, z4); const uint32 z5 = sMissionSys.GetAvailableStoryMission(z.po, 0); check(z5 == 10210, "story: chapter 1 done, next is 2.1 (" + std::to_string(z5) + ")"); }
+			}
 			// the older suites below were written against the emulator's legacy rules
 			sConfig.SetOverride("Combat.InterlockModel", "legacy");
 			sConfig.SetOverride("Combat.TrackAmmo", "1");

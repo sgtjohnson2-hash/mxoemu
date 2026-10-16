@@ -387,6 +387,32 @@ uint32 MissionSystem::GetAvailableStoryMission(PlayerObject* player, uint32 spon
         }
     }
 
+    // Story order (retail Critical Missions): chapters run in order, 10ccv = chapter c step,
+    // variant v. One variant per step: the player's own faction version wins over the neutral one,
+    // other factions' versions are never offered, and a step counts as done once any variant is.
+    // The old passes handed out every own-faction mission first (Zion 4.3 before neutral 2.1).
+    {
+        uint32 bestId = 0;
+        uint32 curGroup = 0;
+        bool groupDone = false;
+        for (const auto& kv : m_missions) {
+            const uint32 mid = kv.first;
+            if (mid < 10100 || mid >= 12000) continue; // story range only (Rebirth 99999 etc. are side content)
+            const uint32 group = mid / 10;
+            if (group != curGroup) {
+                if (bestId != 0 && !groupDone) return bestId;
+                curGroup = group; bestId = 0; groupDone = false;
+                for (const auto& kv2 : m_missions)
+                    if (kv2.first / 10 == group && HasCompletedMission(playerGoId, kv2.first)) { groupDone = true; break; }
+            }
+            if (groupDone) continue;
+            const uint32 f = kv.second.factionId;
+            if (f != 0 && f != targetFaction) continue;
+            if (bestId == 0 || (f == targetFaction && m_missions[bestId].factionId == 0)) bestId = mid;
+        }
+        if (bestId != 0 && !groupDone) return bestId;
+    }
+
     // Pass 1: Look for exact faction match if targetFaction is specified
     if (targetFaction != 0) {
         for (const auto& kv : m_missions) {
