@@ -1751,6 +1751,35 @@ void MarginSocket::HandleCreateCharacterRequest(ByteBuffer &packetData)
 	rsiStmt.SetUInt16(22, leggings.model);
 	sDatabase.ExecutePrepared(&rsiStmt);
 
+	// Psych profile (archetype ability ids 299-308 at @64) sets the starting attributes, exactly as the
+	// retail creation screen shows them (verified on screen for all ten, 2026-10-16).
+	{
+		struct Arch { uint32 id; uint8 belief, perception, reason, focus, vitality; };
+		static const Arch s_arch[] = {
+			{ 308, 8, 11, 8, 5, 8 },  // DetachedSpectator
+			{ 304, 11, 8, 8, 8, 5 },  // DevotedAscetic
+			{ 303, 5, 8, 8, 8, 11 },  // FanaticSelfImprover
+			{ 306, 5, 8, 11, 8, 8 },  // InquisitiveGenius
+			{ 305, 11, 8, 5, 8, 8 },  // LunaticFringe
+			{ 302, 8, 8, 5, 11, 8 },  // NewAgeHippy
+			{ 307, 8, 5, 8, 11, 8 },  // SecludedIntrovert
+			{ 299, 5, 11, 8, 8, 8 },  // SuspiciousCynic
+			{ 301, 8, 8, 11, 5, 8 },  // TroubledIntellectual
+			{ 300, 11, 5, 8, 8, 8 },  // TrueBeliever
+		};
+		const uint32 archId = u32At(64);
+		for (const Arch& a : s_arch)
+		{
+			if (a.id != archId) continue;
+			PreparedStatement attrStmt("UPDATE `characters` SET `belief` = ?0, `perception` = ?1, `reason` = ?2, `focus` = ?3, `vitality` = ?4 WHERE `charId` = ?5");
+			attrStmt.SetUInt16(0, a.belief); attrStmt.SetUInt16(1, a.perception); attrStmt.SetUInt16(2, a.reason);
+			attrStmt.SetUInt16(3, a.focus); attrStmt.SetUInt16(4, a.vitality); attrStmt.SetUInt64(5, charId);
+			sDatabase.ExecutePrepared(&attrStmt);
+			INFO_LOG(format("MS_CreateCharacterRequest: archetype %1% -> B%2% P%3% R%4% F%5% V%6%") % archId
+				% uint32(a.belief) % uint32(a.perception) % uint32(a.reason) % uint32(a.focus) % uint32(a.vitality));
+		}
+	}
+
 	INFO_LOG(format("MS_CreateCharacterRequest: Character %1% successfully created and configured!") % m_charName);
 
 	readyForUdp = true;
