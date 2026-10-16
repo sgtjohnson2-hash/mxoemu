@@ -582,7 +582,9 @@ void PlayerObject::InitializeWorld()
 	
 	m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FF0000}W{/c}{c:DD0000}e{/c}{c:EE0000}l{/c}{c:CC0000}c{/c}{c:BB0000}o{/c}{c:AA0000}m{/c}{c:990000}e{/c} {c:880000}B{/c}{c:770000}a{/c}{c:660000}c{/c}{c:550000}k{/c}{c:440000}.{/c}{c:330000}.{/c}{c:220000}.{/c}"));
 
-	if (m_district == 0)
+	// Bots also run InitializeWorld and default to district 0; spawning tutorial NPCs for them
+	// recursed (each NPC spawned another) and crashed the server on startup.
+	if (m_district == 0 && !m_parent.isBot() && m_characterUID < 9000000)
 	{
 		TutorialSpawnRoom(m_tutStep);
 		TutorialIntro();
@@ -646,6 +648,8 @@ void PlayerObject::TutorialGiveItem(uint32 templateId)
 
 void PlayerObject::TutorialSpawnRoom(uint8 room)
 {
+	if (m_parent.isBot())
+		return;
 	TutorialDespawn();
 	m_parent.m_instanceId = TutorialInstanceId();
 	auto spawn = [&](const char* handle, const char* type, double x, double y, double z, uint32 lvl, uint32 hp) {
