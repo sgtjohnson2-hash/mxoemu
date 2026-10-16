@@ -23,6 +23,8 @@
 //
 // ***************************************************************************
 
+#include <fstream>
+#include <map>
 #include "Common.h"
 #include "Util.h"
 #include "ByteBuffer.h"
@@ -1470,6 +1472,42 @@ void MarginSocket::HandleClaimCharacterNameRequest(ByteBuffer &packetData)
 	SendCrypted(response);
 }
 
+// Clothing item GOID -> RSI model/colour, from gameobjects.csv names like Fclothing_Shirt_A5_C6
+// (model 5, colour index 5: C is 1-based, matching mxoClothing.csv's ModelId/ColorId columns).
+static void ClothingModelColor(uint32 goid, uint16& model, uint16& color)
+{
+	model = 0; color = 0;
+	if (goid == 0) return;
+	static std::map<uint32, std::pair<uint16, uint16>> s_map;
+	static bool s_loaded = false;
+	if (!s_loaded)
+	{
+		s_loaded = true;
+		const char* paths[] = { "Data/hd_dump/gameobjects.csv", "Data/gameobjects.csv" };
+		for (const char* path : paths)
+		{
+			std::ifstream in(path);
+			if (!in) continue;
+			std::string line;
+			while (std::getline(in, line))
+			{
+				if (line.find("clothing_") == std::string::npos) continue;
+				size_t comma = line.find(',');
+				if (comma == std::string::npos) continue;
+				const std::string name = line.substr(0, comma);
+				const uint32 id = uint32(strtoul(line.c_str() + comma + 1, nullptr, 10));
+				size_t a = name.rfind("_A"), c = name.rfind("_C");
+				if (!id || a == std::string::npos || c == std::string::npos || c < a) continue;
+				const int m = atoi(name.c_str() + a + 2), col = atoi(name.c_str() + c + 2);
+				s_map[id] = std::make_pair(uint16(m), uint16(col > 0 ? col - 1 : 0));
+			}
+			break;
+		}
+	}
+	auto it = s_map.find(goid);
+	if (it != s_map.end()) { model = it->second.first; color = it->second.second; }
+}
+
 void MarginSocket::HandleCreateCharacterRequest(ByteBuffer &packetData)
 {
 	DEBUG_LOG("Margin Received MS_CreateCharacterRequest");
@@ -1496,21 +1534,33 @@ void MarginSocket::HandleCreateCharacterRequest(ByteBuffer &packetData)
 		for (size_t i = 0; i < remaining && i < 200; ++i) { snprintf(hb, sizeof(hb), "%02x ", raw[i]); hex += hb; }
 		INFO_LOG(format("MS_CreateCharacterRequest raw (%1% bytes): %2%") % remaining % hex);
 	}
-	uint16 skintone = *(uint16*)&raw[2];
-	uint16 bodyTypeId = *(uint16*)&raw[6];
-	uint16 hairId = *(uint16*)&raw[14];
-	uint16 haircolor = *(uint16*)&raw[18];
-	uint16 tattoo = *(uint16*)&raw[22];
-	uint16 headId = *(uint16*)&raw[26];
-	uint16 facialDetail = *(uint16*)&raw[30];
-	uint16 hatId = *(uint16*)&raw[34];
-	uint16 eyewearId = *(uint16*)&raw[38];
-	uint16 shirtId = *(uint16*)&raw[42];
-	uint16 glovesId = *(uint16*)&raw[46];
-	uint16 outerwearId = *(uint16*)&raw[50];
-	uint16 pantsId = *(uint16*)&raw[54];
-	uint16 footwearId = *(uint16*)&raw[62];
-	uint16 profession = *(uint16*)&raw[66];
+	// The create packet is 17 little-endian u32 fields, then the name/description offsets at 68.
+	// Live captures (QAFresh2 male, QAFresh3 female, 2026-10-16):
+	//  @0 skin tone, @4 body id (100-102 male, 103-105 female), @8 face, @12 hair, @16 hair colour,
+	//  @20 tattoo, @24 facial detail, @28 facial detail colour (part ids are 100+index),
+	//  @32 hat, @36 glasses, @40 shirt, @44 gloves, @48 coat, @52 pants, @56 leggings, @60 shoes
+	//  (clothing item GOIDs: <M|F>clothing_<Type>_A<model>_C<colour> in gameobjects.csv), @64 background.
+	// The old reader took the u16 at +2 of every field (its zero high half), so every RSI was blank
+	// and the defaults dressed each new character in the long black coat.
+	auto u32At = [&](size_t off) -> uint32 { return (off + 4 <= remaining) ? *(const uint32*)&raw[off] : 0; };
+	auto partIdx = [](uint32 v) -> uint16 { return uint16(v >= 100 ? v - 100 : v); };
+	const uint32 bodyRaw = u32At(4);
+	const uint16 sex = (bodyRaw >= 103) ? 1 : 0;
+	uint16 bodyTypeId = uint16((bodyRaw >= 100 ? bodyRaw - 100 : bodyRaw) % 3);
+	uint16 skintone = uint16(u32At(0));
+	uint16 headId = partIdx(u32At(8));
+	uint16 hairId = partIdx(u32At(12));
+	uint16 haircolor = uint16(u32At(16));
+	uint16 tattoo = uint16(u32At(20));
+	uint16 facialDetail = partIdx(u32At(24));
+	uint16 facialDetailColor = uint16(u32At(28));
+	struct Cloth { uint16 model = 0, color = 0; };
+	auto cloth = [&](size_t off) -> Cloth { Cloth c; ClothingModelColor(u32At(off), c.model, c.color); return c; };
+	const Cloth hat = cloth(32), glasses = cloth(36), shirt = cloth(40), gloves = cloth(44), coat = cloth(48),
+		pants = cloth(52), leggings = cloth(56), shoes = cloth(60);
+	uint16 hatId = hat.model, eyewearId = glasses.model, shirtId = shirt.model, glovesId = gloves.model,
+		outerwearId = coat.model, pantsId = pants.model, footwearId = shoes.model;
+	uint16 profession = 0; // @64 is the background/archetype id, not a profession; new operatives start as 2
 
 	string firstName = m_charName;
 	string lastName = "Operative";
@@ -1675,23 +1725,30 @@ void MarginSocket::HandleCreateCharacterRequest(ByteBuffer &packetData)
 	sDatabase.ExecutePrepared(&updStmt);
 
 	PreparedStatement rsiStmt("REPLACE INTO `rsivalues` (`charId`, `sex`, `body`, `hat`, `face`, `shirt`, `coat`, `pants`, `shoes`, `gloves`, `glasses`, `hair`, `facialdetail`, `shirtcolor`, `pantscolor`, `coatcolor`, `shoecolor`, `glassescolor`, `haircolor`, `skintone`, `tattoo`, `facialdetailcolor`, `leggings`) "
-		"VALUES (?0, ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, 41, 16, 0, 0, 15, ?13, ?14, ?15, 0, 0)");
+		"VALUES (?0, ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22)");
 	rsiStmt.SetUInt64(0, charId);
-	rsiStmt.SetUInt16(1, (bodyTypeId % 2));
+	rsiStmt.SetUInt16(1, sex);
 	rsiStmt.SetUInt16(2, bodyTypeId);
 	rsiStmt.SetUInt16(3, hatId);
 	rsiStmt.SetUInt16(4, headId);
-	rsiStmt.SetUInt16(5, shirtId > 0 ? shirtId : 2);
-	rsiStmt.SetUInt16(6, outerwearId > 0 ? outerwearId : 10);
-	rsiStmt.SetUInt16(7, pantsId > 0 ? pantsId : 1);
-	rsiStmt.SetUInt16(8, footwearId > 0 ? footwearId : 6);
-	rsiStmt.SetUInt16(9, glovesId > 0 ? glovesId : 6);
-	rsiStmt.SetUInt16(10, eyewearId > 0 ? eyewearId : 4);
+	rsiStmt.SetUInt16(5, shirtId);
+	rsiStmt.SetUInt16(6, outerwearId); // 0 = no coat (the old default 10 forced a long black coat)
+	rsiStmt.SetUInt16(7, pantsId);
+	rsiStmt.SetUInt16(8, footwearId);
+	rsiStmt.SetUInt16(9, glovesId);
+	rsiStmt.SetUInt16(10, eyewearId);
 	rsiStmt.SetUInt16(11, hairId);
 	rsiStmt.SetUInt16(12, facialDetail);
-	rsiStmt.SetUInt16(13, haircolor);
-	rsiStmt.SetUInt16(14, skintone);
-	rsiStmt.SetUInt16(15, tattoo);
+	rsiStmt.SetUInt16(13, shirt.color);
+	rsiStmt.SetUInt16(14, pants.color);
+	rsiStmt.SetUInt16(15, coat.color);
+	rsiStmt.SetUInt16(16, shoes.color);
+	rsiStmt.SetUInt16(17, glasses.color);
+	rsiStmt.SetUInt16(18, haircolor);
+	rsiStmt.SetUInt16(19, skintone);
+	rsiStmt.SetUInt16(20, tattoo);
+	rsiStmt.SetUInt16(21, facialDetailColor);
+	rsiStmt.SetUInt16(22, leggings.model);
 	sDatabase.ExecutePrepared(&rsiStmt);
 
 	INFO_LOG(format("MS_CreateCharacterRequest: Character %1% successfully created and configured!") % m_charName);
