@@ -813,7 +813,7 @@ void AuthSocket::HandleCreateCharacterRequest( ByteBuffer &packet )
 		{
 			// Create character record
 			PreparedStatement stmt("INSERT INTO `characters` (`userId`, `worldId`, `status`, `handle`, `firstName`, `lastName`, `background`, `x`, `y`, `z`, `rot`, `healthC`, `healthM`, `innerStrC`, `innerStrM`, `level`, `profession`, `alignment`, `pvpflag`, `exp`, `cash`, `district`, `adminFlags`) "
-				"VALUES (?0, 1, 0, ?1, ?2, ?3, '', 16802.3, 495.0, 3237.01, 0.0245437, 250, 250, 100, 100, 1, 1, 0, 0, 0, 250, 1, 0)");
+				"VALUES (?0, 1, 0, ?1, ?2, ?3, '', 16802.3, 495.0, 3237.01, 0.0245437, 250, 250, 100, 100, 1, 1, 0, 0, 0, 250, 255, 0)"); // district 255 = tutorial pending (retail: every redpill starts in tutorial_v2)
 			stmt.SetUInt32(0, m_userId);
 			stmt.SetString(1, handle);
 			stmt.SetString(2, firstName);
