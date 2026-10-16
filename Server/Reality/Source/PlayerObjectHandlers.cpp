@@ -994,11 +994,13 @@ void PlayerObject::ParsePlayerCommand( string theCmd )
 			m_savedPos = mara;
 			this->saveDataToDB();
 			INFO_LOG(format("Character %1% completed the tutorial: moved to Mara Central") % m_handle);
-			m_parent.QueueCommand(make_shared<LoadWorldCmd>(LoadWorldCmd::SLUMS, "Massive"));
-			auto posMsg = make_shared<PositionStateMsg>(m_goId);
-			m_parent.QueueState(posMsg);
-			this->FlushAndRefreshAoI();
-			m_parent.QueueState(make_shared<JackoutEffectMsg>(m_goId, false));
+			// Switching worlds inside a session desyncs object views (client rebuilds the world,
+			// server keeps the old views). Retail returned you to the Loading Area after the
+			// tutorial, so jack out through the hardline; the next jack-in loads Richland.
+			m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:00FF00}[Hardline] Exiting the Construct. Jack in from the Loading Area to enter the Matrix.{/c}"));
+			m_parent.QueueState(make_shared<JackoutEffectMsg>(m_goId));
+			cancelEvents(EVENT_JACKOUT);
+			this->addEvent(EVENT_JACKOUT, boost::bind(&PlayerObject::jackoutEvent, this), 4.0f);
 			return;
 		}
 		}
