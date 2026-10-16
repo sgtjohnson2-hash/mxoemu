@@ -1490,6 +1490,12 @@ void MarginSocket::HandleCreateCharacterRequest(ByteBuffer &packetData)
 	const byte* raw = (const byte*)&packetData.contents()[packetData.rpos()];
 	size_t remaining = packetData.remaining();
 
+	{
+		// raw payload for the RSI field map (live QAFresh 18:21: every RSI field parsed as 0)
+		std::string hex; char hb[4];
+		for (size_t i = 0; i < remaining && i < 200; ++i) { snprintf(hb, sizeof(hb), "%02x ", raw[i]); hex += hb; }
+		INFO_LOG(format("MS_CreateCharacterRequest raw (%1% bytes): %2%") % remaining % hex);
+	}
 	uint16 skintone = *(uint16*)&raw[2];
 	uint16 bodyTypeId = *(uint16*)&raw[6];
 	uint16 hairId = *(uint16*)&raw[14];
