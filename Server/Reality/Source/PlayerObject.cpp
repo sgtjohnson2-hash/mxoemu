@@ -206,6 +206,29 @@ void PlayerObject::loadFromDB( bool updatePos )
 		{
 			m_district = 0; // LoadWorldCmd::TUTORIAL
 			INFO_LOG(format("Character %1% is tutorial-pending: loading tutorial_v2") % m_handle);
+			// tutorial_v2 is a 6x6 grid of identical 320 m blocks (Ammit's Room, White Room,
+			// Scarlet's Office, Dojo, Pistol Room, Subway). A position that is not inside one of
+			// those rooms (e.g. the new-character Mara Central default) is off the tutorial
+			// geometry, so start the redpill in Ammit's Room (93 3 151 m, server units x100).
+			if (updatePos)
+			{
+				static const double rooms[6][3] = { {9300,300,15100}, {7100,4000,15700}, {4000,500,15100},
+					{5800,-1000,21200}, {6900,1600,20200}, {6900,300,21500} };
+				double bx = fmod(m_pos.x, 32000.0); if (bx < 0) bx += 32000.0;
+				double bz = fmod(m_pos.z, 32000.0); if (bz < 0) bz += 32000.0;
+				bool inRoom = false;
+				for (int i = 0; i < 6 && !inRoom; ++i)
+				{
+					double dx = bx - rooms[i][0], dz = bz - rooms[i][2], dy = m_pos.y - rooms[i][1];
+					inRoom = (dx*dx + dz*dz < 4000.0*4000.0) && fabs(dy) < 3000.0;
+				}
+				if (!inRoom)
+				{
+					m_pos.ChangeCoords(rooms[0][0], rooms[0][1], rooms[0][2]);
+					m_savedPos = m_pos;
+					INFO_LOG(format("Character %1% tutorial start: placed in Ammit's Room") % m_handle);
+				}
+			}
 		}
 		else if (m_district == 0)
 			m_district = 1;
