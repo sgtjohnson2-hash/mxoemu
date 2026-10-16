@@ -2015,6 +2015,15 @@ bool CombatSystem::RunInterlockRound(InterlockSession &session)
 
 	auto selectBotRoundMove = [&](PlayerObject* bot, PlayerObject* opponent, const CombatMove*& chosenMove)
 	{
+		// Street mobs throw their faction special about one round in three and a plain style strike
+		// otherwise (live 16:10-16:14: L1 "Hostile" mobs swung KungFu every round, 930 casts in 25 min,
+		// and still killed L1 testers twice per mission). Agents and L30+ elites keep the full kit.
+		const bool eliteBot = bot->getHandle().find("Agent") != std::string::npos || bot->getLevel() >= 30;
+		if (!eliteBot && (rand() % 3) != 0)
+		{
+			chosenMove = GetDefaultStyleMove(bot);
+			return;
+		}
 		uint32 faction = bot->getFaction();
 		if (faction == FACTION_ZION)
 		{
@@ -2054,9 +2063,14 @@ bool CombatSystem::RunInterlockRound(InterlockSession &session)
 				const CombatMove* m = GetMove(5043);
 				if (!m) m = GetMoveByName("Patch Health");
 				uint16 cost = (m && m->isCost > 0) ? m->isCost : 25;
-				bot->spendIS(cost);
-				uint16 healAmt = (m && m->minDmg > 0.0f) ? (uint16)m->minDmg : 50;
-				bot->applyHeal(bot->getGoId(), healAmt);
+				// the heal needs the Inner Strength and restores at most 15% of the bar (a flat 50 on a
+				// 72 HP L1 mob undid two rounds of damage: L1 operatives won 2 fights in 10 vs Merovingians)
+				if (bot->spendIS(cost))
+				{
+					uint16 healAmt = (m && m->minDmg > 0.0f) ? (uint16)m->minDmg : 50;
+					healAmt = std::min<uint16>(healAmt, std::max<uint16>(1, uint16(bot->getMaximumHealth() * 15 / 100)));
+					bot->applyHeal(bot->getGoId(), healAmt);
+				}
 				INFO_LOG(format("UseAbility: %1%:%2% uses %3% (requested id 5043, move id 5043) on target go %4% [interlocked=1 castTime=0]")
 					% bot->getHandle() % bot->getGoId() % (m ? m->name : "Restore") % opponent->getGoId());
 			}
@@ -2560,6 +2574,7 @@ void CombatSystem::RunCR2Exchange(InterlockSession &session, PlayerObject* pA, P
 	auto attemptWithdraw = [&](PlayerObject* who, PlayerObject* opp, uint8 oppTac) -> bool
 	{
 		const bool ok = (float(rand() % 10000) / 10000.0f) < CR2WithdrawChance(who, opp, oppTac);
+		INFO_LOG(format("Interlock CR2 withdraw attempt: %1%:%2% vs %3% (p=%4$.2f) -> %5%") % who->getHandle() % who->getGoId() % opp->getHandle() % CR2WithdrawChance(who, opp, oppTac) % (ok ? "escaped" : "held"));
 		if (!who->getClient().isBot())
 			who->getClient().QueueCommand(std::make_shared<SystemChatMsg>(ok
 				? "You withdraw from combat."

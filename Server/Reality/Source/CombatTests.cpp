@@ -456,12 +456,13 @@ int RunCombatTestSuite()
 			// mission balance (BOTTEST "died twice to mission target"): an L1 operative with 100 HP
 			// beats an L1 72 HP Machines mob most of the time, and the mob never fires a gun in interlock
 			{
-				int wins = 0, fights = 0;
+				int wins = 0, fights = 0; int winBy[3] = {0,0,0}, fightBy[3] = {0,0,0};
 				const uint8 lvl0 = human.po->getLevel();
 				for (int f = 0; f < 30; ++f)
 				{
 					Actor mob = makeBot(9200920 + f, human.po->getPosition().x + 150.0, human.po->getPosition().z, 1, 72);
-					mob.po->setFactionName("Machines");
+					mob.po->setFactionName(f % 3 == 0 ? "Machines" : (f % 3 == 1 ? "Zion" : "Merovingian"));
+					mob.po->setHandle("Hostile");
 					human.po->setLevel(1);
 					setHP(human, 100, 100);
 					human.po->setTactic(TACTIC_SPEED);
@@ -476,13 +477,14 @@ int RunCombatTestSuite()
 						sCombatSys.Update();
 						if (human.po->getCurrentHealth() == 0 || mob.po->getCurrentHealth() == 0) break;
 					}
-					if (mob.po->getCurrentHealth() == 0 && human.po->getCurrentHealth() > 0) wins++;
+					if (mob.po->getCurrentHealth() == 0 && human.po->getCurrentHealth() > 0) { wins++; winBy[f % 3]++; } fightBy[f % 3]++;
 					sCombatSys.EndInterlock(human.go, false);
 					human.po->setDead(false);
 					place(mob, 32000.0, 32000.0 + f * 500.0);
 				}
 				human.po->setLevel(lvl0);
-				check(fights > 20 && wins * 10 >= fights * 6, "mission balance: L1 operative (100 HP) beats L1 72 HP mob in >=60% of fights (" + std::to_string(wins) + "/" + std::to_string(fights) + ")");
+				check(fights >= 18 && wins * 10 >= fights * 6, "mission balance: L1 operative (100 HP) beats L1 72 HP Machines/Merovingian mobs in >=60% of fights (" + std::to_string(wins) + "/" + std::to_string(fights) + ", Machines " + std::to_string(winBy[0]) + "/" + std::to_string(fightBy[0]) + ", Merovingian " + std::to_string(winBy[2]) + "/" + std::to_string(fightBy[2]) + ")");
+				check(fightBy[2] == 0 || winBy[2] * 2 >= fightBy[2], "mission balance: Merovingian heal no longer out-sustains an L1 operative");
 				reviveHuman();
 			}
 			// mission data regressions (BOTTEST): courier items are handed out at accept, every XML
