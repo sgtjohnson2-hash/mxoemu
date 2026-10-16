@@ -671,8 +671,10 @@ void TesterBrain::DoMission(PlayerObject* me, uint32 now, float dt)
     // Rest between mission fights. The HP check used to live only in ChooseGoal, so a
     // tester walked from one objective straight into the next fight at 20-30% HP and died
     // ("tester died twice to mission target" findings against weaker NPCs).
+    // Live 17:39 UTC (f2f0ca32): Westwater still opened a fight at 43-55% HP against a full 72 HP
+    // Hostile and lost; top up to 80% first like a player would (DoRest then refills to 90%).
     if (me->getInterlockPartner() == 0 && !me->isDead() && me->getMaximumHealth() &&
-        uint32(me->getCurrentHealth()) * 2 < uint32(me->getMaximumHealth()))
+        uint32(me->getCurrentHealth()) * 5 < uint32(me->getMaximumHealth()) * 4)
     {
         m_goal = Goal::REST;
         m_restStartMs = now;
