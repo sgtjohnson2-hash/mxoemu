@@ -911,8 +911,18 @@ std::shared_ptr<BotClient> BotManager::SpawnTester(int index, const LocationVect
             ERROR_LOG(format("BOTTEST: could not construct tester %1%") % (i + 1));
             return nullptr;
         }
+        // Tester handles honour the people who made and ran The Matrix Online (Monolith/SOE
+        // developers and the Live Events team), then fall back to Matrix-lore names.
+        static const char* testerNames[] = {
+            "Chadwick", "Ragaini", "Krebs", "Walrus", "Rarebit", "Westwater",
+            "Kaplan", "Auberon", "Archon", "Tyndall", "Sati", "Ghost",
+            "Mouse", "Dozer", "Tank", "Apoc", "Switch", "Sparks" };
+        const int nameCount = int(sizeof(testerNames) / sizeof(testerNames[0]));
         char handle[32];
-        snprintf(handle, sizeof(handle), "Tester_%02d", i + 1);
+        if (i < nameCount)
+            snprintf(handle, sizeof(handle), "%s", testerNames[i]);
+        else
+            snprintf(handle, sizeof(handle), "%s_%02d", testerNames[i % nameCount], i / nameCount + 1);
         bot->SetFaction(factionIds[i % 3]);
         bot->SetSpawnLocation(start.x, start.y, start.z);
         po->setHandle(handle);

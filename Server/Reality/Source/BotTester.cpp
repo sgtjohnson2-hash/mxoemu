@@ -283,13 +283,23 @@ void TesterBrain::CheckLevel(PlayerObject* me)
             ids.push_back(kv.first);
         for (uint16 id : ids)
         {
+            // 0x80b7's last byte is a level DELTA (client.dll 0x621e1290, HDS AbilityHandler.cs),
+            // so send how many levels to add, not the absolute level. Target = player level.
+            auto before = me->getAbilitySystem()->getAbility(id);
+            if (!before) continue;
+            uint16 cur = before->getLevel();
+            uint16 target = uint16(lvl);
+            if (cur >= target) continue;
+            uint8 delta = uint8(std::min<uint16>(255, uint16(target - cur)));
             ByteBuffer b = Rpc16(RPC_ABILITY_UPG);
-            b << uint16(id) << uint16(0) << uint8(lvl);
+            b << uint16(id) << uint16(0) << delta;
             if (SendRpc(b, "0x80b7 ability upgrade"))
             {
                 auto ab = me->getAbilitySystem()->getAbility(id);
-                if (ab && ab->getLevel() == lvl) m_stats.abilityUpgrades++;
-                else AddFinding("0x80b7 upgrade did not raise ability level", LastServerText());
+                if (ab && ab->getLevel() == target) m_stats.abilityUpgrades++;
+                else AddFinding("0x80b7 upgrade did not raise ability level",
+                    (format("ability %1% %2% -> wanted %3%, got %4%") % id % cur % target
+                        % (ab ? ab->getLevel() : 0)).str());
             }
         }
     }
@@ -572,6 +582,16 @@ void TesterBrain::ChooseGoal(PlayerObject* me, uint32 now)
         return;
     }
 
+    // Shop before asking for the next mission. Missions were always available, so the old
+    // order meant testers never reached a vendor (buys 0 / fail 0 on every tester).
+    if (me->getInformation() >= 100 && now >= m_nextShopMs)
+    {
+        m_nextShopMs = now + 600000;
+        m_shopVendorId = 0;
+        m_goal = Goal::SHOP;
+        return;
+    }
+
     if (now >= m_nextMissionRequestMs)
     {
         m_nextMissionRequestMs = now + 90000;
@@ -590,6 +610,9 @@ void TesterBrain::ChooseGoal(PlayerObject* me, uint32 now)
                 (format("%1% (%2%) re-offered %3% '%4%' after trying %5% missions") % me->getHandle()
                     % me->getFactionName() % info.missionId % info.title % m_triedMissions.size()).str());
             m_nextMissionRequestMs = now + 30 * 60 * 1000;
+            // Retry the whole list after the back-off: the tester has levelled since, and
+            // missions it died on at a low level may be playable now.
+            m_triedMissions.clear();
             m_goal = Goal::HUNT;
             return;
         }
@@ -645,6 +668,20 @@ void TesterBrain::AbortMission(PlayerObject* me, const std::string& why)
 
 void TesterBrain::DoMission(PlayerObject* me, uint32 now, float dt)
 {
+    // Rest between mission fights. The HP check used to live only in ChooseGoal, so a
+    // tester walked from one objective straight into the next fight at 20-30% HP and died
+    // ("tester died twice to mission target" findings against weaker NPCs).
+    if (me->getInterlockPartner() == 0 && !me->isDead() && me->getMaximumHealth() &&
+        uint32(me->getCurrentHealth()) * 2 < uint32(me->getMaximumHealth()))
+    {
+        m_goal = Goal::REST;
+        m_restStartMs = now;
+        m_restLastHp = me->getCurrentHealth();
+        m_restLastGainMs = now;
+        m_stats.rests++;
+        m_combatTarget = 0;
+        return;
+    }
     ActiveObjectiveInfo info;
     if (!sMissionSys.GetActiveObjectiveInfo(me->getGoId(), info))
     {
