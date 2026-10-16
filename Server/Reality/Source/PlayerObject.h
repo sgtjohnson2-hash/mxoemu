@@ -79,6 +79,7 @@ public:
 	~PlayerObject();
 
 	void InitializeWorld();
+	void TutorialIntro();
 	void sendAttributes();
 	void SpawnSelf();
 	void PopulateWorld();
@@ -516,6 +517,7 @@ private:
 	
 	uint64 m_exp,m_cash;
 	uint8 m_district;
+	uint8 m_tutStep = 0; // tutorial_v2 room index (0 Ammit's Room ... 5 Subway, 6 done)
 	LocationVector m_savedPos;
 	shared_ptr<class RsiData> m_rsi;
 	uint16 m_innerStrC,m_innerStrM;

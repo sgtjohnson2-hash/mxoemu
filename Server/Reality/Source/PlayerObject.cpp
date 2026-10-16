@@ -221,10 +221,12 @@ void PlayerObject::loadFromDB( bool updatePos )
 				{
 					double dx = bx - rooms[i][0], dz = bz - rooms[i][2], dy = m_pos.y - rooms[i][1];
 					inRoom = (dx*dx + dz*dz < 4000.0*4000.0) && fabs(dy) < 3000.0;
+					if (inRoom) m_tutStep = (uint8)i;
 				}
 				if (!inRoom)
 				{
 					m_pos.ChangeCoords(rooms[0][0], rooms[0][1], rooms[0][2]);
+					m_tutStep = 0;
 					m_savedPos = m_pos;
 					INFO_LOG(format("Character %1% tutorial start: placed in Ammit's Room") % m_handle);
 				}
@@ -577,6 +579,26 @@ void PlayerObject::InitializeWorld()
 	// m_parent.QueueCommand(make_shared<EventURLCmd>("http://mxoemu.info/forum/index.php"));
 	
 	m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FF0000}W{/c}{c:DD0000}e{/c}{c:EE0000}l{/c}{c:CC0000}c{/c}{c:BB0000}o{/c}{c:AA0000}m{/c}{c:990000}e{/c} {c:880000}B{/c}{c:770000}a{/c}{c:660000}c{/c}{c:550000}k{/c}{c:440000}.{/c}{c:330000}.{/c}{c:220000}.{/c}"));
+
+	if (m_district == 0)
+		TutorialIntro();
+}
+
+// Opening lines for a redpill in tutorial_v2; repeated by &tutorial. See ParsePlayerCommand for the chain.
+void PlayerObject::TutorialIntro()
+{
+	static const char* steps[] = {
+		"{c:6699FF}Niobe: You've felt it your whole life, that there's something wrong with the world. I'm offering you the truth.{/c}",
+		"{c:6699FF}Niobe: Take the red pill and you see how deep the rabbit hole goes. Take the blue pill and you wake up believing whatever you want.{/c}",
+		"{c:FFFF00}[Tutorial] Type &red or &blue in chat to make your choice.{/c}",
+		"{c:00FF66}Link: You're in the Construct. Type &continue when you're ready for the next program.{/c}" };
+	if (m_tutStep == 0)
+	{
+		for (int i = 0; i < 3; ++i)
+			m_parent.QueueCommand(make_shared<SystemChatMsg>(steps[i]));
+	}
+	else
+		m_parent.QueueCommand(make_shared<SystemChatMsg>(steps[3]));
 }
 
 void PlayerObject::UpdateAppearance()

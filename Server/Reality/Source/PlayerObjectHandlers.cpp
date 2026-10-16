@@ -907,6 +907,102 @@ void PlayerObject::ParsePlayerCommand( string theCmd )
 		}
 	}
 
+	// ---- Retail tutorial chain (tutorial_v2, district 0 / DB 255) --------------------------
+	// Ammit's Room (pill choice) -> White Room -> Scarlet's Office -> Dojo -> Pistol Room ->
+	// Subway hardline -> Mara Central (Richland). Retail walkthrough: research/retail_mxofaq.txt.
+	// Room coords: mxoemu.info tutorial_v2 list (meters, x100). Players advance with &continue.
+	if (m_district == 0 && (iequals(command, "red") || iequals(command, "blue") || iequals(command, "continue") || iequals(command, "tutorial")))
+	{
+		static const double rooms[6][3] = { {9300,300,15100}, {7100,4000,15700}, {4000,500,15100},
+			{5800,-1000,21200}, {6900,1600,20200}, {6900,300,21500} };
+		auto say = [&](const std::string& who, const std::string& col, const std::string& txt) {
+			m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:" + col + "}" + who + ": " + txt + "{/c}"));
+		};
+		auto moveTo = [&](int room) {
+			LocationVector p(rooms[room][0], rooms[room][1], rooms[room][2]);
+			this->setPosition(p);
+			auto posMsg = make_shared<PositionStateMsg>(m_goId);
+			m_parent.QueueState(posMsg);
+			sGame.AnnounceStateUpdate(&m_parent, posMsg);
+			m_tutStep = (uint8)room;
+		};
+		if (iequals(command, "tutorial"))
+		{
+			TutorialIntro();
+			return;
+		}
+		if (m_tutStep == 0)
+		{
+			if (iequals(command, "blue"))
+			{
+				say("Niobe", "6699FF", "Then the story ends. You wake up in your bed and believe whatever you want to believe.");
+				say("Niobe", "6699FF", "...But you are still here. Some part of you knows the choice is real. Choose again: &red or &blue.");
+				return;
+			}
+			if (!iequals(command, "red"))
+			{
+				say("Niobe", "6699FF", "First you have to choose. Type &red to take the red pill, &blue to take the blue pill.");
+				return;
+			}
+			say("Niobe", "6699FF", "Remember: all I am offering is the truth. Nothing more.");
+			m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:00FF00}[Extraction] Your body is flushed from the power plant... You wake in the Construct.{/c}"));
+			moveTo(1);
+			say("Link", "00FF66", "Welcome to the real world, redpill. I'm Link, your operator. This is the Construct, our loading program.");
+			say("Link", "00FF66", "First, get used to your RSI. Walk around a bit (W A S D, mouse to look). Type &continue when you're ready.");
+			return;
+		}
+		if (!iequals(command, "continue"))
+			return;
+		switch (m_tutStep)
+		{
+		case 1:
+		{
+			double dx = m_pos.x - rooms[1][0], dz = m_pos.z - rooms[1][2];
+			if (dx*dx + dz*dz < 200.0*200.0)
+			{
+				say("Link", "00FF66", "Move around a little first. Walk a few steps, then type &continue.");
+				return;
+			}
+			moveTo(2);
+			say("Link", "00FF66", "Good. This is Scarlet's office. In the Matrix you'll talk to contacts like her to get missions.");
+			say("Link", "00FF66", "Select a person by clicking on them, then right-click to interact. Type &continue for combat training.");
+			return;
+		}
+		case 2:
+			moveTo(3);
+			say("Link", "00FF66", "The Dojo. Close combat in the Matrix is Interlock: target an enemy and attack to lock into a fight.");
+			say("Link", "00FF66", "Your fighting style and abilities decide each round. Blocks, throws and special moves beat each other. Type &continue.");
+			return;
+		case 3:
+			moveTo(4);
+			say("Link", "00FF66", "The Pistol Room. Free Fire is ranged combat: equip a gun, target, and fire from a distance.");
+			say("Link", "00FF66", "Free Fire skips Interlock, but anyone you shoot can pull you into a close fight. Type &continue.");
+			return;
+		case 4:
+			moveTo(5);
+			say("Link", "00FF66", "This subway station has a hardline. Hardlines are how you jack in and out of the Matrix safely.");
+			say("Link", "00FF66", "Level up your abilities from the Loading Area with your Upgrade points. Type &continue to use the hardline and enter the Matrix.");
+			return;
+		case 5:
+		default:
+		{
+			say("Link", "00FF66", "You're ready. I'm sending you to Mara Central in Richland. Find Morpheus's people, and stay out of the Agents' way.");
+			m_tutStep = 6;
+			m_district = 1; // tutorial complete: saves write 1 instead of 255
+			LocationVector mara(17043.1, 495.0, 2398.8); // Mara Central hardline area, Richland
+			this->setPosition(mara);
+			m_savedPos = mara;
+			this->saveDataToDB();
+			INFO_LOG(format("Character %1% completed the tutorial: moved to Mara Central") % m_handle);
+			m_parent.QueueCommand(make_shared<LoadWorldCmd>(LoadWorldCmd::SLUMS, "Massive"));
+			auto posMsg = make_shared<PositionStateMsg>(m_goId);
+			m_parent.QueueState(posMsg);
+			this->FlushAndRefreshAoI();
+			m_parent.QueueState(make_shared<JackoutEffectMsg>(m_goId, false));
+			return;
+		}
+		}
+	}
 	using boost::erase_all;
 	if (iequals(command, "bottest"))
 	{
