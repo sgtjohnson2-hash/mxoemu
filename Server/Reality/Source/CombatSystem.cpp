@@ -1356,7 +1356,7 @@ CombatSystem::AttackResult CombatSystem::ResolveAttack(PlayerObject* attacker, P
 				static const uint32 s_cfgDeflectHitFx = (uint32)sConfig.GetIntDefault("Combat.HitFx", 0);
 				const uint32 deflectFx = (s_cfgDeflectHitFx != 0) ? 0x2800059c : 0;
 				// Authentic dodge animation (0x03EC = G_D_XR_DodgeFromHF_GLb)
-				target->setCurrentAnimation(0xEC);
+				if (!m_ilExchangeActive) target->setCurrentAnimation(0xEC); // interlock clips come from ILExchange only
 				target->setCurrentMood(0x03);
 				sGame.AnnounceStateUpdate(&target->getClient(), std::make_shared<AnimationStateMsg>(target->getGoId()));
 
@@ -1683,18 +1683,25 @@ ILExchange CombatSystem::BuildExchange(const InterlockSession &session, PlayerOb
 	static const int s_contactMs = sConfig.GetIntDefault("Interlock.ExchangeContactMs", 0x29A);
 	static const int s_styleByte = sConfig.GetIntDefault("Interlock.ExchangeStyleByte", 0);
 	e.startMs = uint32(s_startMs);
-	e.unk28 = uint16(s_durMs);
-	e.unk2A = uint16(s_contactMs);
-
-	// Dynamic contact frame timing synchronization (aligns blocks/dodges with strike impact)
+	// The capture's 0x534 / 0x29A pair belongs to move 0x2026. Applying it to every ILDB move cut
+	// longer clips (knockdowns are 1700-1800 ms) short: the client snapped back to stance mid-clip
+	// ("first frame only", "popped straight back up"). Use the move's own ILDB duration when it is
+	// longer, keeping the captured contact ratio (0x29A ~ half of 0x534) for the defender reaction.
+	int durMs = s_durMs;
+	int contactMs = s_contactMs;
 	if (animPair && animPair->contactDelaySeconds > 0.05f)
 	{
-		e.defenderOffsetMs = int16(animPair->contactDelaySeconds * 1000.0f);
+		const int clipMs = int(animPair->contactDelaySeconds * 1000.0f);
+		if (clipMs > durMs)
+		{
+			durMs = std::min(clipMs, 0x7FFF);
+			contactMs = durMs / 2;
+		}
 	}
-	else
-	{
-		e.defenderOffsetMs = 666; // authentic default opening timing from captured exchanges
-	}
+	e.unk28 = uint16(durMs);
+	e.unk2A = uint16(contactMs);
+	// The defender used to start reacting at the END of the attacker clip (offset = full duration).
+	e.defenderOffsetMs = int16(contactMs);
 
 	e.flags = 0x23;
 
@@ -1899,7 +1906,10 @@ void CombatSystem::SendInterlockExchange(InterlockSession &session, PlayerObject
 			otherRef = uint32(otherViewId) | (uint32(PLAYER_SPAWN_COUNTER) << 16);
 		}
 		std::vector<uint32> slots = BuildILSlots(otherRef);
-		if (opponent)
+		// CombatantMode is set once when the interlock opens; re-sending it every round restarted the
+		// opponent's stance pose on the client and cut the exchange clip. Interlock.ResendCombatantMode = 1 restores it.
+		static const bool s_resendMode = sConfig.GetBoolDefault("Interlock.ResendCombatantMode", false);
+		if (opponent && s_resendMode)
 			sides[i].p->getClient().QueueState(std::make_shared<CombatantModeMsg>(opponent->getGoId(), 1));
 
 		std::vector<ILExchange> ex;
