@@ -3393,6 +3393,15 @@ int RunCombatTestSuite()
 				bool foundAtDestAfter = (std::find(nearDestAfter.begin(), nearDestAfter.end(), &p9Client) != nearDestAfter.end());
 				check(foundAtDestAfter,
 					"HandleStateUpdate(0x08) synchronizes SpatialGrid cell so human client is discoverable at (45010, 45020)");
+				{
+					// live capture 15:41:54 (sent on &withdraw): type 0x2E = 0x0E plus bit 0x20, no extra payload
+					ByteBuffer p2e;
+					p2e << (uint8)0x03 << (uint16)VIEWID_SELF << (uint8)1 << (uint8)0x2E << (uint8)0x03 << (uint8)0x00;
+					p2e << (float)46010.0f << (float)95.0f << (float)46020.0f << (uint16)0;
+					p9Human.po->HandleStateUpdate(p2e);
+					check(std::abs(p9Human.po->getPosition().x - 46010.0) < 0.5 && std::abs(p9Human.po->getPosition().z - 46020.0) < 0.5,
+						"HandleStateUpdate(0x2E) (withdraw position update) is decoded like 0x0E and moves the player");
+				}
 
 				// B. Phase 9.3: O(1) ObjectMgr::getGOId and O(1) reverse view lookup (m_goToViews)
 				check(sObjMgr.getGOId(p9Human.po) == p9Human.go,

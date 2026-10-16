@@ -1411,7 +1411,13 @@ void PlayerObject::HandleStateUpdate( ByteBuffer &srcData )
 	bool validUpdate=false;
 	bool movementUpdate=false;
 	LocationVector posBeforeMove = m_pos;
-	switch (updateType)
+	// Bit 0x20 rides on the xyz variants with no payload of its own (live 15:41:54, sent on &withdraw
+	// as the interlock ended: 03 02 00 01 2e | 03 00 | x y z | 00 00, x/y/z = the player's position).
+	// Dropping it left the server on the pre-withdraw position.
+	uint8 baseType = updateType;
+	if ((updateType & 0x20) != 0 && (updateType & 0x0F) >= 0x08 && (updateType & 0xD0) == 0)
+		baseType = uint8(updateType & ~0x20);
+	switch (baseType)
 	{
 	//change angle
 	case 0x04:

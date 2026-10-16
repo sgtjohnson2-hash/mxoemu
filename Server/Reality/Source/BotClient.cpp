@@ -849,6 +849,15 @@ void BotClient::AttackTarget(uint32 targetGoId)
     const CombatMove* defaultMelee = CombatSystem::DefaultMelee();
     float meleeRange = defaultMelee ? defaultMelee->range : 250.0f;
     
+    // The dojo range target is a gunfight drill: it stands its ground and returns fire, it never
+    // closes in or pulls the shooter into an interlock (live 15:43:58, it interlocked after 3 s).
+    if (me->getHandle().find("Range Target") != std::string::npos) {
+        SetLocomotionAnimation(0);
+        if (!sCombatSys.IsFreeFiring(m_playerGoId))
+            sCombatSys.RequestRangedCombat(m_playerGoId, targetGoId, 0);
+        return;
+    }
+
     if (dist <= meleeRange) {
         SetLocomotionAnimation(0);
         if (!sCombatSys.RequestInterlock(m_playerGoId, targetGoId))

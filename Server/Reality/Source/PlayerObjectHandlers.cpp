@@ -1823,7 +1823,7 @@ void PlayerObject::ParsePlayerCommand( string theCmd )
 				? (format("{c:00FF00}Dojo: 1v1 %1% spawned and engaged in close combat interlock!{/c}") % styleLabel).str()
 				: "{c:FF0000}Dojo: could not spawn an enemy.{/c}"));
 		}
-		else if (iequals(subCommand, "ranged") || iequals(subCommand, "freefire"))
+		else if (iequals(subCommand, "ranged") || iequals(subCommand, "range") || iequals(subCommand, "freefire"))
 		{
 			float rangedHp = 100.0f;
 			cmdStream >> rangedHp;
