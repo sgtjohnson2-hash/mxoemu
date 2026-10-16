@@ -1328,7 +1328,8 @@ void PlayerObject::ParsePlayerCommand( string theCmd )
 	else if (iequals(command, "withdraw") || iequals(command, "escape"))
 	{
 		sCombatSys.StopFreeFire(m_goId);
-		sCombatSys.LeaveInterlock(m_goId);
+		// same path as the client Withdraw button (RPC 0x44): contested under CR2, instant otherwise
+		if (sCombatSys.IsInterlocked(m_goId)) { sCombatSys.RequestWithdraw(m_goId); return; }
 		m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FFFF00}Withdrew from combat.{/c}"));
 		return;
 	}
