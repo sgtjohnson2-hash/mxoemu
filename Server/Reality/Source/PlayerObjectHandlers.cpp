@@ -925,6 +925,7 @@ void PlayerObject::ParsePlayerCommand( string theCmd )
 			m_parent.QueueState(posMsg);
 			sGame.AnnounceStateUpdate(&m_parent, posMsg);
 			m_tutStep = (uint8)room;
+			TutorialSpawnRoom((uint8)room);
 		};
 		if (iequals(command, "tutorial"))
 		{
@@ -970,16 +971,29 @@ void PlayerObject::ParsePlayerCommand( string theCmd )
 		}
 		case 2:
 			moveTo(3);
-			say("Link", "00FF66", "The Dojo. Close combat in the Matrix is Interlock: target an enemy and attack to lock into a fight.");
+			say("Link", "00FF66", "The Dojo. Close combat in the Matrix is Interlock: target the Combat Program and attack to lock into a fight.");
 			say("Link", "00FF66", "Your fighting style and abilities decide each round. Blocks, throws and special moves beat each other. Type &continue.");
 			return;
 		case 3:
+			if (!TutorialFightsWon())
+			{
+				say("Link", "00FF66", "Not yet. Target the Combat Program and attack it to start Interlock. Beat it, then type &continue.");
+				return;
+			}
 			moveTo(4);
+			TutorialGiveItem(6885); // training pistol
 			say("Link", "00FF66", "The Pistol Room. Free Fire is ranged combat: equip a gun, target, and fire from a distance.");
 			say("Link", "00FF66", "Free Fire skips Interlock, but anyone you shoot can pull you into a close fight. Type &continue.");
 			return;
 		case 4:
+			if (!TutorialFightsWon())
+			{
+				say("Link", "00FF66", "Equip the pistol from your inventory, target the Target Program and shoot it down. Then type &continue.");
+				return;
+			}
 			moveTo(5);
+			TutorialGiveItem(1259);  // male dress shoes (retail: both shoes are handed out in the tutorial)
+			TutorialGiveItem(12491); // short black women's boots
 			say("Link", "00FF66", "This subway station has a hardline. Hardlines are how you jack in and out of the Matrix safely.");
 			say("Link", "00FF66", "Level up your abilities from the Loading Area with your Upgrade points. Type &continue to use the hardline and enter the Matrix.");
 			return;
@@ -988,6 +1002,8 @@ void PlayerObject::ParsePlayerCommand( string theCmd )
 		{
 			say("Link", "00FF66", "You're ready. I'm sending you to Mara Central in Richland. Find Morpheus's people, and stay out of the Agents' way.");
 			m_tutStep = 6;
+			TutorialDespawn();
+			m_parent.m_instanceId = 0;
 			m_district = 1; // tutorial complete: saves write 1 instead of 255
 			LocationVector mara(17043.1, 495.0, 2398.8); // Mara Central hardline area, Richland
 			this->setPosition(mara);

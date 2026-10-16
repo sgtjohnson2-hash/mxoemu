@@ -80,6 +80,11 @@ public:
 
 	void InitializeWorld();
 	void TutorialIntro();
+	void TutorialSpawnRoom(uint8 room);
+	void TutorialDespawn();
+	bool TutorialFightsWon() const;
+	void TutorialGiveItem(uint32 templateId);
+	uint32 TutorialInstanceId() const;
 	void sendAttributes();
 	void SpawnSelf();
 	void PopulateWorld();
@@ -521,6 +526,7 @@ private:
 	
 	uint64 m_exp,m_cash;
 	uint8 m_district;
+	std::vector<uint32> m_tutNpcs; // tutorial NPC goIds (private instance)
 	uint8 m_tutStep = 0; // tutorial_v2 room index (0 Ammit's Room ... 5 Subway, 6 done)
 	LocationVector m_savedPos;
 	shared_ptr<class RsiData> m_rsi;

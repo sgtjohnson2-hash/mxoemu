@@ -42,6 +42,7 @@
 #include "Config.h"
 #include "AbilitySystem.h"
 #include "ItemSerializer.h"
+#include "BotManager.h"
 #include <set>
 #include <mutex>
 #include <boost/algorithm/string.hpp>
@@ -365,6 +366,7 @@ void PlayerObject::initGoId(uint32 theGoId)
 
 PlayerObject::~PlayerObject()
 {
+	try { TutorialDespawn(); } catch (...) {}
 	// leaving mid-duel used to leave the partner stuck "dueling" a player who is gone
 	if (m_duelPartnerGoId != 0)
 	{
@@ -581,7 +583,10 @@ void PlayerObject::InitializeWorld()
 	m_parent.QueueCommand(make_shared<SystemChatMsg>("{c:FF0000}W{/c}{c:DD0000}e{/c}{c:EE0000}l{/c}{c:CC0000}c{/c}{c:BB0000}o{/c}{c:AA0000}m{/c}{c:990000}e{/c} {c:880000}B{/c}{c:770000}a{/c}{c:660000}c{/c}{c:550000}k{/c}{c:440000}.{/c}{c:330000}.{/c}{c:220000}.{/c}"));
 
 	if (m_district == 0)
+	{
+		TutorialSpawnRoom(m_tutStep);
 		TutorialIntro();
+	}
 }
 
 // Opening lines for a redpill in tutorial_v2; repeated by &tutorial. See ParsePlayerCommand for the chain.
@@ -599,6 +604,71 @@ void PlayerObject::TutorialIntro()
 	}
 	else
 		m_parent.QueueCommand(make_shared<SystemChatMsg>(steps[3]));
+}
+
+// ---- tutorial_v2 NPCs, training fights and items -------------------------------------
+// Every tutorial player gets a private instance, so their Ammit/Scarlet/training programs
+// are invisible to everyone else and street mobs never stream in.
+uint32 PlayerObject::TutorialInstanceId() const
+{
+	return 0x7E000000u | (uint32(m_characterUID) & 0x00FFFFFFu);
+}
+
+void PlayerObject::TutorialDespawn()
+{
+	for (uint32 id : m_tutNpcs)
+		sBotMgr.DespawnBot(id);
+	m_tutNpcs.clear();
+}
+
+bool PlayerObject::TutorialFightsWon() const
+{
+	for (uint32 id : m_tutNpcs)
+	{
+		PlayerObject* po = sObjMgr.getGOPtrSafe(id);
+		if (po && !po->isDead() && po->getFactionName() == "HOSTILE")
+			return false;
+	}
+	return true;
+}
+
+void PlayerObject::TutorialGiveItem(uint32 templateId)
+{
+	if (!getInventory())
+		return;
+	auto item = std::make_shared<Item>(sObjMgr.getNewItemId(), templateId);
+	item->setMetadata(ItemSerializer::Serialize(item));
+	getInventory()->addItemAuto(item);
+	getInventory()->saveToDB();
+	const ItemTemplate* tpl = sDataLoader.GetItemTemplate(templateId);
+	m_parent.QueueCommand(make_shared<SystemChatMsg>((format("{c:00FF00}[Tutorial] Received %1%.{/c}") % (tpl ? tpl->name : std::string("an item"))).str()));
+}
+
+void PlayerObject::TutorialSpawnRoom(uint8 room)
+{
+	TutorialDespawn();
+	m_parent.m_instanceId = TutorialInstanceId();
+	auto spawn = [&](const char* handle, const char* type, double x, double y, double z, uint32 lvl, uint32 hp) {
+		MissionNpc n;
+		n.type = type; n.handle = handle; n.x = float(x); n.y = float(y); n.z = float(z);
+		n.level = lvl; n.maxHP = hp;
+		uint32 id = sBotMgr.SpawnMissionBot(n, TutorialInstanceId());
+		if (id)
+		{
+			PlayerObject* po = sObjMgr.getGOPtrSafe(id);
+			if (po) po->setDistrict(0);
+			m_tutNpcs.push_back(id);
+		}
+	};
+	const double px = m_pos.x, py = m_pos.y, pz = m_pos.z;
+	switch (room)
+	{
+	case 0: spawn("Ammit", "FRIENDLY", px + 200, py, pz + 100, 10, 500); break;
+	case 2: spawn("Scarlet", "FRIENDLY", px + 250, py, pz, 15, 500); break;
+	case 3: spawn("Combat Program", "HOSTILE", px + 400, py, pz, 1, 60); break;
+	case 4: spawn("Target Program", "HOSTILE", px + 600, py, pz, 1, 60); break;
+	default: break;
+	}
 }
 
 void PlayerObject::UpdateAppearance()
