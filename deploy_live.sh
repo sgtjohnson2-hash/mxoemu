@@ -11,6 +11,10 @@ cd "${REPO_DIR}"
 echo "========================================================================"
 echo ">>> [1/5] Initiating Live-Server Git Synchronization..."
 echo "========================================================================"
+# Rollback image first: tag what is running now as pre-<sha of the deployed commit>
+ROLLBACK_TAG="pre-$(git rev-parse --short HEAD)"
+docker tag mxoemu-reality-server:latest "mxoemu-reality-server:${ROLLBACK_TAG}"
+echo "Rollback image: mxoemu-reality-server:${ROLLBACK_TAG}"
 git fetch origin Live-Server
 git checkout Live-Server
 git pull origin Live-Server
@@ -38,6 +42,15 @@ sleep 5
 
 docker ps -f name=mxoemu-reality-server-1
 docker stats --no-stream mxoemu-reality-server-1
+
+echo ">>> Pruning old rollback images (keeping the 3 newest pre-* tags and the running image)..."
+RUNNING_ID="$(docker inspect --format '{{.Image}}' mxoemu-reality-server-1 | cut -d: -f2 | cut -c1-12)"
+docker images mxoemu-reality-server --format '{{.CreatedAt}}|{{.Tag}}|{{.ID}}' \
+  | grep '|pre-' | sort -r | tail -n +4 \
+  | while IFS='|' read -r _ tag id; do
+      if [ "${id}" != "${RUNNING_ID}" ]; then docker rmi "mxoemu-reality-server:${tag}" || true; fi
+    done
+docker image prune -f > /dev/null || true
 
 echo ">>> Recent Reality Server Log Output:"
 docker logs --tail 30 mxoemu-reality-server-1
