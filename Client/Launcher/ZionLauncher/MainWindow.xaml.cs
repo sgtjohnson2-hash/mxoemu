@@ -3257,6 +3257,7 @@ namespace ZionLauncher
                             {
                                 var buf = new byte[4];
                                 SyncWidgetManagerSize(hp, p.Id, w, h, logged);
+                                EnableInterlockTacticWheel(hp, p.Id, logged);
                                 DockHudIfNewViews(hp, p.Id, dockedToolbar);
                                 if (!ReadProcessMemory(hp, (IntPtr)0x629f84e8, buf, 4, out _)) continue;
                                 uint pInterface = BitConverter.ToUInt32(buf, 0);
@@ -3305,6 +3306,22 @@ namespace ZionLauncher
             bool ok = WriteProcessMemory(hp, (IntPtr)(mgr + 0x0c), nv, 5, out _);
             if (logged.Add($"wm{pid}:{cw}x{ch}"))
                 AppendLaunchLog($"widget manager size pid={pid} {cw}x{ch} -> {w}x{h} ({(ok ? "ok" : "write failed")})");
+        }
+
+        // client.dll 7.6005 cvars CombatUINoWWCode (value 0x629e4194) and CombatUINoTacticsBar (0x629e41d0) default to 1
+        // and hide every Interlock_* tactic button (CViewInterlock ctor FUN_620bad90 / FUN_620bc550). Found 2026-10-16
+        // from the cvar registration at 0x627c7e91..0x627c7ef2. autoexec.cfg also sets both to 0; this is the fallback.
+        private void EnableInterlockTacticWheel(IntPtr hp, int pid, System.Collections.Generic.HashSet<string> logged)
+        {
+            foreach (uint addr in new uint[] { 0x629e4194, 0x629e41d0 })
+            {
+                var b = new byte[4];
+                if (!ReadProcessMemory(hp, (IntPtr)addr, b, 4, out _)) continue;
+                if (BitConverter.ToUInt32(b, 0) != 1) continue;
+                bool ok = WriteProcessMemory(hp, (IntPtr)addr, new byte[4], 4, out _);
+                if (logged.Add($"ww{pid}:{addr:X}"))
+                    AppendLaunchLog($"interlock tactic wheel cvar 0x{addr:X8} 1 -> 0 pid={pid} ({(ok ? "ok" : "write failed")})");
+            }
         }
 
         // Views built before the size fix keep their 800x600 placement, so once the in-world Toolbar view (0x24) exists
