@@ -13,6 +13,8 @@ class PlayerObject;
 // Retail street-mob aggro rule: a world mob does not start a fight with a target it cons grey to,
 // or one outside its aggro radius. Agent Smith hosts are exempt.
 bool WorldMobWontAggro(PlayerObject* mob, PlayerObject* target, float dist);
+// MxO con: a mob cons grey once it is well below you (no XP, no info, no gear drops)
+bool WorldMobConsGrey(int mobLevel, int playerLevel);
 
 class BotManager : public Singleton<BotManager>
 {

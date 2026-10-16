@@ -25,6 +25,7 @@ struct NPCTemplate
     std::string rsiHex;
     std::string weaponHex;
     bool isHostile;
+    bool isLeader = false; // gang leader: unique handle with <= 2 captured spots
 };
 
 struct PropheticGlitchNode

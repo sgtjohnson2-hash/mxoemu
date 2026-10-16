@@ -3051,6 +3051,17 @@ void CombatSystem::AwardKill(PlayerObject* killer, PlayerObject* victim)
                                              killer->getClient().isBot() ? 30.0f : 50.0f, "Combat Elimination");
     }
 
+    // Retail: a street mob that cons grey gives no experience and no information
+    if (victim->isWorldMob() && WorldMobConsGrey((int)victim->getLevel(), (int)killer->getLevel()))
+    {
+        if (AgentPossessionManager::getSingletonPtr() && sAgentPossessionMgr.IsEntityPossessed(victim->getGoId()))
+            sAgentPossessionMgr.HandleAgentDefeat(victim->getGoId(), killer->getGoId());
+        INFO_LOG(format("AwardKill: %1% defeated grey %2% (L%3%) -> no XP/info") % killer->getHandle() % victim->getHandle() % (int)victim->getLevel());
+        if (!killer->getClient().isBot())
+            killer->getClient().QueueCommand(std::make_shared<SystemChatMsg>(
+                (format("{c:AAAAAA}[COMBAT] Defeated %1%. It cons grey: no experience or information.{/c}") % victim->getHandle()).str()));
+        return;
+    }
     // Original experience logic
     uint32 exp = victim->getLevel() * 100;
     killer->awardCombatExperience(exp);

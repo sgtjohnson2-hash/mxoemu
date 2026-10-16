@@ -1,3 +1,4 @@
+#include "BotManager.h"
 #include "LootManager.h"
 #include "PlayerObject.h"
 #include "InventorySystem.h"
@@ -95,7 +96,9 @@ void LootManager::GenerateLoot(PlayerObject* killer, PlayerObject* victim)
             tableId = 1; // Street Thugs / Slums Table
     }
 
-    auto it = m_lootTables.find(tableId);
+    // greys drop no gear (retail); the mission LOOT check below still runs
+    const bool greyMob = victim->isWorldMob() && WorldMobConsGrey((int)victim->getLevel(), (int)killer->getLevel());
+    auto it = greyMob ? m_lootTables.end() : m_lootTables.find(tableId);
     if (it != m_lootTables.end())
     {
         const auto& allItems = sDataLoader.GetAllItems();

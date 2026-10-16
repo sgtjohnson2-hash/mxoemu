@@ -654,15 +654,20 @@ void BotManager::Update()
     }
 }
 
+bool WorldMobConsGrey(int mobLevel, int playerLevel)
+{
+    static const int s_greyBase = sConfig.GetIntDefault("World.MobGreyGap", 5);
+    return playerLevel - mobLevel >= s_greyBase + playerLevel / 10;
+}
+
 bool WorldMobWontAggro(PlayerObject* mob, PlayerObject* target, float dist)
 {
     if (!mob || !target || !mob->isWorldMob()) return false;
     if (target->getDistrict() != mob->getDistrict()) return true; // different district world
     if (mob->getHandle().find("Smith") != std::string::npos) return false; // virus hosts hunt everyone
     static const float s_radius = sConfig.GetFloatDefault("World.MobAggroRadius", 1500.0f);
-    static const int s_greyBase = sConfig.GetIntDefault("World.MobGreyGap", 5);
     int ml = (int)mob->getLevel(), tl = (int)target->getLevel();
-    if (tl - ml >= s_greyBase + tl / 10) return true; // greys never start fights (retail needed Taunt)
+    if (WorldMobConsGrey(ml, tl)) return true; // greys never start fights (retail needed Taunt)
     return dist > s_radius;
 }
 
@@ -701,11 +706,39 @@ void BotManager::PopulateWorld()
             });
             size_t quota = std::min(pool.size(), (size_t)(targetPop * shares[d] + 0.5f));
             if (quota == 0) continue;
-            double stride = double(pool.size()) / double(quota);
-            for (size_t i = 0; i < quota; ++i)
-                selection.push_back(pool[std::min(pool.size() - 1, (size_t)(i * stride))]);
-            INFO_LOG(format("BotManager: district %1%: %2% of %3% retail spawn points populated")
-                % (int)districts[d] % quota % pool.size());
+            std::vector<char> used(pool.size(), 0);
+            size_t taken = 0, leaders = 0, groupsMade = 0;
+            // gang leaders always spawn (retail: unique-named boss with his crew around him)
+            for (size_t i = 0; i < pool.size() && taken < quota; ++i)
+                if (pool[i]->isLeader) { used[i] = 1; selection.push_back(pool[i]); taken++; leaders++; }
+            // retail mobs stand in gang groups: evenly spread anchors, each filled with the
+            // captured spots of the same gang next to it
+            static const int s_group = std::max(1, sConfig.GetIntDefault("World.MobGroupSize", 4));
+            static const float s_groupR = sConfig.GetFloatDefault("World.MobGroupRadius", 1500.0f);
+            size_t groups = std::max<size_t>(1, (quota - taken) / s_group);
+            double stride = double(pool.size()) / double(groups);
+            for (size_t g = 0; g < groups && taken < quota; ++g)
+            {
+                size_t a = std::min(pool.size() - 1, (size_t)(g * stride));
+                while (a < pool.size() && used[a]) ++a;
+                if (a >= pool.size()) continue;
+                used[a] = 1; selection.push_back(pool[a]); taken++; groupsMade++;
+                const std::string gang = pool[a]->name.substr(0, pool[a]->name.find(' '));
+                int members = 1;
+                for (size_t j = 0; j < pool.size() && members < s_group && taken < quota; ++j)
+                {
+                    if (used[j] || pool[j]->name.compare(0, gang.size(), gang) != 0) continue;
+                    float dx = pool[j]->x - pool[a]->x, dz = pool[j]->z - pool[a]->z;
+                    if (dx * dx + dz * dz > s_groupR * s_groupR) continue;
+                    used[j] = 1; selection.push_back(pool[j]); taken++; members++;
+                }
+            }
+            // top up with spread singles if the groups came up short
+            size_t step = std::max<size_t>(1, pool.size() / std::max<size_t>(1, quota));
+            for (size_t i = 0; i < pool.size() && taken < quota; i += step)
+                if (!used[i]) { used[i] = 1; selection.push_back(pool[i]); taken++; }
+            INFO_LOG(format("BotManager: district %1%: %2% of %3% retail spawn points populated (%4% gang groups, %5% leaders)")
+                % (int)districts[d] % taken % pool.size() % groupsMade % leaders);
         }
     }
 
@@ -751,6 +784,7 @@ void BotManager::PopulateWorld()
             po->setPosition(loc);
             po->setDistrict(templ.districtId);
             po->setWorldMob(true, loc);
+            if (templ.isLeader) po->setLootTableId(3); // leaders pay out from the elite table
             sSpatialGrid.UpdateClientPosition(bot.get(), templ.x, templ.z);
 
             // Apply authentic RSI appearance

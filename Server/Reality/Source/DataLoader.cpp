@@ -818,6 +818,14 @@ bool DataLoader::LoadNPCs(const std::string& filePath)
             }
         }
     }
+    {
+        std::map<std::string, int> spots;
+        for (const auto& kv : m_npcs) spots[kv.second.name]++;
+        size_t leaders = 0;
+        for (auto& kv : m_npcs)
+            if (kv.second.isHostile && kv.second.level >= 5 && spots[kv.second.name] <= 2) { kv.second.isLeader = true; leaders++; }
+        INFO_LOG(format("DataLoader: %1% gang leader spawn points (unique handles)") % leaders);
+    }
     INFO_LOG(format("DataLoader: Successfully loaded %1% authentic NPC spawn points (%2% duplicate/event rows skipped).") % m_npcs.size() % skipped);
     return true;
 }

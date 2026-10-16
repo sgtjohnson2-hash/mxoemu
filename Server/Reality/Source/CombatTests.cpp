@@ -734,6 +734,13 @@ int RunCombatTestSuite()
 			check(WorldMobWontAggro(mob.po, human.po, 3000.0f), "a street mob ignores a player outside its aggro radius");
 			human.po->setLevel(15);
 			check(WorldMobWontAggro(mob.po, human.po, 500.0f), "a street mob that cons grey never starts a fight");
+			{
+				uint64 xpBefore = human.po->getExperience();
+				uint64 infoBefore = human.po->getInformation();
+				sCombatSys.AwardKill(human.po, mob.po);
+				check(human.po->getExperience() == xpBefore && human.po->getInformation() == infoBefore, "a grey street mob kill pays no XP and no info");
+				check(WorldMobConsGrey(5, 15) && !WorldMobConsGrey(5, 8), "grey con: L5 is grey to L15, not to L8");
+			}
 			human.po->setLevel(3);
 			human.po->setDistrict(2);
 			check(WorldMobWontAggro(mob.po, human.po, 500.0f), "a Richland mob ignores a player in another district world");
