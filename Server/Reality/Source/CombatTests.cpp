@@ -431,6 +431,28 @@ int RunCombatTestSuite()
 			human.po->setLevel(savedLevel);
 			setHP(human, savedMaxHp, savedMaxHp);
 			reviveHuman();
+			// free fire: the mob shot at fights back and a same-faction ally joins; the dojo range
+			// target returns fire from where it stands and never pulls the shooter into an interlock
+			{
+				Actor mob = makeBot(9200910, human.po->getPosition().x + 1000.0, human.po->getPosition().z, 10, 5000);
+				Actor ally = makeBot(9200911, human.po->getPosition().x + 1200.0, human.po->getPosition().z + 300.0, 10, 5000);
+				mob.po->setFactionName("Machines"); ally.po->setFactionName("Machines");
+				mob.bot->SetTargetGoId(0); ally.bot->SetTargetGoId(0);
+				const bool ff = sCombatSys.RequestRangedCombat(human.go, mob.go, 0);
+				check(ff && mob.bot->GetTargetGoId() == human.go, "free fire: the mob that is shot targets its attacker");
+				check(ally.bot->GetTargetGoId() == human.go, "free fire: a same-faction ally within 25 m joins the fight");
+				sCombatSys.StopFreeFire(human.go);
+				place(mob, 30500.0, 30500.0); place(ally, 31000.0, 31000.0);
+
+				Actor rt = makeBot(9200912, human.po->getPosition().x + 100.0, human.po->getPosition().z, 10, 5000);
+				rt.po->setHandle("Dojo Range Target");
+				rt.bot->AttackTarget(human.go); // 1 m away: a street bot would interlock here
+				check(!sCombatSys.IsInterlocked(rt.go) && !sCombatSys.IsInterlocked(human.go),
+					"dojo range target never opens an interlock, even at melee range");
+				check(sCombatSys.IsFreeFiring(rt.go), "dojo range target returns fire");
+				sCombatSys.StopFreeFire(rt.go);
+				place(rt, 31500.0, 31500.0);
+			}
 			// the older suites below were written against the emulator's legacy rules
 			sConfig.SetOverride("Combat.InterlockModel", "legacy");
 			sConfig.SetOverride("Combat.TrackAmmo", "1");
