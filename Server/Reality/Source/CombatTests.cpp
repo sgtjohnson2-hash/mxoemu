@@ -453,6 +453,77 @@ int RunCombatTestSuite()
 				sCombatSys.StopFreeFire(rt.go);
 				place(rt, 31500.0, 31500.0);
 			}
+			// mission balance (BOTTEST "died twice to mission target"): an L1 operative with 100 HP
+			// beats an L1 72 HP Machines mob most of the time, and the mob never fires a gun in interlock
+			{
+				int wins = 0, fights = 0;
+				const uint8 lvl0 = human.po->getLevel();
+				for (int f = 0; f < 30; ++f)
+				{
+					Actor mob = makeBot(9200920 + f, human.po->getPosition().x + 150.0, human.po->getPosition().z, 1, 72);
+					mob.po->setFactionName("Machines");
+					human.po->setLevel(1);
+					setHP(human, 100, 100);
+					human.po->setTactic(TACTIC_SPEED);
+					if (!sCombatSys.RequestInterlock(human.go, mob.go, 0x002F0000 | 0x1240)) { place(mob, 32000.0, 32000.0 + f * 500.0); continue; }
+					fights++;
+					for (int r = 0; r < 80 && sCombatSys.IsInterlocked(human.go); ++r)
+					{
+						InterlockSession* live = sCombatSys.GetInterlockSession(human.go);
+						if (!live) break;
+						check(live->roundMoveB != 14 || r == 0, "mission mob never fires PowerShot inside an interlock");
+						live->nextRoundTime = 0;
+						sCombatSys.Update();
+						if (human.po->getCurrentHealth() == 0 || mob.po->getCurrentHealth() == 0) break;
+					}
+					if (mob.po->getCurrentHealth() == 0 && human.po->getCurrentHealth() > 0) wins++;
+					sCombatSys.EndInterlock(human.go, false);
+					human.po->setDead(false);
+					place(mob, 32000.0, 32000.0 + f * 500.0);
+				}
+				human.po->setLevel(lvl0);
+				check(fights > 20 && wins * 10 >= fights * 6, "mission balance: L1 operative (100 HP) beats L1 72 HP mob in >=60% of fights (" + std::to_string(wins) + "/" + std::to_string(fights) + ")");
+				reviveHuman();
+			}
+			// mission data regressions (BOTTEST): courier items are handed out at accept, every XML
+			// objective command is a supported type, the starter 10111 is not re-offered once done
+			{
+				if (sMissionSys.GetMissionTemplates().size() < 40)
+					sMissionSys.LoadMissionsFromXML("Data/hd_dump/missions");
+				int giveSteps = 0, missing = 0;
+				std::string firstMissing;
+				for (const auto& kv : sMissionSys.GetMissionTemplates())
+				{
+					const MissionTemplate& t = kv.second;
+					for (size_t i = 0; i < t.objectives.size(); ++i)
+					{
+						const MissionObjective& o2 = t.objectives[i];
+						if (o2.command != ObjectiveCommand::GIVE || o2.requiredItem.empty()) continue;
+						bool looted = false;
+						for (size_t j = 0; j < i; ++j)
+							if (t.objectives[j].command == ObjectiveCommand::LOOT && t.objectives[j].requiredItem == o2.requiredItem) looted = true;
+						if (looted) continue;
+						uint32 itemId = 0;
+						try { itemId = std::stoul(o2.requiredItem, nullptr, 16); } catch (...) {}
+						if (itemId == 0) continue;
+						giveSteps++;
+						if (sMissionSys.HasActiveMission(human.go)) sMissionSys.AbortMission(human.po, "test");
+						sMissionSys.AssignMission(human.po, kv.first);
+						if (!human.po->getInventory() || !human.po->getInventory()->hasItemByTemplate(itemId))
+						{ missing++; if (firstMissing.empty()) firstMissing = std::to_string(kv.first) + "/" + o2.requiredItem; }
+						break;
+					}
+				}
+				if (sMissionSys.HasActiveMission(human.go)) sMissionSys.AbortMission(human.po, "test");
+				check(missing == 0, "missions: every courier (GIVE) item is in the bag after accept (" + std::to_string(giveSteps) + " missions, missing " + std::to_string(missing) + (firstMissing.empty() ? "" : ", first " + firstMissing) + ")");
+				check(sMissionSys.GetMissionTemplates().count(10111) == 1, "missions: starter 10111 (Chapter 1.1) is loaded");
+				sMissionSys.RecordCompletedMission(human.go, 10111);
+				sMissionSys.LoadPlayerMissions(human.po);
+				ActiveObjectiveInfo aoi;
+				check(!(sMissionSys.HasActiveMission(human.go) && sMissionSys.GetActiveObjectiveInfo(human.go, aoi) && aoi.missionId == 10111),
+					"missions: a tester that finished 10111 is not handed it again on reload");
+				if (sMissionSys.HasActiveMission(human.go)) sMissionSys.AbortMission(human.po, "test");
+			}
 			// the older suites below were written against the emulator's legacy rules
 			sConfig.SetOverride("Combat.InterlockModel", "legacy");
 			sConfig.SetOverride("Combat.TrackAmmo", "1");

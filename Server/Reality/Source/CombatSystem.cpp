@@ -2019,11 +2019,13 @@ bool CombatSystem::RunInterlockRound(InterlockSession &session)
 		if (faction == FACTION_ZION)
 		{
 			const CombatMove* m = GetMove(133);
-			if (m)
+			// signature move only when it is a close-combat move and the Inner Strength is there;
+			// Machines used to fire PowerShot (25-35, a gun) every interlock round for free and
+			// L1 mission mobs out-damaged L1 operatives (BOTTEST "died twice to mission target")
+			const uint16 cost = (m && m->isCost > 0) ? m->isCost : 10;
+			if (m && !m->freefireOnly && m->dmgType != DAMAGE_RANGED && m->dmgType != DAMAGE_BALLISTIC && bot->spendIS(cost))
 			{
 				chosenMove = m;
-				uint16 cost = (m->isCost > 0) ? m->isCost : 10;
-				bot->spendIS(cost);
 				INFO_LOG(format("UseAbility: %1%:%2% uses %3% (requested id 133, move id 133) on target go %4% [interlocked=1 castTime=0]")
 					% bot->getHandle() % bot->getGoId() % m->name % opponent->getGoId());
 				return;
@@ -2032,11 +2034,13 @@ bool CombatSystem::RunInterlockRound(InterlockSession &session)
 		else if (faction == FACTION_MACHINES)
 		{
 			const CombatMove* m = GetMove(14);
-			if (m)
+			// signature move only when it is a close-combat move and the Inner Strength is there;
+			// Machines used to fire PowerShot (25-35, a gun) every interlock round for free and
+			// L1 mission mobs out-damaged L1 operatives (BOTTEST "died twice to mission target")
+			const uint16 cost = (m && m->isCost > 0) ? m->isCost : 15;
+			if (m && !m->freefireOnly && m->dmgType != DAMAGE_RANGED && m->dmgType != DAMAGE_BALLISTIC && bot->spendIS(cost))
 			{
 				chosenMove = m;
-				uint16 cost = (m->isCost > 0) ? m->isCost : 15;
-				bot->spendIS(cost);
 				INFO_LOG(format("UseAbility: %1%:%2% uses %3% (requested id 14, move id 14) on target go %4% [interlocked=1 castTime=0]")
 					% bot->getHandle() % bot->getGoId() % m->name % opponent->getGoId());
 				return;
@@ -2060,11 +2064,9 @@ bool CombatSystem::RunInterlockRound(InterlockSession &session)
 			{
 				const CombatMove* m = GetMove(146);
 				if (!m) m = GetMoveByName("Poison knife");
-				if (m)
+				if (m && bot->spendIS((m->isCost > 0) ? m->isCost : 10))
 				{
 					chosenMove = m;
-					uint16 cost = (m->isCost > 0) ? m->isCost : 10;
-					bot->spendIS(cost);
 					INFO_LOG(format("UseAbility: %1%:%2% uses %3% (requested id 146, move id 146) on target go %4% [interlocked=1 castTime=0]")
 						% bot->getHandle() % bot->getGoId() % m->name % opponent->getGoId());
 					return;

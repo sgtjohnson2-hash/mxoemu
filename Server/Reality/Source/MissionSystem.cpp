@@ -446,7 +446,8 @@ void MissionSystem::LoadPlayerMissions(PlayerObject* player)
     if (!player) return;
     if (player->getClient().isBot() || player->getCharacterUID() >= 9000000)
     {
-        if (!HasActiveMission(player->getGoId()))
+        // starter only: a tester that already finished 10111 was handed it again on every reload
+        if (!HasActiveMission(player->getGoId()) && !HasCompletedMission(player->getGoId(), 10111))
             AssignMission(player, 10111);
         return;
     }
