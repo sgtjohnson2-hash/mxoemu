@@ -690,7 +690,6 @@ void FactionWarManager::updateBroadcasts(uint32 deltaMs)
 
 void FactionWarManager::captureNode(uint32 id, uint32 newFaction)
 {
-    if (!FactionWarEnabled()) return;
     if (m_controlNodes.find(id) != m_controlNodes.end())
     {
         uint32 oldFaction = m_controlNodes[id].controllingFaction;
@@ -739,7 +738,7 @@ void FactionWarManager::captureNode(uint32 id, uint32 newFaction)
 
 bool FactionWarManager::AdvanceNodeCapture(uint32 nodeId, uint32 faction, float deltaProgress, PlayerObject* player)
 {
-    if (!FactionWarEnabled()) return false;
+    if (!FactionWarEnabled() && !(player && player->isAdmin())) return false;
     auto it = m_controlNodes.find(nodeId);
     if (it == m_controlNodes.end()) return false;
 

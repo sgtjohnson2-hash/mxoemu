@@ -1657,7 +1657,7 @@ void PlayerObject::ParsePlayerCommand( string theCmd )
 	}
 	else if (iequals(command, "capture") || iequals(command, "hacknode"))
 	{
-		if (!sConfig.GetBoolDefault("World.FactionWar", false))
+		if (!m_isAdmin && !sConfig.GetBoolDefault("World.FactionWar", false))
 		{
 			m_parent.QueueCommand(make_shared<SystemChatMsg>("Hardline capture is not part of the retail game (World.FactionWar is off)."));
 			return;

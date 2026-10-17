@@ -1548,6 +1548,7 @@ void PlayerObject::HandleStateUpdate( ByteBuffer &srcData )
 	uint8 baseType = updateType;
 	if ((updateType & 0x20) != 0 && (updateType & 0x0F) >= 0x08 && (updateType & 0xD0) == 0)
 		baseType = uint8(updateType & ~0x20);
+	size_t xyzOffset = 0;
 	switch (baseType)
 	{
 	//change angle
@@ -1594,7 +1595,7 @@ void PlayerObject::HandleStateUpdate( ByteBuffer &srcData )
 	case 0x08:
 		{
 			movementUpdate=true;
-
+			xyzOffset = srcData.rpos();
 			validUpdate = m_pos.fromFloatBuf(srcData);
 			break;
 		}
@@ -1608,7 +1609,7 @@ void PlayerObject::HandleStateUpdate( ByteBuffer &srcData )
 			if (srcData.remaining() < sizeof(extraByte))
 				return;
 			srcData >> extraByte;
-			
+			xyzOffset = srcData.rpos();
 			validUpdate = m_pos.fromFloatBuf(srcData);
 			break;
 		}
@@ -1622,7 +1623,7 @@ void PlayerObject::HandleStateUpdate( ByteBuffer &srcData )
 				return;
 			srcData >> extraByte1;
 			srcData >> extraByte2;
-
+			xyzOffset = srcData.rpos();
 			validUpdate = m_pos.fromFloatBuf(srcData);
 			break;
 		}
@@ -1646,6 +1647,43 @@ void PlayerObject::HandleStateUpdate( ByteBuffer &srcData )
 			{
 				m_pos = posBeforeMove;
 				return;
+			}
+			if ((baseType & 0x08) != 0)
+			{
+				auto isPlausibleMove = [&](const LocationVector& p) -> bool {
+					if (!std::isfinite(p.x) || !std::isfinite(p.y) || !std::isfinite(p.z))
+						return false;
+					if (std::fabs(p.x) > 250000.0 || std::fabs(p.z) > 250000.0 || p.y < -10000.0 || p.y > 25000.0)
+						return false;
+					if (std::fabs(p.x) > 0.0 && std::fabs(p.x) < 1e-6 && std::fabs(posBeforeMove.x) > 100.0)
+						return false;
+					return true;
+				};
+				if (!isPlausibleMove(m_pos))
+				{
+					if ((updateType & 0x20) != 0 && xyzOffset > 0)
+					{
+						srcData.rpos(xyzOffset + 1);
+						if (m_pos.fromFloatBuf(srcData) && isPlausibleMove(m_pos))
+						{
+							endOfUpdatePos = srcData.rpos();
+						}
+						else
+						{
+							m_pos = posBeforeMove;
+							return;
+						}
+					}
+					else
+					{
+						m_pos = posBeforeMove;
+						return;
+					}
+				}
+				if ((updateType & 0x20) != 0 && std::fabs(m_pos.y) < 1.0 && posBeforeMove.y > 50.0)
+				{
+					m_pos.y = posBeforeMove.y;
+				}
 			}
 			if (m_pos.x != posBeforeMove.x || m_pos.z != posBeforeMove.z)
 			{
