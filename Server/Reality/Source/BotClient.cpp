@@ -172,6 +172,14 @@ static bool HostileTo(BotClient* bot, PlayerObject* me, PlayerObject* other)
         static const bool npc = sConfig.GetBoolDefault("Bots.NpcVsNpc", false);
         if (!npc) return false;
     }
+    else if (GameServer::getSingletonPtr() != nullptr)
+    {
+        // Do not unprovoked-gank human players standing at the Richland starter spawn plaza (17043.1, 2398.8)
+        double sdx = other->getPosition().x - 17043.1;
+        double sdz = other->getPosition().z - 2398.8;
+        if (sdx * sdx + sdz * sdz < 3500.0 * 3500.0)
+            return false;
+    }
     return true;
 }
 

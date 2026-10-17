@@ -137,7 +137,7 @@ std::shared_ptr<BotClient> BotManager::SpawnSingleBot(float x, float y, float z,
     // because recycling a GoId already in a human player's m_spawnedEntities preserves its old client nameplate.
     if (autoSpawnSelf) {
         std::lock_guard<std::recursive_mutex> lock(m_botMutex);
-        size_t activeBotLimit = (size_t)sConfig.GetIntDefault("BotManager.ActiveBotLimit", 2500);
+        size_t activeBotLimit = (size_t)sConfig.GetIntDefault("BotManager.ActiveBotLimit", 500);
         if (activeBotLimit > MAX_BOT_POPULATION_CEILING) activeBotLimit = MAX_BOT_POPULATION_CEILING;
         if (m_bots.size() >= activeBotLimit && !m_bots.empty()) {
             size_t idx = (m_recycleBotIndex++) % m_bots.size();

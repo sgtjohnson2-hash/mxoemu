@@ -202,6 +202,15 @@ NodeStatus ActionFindTarget::Tick(BotClient* bot)
             LocationVector targetPos = potentialTarget->getPosition();
             float dist = sqrt(pow(myPos.x - targetPos.x, 2) + pow(myPos.y - targetPos.y, 2) + pow(myPos.z - targetPos.z, 2));
             if (WorldMobWontAggro(me, potentialTarget, dist)) continue;
+            if (!client->isBot() && GameServer::getSingletonPtr() != nullptr) {
+                double sdx = targetPos.x - 17043.1;
+                double sdz = targetPos.z - 2398.8;
+                if (sdx * sdx + sdz * sdz < 3500.0 * 3500.0 &&
+                    potentialTarget->getTargetGoId() != bot->GetPlayerGoId() &&
+                    potentialTarget->getInterlockPartner() != bot->GetPlayerGoId()) {
+                    continue;
+                }
+            }
             
             // 360-degree close acoustic awareness: footsteps / presence within 8m (800 units)
             bool detected = (dist <= 800.0f);
