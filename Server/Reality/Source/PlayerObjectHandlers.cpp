@@ -32,6 +32,7 @@
 #include "CraftingSystem.h"
 #include "EconomySystem.h"
 #include "PlayerObject.h"
+#include "TeamManager.h"
 #include "Log.h"
 #include "Database/Database.h"
 #include "Database/PreparedStatement.h"
@@ -4833,14 +4834,61 @@ void PlayerObject::RPC_HandleFactionInfo(ByteBuffer& srcCmd)
 	DEBUG_LOG(format("(%1%) %2%:%3% RPC_HandleFactionInfo %4%") % m_parent.Address() % m_handle % m_goId % Bin2Hex(srcCmd));
 }
 
+// 80 8c: invite a player to the mission team (client FUN_62215560 -> FUN_62212e60)
 void PlayerObject::RPC_HandleMissionInvite(ByteBuffer& srcCmd)
 {
-	DEBUG_LOG(format("(%1%) %2%:%3% RPC_HandleMissionInvite") % m_parent.Address() % m_handle % m_goId);
+	DEBUG_LOG(format("(%1%) %2%:%3% RPC_HandleMissionInvite %4%") % m_parent.Address() % m_handle % m_goId % Bin2Hex(srcCmd));
+	sTeamMgr.HandleInvite(this, srcCmd);
 }
 
+// 71 [GroupType]: leave (client FUN_621c0540)
 void PlayerObject::RPC_HandlePartyLeave(ByteBuffer& srcCmd)
 {
-	DEBUG_LOG(format("(%1%) %2%:%3% RPC_HandlePartyLeave") % m_parent.Address() % m_handle % m_goId);
+	uint8 groupType = srcCmd.remaining() ? srcCmd.read<uint8>() : 0;
+	if (groupType == TeamManager::GROUP_MISSION_TEAM)
+		sTeamMgr.HandleLeave(this);
+}
+
+// 6f [GroupType][u16 name off][u32 status]: accept (0) / decline (client FUN_621c1680 / FUN_621c1720)
+void PlayerObject::RPC_HandleGroupInviteReply(ByteBuffer& srcCmd)
+{
+	sTeamMgr.HandleInviteReply(this, srcCmd);
+}
+
+// 72 [GroupType][u32 PlayerID]: boot a member (client FUN_621c0c40)
+void PlayerObject::RPC_HandleGroupBoot(ByteBuffer& srcCmd)
+{
+	uint8 groupType = srcCmd.remaining() ? srcCmd.read<uint8>() : 0;
+	if (groupType == TeamManager::GROUP_MISSION_TEAM)
+		sTeamMgr.HandleBoot(this, srcCmd);
+}
+
+// 75 [GroupType][u32 PlayerID]: make leader (client FUN_621c0700)
+void PlayerObject::RPC_HandleGroupMakeLeader(ByteBuffer& srcCmd)
+{
+	uint8 groupType = srcCmd.remaining() ? srcCmd.read<uint8>() : 0;
+	if (groupType == TeamManager::GROUP_MISSION_TEAM)
+		sTeamMgr.HandleMakeLeader(this, srcCmd);
+}
+
+// 77 [GroupType]: disband (client FUN_621c04a0, leader only)
+void PlayerObject::RPC_HandleGroupDisband(ByteBuffer& srcCmd)
+{
+	uint8 groupType = srcCmd.remaining() ? srcCmd.read<uint8>() : 0;
+	if (groupType == TeamManager::GROUP_MISSION_TEAM)
+		sTeamMgr.HandleDisband(this);
+}
+
+// 28 15: team chat. Client RPC 28 layout (FUN_621320d0): +1 u8 ChatType, +2 u8 bShout, +3 u16 Text offset
+void PlayerObject::RPC_HandleTeamChat(ByteBuffer& srcCmd)
+{
+	if (srcCmd.size() < 5) return;
+	uint16 off = uint16(uint8(srcCmd.contents()[3])) | (uint16(uint8(srcCmd.contents()[4])) << 8);
+	if (off == 0 || size_t(off) + 2 > srcCmd.size()) return;
+	srcCmd.rpos(off);
+	std::string text;
+	try { text = srcCmd.readString(); } catch (...) { return; }
+	sTeamMgr.HandleTeamChat(this, text);
 }
 
 void PlayerObject::RPC_HandleMemoryChangeTactic(ByteBuffer& srcCmd)
@@ -5174,6 +5222,12 @@ void PlayerObject::RPC_HandleItemMountRSI(ByteBuffer& srcCmd)
 
 void PlayerObject::RPC_HandleCallContact( ByteBuffer &srcCmd )
 {
+	// 80 90 with one byte is the mission team loot-mode message (client FUN_620dbe50), not a contact call
+	if (srcCmd.remaining() == 1 && sTeamMgr.GetTeamId(m_goId) != 0)
+	{
+		sTeamMgr.HandleLootMode(this, srcCmd.read<uint8>());
+		return;
+	}
 	uint32 contactId = 0;
 	if (srcCmd.remaining() >= 4)
 		contactId = srcCmd.read<uint32>();

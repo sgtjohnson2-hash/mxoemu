@@ -25,6 +25,7 @@
 
 #include "Common.h"
 #include "PlayerObject.h"
+#include "TeamManager.h"
 #include "RsiData.h"
 #include "Database/Database.h"
 #include "GameServer.h"
@@ -366,6 +367,7 @@ void PlayerObject::initGoId(uint32 theGoId)
 
 PlayerObject::~PlayerObject()
 {
+	try { sTeamMgr.OnLogout(this); } catch (...) {}
 	try { TutorialDespawn(); } catch (...) {}
 	// leaving mid-duel used to leave the partner stuck "dueling" a player who is gone
 	if (m_duelPartnerGoId != 0)
@@ -1733,10 +1735,18 @@ void PlayerObject::HandleCommand( ByteBuffer &srcCmd )
 		m_RPCbyte[0x42] = &PlayerObject::RPC_HandleChangeTactic;
 		m_RPCbyte[0x44] = &PlayerObject::RPC_HandleLeaveCombat;
 		m_RPCbyte[0x50] = &PlayerObject::RPC_HandleDuelRequest;
+		// group (mission team) messages, client.dll 7.6005: 6f invite reply, 71 leave, 72 boot,
+		// 75 make leader, 77 disband - single-byte ids followed by the GroupType byte
+		m_RPCbyte[0x6f] = &PlayerObject::RPC_HandleGroupInviteReply;
+		m_RPCbyte[0x71] = &PlayerObject::RPC_HandlePartyLeave;
+		m_RPCbyte[0x72] = &PlayerObject::RPC_HandleGroupBoot;
+		m_RPCbyte[0x75] = &PlayerObject::RPC_HandleGroupMakeLeader;
+		m_RPCbyte[0x77] = &PlayerObject::RPC_HandleGroupDisband;
 	}
 	if (!m_RPCshort.size())
 	{
 		m_RPCshort[0x2810] = &PlayerObject::RPC_HandleChat;
+		m_RPCshort[0x2815] = &PlayerObject::RPC_HandleTeamChat; // chat type 21 = mission team
 		m_RPCshort[0x2907] = &PlayerObject::RPC_HandleWhisper;
 		m_RPCshort[0x80c7] = &PlayerObject::RPC_HandleDynamicObjInteraction;
 		m_RPCshort[0x80c8] = &PlayerObject::RPC_HandleStaticObjInteraction;
@@ -1761,7 +1771,6 @@ void PlayerObject::HandleCommand( ByteBuffer &srcCmd )
 		m_RPCshort[0x809b] = &PlayerObject::RPC_HandleMissionAccept;
 		m_RPCshort[0x80a6] = &PlayerObject::RPC_HandleMissionAbort;
 		m_RPCshort[0x808c] = &PlayerObject::RPC_HandleMissionInvite;
-		m_RPCshort[0x8071] = &PlayerObject::RPC_HandlePartyLeave;
 		m_RPCshort[0x80b5] = &PlayerObject::RPC_HandleApplyAttributes;
 		m_RPCshort[0x80b7] = &PlayerObject::RPC_HandleUpgradeAbility;
 		m_RPCshort[0x810e] = &PlayerObject::RPC_HandleVendorBuy;

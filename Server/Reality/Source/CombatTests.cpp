@@ -39,6 +39,7 @@
 #include "RsiData.h"
 #include "InventorySystem.h"
 #include "Item.h"
+#include "TeamManager.h"
 #include "StatusEffectManager.h"
 #include "HackerSystem.h"
 #include "MissionSystem.h"
@@ -4250,6 +4251,85 @@ int RunCombatTestSuite()
 					}
 				}
 			}
+		}
+		// ---------------------------------------------------------------- Mission teams (client.dll 7.6005 group protocol)
+		{
+			TestHumanClient leadClient, mateClient;
+			Actor lead = makeHuman(&leadClient, 9100777, 52000.0, 52000.0);
+			Actor mate = makeHuman(&mateClient, 9100778, 52100.0, 52000.0);
+			auto saw = [](TestHumanClient& c, uint8 b0, uint8 b1) {
+				for (const std::string& m : c.captured) if (m.size() >= 2 && uint8(m[0]) == b0 && uint8(m[1]) == b1) return true;
+				return false;
+			};
+			auto find = [](TestHumanClient& c, uint8 b0, uint8 b1) -> std::string {
+				for (const std::string& m : c.captured) if (m.size() >= 2 && uint8(m[0]) == b0 && uint8(m[1]) == b1) return m;
+				return std::string();
+			};
+			// wire layouts
+			{
+				ByteBuffer created = TeamManager::BuildTeamCreated(7, "Crew", 4, 0);
+				check(created.size() == 14 + 2 + 5 && uint8(created.contents()[0]) == 0x80 && uint8(created.contents()[1]) == 0x8d &&
+					*reinterpret_cast<const uint16*>(&created.contents()[6]) == 14,
+					"teams: 80 8d team created is 14 fixed bytes, name string at offset 14");
+				MissionTeam t; t.id = 7; t.name = "Crew"; t.lootSharing = 4;
+				std::vector<std::pair<uint32, std::string>> members = { {11, "Neo"}, {12, "Trinity"} };
+				ByteBuffer roster = TeamManager::BuildRoster(11, t, members, 11);
+				const uint16 membersOff = *reinterpret_cast<const uint16*>(&roster.contents()[17]);
+				check(roster.size() == size_t(19 + 2 + 5 + 2 + 2 * 38) && membersOff == 19 + 2 + 5 &&
+					*reinterpret_cast<const uint16*>(&roster.contents()[membersOff]) == 2 &&
+					std::string((const char*)&roster.contents()[membersOff + 2 + 38 + 5]) == "Trinity",
+					"teams: 80 8e roster has 19 fixed bytes and 38-byte member records (u8, u32 id, char[32] name, u8 rank)");
+				ByteBuffer inv = TeamManager::BuildInvite("Neo", "Crew");
+				check(inv.size() >= 12 && uint8(inv.contents()[0]) == 0x80 && uint8(inv.contents()[1]) == 0x8f &&
+					*reinterpret_cast<const uint16*>(&inv.contents()[2]) == 12, "teams: 80 8f invite carries the inviter name at offset 12");
+				ByteBuffer joined = TeamManager::BuildMemberJoined(12, "Trinity");
+				check(joined.contents()[0] == 0x70 && joined.contents()[1] == 3 && *reinterpret_cast<const uint16*>(&joined.contents()[6]) == 9,
+					"teams: 70 member joined is [70][03][u32 id][u16 name off=9][u8]");
+			}
+			// flow
+			check(sTeamMgr.Invite(lead.po, mate.po, ""), "teams: a player can invite another operative");
+			check(saw(leadClient, 0x80, 0x8d) && saw(mateClient, 0x80, 0x8f), "teams: inviter gets 80 8d (team created), invitee gets 80 8f (invite)");
+			check(sTeamMgr.PendingInviteFrom(mate.go) == lead.go, "teams: the invite is pending until answered");
+			check(!sTeamMgr.Invite(mate.po, lead.po, ""), "teams: someone with a pending invite cannot start inviting the team leader back");
+			leadClient.captured.clear(); mateClient.captured.clear();
+			// accept through the client RPC 6f [03][u16 name off][u32 status 0]
+			{
+				ByteBuffer reply; reply << uint8(0x6f) << uint8(3) << uint16(8) << uint32(0); reply.writeString(lead.po->getHandle());
+				mate.po->HandleCommand(reply);
+			}
+			check(sTeamMgr.SameTeam(lead.go, mate.go), "teams: 6f with status 0 accepts the invite");
+			check(saw(leadClient, 0x6f, 3) && saw(leadClient, 0x70, 3) && saw(mateClient, 0x80, 0x8e),
+				"teams: inviter gets the 6f result and 70 member joined, the joiner gets the 80 8e roster");
+			// team chat through RPC 28 15
+			mateClient.captured.clear();
+			{
+				ByteBuffer chat; chat << uint8(0x28) << uint8(0x15) << uint8(0) << uint16(8) << uint16(0) << uint8(0); // 8 fixed bytes, text at 8
+				chat.writeString("on my way");
+				lead.po->HandleCommand(chat);
+			}
+			const std::string tc = find(mateClient, 0x2E, 0x15);
+			check(!tc.empty() && tc.find("on my way") != std::string::npos, "teams: 28 15 team chat reaches team mates as 2e 15");
+			// leader hand-off and leave
+			{
+				ByteBuffer ml; ml << uint8(0x75) << uint8(3) << uint32(TeamManager::WireId(mate.po));
+				lead.po->HandleCommand(ml);
+			}
+			MissionTeam copy;
+			check(sTeamMgr.GetTeamCopy(sTeamMgr.GetTeamId(lead.go), copy) && copy.leaderGoId == mate.go, "teams: 75 hands the lead to another member");
+			leadClient.captured.clear(); mateClient.captured.clear();
+			{ ByteBuffer lv; lv << uint8(0x71) << uint8(3); lead.po->HandleCommand(lv); }
+			check(sTeamMgr.GetTeamId(lead.go) == 0 && sTeamMgr.GetTeamId(mate.go) == 0,
+				"teams: 71 leave; a team left with one member is disbanded");
+			check(saw(leadClient, 0x72, 3) && saw(mateClient, 0x77, 3), "teams: the leaver gets 72, the last member gets 77 disbanded");
+			// decline
+			sTeamMgr.Invite(lead.po, mate.po, "");
+			leadClient.captured.clear();
+			{ ByteBuffer reply; reply << uint8(0x6f) << uint8(3) << uint16(0) << uint32(TeamManager::INVITE_DECLINED); mate.po->HandleCommand(reply); }
+			const std::string res = find(leadClient, 0x6f, 3);
+			check(!sTeamMgr.SameTeam(lead.go, mate.go) && res.size() >= 8 && *reinterpret_cast<const uint32*>(&res[4]) == TeamManager::INVITE_DECLINED,
+				"teams: a declined invite is reported back to the inviter");
+			sTeamMgr.OnLogout(lead.po);
+			sTeamMgr.OnLogout(mate.po);
 		}
 	}
 	catch (const std::exception& e)

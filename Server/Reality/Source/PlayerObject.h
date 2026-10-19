@@ -389,6 +389,11 @@ private:
 	void RPC_HandleFactionInfo( ByteBuffer &srcCmd );
 	void RPC_HandleMissionInvite( ByteBuffer &srcCmd );
 	void RPC_HandlePartyLeave( ByteBuffer &srcCmd );
+	void RPC_HandleGroupInviteReply( ByteBuffer &srcCmd );
+	void RPC_HandleGroupBoot( ByteBuffer &srcCmd );
+	void RPC_HandleGroupMakeLeader( ByteBuffer &srcCmd );
+	void RPC_HandleGroupDisband( ByteBuffer &srcCmd );
+	void RPC_HandleTeamChat( ByteBuffer &srcCmd );
 	void RPC_HandleMemoryChangeTactic( ByteBuffer &srcCmd );
 	void RPC_HandleApplyAttributes( ByteBuffer &srcCmd );
 	void RPC_HandleUpgradeAbility( ByteBuffer &srcCmd );
