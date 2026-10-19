@@ -1,6 +1,7 @@
 #include <set>
 #include <cmath>
 #include "DataLoader.h"
+#include "Item.h"
 #include "Log.h"
 #include "MissionSystem.h"
 #include "EconomySystem.h"
@@ -515,93 +516,35 @@ void DataLoader::EnsureCoreAbilities()
     addCore(523, "StealthDamageAbility", DisciplineType::SPY, false, 0, 0, 0, 0, true, 0);
     addCore(1035, "StealthedCodeDamageAbility", DisciplineType::SPY, false, 0, 0, 0, 0, true, 0);
 
-    // Core Weapon Templates for Firearms & Soldier/Spy Ranged Combat
-    if (m_items.find(1001) == m_items.end())
+    // Core weapon templates at retail weapon game-object ids (see RetailWeaponGoid in Item.h).
+    // Retail MxO had no ammunition items, so there are no clip templates.
+    auto setWeapon = [this](uint32 id, const char* name, bool dual, uint16 minDmg, uint16 maxDmg,
+                            float speed, uint16 ammo, float range, uint32 price, uint16 anim)
     {
-        ItemTemplate dualPistols;
-        dualPistols.templateId = 1001;
-        dualPistols.name = "Dual Beretta 92FS";
-        dualPistols.type = ITEM_TYPE_WEAPON;
-        dualPistols.isDualWield = true;
-        dualPistols.minDamage = 15;
-        dualPistols.maxDamage = 25;
-        dualPistols.attackSpeed = 1.2f;
-        dualPistols.maxAmmo = 30;
-        dualPistols.range = 2500.0f;
-        dualPistols.value = 1200;
-        dualPistols.animAttack = 0x0EDD;
-        m_items[1001] = dualPistols;
-    }
-    if (m_items.find(1002) == m_items.end())
-    {
-        ItemTemplate pistol;
-        pistol.templateId = 1002;
-        pistol.name = "Beretta 92FS";
-        pistol.type = ITEM_TYPE_WEAPON;
-        pistol.isDualWield = false;
-        pistol.minDamage = 18;
-        pistol.maxDamage = 30;
-        pistol.attackSpeed = 1.6f;
-        pistol.maxAmmo = 15;
-        pistol.range = 2500.0f;
-        pistol.value = 600;
-        pistol.animAttack = 0x0EDF;
-        m_items[1002] = pistol;
-    }
-    if (m_items.find(1003) == m_items.end())
-    {
-        ItemTemplate rifle;
-        rifle.templateId = 1003;
-        rifle.name = "M4A1 Tactical Carbine";
-        rifle.type = ITEM_TYPE_WEAPON;
-        rifle.isDualWield = false;
-        rifle.minDamage = 40;
-        rifle.maxDamage = 65;
-        rifle.attackSpeed = 2.2f;
-        rifle.maxAmmo = 30;
-        rifle.range = 6000.0f;
-        rifle.value = 1500;
-        rifle.animAttack = 0x0EE0;
-        m_items[1003] = rifle;
-    }
-    if (m_items.find(1004) == m_items.end())
-    {
-        ItemTemplate smg;
-        smg.templateId = 1004;
-        smg.name = "Heckler & Koch MP5";
-        smg.type = ITEM_TYPE_WEAPON;
-        smg.isDualWield = false;
-        smg.minDamage = 14;
-        smg.maxDamage = 28;
-        smg.attackSpeed = 1.0f;
-        smg.maxAmmo = 30;
-        smg.range = 3000.0f;
-        smg.value = 1000;
-        smg.animAttack = 0x0EE1;
-        m_items[1004] = smg;
-    }
-    if (m_items.find(1050) == m_items.end())
-    {
-        ItemTemplate ammo9mm;
-        ammo9mm.templateId = 1050;
-        ammo9mm.name = "9mm Pistol Ammo Clip";
-        ammo9mm.type = ITEM_TYPE_CONSUMABLE;
-        ammo9mm.maxStack = 20;
-        ammo9mm.maxAmmo = 15;
-        ammo9mm.value = 50;
-        m_items[1050] = ammo9mm;
-    }
-    if (m_items.find(1051) == m_items.end())
-    {
-        ItemTemplate ammo556;
-        ammo556.templateId = 1051;
-        ammo556.name = "5.56mm Rifle Ammo Clip";
-        ammo556.type = ITEM_TYPE_CONSUMABLE;
-        ammo556.maxStack = 20;
-        ammo556.maxAmmo = 30;
-        ammo556.value = 100;
-        m_items[1051] = ammo556;
-    }
+        ItemTemplate w;
+        w.templateId = id;
+        w.name = name;
+        w.type = ITEM_TYPE_WEAPON;
+        w.isDualWield = dual;
+        w.minDamage = minDmg;
+        w.maxDamage = maxDmg;
+        w.attackSpeed = speed;
+        w.maxAmmo = ammo;
+        w.range = range;
+        w.value = price;
+        w.animAttack = anim;
+        m_items[id] = w;
+    };
+    setWeapon(RETAIL_DUAL_PISTOLS, "Dual Pistols", true, 15, 25, 1.2f, 30, 2500.0f, 1200, 0x0EDD);
+    setWeapon(RETAIL_PISTOL, "Semi-Automatic Pistol", false, 18, 30, 1.6f, 15, 2500.0f, 600, 0x0EDF);
+    setWeapon(RETAIL_AUTO_RIFLE, "Automatic Rifle", false, 40, 65, 2.2f, 30, 6000.0f, 1500, 0x0EE0);
+    setWeapon(RETAIL_SMG, "Submachine Gun", false, 14, 28, 1.0f, 30, 3000.0f, 1000, 0x0EE1);
+    setWeapon(RETAIL_SMG_2, "Submachine Gun II", false, 16, 30, 1.0f, 30, 3000.0f, 1300, 0x0EE1);
+    setWeapon(RETAIL_PISTOL_3, "Semi-Automatic Pistol III", false, 20, 32, 1.6f, 15, 2500.0f, 800, 0x0EDF);
+    setWeapon(RETAIL_AUTO_RIFLE_2, "Automatic Rifle II", false, 44, 70, 2.2f, 30, 6000.0f, 1900, 0x0EE0);
+    setWeapon(RETAIL_REVOLVER, "Revolver", false, 24, 36, 1.8f, 6, 2500.0f, 700, 0x0EDF);
+    setWeapon(RETAIL_SHOTGUN, "Shotgun", false, 35, 55, 2.0f, 8, 1500.0f, 1100, 0x0EE0);
+    setWeapon(RETAIL_SNIPER_RIFLE, "Sniper Rifle", false, 60, 90, 3.0f, 5, 8000.0f, 2500, 0x0EE0);
 
     auto addClothingCore = [this](uint32 id, const std::string& name, const std::string& slot,
                                   uint32 rsiModel, uint8 rsiColor, uint16 evasion, uint16 hacking, uint32 price)
@@ -635,7 +578,6 @@ void DataLoader::EnsureCoreAbilities()
     auto addWeaponCore = [this](uint32 id, const std::string& name, bool dual, uint16 minDmg, uint16 maxDmg,
                                 float speed, uint16 ammo, float range, uint32 price, uint16 anim)
     {
-        if (m_items.find(id) == m_items.end())
         {
             ItemTemplate w;
             w.templateId = id;

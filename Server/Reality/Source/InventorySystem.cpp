@@ -1,3 +1,4 @@
+#include "Item.h"
 // ***************************************************************************
 //
 // Reality - The Matrix Online Server Emulator
@@ -89,8 +90,7 @@ void InventorySystem::loadFromDB()
             { 46407, 2, 1 },  // System Sunglasses
             { 47243, 3, 1 },  // Rave Pants
             { 40476, 4, 1 },  // Caution Shoes
-            { 1002,  5, 1 },  // Beretta 92FS Pistol
-            { 1050,  6, 20 }  // 9mm Pistol Ammo Clip (20 rounds)
+            { RETAIL_PISTOL, 5, 1 }   // SemiAutoPistol1 (retail had no ammunition items)
         };
         
         for (const auto& sg : starterGear)

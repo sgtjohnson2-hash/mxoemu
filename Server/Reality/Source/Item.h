@@ -26,6 +26,26 @@ enum ItemType
     ITEM_TYPE_TOOL      = 4
 };
 
+// Retail weapon game-object ids (hd_dump/gameobjects.csv). Items are sent to the client by
+// game-object id, so a weapon must use a weapon GOID: the old invented ids 1001-1004 were the
+// retail Blockers/Sector sunglasses and 1050/1051 "ammo" were Barret Fauxskin pants.
+enum RetailWeaponGoid : uint32
+{
+    RETAIL_AUTO_RIFLE      = 692,   // AutomaticRifle1
+    RETAIL_PISTOL          = 694,   // SemiAutoPistol1
+    RETAIL_SMG             = 698,   // Submachinegun1
+    RETAIL_DUAL_PISTOLS    = 2434,  // DualPistol4
+    RETAIL_DUAL_PISTOLS_5  = 2495,  // DualPistol5
+    RETAIL_DUAL_PISTOLS_6  = 2496,  // DualPistol6
+    RETAIL_DUAL_PISTOLS_7  = 2497,  // DualPistol7
+    RETAIL_REVOLVER        = 537,   // Revolver1
+    RETAIL_SHOTGUN         = 696,   // Shotgun1
+    RETAIL_PISTOL_3        = 695,   // SemiAutoPistol3
+    RETAIL_AUTO_RIFLE_2    = 693,   // AutomaticRifle2
+    RETAIL_SMG_2           = 699,   // Submachinegun2
+    RETAIL_SNIPER_RIFLE    = 7901,  // SniperRifle1
+};
+
 enum ItemRarity
 {
     RARITY_COMMON = 0,

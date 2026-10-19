@@ -424,6 +424,54 @@ int RunCombatTestSuite()
 				for (uint32 r = 0; r < 10000; r += 7) { uint8 t = CombatSystem::CR2BotTactic(TACTIC_NORMAL, false, 0, 1.0f, r * 2654435761u); if (t == TACTIC_DEFENSE) blocks++; else attacks++; }
 				check(attacks > blocks * 5, "CR2 AI: street fighters press the attack (" + std::to_string(attacks) + " vs " + std::to_string(blocks) + " blocks)");
 			}
+			// retail special state rules: requirements and stun
+			{
+				const SpecialStateRule* mgk = CombatSystem::GetSpecialStateRule("MachinegunKickAbility");
+				check(mgk && mgk->requiresTarget == COMBAT_STATE_DAZED && (mgk->causes & COMBAT_STATE_STUNNED),
+					"state rules: Machinegun Kick needs a Dazed target and stuns");
+				check(CombatSystem::GetSpecialStateRule("ThreeRoundBurstAbility") &&
+					CombatSystem::GetSpecialStateRule("ThreeRoundBurstAbility")->requiresTarget == COMBAT_STATE_STAGGERED,
+					"state rules: Three-Round Burst needs a Staggered target");
+				check(CombatSystem::GetSpecialStateRule("KarateAbility") == nullptr, "state rules: basic style moves have no requirement");
+				sCombatSys.EndInterlock(human.go, false);
+				human.po->setTactic(TACTIC_SPEED);
+				bool il2 = false;
+				for (int t = 0; t < 20 && !il2; ++t) il2 = sCombatSys.RequestInterlock(human.go, foe.go, 0x002F0000 | 0x1235) || sCombatSys.IsInterlocked(human.go);
+				InterlockSession* live = sCombatSys.GetInterlockSession(human.go);
+				check(il2 && live, "state rules: interlock for the state checks");
+				if (live)
+				{
+					const bool foeIsB = (live->goIdB == foe.go);
+					uint16& foeState = foeIsB ? live->combatStateB : live->combatStateA;
+					uint32& foeRound = foeIsB ? live->stateRoundB : live->stateRoundA;
+					foeState = 0;
+					check(!sCombatSys.CheckSpecialRequirement(human.po, foe.go, "MachinegunKickAbility", false),
+						"state rules: Machinegun Kick is refused on a target that is not Dazed");
+					foeState = COMBAT_STATE_DAZED; foeRound = live->roundNumber;
+					check(sCombatSys.CheckSpecialRequirement(human.po, foe.go, "MachinegunKickAbility", false),
+						"state rules: Machinegun Kick is allowed on a Dazed target");
+					check(sCombatSys.CheckSpecialRequirement(human.po, foe.go, "PunchAbility", false),
+						"state rules: abilities without a rule are always allowed");
+					// a stunned fighter loses the round: the foe throws nothing at us
+					int stunnedRounds = 0, hitWhileStunned = 0;
+					for (int r = 0; r < 30 && sCombatSys.IsInterlocked(human.go); ++r)
+					{
+						InterlockSession* s2 = sCombatSys.GetInterlockSession(human.go);
+						if (!s2) break;
+						uint16& fs = (s2->goIdB == foe.go) ? s2->combatStateB : s2->combatStateA;
+						uint32& fr = (s2->goIdB == foe.go) ? s2->stateRoundB : s2->stateRoundA;
+						fs = COMBAT_STATE_STUNNED; fr = s2->roundNumber;
+						s2->nextRoundTime = 0;
+						const uint16 before = human.po->getCurrentHealth();
+						sCombatSys.Update();
+						stunnedRounds++;
+						if (human.po->getCurrentHealth() < before) hitWhileStunned++;
+						setHP(human, 60000, 60000);
+					}
+					check(stunnedRounds > 5 && hitWhileStunned == 0,
+						"state rules: a Stunned fighter loses the round (" + std::to_string(hitWhileStunned) + " hits in " + std::to_string(stunnedRounds) + " stunned rounds)");
+				}
+			}
 			sCombatSys.EndInterlock(human.go, false);
 			check(human.po->consumeFirearmAmmo(), "retail has no ammo: firing never runs dry (Combat.TrackAmmo off)");
 			human.po->setTactic(TACTIC_NORMAL);
@@ -1266,7 +1314,7 @@ int RunCombatTestSuite()
 			check(humanClient.sawText("[SOLDIER]"), "Human caster receives [SOLDIER] ballistic chat feedback");
 
 			// Soldier Dual-Wielding 1.5x Multiplier
-			human.po->getInventory()->addItemAuto(std::make_shared<Item>(9901, 1001));
+			human.po->getInventory()->addItemAuto(std::make_shared<Item>(9901, RETAIL_DUAL_PISTOLS));
 			check(human.po->isDualWielding() == true, "Operative equipped with dual pistols enters dual-wielding state");
 			Actor dualVictim = makeBot(9200068, 10050.0, 10000.0, 1, 100);
 			human.po->setInnerStrength(100);
@@ -1425,8 +1473,8 @@ int RunCombatTestSuite()
 		// ---------------------------------------------------------------- 12. Firearms & Bullet Dodge Regression Suite
 		{
 			// A. Firearms Weapon & Ammunition Templates
-			const ItemTemplate* tplBerettas = sDataLoader.GetItemTemplate(1001);
-			check(tplBerettas != nullptr, "DataLoader: Dual Berettas (1001) template loaded");
+			const ItemTemplate* tplBerettas = sDataLoader.GetItemTemplate(RETAIL_DUAL_PISTOLS);
+			check(tplBerettas != nullptr, "DataLoader: Dual Pistols (retail GOID 2434) template loaded");
 			if (tplBerettas)
 			{
 				check(tplBerettas->type == ITEM_TYPE_WEAPON, "Dual Berettas is ITEM_TYPE_WEAPON");
@@ -1436,8 +1484,8 @@ int RunCombatTestSuite()
 				check(tplBerettas->animAttack == 0x0EDD, "Dual Berettas has animAttack 0x0EDD");
 			}
 
-			const ItemTemplate* tplRifle = sDataLoader.GetItemTemplate(1003);
-			check(tplRifle != nullptr, "DataLoader: M4A1 Tactical Carbine (1003) template loaded");
+			const ItemTemplate* tplRifle = sDataLoader.GetItemTemplate(RETAIL_AUTO_RIFLE);
+			check(tplRifle != nullptr, "DataLoader: Automatic Rifle (retail GOID 692) template loaded");
 			if (tplRifle)
 			{
 				check(tplRifle->attackSpeed == 2.2f, "M4A1 Carbine has attackSpeed 2.2s cadence");
@@ -1445,10 +1493,13 @@ int RunCombatTestSuite()
 				check(tplRifle->animAttack == 0x0EE0, "M4A1 Carbine has animAttack 0x0EE0");
 			}
 
-			const ItemTemplate* tplAmmo9mm = sDataLoader.GetItemTemplate(1050);
-			check(tplAmmo9mm != nullptr && tplAmmo9mm->type == ITEM_TYPE_CONSUMABLE, "DataLoader: 9mm Ammo (1050) template loaded");
-			const ItemTemplate* tplAmmo556 = sDataLoader.GetItemTemplate(1051);
-			check(tplAmmo556 != nullptr && tplAmmo556->type == ITEM_TYPE_CONSUMABLE, "DataLoader: 5.56mm Ammo (1051) template loaded");
+			// retail had no ammunition items: 1050/1051 are the retail Barret Fauxskin pants, not clips
+			const ItemTemplate* tplOld9mm = sDataLoader.GetItemTemplate(1050);
+			check(tplOld9mm == nullptr || tplOld9mm->type != ITEM_TYPE_CONSUMABLE, "DataLoader: no invented ammo clip on retail item 1050");
+			check(sDataLoader.GetItemTemplate(RETAIL_PISTOL) && sDataLoader.GetItemTemplate(RETAIL_PISTOL)->type == ITEM_TYPE_WEAPON,
+				"DataLoader: SemiAutoPistol1 (retail GOID 694) is a weapon");
+			check(sDataLoader.GetItemTemplate(RETAIL_SMG) && sDataLoader.GetItemTemplate(RETAIL_SMG)->type == ITEM_TYPE_WEAPON,
+				"DataLoader: Submachinegun1 (retail GOID 698) is a weapon");
 
 			// B. Evade Shield & Equipped Item Protocol Serialization
 			SelfEvadeShieldMsg selfShieldMsg(85);
@@ -1462,7 +1513,7 @@ int RunCombatTestSuite()
 				check(data[3] == 0x02, "SelfEvadeShieldMsg attribute update type is 0x02");
 			}
 
-			SelfEquippedItemMsg selfEquipMsg(1001);
+			SelfEquippedItemMsg selfEquipMsg(RETAIL_DUAL_PISTOLS);
 			const ByteBuffer& selfEquipBuf = selfEquipMsg.toBuf();
 			check(selfEquipBuf.size() > 0, "SelfEquippedItemMsg serializes successfully");
 
@@ -1530,31 +1581,25 @@ int RunCombatTestSuite()
 			check(dodger.po->getEvadeShield() == 55, "Evade Shield regenerates +5% (to 55%) after 4s without fire");
 
 			// F. Firearms Cadence & Weapon Equipping
-			dodger.po->setEquippedWeaponId(1001);
-			check(dodger.po->getEquippedWeaponId() == 1001, "setEquippedWeaponId equips Dual Berettas (1001)");
+			dodger.po->giveItem(RETAIL_DUAL_PISTOLS); // a real item in the bag, so reloads persist
+			dodger.po->setEquippedWeaponId(RETAIL_DUAL_PISTOLS);
+			check(dodger.po->getEquippedWeaponId() == RETAIL_DUAL_PISTOLS, "setEquippedWeaponId equips Dual Pistols");
 			check(dodger.po->isDualWielding(), "Player is dual wielding when Dual Berettas equipped");
 			auto eqWeapons = dodger.po->getEquippedWeapons();
-			check(!eqWeapons.empty() && eqWeapons[0]->getTemplateId() == 1001, "getEquippedWeapons returns equipped Dual Berettas");
+			check(!eqWeapons.empty() && eqWeapons[0]->getTemplateId() == RETAIL_DUAL_PISTOLS, "getEquippedWeapons returns equipped Dual Pistols");
 
 			// Inventory Ammo Reload
 			auto inv = dodger.po->getInventory();
 			check(inv != nullptr, "Player InventorySystem exists");
 			if (inv)
 			{
-				bool gaveAmmo = dodger.po->giveItem(1050); // 9mm clip
-				check(gaveAmmo, "giveItem gave 9mm ammo clip (1050)");
-				check(inv->hasItemByTemplate(1050), "Inventory contains 9mm ammunition clip (1050)");
 				eqWeapons[0]->setAmmoCount(0);
 				check(eqWeapons[0]->getAmmoCount() == 0, "Weapon ammo set to 0 to simulate empty magazine");
-
-				const ItemTemplate* wpnTpl = sDataLoader.GetItemTemplate(1001);
-				if (wpnTpl && wpnTpl->maxAmmo > 0 && inv->hasItemByTemplate(1050))
-				{
-					inv->consumeItemByTemplate(1050);
-					eqWeapons[0]->setAmmoCount(wpnTpl->maxAmmo - 1);
-				}
-				check(!inv->hasItemByTemplate(1050), "Ammunition clip consumed during reload");
-				check(eqWeapons[0]->getAmmoCount() == 29, "Dual Berettas magazine reloaded to max (30 - 1 = 29)");
+				const std::string savedTrackAmmo = sConfig.GetStringDefault("Combat.TrackAmmo", "0");
+				sConfig.SetOverride("Combat.TrackAmmo", "1");
+				check(dodger.po->consumeFirearmAmmo(), "emulator ammo mode: an empty magazine reloads in place (no clip items)");
+				sConfig.SetOverride("Combat.TrackAmmo", savedTrackAmmo.c_str());
+				check(eqWeapons[0]->getAmmoCount() == 28, "Dual Pistols magazine reloaded to max minus the volley (30 - 2 = 28), got " + std::to_string(eqWeapons[0]->getAmmoCount()));
 			}
 		}
 
@@ -1861,8 +1906,8 @@ int RunCombatTestSuite()
 			check(humanOperative.po->getInventory() != nullptr, "Operative inventory system exists");
 
 			// 1. Single Firearm Ammo Depletion & Empty Chamber Stop
-			humanOperative.po->giveItem(1002); // Beretta 92FS (maxAmmo = 15)
-			humanOperative.po->setEquippedWeaponId(1002);
+			humanOperative.po->giveItem(RETAIL_PISTOL); // SemiAutoPistol1 (maxAmmo = 15)
+			humanOperative.po->setEquippedWeaponId(RETAIL_PISTOL);
 			auto wpns = humanOperative.po->getEquippedWeapons();
 			check(!wpns.empty(), "Equipped Beretta 92FS resolved in getEquippedWeapons()");
 			wpns[0]->setAmmoCount(2);
@@ -1881,21 +1926,15 @@ int RunCombatTestSuite()
 			check(sCombatSys.RunFreeFireShot(ffState), "RunFreeFireShot fires shot 2 successfully");
 			check(wpns[0]->getAmmoCount() == 0, "Ammo count decrements from 1 to 0 (magazine empty)");
 
-			// Shot 3: No ammo clip in inventory -> weapon dry, stops free fire
+			// Shot 3: empty magazine reloads in place (retail had no clip items)
 			humanClient.captured.clear();
-			check(!sCombatSys.RunFreeFireShot(ffState), "RunFreeFireShot returns false when dry without ammo clip");
-			check(humanClient.sawText("[OUT OF AMMO]"), "Operative receives [OUT OF AMMO] click notice");
-
-			// 2. Ammo Clip Inventory Reload
-			humanOperative.po->giveItem(1050); // 9mm Pistol Ammo Clip
-			humanClient.captured.clear();
-			check(sCombatSys.RunFreeFireShot(ffState), "RunFreeFireShot auto-reloads and fires when ammo clip present");
+			check(sCombatSys.RunFreeFireShot(ffState), "RunFreeFireShot reloads an empty magazine and fires");
 			check(humanClient.sawText("[RELOAD]"), "Operative receives [RELOAD] notification");
 			check(wpns[0]->getAmmoCount() == 14, "Weapon reloaded to maxAmmo - 1 (14 rounds remaining)");
 
 			// 3. Dual-Wield Burst Mechanics
-			humanOperative.po->giveItem(1001); // Dual Beretta 92FS (isDualWield = true)
-			humanOperative.po->setEquippedWeaponId(1001);
+			humanOperative.po->giveItem(RETAIL_DUAL_PISTOLS); // DualPistol4 (isDualWield = true)
+			humanOperative.po->setEquippedWeaponId(RETAIL_DUAL_PISTOLS);
 			check(humanOperative.po->isDualWielding(), "Operative reports isDualWielding() true with Dual Berettas");
 			auto dualWpns = humanOperative.po->getEquippedWeapons();
 			check(!dualWpns.empty(), "Dual Berettas resolved in getEquippedWeapons()");
@@ -1913,12 +1952,12 @@ int RunCombatTestSuite()
 			humanOperative.po->addInfo(5000);
 			uint64 cashBeforeBuy = humanOperative.po->getInfo();
 			ByteBuffer buyCmd;
-			buyCmd << (uint8)0x81 << (uint8)0x0e << (uint32)1050 << (uint32)33333; // 9mm ammo clip (value = 50), vendor GoId 33333
+			buyCmd << (uint8)0x81 << (uint8)0x0e << (uint32)RETAIL_PISTOL << (uint32)33333; // SemiAutoPistol1 (value = 600), vendor GoId 33333
 
 			humanClient.captured.clear();
 			humanOperative.po->HandleCommand(buyCmd);
-			check(humanClient.sawText("[VENDOR] Purchased 9mm Pistol Ammo Clip for 50 Information Bits."), "HandleCommand(0x810e) executes RPC_HandleVendorBuy with success notice");
-			check(humanOperative.po->getInfo() == cashBeforeBuy - 50, "Operative Info Bits deducted by 50");
+			check(humanClient.sawText("[VENDOR] Purchased Semi-Automatic Pistol for 600 Information Bits."), "HandleCommand(0x810e) executes RPC_HandleVendorBuy with success notice");
+			check(humanOperative.po->getInfo() == cashBeforeBuy - 600, "Operative Info Bits deducted by 600");
 
 			// 4b. Inventory mirrored to the client: 0x5E on add, 0x65 on move, clothing mount/unmount
 			{
@@ -1978,16 +2017,16 @@ int RunCombatTestSuite()
 			// 5. Static Vendor Selling (Opcode 0x8111)
 			uint64 cashBeforeSell = humanOperative.po->getInfo();
 			ByteBuffer sellCmd;
-			sellCmd << (uint8)0x81 << (uint8)0x11 << (uint32)1050 << (uint32)33333; // sell 9mm ammo clip (value 50 -> 50% sell price = 25)
+			sellCmd << (uint8)0x81 << (uint8)0x11 << (uint32)RETAIL_PISTOL << (uint32)33333; // sell the spare pistol (value 600 -> 50% sell price = 300)
 
 			humanClient.captured.clear();
 			humanOperative.po->HandleCommand(sellCmd);
-			check(humanClient.sawText("[VENDOR] Sold 9mm Pistol Ammo Clip for 25 Information Bits."), "HandleCommand(0x8111) executes RPC_HandleVendorSell with credit notice");
-			check(humanOperative.po->getInfo() == cashBeforeSell + 25, "Operative Info Bits credited by 25");
+			check(humanClient.sawText("[VENDOR] Sold Semi-Automatic Pistol for 300 Information Bits."), "HandleCommand(0x8111) executes RPC_HandleVendorSell with credit notice");
+			check(humanOperative.po->getInfo() == cashBeforeSell + 300, "Operative Info Bits credited by 300");
 
 			// 6. Vendor Selling Equipped Weapon Protection
 			ByteBuffer sellEquippedCmd;
-			sellEquippedCmd << (uint8)0x81 << (uint8)0x11 << (uint32)1001 << (uint32)33333; // Equipped Dual Berettas
+			sellEquippedCmd << (uint8)0x81 << (uint8)0x11 << (uint32)RETAIL_DUAL_PISTOLS << (uint32)33333; // Equipped Dual Pistols
 
 			humanClient.captured.clear();
 			humanOperative.po->HandleCommand(sellEquippedCmd);
@@ -1998,11 +2037,11 @@ int RunCombatTestSuite()
 			humanOperative.po->setDistrict(1);
 			humanOperative.po->setPosition(LocationVector(900000.0, 572.0, 900000.0));
 			humanClient.captured.clear();
-			{ ByteBuffer b; b << (uint8)0x81 << (uint8)0x0e << (uint32)1050 << (uint32)33333; humanOperative.po->HandleCommand(b); }
+			{ ByteBuffer b; b << (uint8)0x81 << (uint8)0x0e << (uint32)RETAIL_PISTOL << (uint32)33333; humanOperative.po->HandleCommand(b); }
 			check(humanClient.sawText("No vendor nearby sells that item") && !humanClient.sawText("[VENDOR] Purchased"),
 				"0x810e away from any vendor is refused");
 			humanClient.captured.clear();
-			{ ByteBuffer b; b << (uint8)0x81 << (uint8)0x11 << (uint32)1050 << (uint32)33333; humanOperative.po->HandleCommand(b); }
+			{ ByteBuffer b; b << (uint8)0x81 << (uint8)0x11 << (uint32)RETAIL_PISTOL << (uint32)33333; humanOperative.po->HandleCommand(b); }
 			check(humanClient.sawText("You need to be at a vendor to sell") && !humanClient.sawText("[VENDOR] Sold"),
 				"0x8111 away from any vendor is refused");
 
@@ -2054,14 +2093,14 @@ int RunCombatTestSuite()
 			uint64 cashBeforeCraft = humanOperative.po->getInfo();
 
 			ByteBuffer craftCmd;
-			craftCmd << (uint8)0x80 << (uint8)0x66 << (uint32)102; // Craft blueprint 102
+			craftCmd << (uint8)0x80 << (uint8)0x66 << (uint32)110; // Craft blueprint 110 (dual pistol frame)
 			humanClient.captured.clear();
 			humanOperative.po->HandleCommand(craftCmd);
 
-			check(humanClient.sawText("[CRAFTING] Compilation complete! Synthesized: Standard 9mm Ammo Clip"),
+			check(humanClient.sawText("[CRAFTING] Compilation complete! Synthesized: Dual Beretta Frame"),
 				"HandleCommand(0x8066) executes RPC_HandleCraftRequest with synthesis confirmation");
-			check(humanOperative.po->getInfo() == cashBeforeCraft - 75, "Operative Info Bits deducted by 75 for crafting cost");
-			check(humanOperative.po->getInventory()->hasItemByTemplate(1050), "Operative inventory received item template 1050 (9mm ammo clip)");
+			check(humanOperative.po->getInfo() == cashBeforeCraft - 600, "Operative Info Bits deducted by 600 for crafting cost");
+			check(humanOperative.po->getInventory()->hasItemByTemplate(RETAIL_DUAL_PISTOLS), "Operative inventory received the dual pistols (retail GOID 2434)");
 
 			// 3. Mission Objectives: HACK, USE_ITEM, ESCORT
 			MissionTemplate phaseDMission;
@@ -2970,7 +3009,7 @@ int RunCombatTestSuite()
 			check(gunnerPo && victimPo, "Constructed gunner and victim test bots");
 			if (gunnerPo && victimPo) {
 				gunnerPo->setHandle("City Police Gunner");
-				gunnerPo->giveItem(1001); // Dual Berettas (Ranged weapon)
+				gunnerPo->giveItem(RETAIL_DUAL_PISTOLS); // Dual Pistols (Ranged weapon)
 				gunnerPo->setPosition(LocationVector(50000.0, 572.0, 50000.0));
 				victimPo->setPosition(LocationVector(50000.0, 572.0, 51600.0)); // 1600 units away (optimal standoff)
 				gunnerBot->SetTargetGoId(victimPo->getGoId());
@@ -3195,8 +3234,8 @@ int RunCombatTestSuite()
 
 					// Verify Soldier ability consumes magazine ammo & auto-reloads from inventory clip
 					p2Human.po->getInventory()->clear();
-					p2Human.po->giveItem(1002); // Beretta 92FS (maxAmmo = 15)
-					p2Human.po->setEquippedWeaponId(1002);
+					p2Human.po->giveItem(RETAIL_PISTOL); // SemiAutoPistol1 (maxAmmo = 15)
+					p2Human.po->setEquippedWeaponId(RETAIL_PISTOL);
 					auto eqW = p2Human.po->getEquippedWeapons();
 					check(!eqW.empty(), "Phase 2 operative equipped Beretta 92FS");
 					if (!eqW.empty())
@@ -3207,18 +3246,11 @@ int RunCombatTestSuite()
 						bool shot1 = sCombatSys.UseAbility(p2Human.po, 14, rangeTgt.go);
 						check(shot1 && eqW[0]->getAmmoCount() == 0, "Soldier PowerShot decrements magazine ammo (1 -> 0)");
 
-						// Dry fire without clip fails with [OUT OF AMMO]
-						p2Client.captured.clear();
-						bool dryShot = sCombatSys.UseAbility(p2Human.po, 14, rangeTgt.go);
-						check(!dryShot && p2Client.sawText("[OUT OF AMMO]"),
-							"Soldier PowerShot fails with [OUT OF AMMO] when magazine is empty and no clip in inventory");
-
-						// Give 9mm clip (1050) -> PowerShot auto-reloads and fires
-						p2Human.po->giveItem(1050);
+						// empty magazine: PowerShot reloads in place (no clip items in retail) and fires
 						p2Client.captured.clear();
 						bool reloadShot = sCombatSys.UseAbility(p2Human.po, 14, rangeTgt.go);
 						check(reloadShot && eqW[0]->getAmmoCount() == 14 && p2Client.sawText("[RELOAD]"),
-							"Soldier PowerShot auto-reloads from 9mm clip (1050) to 14 rounds and fires");
+							"Soldier PowerShot reloads an empty magazine to 14 rounds and fires");
 					}
 					p2Human.po->setEquippedWeaponId(0);
 					p2Human.po->getInventory()->clear();

@@ -1,6 +1,7 @@
 #include "CraftingSystem.h"
 #include "PlayerObject.h"
 #include "InventorySystem.h"
+#include "Item.h"
 #include "EconomySystem.h"
 #include "Log.h"
 #include "BotManager.h" // For messaging
@@ -113,15 +114,16 @@ bool CraftingSystem::HandleCraftRequest(PlayerObject* player, uint32 blueprintId
 
     // 3. Give Resulting Item (map blueprint ID to authentic item template)
     uint32 resultItemTpl = 1000;
-    if (blueprintId == 101) resultItemTpl = 1050; // Health Stim Patch / 9mm ammo
-    else if (blueprintId == 102) resultItemTpl = 1050; // 9mm Pistol Ammo Clip
-    else if (blueprintId == 103) resultItemTpl = 1051; // 5.56mm Rifle Ammo Clip
+    if (blueprintId == 101) resultItemTpl = 0; // no retail item (1050 was a pair of pants)
+    else if (blueprintId == 102) resultItemTpl = 0; // retail had no ammunition
+    else if (blueprintId == 103) resultItemTpl = 0; // retail had no ammunition
     else if (blueprintId == 104) resultItemTpl = 10111; // Nanoweave Coat
     else if (blueprintId == 108) resultItemTpl = 10103; // Dark Shades
-    else if (blueprintId == 110) resultItemTpl = 1001;  // Dual Beretta 92FS
+    else if (blueprintId == 110) resultItemTpl = RETAIL_DUAL_PISTOLS;
     else if (bp.blueprintId >= 1000 && bp.blueprintId < 2000) resultItemTpl = bp.blueprintId;
 
-    player->giveItem(resultItemTpl);
+    if (resultItemTpl != 0)
+        player->giveItem(resultItemTpl);
     sBotMgr.LogCombat((format("[Crafting] %1% crafted item: %2%") % player->getHandle() % bp.resultingName).str());
     INFO_LOG(format("Player %1% crafted %2% (template %3%)") % player->getHandle() % bp.resultingName % resultItemTpl);
 

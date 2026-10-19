@@ -325,7 +325,7 @@ void EconomySystem::InitializeHardlineVendors()
     vSlums.z = 2398.8f;
     vSlums.inventoryTemplates = {
         ITEM_DUAL_BERETTAS, ITEM_SLUMS_TRENCHCOAT, ITEM_DARK_SHADES,
-        46568, 46407, 47243, 40476, 1001, 1002, 1050, 20201, 20202, 20203, 20204
+        46568, 46407, 47243, 40476, RETAIL_PISTOL, RETAIL_AUTO_RIFLE, RETAIL_SMG, 20201, 20202, 20203, 20204
     };
     m_hardlineVendors[1] = vSlums;
 
@@ -341,7 +341,7 @@ void EconomySystem::InitializeHardlineVendors()
     vDT.z = -21475.0f;
     vDT.inventoryTemplates = {
         ITEM_POLISHED_BERETTAS, ITEM_TRENCHCOAT_ONYX, ITEM_MIRRORED_SHADES,
-        1003, 1050, 1051, 20301, 20302, 20303, 20304
+        RETAIL_AUTO_RIFLE, RETAIL_REVOLVER, RETAIL_SHOTGUN, 20301, 20302, 20303, 20304
     };
     m_hardlineVendors[2] = vDT;
 
@@ -357,7 +357,7 @@ void EconomySystem::InitializeHardlineVendors()
     vIT.z = 23659.0f;
     vIT.inventoryTemplates = {
         ITEM_TACTICAL_BERETTAS, ITEM_OPERATIVE_DUSTER, ITEM_VISION_SHADES,
-        1004, 1050, 1051, 20401, 20402, 20403, 20404
+        RETAIL_SMG, RETAIL_SMG_2, RETAIL_PISTOL_3, 20401, 20402, 20403, 20404
     };
     m_hardlineVendors[3] = vIT;
 
@@ -373,7 +373,7 @@ void EconomySystem::InitializeHardlineVendors()
     vRichland.z = -15000.0f;
     vRichland.inventoryTemplates = {
         ITEM_HEAVY_BERETTAS, ITEM_NANOWEAVE_COAT, ITEM_POLARIZED_SHADES,
-        1001, 1003, 1050, 1051, 20401, 20402, 20403, 20404
+        RETAIL_DUAL_PISTOLS, RETAIL_AUTO_RIFLE_2, RETAIL_SNIPER_RIFLE, 20401, 20402, 20403, 20404
     };
     m_hardlineVendors[4] = vRichland;
 }

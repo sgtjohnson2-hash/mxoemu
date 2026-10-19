@@ -13,16 +13,16 @@ class PlayerObject;
 // Gear Item Template IDs
 enum GearTemplateId : uint32
 {
-    ITEM_DUAL_BERETTAS        = 10101,
+    ITEM_DUAL_BERETTAS        = 2434,  // DualPistol4 (was 10101, a retail shirt)
     ITEM_TRENCHCOAT_ONYX      = 10102,
     ITEM_DARK_SHADES          = 10103,
     ITEM_SLUMS_TRENCHCOAT     = 10104,
-    ITEM_POLISHED_BERETTAS    = 10105,
+    ITEM_POLISHED_BERETTAS    = 2495,  // DualPistol5
     ITEM_MIRRORED_SHADES      = 10106,
-    ITEM_TACTICAL_BERETTAS    = 10107,
+    ITEM_TACTICAL_BERETTAS    = 2496,  // DualPistol6
     ITEM_OPERATIVE_DUSTER     = 10108,
     ITEM_VISION_SHADES        = 10109,
-    ITEM_HEAVY_BERETTAS       = 10110,
+    ITEM_HEAVY_BERETTAS       = 2497,  // DualPistol7
     ITEM_NANOWEAVE_COAT       = 10111,
     ITEM_POLARIZED_SHADES     = 10112
 };

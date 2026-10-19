@@ -62,6 +62,18 @@ enum mxoCombatState
 	COMBAT_STATE_STUNNED	= 0x20,
 };
 
+// Retail special-move state rules (matrixonline.fandom.com ability pages, see project doc
+// RETAIL_RESEARCH_COMBAT): the state the target must be in for the special to be usable, and
+// the state a landed special leaves on the target (percent chance).
+struct SpecialStateRule
+{
+	const char* name;		// AbilityTemplate name, e.g. "KiChargedPunchAbility"
+	const char* display;	// name shown to the player
+	uint16 requiresTarget;	// mxoCombatState bits the target must have (0 = none)
+	uint16 causes;			// mxoCombatState bits applied on a landed hit (0 = none)
+	uint8 causeChance;		// percent
+};
+
 // Oracle premonition helper (the client->server tactic remap that lived here was invented
 // and has been removed: the client sends mxoTacticType values directly)
 class TacticAdapter
@@ -255,6 +267,10 @@ public:
 	float m_cr2DamageMul = 0.0f;
 	static bool UseCR2Interlock();
 	uint16 GetCombatState(uint32 goId);
+	static const SpecialStateRule* GetSpecialStateRule(const std::string& abilityName);
+	static const char* CombatStateName(uint16 state);
+	// false (and tells a human caster why) when the target is not in the state the special needs
+	bool CheckSpecialRequirement(PlayerObject* caster, uint32 targetGoId, const std::string& abilityName, bool tell);
 	static float CR2HitChance(PlayerObject* attacker, PlayerObject* defender, uint8 attTac, uint8 defTac);
 	// CR2 result card for the exchange shown this round: no rock-paper-scissors outcomes (CR2 removed
 	// them). Both landed = trade (Clash clip), one landed = hit (special clip if a special was swung),

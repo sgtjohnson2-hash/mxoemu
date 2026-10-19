@@ -1,3 +1,4 @@
+#include "Item.h"
 #include "BotManager.h"
 #include "MessageTypes.h"
 #include "DataLoader.h"
@@ -162,11 +163,11 @@ std::shared_ptr<BotClient> BotManager::SpawnSingleBot(float x, float y, float z,
                         po->setHandle(newHandle);
                         po->GenerateProceduralAppearance((uint32)po->getCharacterUID() + (uint32)m_recycleBotIndex * 97u, faction, newHandle);
                     }
-                    if (po->getEquippedWeaponId() == 0 && po->giveItem(1001))
+                    if (po->getEquippedWeaponId() == 0 && po->giveItem(RETAIL_DUAL_PISTOLS))
                     {
                         for (auto item : po->getInventory()->getAllItems())
                         {
-                            if (item && item->getTemplateId() == 1001)
+                            if (item && item->getTemplateId() == RETAIL_DUAL_PISTOLS)
                             {
                                 po->setEquippedWeaponId(item->getGoId());
                                 break;
@@ -201,11 +202,11 @@ std::shared_ptr<BotClient> BotManager::SpawnSingleBot(float x, float y, float z,
     
     // A real pistol in the bag, equipped, with a full magazine. Template 500 was not a weapon,
     // so the bot's inventory never fired. Bots are not written back to the character tables.
-    if (po && po->getEquippedWeaponId() == 0 && po->giveItem(1001))
+    if (po && po->getEquippedWeaponId() == 0 && po->giveItem(RETAIL_DUAL_PISTOLS))
     {
         for (auto item : po->getInventory()->getAllItems())
         {
-            if (item && item->getTemplateId() == 1001)
+            if (item && item->getTemplateId() == RETAIL_DUAL_PISTOLS)
             {
                 po->setEquippedWeaponId(item->getGoId());
                 break;

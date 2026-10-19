@@ -1,3 +1,4 @@
+#include "Item.h"
 #include "AgentPossessionManager.h"
 #include "Log.h"
 #include "GameServer.h"
@@ -101,7 +102,7 @@ uint32 AgentPossessionManager::PossessCivilian(uint32 civilianGoId, const std::s
             po->setLevel(50);
             po->setMaximumHealth(10000);
             po->setCurrentHealth(10000);
-            po->giveItem(1001); // Service weapon
+            po->giveItem(RETAIL_DUAL_PISTOLS); // Service weapon
             po->setAgentAppearance();
             po->setCombatStance(true);
             sGame.AnnounceStateUpdate(NULL, std::make_shared<PlayerAppearanceMsg>(civilianGoId));

@@ -968,6 +968,20 @@ void PlayerObject::RPC_HandleAbilityUse( ByteBuffer &srcCmd )
 	INFO_LOG(format("(%1%) %2%:%3% UseAbility request ability %4% view %5% -> target go %6%")
 		% m_parent.Address() % m_handle % m_goId % abilityId % targetViewId % targetGoId);
 
+	// Retail: only abilities loaded into memory (at a hardline) can be used. The client
+	// could send any ability id and the server ran it (audit item #7).
+	if (!m_parent.isBot() && !isAdmin() && m_abilitySystem &&
+		sConfig.GetBoolDefault("Combat.RequireLoadedAbility", true) &&
+		!m_abilitySystem->getLoadedAbilities().empty() &&
+		!m_abilitySystem->getAbility(abilityId))
+	{
+		const AbilityTemplate* t = sDataLoader.GetAbilityTemplate(abilityId);
+		INFO_LOG(format("%1%: ability %2% (%3%) refused, not loaded") % m_handle % abilityId % (t ? t->name : std::string("?")));
+		m_parent.QueueCommand(std::make_shared<SystemChatMsg>(
+			"{c:FFFF00}[COMBAT] That ability is not loaded. Load it at a hardline first.{/c}"));
+		return;
+	}
+
 	// Loadout abilities carry a cooldown. The check used to exist only on AbilitySystem
 	// and the handler stamped the timer even when the cast then failed.
 	if (m_abilitySystem && m_abilitySystem->getAbility(abilityId))

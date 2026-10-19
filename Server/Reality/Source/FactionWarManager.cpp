@@ -1,3 +1,4 @@
+#include "Item.h"
 #include "FactionWarManager.h"
 #include "Log.h"
 #include "Database/Database.h"
@@ -1291,10 +1292,10 @@ std::vector<uint32> FactionWarManager::GetWorldBossLootTable(WorldEventType type
 {
     if (type == WorldEventType::MACHINE_SENTINEL_INCURSION) {
         // Machine Sentinel Incursion rare drops: SMG + Armored Coat + Red Pill
-        return { 1002, 2001, 3001 };
+        return { RETAIL_SMG, 2001, 3001 };
     } else if (type == WorldEventType::MEROVINGIAN_EXILE_RAID) {
         // Merovingian Exile Raid rare drops: Beretta 92FS + Sunglasses + Code Fragment
-        return { 1001, 2002, 4001 };
+        return { RETAIL_DUAL_PISTOLS, 2002, 4001 };
     }
     return { 3001, 4001 };
 }

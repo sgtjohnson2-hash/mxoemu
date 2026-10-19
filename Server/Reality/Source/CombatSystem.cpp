@@ -2532,6 +2532,71 @@ uint16 CombatSystem::GetCombatState(uint32 goId)
 	return (goId == s->goIdA) ? s->combatStateA : s->combatStateB;
 }
 
+// Retail special-move state requirements and effects. Source: matrixonline.fandom.com ability
+// pages ("Requires target to be Staggered", "Causes Stun", "40% chance to ..."). Where a page
+// says "chance" without a number, 50% is used; "Causes" without a chance is 100%.
+// States the server does not model yet (Powerless, Blinded, Enraged, Confused, Rooted) are left out.
+static const SpecialStateRule s_specialStateRules[] = {
+	// Karate
+	{ "KiChargedPunchAbility",      "Ki-charged Punch",       COMBAT_STATE_STAGGERED,  COMBAT_STATE_STUNNED,   50 },
+	{ "KiChargedFootSweepAbility",  "Ki-charged Foot Sweep",  COMBAT_STATE_STAGGERED,  0,                      0 },
+	{ "MachinegunKickAbility",      "Machinegun Kick",        COMBAT_STATE_DAZED,      COMBAT_STATE_STUNNED,  100 },
+	{ "SkyhighSidekickAbility",     "Sky-high Sidekick",      0,                       COMBAT_STATE_STAGGERED, 50 },
+	{ "WristThrowAbility",          "Wrist Throw",            0,                       COMBAT_STATE_STUNNED,   50 },
+	// Awakened / Martial Arts initiate
+	{ "HeadButtAbility",            "Head Butt",              COMBAT_STATE_DAZED,      0,                      0 },
+	{ "GuardBreakerAbility",        "Guard Breaker",          COMBAT_STATE_OFFBALANCE, 0,                      0 },
+	// Kung Fu
+	{ "PistonKicksAbility",         "Piston Kicks",           COMBAT_STATE_STAGGERED,  COMBAT_STATE_STUNNED,   40 },
+	{ "DimMakStrikeAbility",        "Dim Mak Strike",         COMBAT_STATE_DAZED,      0,                      0 },
+	{ "TripleFrontKickAbility",     "Triple Front Kick",      COMBAT_STATE_OFFBALANCE, 0,                      0 },
+	{ "WoodenDummyDrillAbility",    "Wooden Dummy Drill",     COMBAT_STATE_DAZED,      0,                      0 },
+	{ "ExtremeFallingKickAbility",  "Extreme Falling Kick",   0,                       COMBAT_STATE_STUNNED,   50 },
+	// Aikido
+	{ "CounterThrowAbility",        "Counter Throw",          COMBAT_STATE_OFFBALANCE, 0,                      0 },
+	{ "TomoNageAbility",            "Tomo Nage",              COMBAT_STATE_OFFBALANCE, 0,                      0 },
+	// Guns
+	{ "PistolWhipAbility",          "Pistol Whip",            COMBAT_STATE_DAZED,      0,                      0 },
+	{ "DualPistolPointBlankAbility","Dual Pistol Point Blank",COMBAT_STATE_OFFBALANCE, 0,                      0 },
+	{ "PistolSlideAbility",         "Pistol Slide",           COMBAT_STATE_OFFBALANCE, 0,                      0 },
+	{ "PistolAerialAbility",        "Pistol Aerial",          0,                       COMBAT_STATE_STUNNED,   50 },
+	{ "ThreeRoundBurstAbility",     "Three-Round Burst",      COMBAT_STATE_STAGGERED,  COMBAT_STATE_STUNNED,   50 },
+	{ "FullAutoAbility",            "Full Auto",              COMBAT_STATE_STAGGERED,  0,                      0 },
+	{ "FullAutoReduxAbility",       "Full Auto Redux",        COMBAT_STATE_DAZED,      0,                      0 },
+	{ "SlidingVolleyAbility",       "Sliding Volley",         COMBAT_STATE_DAZED,      0,                      0 },
+	// Utility
+	{ "BashAbility",                "Bash",                   0,                       COMBAT_STATE_STUNNED,  100 },
+};
+
+const SpecialStateRule* CombatSystem::GetSpecialStateRule(const std::string& abilityName)
+{
+	if (abilityName.empty()) return nullptr;
+	for (const auto& r : s_specialStateRules)
+		if (abilityName == r.name) return &r;
+	return nullptr;
+}
+
+const char* CombatSystem::CombatStateName(uint16 state)
+{
+	if (state & COMBAT_STATE_STAGGERED)  return "Staggered";
+	if (state & COMBAT_STATE_DAZED)      return "Dazed";
+	if (state & COMBAT_STATE_OFFBALANCE) return "Off-Balance";
+	if (state & COMBAT_STATE_STUNNED)    return "Stunned";
+	return "";
+}
+
+bool CombatSystem::CheckSpecialRequirement(PlayerObject* caster, uint32 targetGoId, const std::string& abilityName, bool tell)
+{
+	if (!sConfig.GetBoolDefault("Combat.StateRequirements", true)) return true;
+	const SpecialStateRule* rule = GetSpecialStateRule(abilityName);
+	if (!rule || rule->requiresTarget == 0) return true;
+	if (targetGoId != 0 && (GetCombatState(targetGoId) & rule->requiresTarget)) return true;
+	if (tell && caster && !caster->getClient().isBot())
+		caster->getClient().QueueCommand(std::make_shared<SystemChatMsg>(
+			(format("{c:FFFF00}[COMBAT] %1% requires the target to be %2%.{/c}") % rule->display % CombatStateName(rule->requiresTarget)).str()));
+	return false;
+}
+
 static float CR2StanceAccuracy(uint8 t)
 {
 	switch (t)
@@ -2598,6 +2663,34 @@ void CombatSystem::RunCR2Exchange(InterlockSession &session, PlayerObject* pA, P
 	const uint16 stA = session.combatStateA;
 	const uint16 stB = session.combatStateB;
 
+	// Retail special rules: a queued special whose state requirement is no longer met falls back
+	// to the style strike; a Stunned fighter loses the round.
+	const SpecialStateRule* ruleA = (session.queuedMoveA > 1 && moveA) ? GetSpecialStateRule(moveA->name) : nullptr;
+	const SpecialStateRule* ruleB = (session.queuedMoveB > 1 && moveB) ? GetSpecialStateRule(moveB->name) : nullptr;
+	const bool stateRules = sConfig.GetBoolDefault("Combat.StateRequirements", true);
+	if (stateRules && ruleA && ruleA->requiresTarget && !(stB & ruleA->requiresTarget))
+	{
+		if (!pA->getClient().isBot())
+			pA->getClient().QueueCommand(std::make_shared<SystemChatMsg>((format("{c:FFFF00}[COMBAT] %1% failed: %2% is no longer %3%.{/c}")
+				% ruleA->display % pB->getHandle() % CombatStateName(ruleA->requiresTarget)).str()));
+		moveA = GetDefaultStyleMove(pA);
+		ruleA = nullptr;
+	}
+	if (stateRules && ruleB && ruleB->requiresTarget && !(stA & ruleB->requiresTarget))
+	{
+		if (!pB->getClient().isBot())
+			pB->getClient().QueueCommand(std::make_shared<SystemChatMsg>((format("{c:FFFF00}[COMBAT] %1% failed: %2% is no longer %3%.{/c}")
+				% ruleB->display % pA->getHandle() % CombatStateName(ruleB->requiresTarget)).str()));
+		moveB = GetDefaultStyleMove(pB);
+		ruleB = nullptr;
+	}
+	const bool stunnedA = stateRules && (stA & COMBAT_STATE_STUNNED);
+	const bool stunnedB = stateRules && (stB & COMBAT_STATE_STUNNED);
+	if (stunnedA && !pA->getClient().isBot())
+		pA->getClient().QueueCommand(std::make_shared<SystemChatMsg>("{c:FF4444}[COMBAT] You are stunned and lose the round.{/c}"));
+	if (stunnedB && !pB->getClient().isBot())
+		pB->getClient().QueueCommand(std::make_shared<SystemChatMsg>("{c:FF4444}[COMBAT] You are stunned and lose the round.{/c}"));
+
 	// Withdraw is contested (CR2): the attempt takes the round, it can fail, and the fighter
 	// trying to leave throws nothing that round.
 	const bool tryA = session.withdrawA, tryB = session.withdrawB;
@@ -2621,8 +2714,8 @@ void CombatSystem::RunCR2Exchange(InterlockSession &session, PlayerObject* pA, P
 	// special waits until they change stance (see RunInterlockRound). Combat.CR2.BlockSpecials = 1
 	// restores the older 'specials from Block' behaviour.
 	const bool blockSpecials = sConfig.GetBoolDefault("Combat.CR2.BlockSpecials", false);
-	const bool aSwings = !tryA && moveA && (tacA != TACTIC_DEFENSE || (blockSpecials && session.queuedMoveA != 0));
-	const bool bSwings = !tryB && moveB && (tacB != TACTIC_DEFENSE || (blockSpecials && session.queuedMoveB != 0));
+	const bool aSwings = !tryA && !stunnedA && moveA && (tacA != TACTIC_DEFENSE || (blockSpecials && session.queuedMoveA != 0));
+	const bool bSwings = !tryB && !stunnedB && moveB && (tacB != TACTIC_DEFENSE || (blockSpecials && session.queuedMoveB != 0));
 	// both offense rolls are made before either blow lands
 	const bool aHits = aSwings && (float(rand() % 10000) / 10000.0f) < CR2HitChance(pA, pB, tacA, tacB);
 	const bool bHits = bSwings && (float(rand() % 10000) / 10000.0f) < CR2HitChance(pB, pA, tacB, tacA);
@@ -2675,6 +2768,23 @@ void CombatSystem::RunCR2Exchange(InterlockSession &session, PlayerObject* pA, P
 		session.combatStateB |= stateFor(tacA);
 		session.stateRoundB = round;
 	}
+	// a landed special can leave its own state (Machinegun Kick stuns, Sky-high Sidekick staggers)
+	auto applyCause = [&](const SpecialStateRule* rule, const AttackResult& res, uint16& defState, uint32& defRound,
+		PlayerObject* att, PlayerObject* def)
+	{
+		if (!stateRules || !rule || !rule->causes || !res.hit || res.isBlocked) return;
+		if (int(rand() % 100) >= int(rule->causeChance)) return;
+		defState |= rule->causes;
+		defRound = round;
+		if (!att->getClient().isBot())
+			att->getClient().QueueCommand(std::make_shared<SystemChatMsg>((format("{c:00FF00}[COMBAT] %1% leaves %2% %3%.{/c}")
+				% rule->display % def->getHandle() % CombatStateName(rule->causes)).str()));
+		if (!def->getClient().isBot())
+			def->getClient().QueueCommand(std::make_shared<SystemChatMsg>((format("{c:FF4444}[COMBAT] %1%'s %2% leaves you %3%.{/c}")
+				% att->getHandle() % rule->display % CombatStateName(rule->causes)).str()));
+	};
+	applyCause(ruleA, resA, session.combatStateB, session.stateRoundB, pA, pB);
+	applyCause(ruleB, resB, session.combatStateA, session.stateRoundA, pB, pA);
 	if (resB.hit && !resB.isBlocked && tacA != TACTIC_DEFENSE && stateFor(tacB))
 	{
 		session.combatStateA |= stateFor(tacB);
@@ -2888,6 +2998,9 @@ bool CombatSystem::UseAbility(PlayerObject* caster, uint16 abilityId, uint32 tar
 
     // Check authentic discipline routing (Hacker viral logic / Coder RSI support)
     const AbilityTemplate* abilTempl = sDataLoader.GetAbilityTemplate(requestedAbilityId);
+    // Retail specials that follow up a combat state (Staggered / Dazed / Off-Balance)
+    if (abilTempl && !CheckSpecialRequirement(caster, targetGoId, abilTempl->name, humanCaster))
+        return false;
     // Retail: programs that need a few uninterrupted seconds cannot be run in close combat;
     // quick ones work in or out of interlock (Combat.InterlockCastLimitMs, default 1000).
     if (abilTempl && abilTempl->castTime > 0 && IsInterlocked(caster->getGoId()) &&

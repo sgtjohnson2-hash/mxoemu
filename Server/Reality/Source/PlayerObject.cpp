@@ -2067,28 +2067,16 @@ bool PlayerObject::consumeFirearmAmmo()
 	}
 	else if (wpnTpl->maxAmmo > 0)
 	{
-		uint32 ammoTplId = (wpnTpl->attackSpeed >= 2.0f) ? 1051 : 1050; // 5.56 rifle vs 9mm pistol
-		if (m_inventorySystem && m_inventorySystem->hasItemByTemplate(ammoTplId))
+		// emulator-only ammo mode: retail had no clip items, so an empty magazine reloads in place
+		uint16 roundsToConsume = (isDualWield ? 2 : 1);
+		weapons[0]->setAmmoCount(wpnTpl->maxAmmo - roundsToConsume);
+		if (m_inventorySystem) m_inventorySystem->markDirty();
+		if (!getClient().isBot())
 		{
-			m_inventorySystem->consumeItemByTemplate(ammoTplId);
-			uint16 roundsToConsume = (isDualWield ? 2 : 1);
-			weapons[0]->setAmmoCount(wpnTpl->maxAmmo - roundsToConsume);
-			if (!getClient().isBot())
-			{
-				getClient().QueueCommand(std::make_shared<SystemChatMsg>(
-					"{c:00FF00}[RELOAD] Weapon reloaded with fresh ammunition clip.{/c}"));
-			}
-			return true;
+			getClient().QueueCommand(std::make_shared<SystemChatMsg>(
+				"{c:00FF00}[RELOAD] Weapon reloaded.{/c}"));
 		}
-		else
-		{
-			if (!getClient().isBot())
-			{
-				getClient().QueueCommand(std::make_shared<SystemChatMsg>(
-					"{c:FF5555}[OUT OF AMMO] *Click* - Weapon magazine empty! No ammunition clip in inventory.{/c}"));
-			}
-			return false;
-		}
+		return true;
 	}
 	return true;
 }
