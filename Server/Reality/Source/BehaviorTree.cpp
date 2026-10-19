@@ -596,6 +596,11 @@ NodeStatus ActionEngageTarget::Tick(BotClient* bot)
         return NodeStatus::FAILURE;
     }
 
+    // In an interlock the ILCombatHandler owns both fighters' positions and facing:
+    // locomotion/rotation updates here would overwrite the exchange choreography.
+    if (me->getInterlockPartner() != 0 || sCombatSys.IsInterlocked(me->getGoId()))
+        return NodeStatus::SUCCESS;
+
     LocationVector myPos = me->getPosition();
     LocationVector targetPos = target->getPosition();
     float dist = sqrt(pow(myPos.x - targetPos.x, 2) + pow(myPos.y - targetPos.y, 2) + pow(myPos.z - targetPos.z, 2));

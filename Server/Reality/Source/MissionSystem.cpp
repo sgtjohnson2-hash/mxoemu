@@ -586,6 +586,18 @@ void MissionSystem::AssignMission(PlayerObject* player, uint32 missionId)
         return;
     }
 
+    // Replacing an active mission: despawn its NPCs and record it as aborted (state 2)
+    auto activeIt = m_activeMissions.find(player->getGoId());
+    if (activeIt != m_activeMissions.end())
+    {
+        INFO_LOG(format("AssignMission: Player %1% replacing active mission %2% with %3%; cleaning up prior NPCs")
+                 % player->getHandle() % activeIt->second.missionId % missionId);
+        for (const auto& npc : activeIt->second.spawnedNpcs)
+            sBotMgr.DespawnBot(npc.second);
+        SavePlayerMission(player, activeIt->second.missionId, activeIt->second.currentObjectiveIndex, 2);
+        m_activeMissions.erase(activeIt);
+    }
+
     ActiveMissionState state;
     state.missionId = missionId;
     state.currentObjectiveIndex = 0;
@@ -1094,7 +1106,13 @@ void MissionSystem::CompleteMission(PlayerObject* player, MissionTemplate& templ
     }
 
     RecordCompletedMission(goId, templ.missionId);
-    m_activeMissions.erase(goId);
+    auto activeIt = m_activeMissions.find(goId);
+    if (activeIt != m_activeMissions.end())
+    {
+        for (const auto& npc : activeIt->second.spawnedNpcs)
+            sBotMgr.DespawnBot(npc.second);
+        m_activeMissions.erase(activeIt);
+    }
 }
 
 // Item 37: Bounty Hunter Contracts

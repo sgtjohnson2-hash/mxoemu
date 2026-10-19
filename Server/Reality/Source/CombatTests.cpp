@@ -1660,7 +1660,7 @@ int RunCombatTestSuite()
 				"ILExchange: startMs 0x113, timing pair 0x534 / 0x29A (HDS L76 capture)");
 			check(exchange.attackerSlot == 2 && exchange.defenderSlot == 1,
 				"ILExchange: viewer attacking = slot 2, opponent = slot 1 (HDS slot order)");
-			check(exchange.defenderOffsetMs == 460, "ILExchange: defenderOffsetMs dynamically synchronized to 460ms");
+			check(exchange.defenderOffsetMs == 0x29A, "ILExchange: defenderOffsetMs synchronized to HDS L76 capture 0x29A (666ms)");
 			check(exchange.moves[2][0] == 0x2026, "ILExchange: mainMove is 0x2026 (Kung Fu strike)");
 			check(exchange.moves[3][0] == 0, "ILExchange: moves[3][0] is zeroed (ILDB moves only in slots 0-2)");
 			check(exchange.moves[4][0] == 0, "ILExchange: moves[4][0] is zeroed (ILDB moves only in slots 0-2)");
@@ -1674,7 +1674,7 @@ int RunCombatTestSuite()
 			uint16 wireNum = *reinterpret_cast<const uint16*>(&rawBytes[0x20]);
 			check(wireNum == 4, "ILExchange wire bytes at 0x20 are sequence number 4");
 			int16 wireOffset = *reinterpret_cast<const int16*>(&rawBytes[0x26]);
-			check(wireOffset == 460, "ILExchange wire bytes at 0x26 are 460ms defenderOffsetMs");
+			check(wireOffset == 0x29A, "ILExchange wire bytes at 0x26 are 0x29A defenderOffsetMs");
 			check(rawBytes[0x2C] == 0x23, "ILExchange wire byte 0x2C is flags 0x23");
 			uint16 attAdjust = *reinterpret_cast<const uint16*>(&rawBytes[0x02]);
 			check(attAdjust == 775, "ILExchange wire bytes at 0x02 are attackerAdjustMs 775");

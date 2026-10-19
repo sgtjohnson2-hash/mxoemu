@@ -1314,7 +1314,7 @@ void PlayerObject::ParsePlayerCommand( string theCmd )
 		{
 			const AbilityTemplate* t = sDataLoader.GetAbilityTemplate(abId);
 			m_abilitySystem->loadAbility(abId, 1, slot);
-			m_parent.QueueCommand(make_shared<AbilityLoadRspMsg>(abId, 1, slot));
+			m_parent.QueueCommand(make_shared<AbilityLoadRspMsg>(abId, 1, AbilitySystem::LOAD_RSP_TRAILER));
 			std::string abName = t ? t->name : "Ability";
 			if (abId == 133) abName = "Kung Fu";
 			m_parent.QueueCommand(make_shared<SystemChatMsg>(
@@ -4953,7 +4953,7 @@ void PlayerObject::RPC_HandleUpgradeAbility(ByteBuffer& srcCmd)
 	m_abilitySystem->loadAbility(abilityId, newLevel, ab->getMemorySlot());
 	m_abilitySystem->saveToDB();
 	m_parent.QueueCommand(std::make_shared<AbilityUpgradeRspMsg>(abilityId, newLevel));
-	m_parent.QueueCommand(std::make_shared<AbilityLoadRspMsg>(abilityId, newLevel, ab->getMemorySlot()));
+	m_parent.QueueCommand(std::make_shared<AbilityLoadRspMsg>(abilityId, newLevel, AbilitySystem::LOAD_RSP_TRAILER));
 }
 void PlayerObject::RPC_HandleMissionAbort(ByteBuffer& srcCmd)
 {

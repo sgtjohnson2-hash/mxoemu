@@ -974,7 +974,36 @@ namespace ZionLauncher
 
                 await Task.Delay(400);
 
-                // Helper updater batch script with retry loop and UAC elevation fallback
+                // Preferred path: Windows lets a running exe be renamed (not overwritten), so move
+                // ourselves aside to .old, drop the new build in place and start it. No batch file,
+                // no copy-while-locked retries, no UAC prompt. The .old file is removed by
+                // CleanupOldUpdateArtifacts on the next start.
+                string oldExe = currentExe + ".old";
+                bool movedAside = false;
+                try
+                {
+                    if (File.Exists(oldExe)) File.Delete(oldExe);
+                    File.Move(currentExe, oldExe);
+                    movedAside = true;
+                    File.Move(tempFile, currentExe);
+                    Process.Start(new ProcessStartInfo { FileName = currentExe, UseShellExecute = true, WorkingDirectory = targetDir });
+                    _isRainRunning = false;
+                    CompositionTarget.Rendering -= OnMatrixCompositionRendering;
+                    _diagTimer?.Stop();
+                    Application.Current.Shutdown();
+                    Environment.Exit(0);
+                    return;
+                }
+                catch
+                {
+                    // Put the running exe back if we got halfway, then fall through to the batch helper.
+                    if (movedAside && !File.Exists(currentExe))
+                    {
+                        try { File.Move(oldExe, currentExe); } catch { }
+                    }
+                }
+
+                // Fallback: helper updater batch script with retry loop and UAC elevation fallback
                 string scriptPath = Path.Combine(targetDir, "update_launcher.bat");
                 string scriptContent = 
                     "@echo off\r\n" +

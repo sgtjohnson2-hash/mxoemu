@@ -204,9 +204,10 @@ void CombatSystem::LoadAbilities()
 			{ 283, "KnifeThrowerAbility",          15, 16.0f, 24.0f },
 		};
 		for (const auto& rm : s_retailMoves) {
-			// the loadout aliases ran first, so 17/137/600 (the default hotbar) stayed basic-strike
-			// placeholders and their retail rows were skipped: testers fought with the weakest move
-			if (m_moveTable.find(rm.id) == m_moveTable.end() || aliasedToBase.count(rm.id)) {
+			// Always register/overwrite the retail rows: the loadout aliases ran first (17/137/600, the
+			// default hotbar, were basic-strike placeholders) and abilities.json placeholder rows such as
+			// fake id 101 "Trace Route" must not shadow real retail abilities like AikidoAbility (101).
+			{
 				CombatMove m;
 				m.id = rm.id;
 				m.name = rm.name;
@@ -2426,9 +2427,9 @@ void CombatSystem::RequestWithdraw(uint32 goId)
 	std::lock_guard<std::recursive_mutex> lock(m_combatMutex);
 	InterlockSession* s = GetInterlockSession(goId);
 	PlayerObject* other = s ? getPlayerSafe(s->goIdA == goId ? s->goIdB : s->goIdA) : nullptr;
-	// legacy rules, contested withdraw switched off, or nobody left to hold on: leave at once
+	// legacy rules, contested withdraw switched off, dojo sparring dummy, or nobody left to hold on: leave at once
 	if (!s || !UseCR2Interlock() || !sConfig.GetBoolDefault("Interlock.ContestedWithdraw", true) ||
-		!other || other->isDead() || other->getCurrentHealth() == 0)
+		!other || other->isDead() || other->getCurrentHealth() == 0 || other->m_dojoOwnerGoId != 0)
 	{
 		LeaveInterlock(goId);
 		return;

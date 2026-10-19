@@ -1,5 +1,6 @@
 #include "CraftingSystem.h"
 #include "PlayerObject.h"
+#include "InventorySystem.h"
 #include "EconomySystem.h"
 #include "Log.h"
 #include "BotManager.h" // For messaging
@@ -59,7 +60,55 @@ bool CraftingSystem::HandleCraftRequest(PlayerObject* player, uint32 blueprintId
         return false;
     }
 
-    // 2. Consume Resources
+    // 2. Pre-validate required components BEFORE consuming anything (F25)
+    if (!player->getInventory())
+        return false;
+
+    if (!player->isAdmin())
+    {
+        // Aggregate required component counts into a frequency map (F25)
+        std::map<uint32, uint32> reqCounts;
+        for (uint32 compId : bp.requiredComponentIds)
+        {
+            if (compId != 0)
+                reqCounts[compId]++;
+        }
+
+        // Count available components in operative inventory (handling stacks and multiple slots)
+        std::map<uint32, uint32> availCounts;
+        for (const auto& item : player->getInventory()->getAllItems())
+        {
+            if (item)
+            {
+                uint32 count = item->getStackCount() > 0 ? item->getStackCount() : 1;
+                availCounts[item->getTemplateId()] += count;
+            }
+        }
+
+        for (const auto& req : reqCounts)
+        {
+            uint32 compId = req.first;
+            uint32 reqCount = req.second;
+            if (availCounts[compId] < reqCount)
+            {
+                if (!player->getClient().isBot())
+                {
+                    const ItemTemplate* compTpl = sDataLoader.GetItemTemplate(compId);
+                    std::string compName = compTpl ? compTpl->name : (format("Component #%1%") % compId).str();
+                    player->getClient().QueueCommand(std::make_shared<SystemChatMsg>(
+                        (format("{c:FF4444}[CRAFTING] Missing required component: %1%. Compilation aborted.{/c}") % compName).str()));
+                }
+                return false;
+            }
+        }
+    }
+
+    // 3. All components confirmed present: consume components and Info bits
+    for (uint32 compId : bp.requiredComponentIds)
+    {
+        if (compId != 0 && player->getInventory()->hasItemByTemplate(compId))
+            player->getInventory()->consumeItemByTemplate(compId);
+    }
     sEconomySys.TakeInfo(player, bp.infoCost, "Crafting Cost");
 
     // 3. Give Resulting Item (map blueprint ID to authentic item template)
