@@ -1,0 +1,14 @@
+{
+  "status": "online",
+  "megacity_circadian_hour": 23.81,
+  "is_night_window": true,
+  "districts": [
+    {"district_id": 1, "name": "Slums", "controlling_faction": "Zion", "faction_id": 1, "is_regen_bonus_pct": 5, "info_drop_bonus_pct": 5, "active_buff": "None (Contested Territory)"},
+    {"district_id": 2, "name": "Downtown", "controlling_faction": "Machine", "faction_id": 2, "is_regen_bonus_pct": 5, "info_drop_bonus_pct": 5, "active_buff": "None (Contested Territory)"},
+    {"district_id": 3, "name": "International", "controlling_faction": "Zion", "faction_id": 1, "is_regen_bonus_pct": 5, "info_drop_bonus_pct": 5, "active_buff": "None (Contested Territory)"},
+    {"district_id": 4, "name": "Richland", "controlling_faction": "Machine", "faction_id": 2, "is_regen_bonus_pct": 5, "info_drop_bonus_pct": 5, "active_buff": "None (Contested Territory)"}
+  ],
+  "active_world_events": [
+
+  ]
+}
